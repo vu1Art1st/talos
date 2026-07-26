@@ -7,8 +7,10 @@ __pycache__/
 # 本地运行时数据
 dev.db
 test.db*
+test_vp.db
 backend/storage/
 backend/dev.db
+backend/tests/test_storage/
 
 # 前端
 node_modules/
