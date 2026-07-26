@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vulnplatform
+      POSTGRES_PASSWORD: vulnplatform
+      POSTGRES_DB: vulnplatform
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vulnplatform"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gotenberg:
+    image: gotenberg/gotenberg:8
+    command: ["gotenberg", "--api-timeout=120s"]
+
+  api:
+    build: ./backend
+    environment: &backend_env
+      VP_DATABASE_URL: postgresql+asyncpg://vulnplatform:vulnplatform@postgres:5432/vulnplatform
+      VP_REDIS_URL: redis://redis:6379/0
+      VP_GOTENBERG_URL: http://gotenberg:3000
+      VP_SECRET_KEY: change-me-to-a-long-random-string
+      VP_STORAGE_DIR: /app/storage
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  worker:
+    build: ./backend
+    command: ["arq", "app.workers.main.WorkerSettings"]
+    environment: *backend_env
+    volumes:
+      - storage_data:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+
+volumes:
+  pg_data:
+  storage_data:

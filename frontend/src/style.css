@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+  background: #f5f7fa;
+  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+}
+
+/* 富文本正文与编辑器统一样式 */
+.rich-content {
+  line-height: 1.75;
+  word-break: break-word;
+}
+.rich-content img {
+  max-width: 100%;
+  border-radius: 4px;
+  border: 1px solid #ebeef5;
+}
+.rich-content table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  width: 100%;
+}
+.rich-content th,
+.rich-content td {
+  border: 1px solid #dcdfe6;
+  padding: 6px 10px;
+}
+.rich-content pre {
+  background: #282c34;
+  color: #abb2bf;
+  padding: 12px;
+  border-radius: 6px;
+  overflow: auto;
+}
+.rich-content blockquote {
+  border-left: 3px solid #409eff;
+  margin: 8px 0;
+  padding: 4px 12px;
+  color: #606266;
+  background: #ecf5ff;
+}
+
+/* TipTap 编辑区 */
+.tiptap {
+  min-height: 220px;
+  outline: none;
+  padding: 12px 16px;
+}
+.tiptap p.is-editor-empty:first-child::before {
+  color: #a8abb2;
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
