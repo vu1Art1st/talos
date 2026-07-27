@@ -7,7 +7,7 @@
       <div class="text-center mb-6 mt-2">
         <div class="flex items-center justify-center gap-2 text-2xl font-bold text-gray-800">
           <el-icon :size="28" color="#409EFF"><Lock /></el-icon>
-          漏洞管理平台
+          Talos 漏洞管理平台
         </div>
         <div class="text-gray-400 text-sm mt-2">现代化漏洞全生命周期管理</div>
       </div>

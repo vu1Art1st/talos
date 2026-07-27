@@ -3,7 +3,7 @@
     <el-aside width="220px" class="bg-[#001529]">
       <div class="flex items-center gap-2 px-5 h-14 text-white font-bold text-lg">
         <el-icon :size="22" color="#409EFF"><Lock /></el-icon>
-        漏洞管理平台
+        Talos 漏洞管理平台
       </div>
       <el-menu
         :default-active="activeMenu"

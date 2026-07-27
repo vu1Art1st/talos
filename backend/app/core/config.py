@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """全局配置，全部支持环境变量覆盖（前缀 VP_）。"""
 
-    APP_NAME: str = "VulnPlatform"
+    APP_NAME: str = "Talos"
     DEBUG: bool = False
 
     SECRET_KEY: str = "please-change-me-in-production"
