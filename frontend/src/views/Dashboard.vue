@@ -40,6 +40,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import * as echarts from 'echarts'
 import { DataLine, CircleCheck, Warning, Grid } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { LEVEL_COLORS_BY_NAME, STATUS_COLORS_BY_NAME } from '../utils/colors'
 
 const trendRef = ref<HTMLElement>()
 const levelRef = ref<HTMLElement>()
@@ -48,14 +49,10 @@ const typeRef = ref<HTMLElement>()
 const charts = shallowRef<echarts.ECharts[]>([])
 const cards = ref([
   { label: '漏洞总数', value: 0, color: '#409EFF', icon: DataLine },
-  { label: '未闭环漏洞', value: 0, color: '#E6A23C', icon: Warning },
+  { label: '未闭环漏洞', value: 0, color: '#F56C6C', icon: Warning },
   { label: '修复率', value: '0%', color: '#67C23A', icon: CircleCheck },
   { label: '在管应用', value: 0, color: '#909399', icon: Grid },
 ])
-
-const LEVEL_COLORS: Record<string, string> = {
-  严重: '#F56C6C', 高危: '#E6A23C', 中危: '#409EFF', 低危: '#67C23A',
-}
 
 function mk(el: HTMLElement | undefined, option: echarts.EChartsOption) {
   if (!el) return
@@ -91,7 +88,7 @@ onMounted(async () => {
       label: { formatter: '{b}: {c}' },
       data: data.by_level.map((x: any) => ({
         name: x.name, value: x.count,
-        itemStyle: { color: LEVEL_COLORS[x.name] },
+        itemStyle: { color: LEVEL_COLORS_BY_NAME[x.name] },
       })),
     }],
   })
@@ -101,7 +98,10 @@ onMounted(async () => {
     legend: { bottom: 0 },
     series: [{
       type: 'pie', radius: '62%', center: ['50%', '45%'],
-      data: data.by_status.map((x: any) => ({ name: x.name, value: x.count })),
+      data: data.by_status.map((x: any) => ({
+        name: x.name, value: x.count,
+        itemStyle: { color: STATUS_COLORS_BY_NAME[x.name] },
+      })),
     }],
   })
 

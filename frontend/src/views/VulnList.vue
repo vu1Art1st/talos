@@ -27,7 +27,7 @@
       <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip />
       <el-table-column label="等级" width="90">
         <template #default="{ row }">
-          <el-tag :type="levelTag(row.level)" effect="dark" size="small">
+          <el-tag :color="levelColor(row.level)" effect="dark" size="small" class="!border-0">
             {{ meta?.vul_level?.[row.level] ?? row.level }}
           </el-tag>
         </template>
@@ -37,7 +37,9 @@
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :type="statusTag(row.status)" size="small">{{ meta?.vul_status?.[row.status] ?? row.status }}</el-tag>
+          <el-tag :color="statusColor(row.status)" effect="dark" size="small" class="!border-0">
+            {{ meta?.vul_status?.[row.status] ?? row.status }}
+          </el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="app_name" label="所属应用" width="150" show-overflow-tooltip />
@@ -63,6 +65,7 @@ import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { levelColor, statusColor } from '../utils/colors'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -76,9 +79,6 @@ const query = reactive({
 })
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
-const levelTag = (lv: number) => (lv === 10 ? 'danger' : lv === 20 ? 'warning' : lv === 30 ? 'primary' : 'success')
-const statusTag = (s: number) =>
-  s === 10 ? 'warning' : s === 40 || s === 50 ? 'danger' : s === 60 ? 'success' : s === 55 ? 'primary' : 'info'
 
 async function load(page = query.page) {
   query.page = page

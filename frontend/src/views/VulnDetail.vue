@@ -6,9 +6,13 @@
           <div>
             <div class="text-xl font-semibold text-gray-800">{{ vul.title }}</div>
             <div class="flex items-center gap-2 mt-2">
-              <el-tag :type="levelTag(vul.level)" effect="dark" size="small">{{ meta?.vul_level?.[vul.level] }}</el-tag>
+              <el-tag :color="levelColor(vul.level)" effect="dark" size="small" class="!border-0">
+                {{ meta?.vul_level?.[vul.level] }}
+              </el-tag>
               <el-tag size="small">{{ meta?.vul_type?.[vul.vul_type] }}</el-tag>
-              <el-tag type="info" size="small">{{ meta?.vul_status?.[vul.status] }}</el-tag>
+              <el-tag :color="statusColor(vul.status)" effect="dark" size="small" class="!border-0">
+                {{ meta?.vul_status?.[vul.status] }}
+              </el-tag>
               <el-tag type="info" size="small" effect="plain">来源：{{ meta?.vul_source?.[vul.source] }}</el-tag>
             </div>
           </div>
@@ -67,6 +71,7 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { levelColor, statusColor } from '../utils/colors'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -78,7 +83,6 @@ const comment = ref('')
 const meta = ref<any>(null)
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
-const levelTag = (lv: number) => (lv === 10 ? 'danger' : lv === 20 ? 'warning' : lv === 30 ? 'primary' : 'success')
 
 const richSections = computed(() =>
   [

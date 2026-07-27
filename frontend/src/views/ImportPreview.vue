@@ -59,7 +59,9 @@
       <template v-else>
         <div class="font-semibold text-gray-800">{{ rec.title || '（未识别标题）' }}</div>
         <div class="flex gap-2 mt-1 text-sm text-gray-500">
-          <el-tag :type="levelTag(rec.level)" size="small" effect="dark">{{ meta?.vul_level?.[rec.level] }}</el-tag>
+          <el-tag :color="levelColor(rec.level)" size="small" effect="dark" class="!border-0">
+            {{ meta?.vul_level?.[rec.level] }}
+          </el-tag>
           <span>{{ meta?.vul_type?.[rec.vul_type] }}</span>
           <span v-if="rec.affected_url" class="truncate">{{ rec.affected_url }}</span>
         </div>
@@ -88,6 +90,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { levelColor } from '../utils/colors'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -104,7 +107,6 @@ const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
 )
 
-const levelTag = (lv: number) => (lv === 10 ? 'danger' : lv === 20 ? 'warning' : lv === 30 ? 'primary' : 'success')
 const recName = (s: string) =>
   ({ parsed: '待确认', error: '解析异常', confirmed: '已入库', discarded: '已丢弃' })[s] ?? s
 const recTag = (s: string) =>
