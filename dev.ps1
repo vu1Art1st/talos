@@ -1,4 +1,4 @@
-<#
+﻿<#
 Talos 一键本地开发脚本（Windows）
 - 后端：SQLite + 免队列模式，无需 Postgres/Redis，http://localhost:8000
 - 前端：Vite Dev Server，http://localhost:5173
