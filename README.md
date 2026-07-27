@@ -38,6 +38,7 @@
 │   └── tests/             # pytest 集成测试
 ├── frontend/
 │   └── src/{api, stores, router, views, components, layouts}
+├── dev.ps1 / dev.sh       # 一键本地开发脚本
 └── docker-compose.yml
 ```
 
@@ -54,6 +55,21 @@ docker compose up -d
 > **安全提醒**：生产部署前请务必修改 `docker-compose.yml` 中的 `VP_SECRET_KEY` 与数据库口令，并在首次登录后立即修改 admin 密码。
 
 ## 本地开发
+
+推荐一键脚本（自动创建虚拟环境、安装依赖，SQLite + 免队列模式，无需 Postgres/Redis）：
+
+```bash
+# Windows
+powershell -ExecutionPolicy Bypass -File .\dev.ps1
+
+# Linux / macOS
+bash dev.sh
+```
+
+启动后访问 http://localhost:5173，默认账号 `admin` / `admin123`，Ctrl+C 一并停止前后端。
+
+<details>
+<summary>手动步骤</summary>
 
 后端（可免 Postgres/Redis 依赖）：
 
@@ -73,12 +89,18 @@ npm install
 npm run dev   # http://localhost:5173，代理 /api 与 /storage 到 8000
 ```
 
+</details>
+
 运行测试：
 
 ```bash
 cd backend
 .venv/Scripts/python -m pytest
 ```
+
+## 功能规划
+
+后续功能设计详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 旧数据迁移
 
