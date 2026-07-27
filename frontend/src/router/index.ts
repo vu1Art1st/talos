@@ -31,7 +31,7 @@ router.beforeEach((to) => {
   const token = localStorage.getItem('access_token')
   if (!token && to.name !== 'login') return { name: 'login', query: { redirect: to.fullPath } }
   if (token && to.name === 'login') return { name: 'dashboard' }
-  document.title = to.meta.title ? `${to.meta.title} - 漏洞管理平台` : '漏洞管理平台'
+  document.title = to.meta.title ? `${to.meta.title} - Talos 漏洞管理平台` : 'Talos 漏洞管理平台'
 })
 
 export default router
