@@ -18,26 +18,22 @@ export const LEVEL_COLORS_BY_NAME: Record<string, string> = {
   安全: LEVEL_COLORS[50],
 }
 
-// 状态：未修复(待审核/已确认)-红 修复中(修复中/复测中)-橙 已修复(已完成)-绿 其他-灰
+// 状态：未修复-红 修复中/复测中-橙 已修复-绿 已忽略/暂不处理-灰
 export const STATUS_COLORS: Record<number, string> = {
-  10: '#F56C6C', // 待审核
-  40: '#F56C6C', // 已确认
+  10: '#F56C6C', // 未修复
   50: '#E6A23C', // 修复中
   55: '#E6A23C', // 复测中
-  60: '#67C23A', // 已完成
+  60: '#67C23A', // 已修复
   20: '#909399', // 已忽略
-  30: '#909399', // 已驳回
   35: '#909399', // 暂不处理
 }
 
 export const STATUS_COLORS_BY_NAME: Record<string, string> = {
-  待审核: STATUS_COLORS[10],
-  已确认: STATUS_COLORS[40],
+  未修复: STATUS_COLORS[10],
   修复中: STATUS_COLORS[50],
   复测中: STATUS_COLORS[55],
-  已完成: STATUS_COLORS[60],
+  已修复: STATUS_COLORS[60],
   已忽略: STATUS_COLORS[20],
-  已驳回: STATUS_COLORS[30],
   暂不处理: STATUS_COLORS[35],
 }
 

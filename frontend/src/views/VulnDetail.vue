@@ -20,7 +20,14 @@
         </div>
         <el-descriptions :column="2" border class="mt-4" size="small">
           <el-descriptions-item label="影响URL" :span="2">{{ vul.affected_url || '-' }}</el-descriptions-item>
-          <el-descriptions-item label="所属应用">{{ vul.app_name || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="关联资产">
+            {{ (vul.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
+          </el-descriptions-item>
+          <el-descriptions-item label="测试计划">
+            <el-link v-if="vul.testing_plan_id" type="primary"
+                     @click="router.push('/testing-plans')">计划 #{{ vul.testing_plan_id }}</el-link>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="风险评分">{{ vul.risk_score }}</el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ fmt(vul.submit_time) }}</el-descriptions-item>
           <el-descriptions-item label="审核时间">{{ fmt(vul.audit_time) }}</el-descriptions-item>
@@ -43,9 +50,9 @@
           <el-input v-model="comment" type="textarea" :rows="2" placeholder="处理意见（可选）" />
           <div class="flex flex-wrap gap-2">
             <el-button v-for="t in transitions" :key="t.status" size="small"
-                       :type="t.status === 60 ? 'success' : t.status === 40 ? 'primary' : t.status === 30 ? 'danger' : ''"
+                       :type="t.status === 60 ? 'success' : t.status === 50 ? 'warning' : t.status === 55 ? 'primary' : ''"
                        @click="doTransition(t.status)">
-              {{ t.name }}
+              {{ transitionLabel(t) }}
             </el-button>
           </div>
         </div>
@@ -84,11 +91,18 @@ const meta = ref<any>(null)
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
+// 复测中打回修复中时，按业务语义显示为「复测未通过」
+function transitionLabel(t: { status: number; name: string }) {
+  if (vul.value?.status === 55 && t.status === 50) return '复测未通过'
+  return t.name
+}
+
 const richSections = computed(() =>
   [
     { title: '漏洞描述', html: vul.value?.description_html },
     { title: '复现步骤', html: vul.value?.reproduce_html },
     { title: '修复建议', html: vul.value?.solution_html },
+    { title: '复测详情', html: vul.value?.retest_html },
   ].filter((s) => s.html),
 )
 

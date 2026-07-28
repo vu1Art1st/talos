@@ -42,7 +42,11 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="app_name" label="所属应用" width="150" show-overflow-tooltip />
+      <el-table-column label="关联资产" width="150" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ (row.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
+        </template>
+      </el-table-column>
       <el-table-column label="来源" width="100">
         <template #default="{ row }">{{ meta?.vul_source?.[row.source] ?? '-' }}</template>
       </el-table-column>
