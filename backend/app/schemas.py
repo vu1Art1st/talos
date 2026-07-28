@@ -28,6 +28,13 @@ class PasswordIn(BaseModel):
     new_password: str = Field(min_length=8)
 
 
+class UserOption(BaseModel):
+    """用户下拉选项（供报告作者等选择器使用，普通登录用户可见）。"""
+
+    id: int
+    name: str
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -83,33 +90,32 @@ class GroupIn(BaseModel):
     remark: str = ""
 
 
-# ---------- 应用 / 资产 ----------
-class AppIn(BaseModel):
+# ---------- 资产 ----------
+class PublicUrlItem(BaseModel):
+    url: str
+    tag: int = 10  # URL_TAG：10 互联网 / 20 办公网
+
+
+class AssetOwnerItem(BaseModel):
     name: str
-    url: str = ""
-    app_type: int = 20
-    sec_level: int = 40
-    status: int = 10
-    group_id: int | None = None
-    owner_id: int | None = None
-    remark: str = ""
-
-
-class AppOut(AppIn):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    create_time: datetime | None = None
-    update_time: datetime | None = None
+    phone: str = ""
+    email: str = ""
 
 
 class AssetIn(BaseModel):
-    value: str
-    asset_type: int = 10
-    level: int = 40
-    is_open: bool = False
-    is_https: bool = False
-    app_id: int | None = None
+    name: str = Field(min_length=1, max_length=128)
+    sub_system: str = ""
+    department: str = ""
+    public_urls: list[PublicUrlItem] = []
+    internal_urls: list[str] = []
+    ports: list[str] = []
+    services: str = ""
+    middleware: str = ""
+    database_type: str = ""
+    owners: list[AssetOwnerItem] = []
+    sec_level: int = 40
+    status: int = 10
+    group_id: int | None = None
     remark: str = ""
 
 
@@ -118,6 +124,23 @@ class AssetOut(AssetIn):
 
     id: int
     create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class AssetBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    sub_system: str = ""
+    department: str = ""
+
+
+class AssetImportResultOut(BaseModel):
+    total: int = 0
+    success: int = 0
+    failed: int = 0
+    errors: list[str] = []
 
 
 # ---------- 漏洞 ----------
@@ -138,7 +161,8 @@ class VulIn(BaseModel):
     risk_score: int = 0
     left_risk_score: int = 0
     asset_level: int = 0
-    app_id: int | None = None
+    asset_ids: list[int] = []
+    testing_plan_id: int | None = None  # 关联测试计划
 
 
 class VulOut(VulIn):
@@ -146,11 +170,13 @@ class VulOut(VulIn):
 
     id: int
     status: int = 10
+    retest_html: str = ""
+    retest_json: dict | None = None
     is_retest: bool = False
     delay_days: int = 0
     delay_reason: str = ""
     submitter_id: int | None = None
-    app_name: str = ""
+    assets: list[AssetBrief] = []
     submit_time: datetime | None = None
     audit_time: datetime | None = None
     notice_time: datetime | None = None
@@ -158,9 +184,19 @@ class VulOut(VulIn):
     update_time: datetime | None = None
 
 
+class VulBatchIn(BaseModel):
+    """同一批资产下批量提交多个漏洞。"""
+
+    asset_ids: list[int] = []
+    vulns: list[VulIn] = Field(min_length=1)
+
+
 class VulTransitionIn(BaseModel):
     status: int
     comment: str = ""
+    # 复测编辑界面随流转一并提交的复测详情（可选）
+    retest_html: str | None = None
+    retest_json: dict | None = None
 
 
 class VulDelayIn(BaseModel):
@@ -221,7 +257,8 @@ class ImportBatchOut(BaseModel):
 
 class ImportConfirmIn(BaseModel):
     record_ids: list[int]
-    app_id: int | None = None
+    asset_id: int | None = None
+    report_id: int | None = None  # 入库后自动追加为该报告的漏洞章节
 
 
 # ---------- 报告 ----------
@@ -247,8 +284,7 @@ class ReportMetaIn(BaseModel):
     author: str = ""
     test_start: str = ""
     test_end: str = ""
-    summary_html: str = ""
-    summary_json: dict | None = None
+    target_ip: str = ""
     status: str = "draft"
 
 
@@ -262,6 +298,7 @@ class ReportOut(ReportMetaIn):
 
     id: int
     version: int = 1
+    testing_plan_id: int | None = None
     creator_id: int | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None
@@ -273,6 +310,7 @@ class ReportListOut(ReportMetaIn):
 
     id: int
     version: int = 1
+    testing_plan_id: int | None = None
     update_time: datetime | None = None
 
 
@@ -286,3 +324,94 @@ class ExportJobOut(BaseModel):
     error: str = ""
     create_time: datetime | None = None
     finish_time: datetime | None = None
+
+
+class ReportVulnStateOut(BaseModel):
+    """报告关联漏洞的复测状态视图（复测编辑面板用）。"""
+
+    vul_id: int
+    title: str = ""
+    status: int = 10
+    level: int = 30
+    retest_html: str = ""
+    retest_json: dict | None = None
+
+
+# ---------- 专项管理 ----------
+class RemoteTestingIn(BaseModel):
+    title: str = Field(min_length=1, max_length=255)
+    system_name: str = ""
+    test_time: str = ""
+    department: str = ""
+    appeal_success: bool = False
+    appeal_report_id: int | None = None
+
+
+class RemoteTestingOut(RemoteTestingIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class UserBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    realname: str = ""
+
+
+class VulBrief(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    level: int = 30
+    status: int = 10
+
+
+class TestingPlanIn(BaseModel):
+    system_name: str = Field(min_length=1, max_length=128)
+    test_type: str = ""
+    department: str = ""
+    receive_time: str = ""
+    first_test_done_time: str = ""
+    status: int = 10  # TESTING_PLAN_STATUS
+    retest_notice_time: str = ""
+    retest_done_time: str = ""
+    stat_critical: int = 0
+    stat_high: int = 0
+    stat_medium: int = 0
+    stat_low: int = 0
+    brief: str = ""
+    detail: str = ""
+
+
+class TestingPlanOut(TestingPlanIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    testers: list[UserBrief] = []
+    vuls: list[VulBrief] = []
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+
+class SpringActionIn(BaseModel):
+    report_no: str = Field(min_length=1, max_length=128)
+    system_name: str = ""
+    appeal_success: bool = False
+    score_deduction: float = 0
+    doc_no: str = ""
+    vul_ids: list[int] = []
+
+
+class SpringActionOut(SpringActionIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    vuls: list[VulBrief] = []
+    create_time: datetime | None = None
+    update_time: datetime | None = None

@@ -19,18 +19,22 @@
         <el-menu-item index="/vulns">
           <el-icon><Warning /></el-icon><span>漏洞管理</span>
         </el-menu-item>
-        <el-menu-item v-if="auth.hasPerm('import:manage')" index="/imports">
-          <el-icon><Upload /></el-icon><span>Word 导入</span>
-        </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('report:manage')" index="/reports">
           <el-icon><Document /></el-icon><span>报告中心</span>
-        </el-menu-item>
-        <el-menu-item v-if="auth.hasPerm('app:manage')" index="/apps">
-          <el-icon><Grid /></el-icon><span>应用管理</span>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('asset:manage')" index="/assets">
           <el-icon><Monitor /></el-icon><span>资产管理</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.hasPerm('special:manage')" index="/testing-plans">
+          <el-icon><Tickets /></el-icon><span>测试计划</span>
+        </el-menu-item>
+        <el-sub-menu v-if="auth.hasPerm('special:manage')" index="/special">
+          <template #title>
+            <el-icon><Folder /></el-icon><span>专项管理</span>
+          </template>
+          <el-menu-item index="/remote-testings">远程检测</el-menu-item>
+          <el-menu-item index="/spring-actions">春耕行动</el-menu-item>
+        </el-sub-menu>
         <el-menu-item v-if="auth.hasPerm('user:manage')" index="/users">
           <el-icon><User /></el-icon><span>用户与权限</span>
         </el-menu-item>
