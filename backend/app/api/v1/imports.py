@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import settings
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import ImportBatch, ImportRecord, User, Vul, VulLog
+from app.models import Asset, ImportBatch, ImportRecord, Report, ReportSection, User, Vul, VulLog
 from app.schemas import (
     ImportBatchOut,
     ImportConfirmIn,
@@ -20,6 +20,7 @@ from app.schemas import (
     Page,
 )
 from app.services.docx_parser import build_import_template
+from app.services import vuln_service
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/imports", tags=["Word导入"])
@@ -164,7 +165,21 @@ async def confirm_batch(
     if not records:
         raise HTTPException(400, "没有可入库的记录（仅解析成功且未入库的记录可确认）")
 
+    asset = None
+    if body.asset_id is not None:
+        asset = await session.get(Asset, body.asset_id)
+        if asset is None:
+            raise HTTPException(400, "指定的资产不存在")
+
+    report = None
+    if body.report_id is not None:
+        report = await session.get(Report, body.report_id)
+        if report is None:
+            raise HTTPException(400, "指定的报告不存在")
+    from app.api.v1.reports import _vuln_section_html
+
     created = 0
+    new_vul_ids: list[int] = []
     for rec in records:
         vul = Vul(
             title=rec.title,
@@ -175,9 +190,10 @@ async def confirm_batch(
             reproduce_html=rec.reproduce_html,
             solution_html=rec.solution_html,
             source=60,  # Word导入
-            app_id=body.app_id,
             submitter_id=user.id,
         )
+        if asset is not None:
+            vul.assets = [asset]
         session.add(vul)
         await session.flush()
         session.add(VulLog(
@@ -186,7 +202,24 @@ async def confirm_batch(
         ))
         rec.status = "confirmed"
         rec.vul_id = vul.id
+        new_vul_ids.append(vul.id)
+        # 关联到指定报告：自动追加为漏洞章节
+        if report is not None:
+            session.add(ReportSection(
+                report_id=report.id,
+                order=len(report.sections) + created,
+                title=vul.title,
+                content_html=_vuln_section_html(vul),
+                vul_id=vul.id,
+            ))
         created += 1
+
+    if report is not None:
+        report.version += 1
+        # 与报告编辑关联漏洞的行为一致：自动进入修复中
+        await vuln_service.auto_transition(
+            session, new_vul_ids, 50, user, f"关联报告《{report.title}》，自动进入修复中",
+        )
 
     remaining = (
         await session.execute(

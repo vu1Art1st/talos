@@ -1,16 +1,31 @@
-"""报告 Word 构建：封面 + 漏洞汇总表 + 富文本章节（htmldocx 转换）。"""
+"""报告 Word 构建：以渗透测试报告模板为基底，填充封面 / 版本记录 / 测试目标 / 汇总统计 / 漏洞详情。
+
+模板锚点依赖 backend/app/templates/report_template.docx 的固定结构：
+表0 封面装饰 | 表1 版本变更记录 | 表2 适用性声明 | 表3 目录(TOC 域)
+表4 测试目标 | 表5 时间与人员 | 表6 风险问题汇总
+"""
+import copy
 import re
+from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from docx import Document
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Pt, RGBColor
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.table import Table, _Row
+from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
 
-from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
+from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE
 from app.core.config import settings
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
+
+# 模板中用于定位替换的封面/统计段落文案
+_TPL_COVER_TITLE = "标准名称（邮件、台账）-系统名称（网页）"
+_TPL_COVER_DATE = "2026年xx月xx日"
+_TPL_COMPANY = "中移系统集成有限公司"
 
 
 def _localize_images(html: str) -> str:
@@ -36,79 +51,195 @@ def _add_html(doc: Document, html: str) -> None:
         doc.add_paragraph(text)
 
 
-def _cover(doc: Document, meta: dict) -> None:
-    for _ in range(4):
-        doc.add_paragraph()
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run(meta.get("title") or "安全测试报告")
-    run.font.size = Pt(32)
-    run.font.bold = True
-    run.font.color.rgb = RGBColor(0x1F, 0x3A, 0x63)
+def _set_para_text(para: Paragraph, text: str) -> None:
+    """替换段落文本并保留首个 run 的字体格式。"""
+    if para.runs:
+        para.runs[0].text = text
+        for run in para.runs[1:]:
+            run.text = ""
+    else:
+        para.add_run(text)
 
-    sub = doc.add_paragraph()
-    sub.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    sub.add_run(meta.get("project_name", "")).font.size = Pt(16)
 
-    doc.add_paragraph()
-    info = doc.add_table(rows=4, cols=2)
-    info.style = "Table Grid"
-    items = [
-        ("委托单位", meta.get("customer", "")),
-        ("报告作者", meta.get("author", "")),
-        ("测试周期", f"{meta.get('test_start', '')} ~ {meta.get('test_end', '')}"),
-        ("报告状态", "正式版" if meta.get("status") == "final" else "草稿"),
+def _set_cell_text(cell, text: str) -> None:
+    """替换单元格文本，保留原格式；多余段落清除。"""
+    for extra in cell.paragraphs[1:]:
+        extra._element.getparent().remove(extra._element)
+    _set_para_text(cell.paragraphs[0], text)
+
+
+def _clone_row(table: Table, src_row: _Row) -> _Row:
+    """深拷贝样例行（保留边框/字体等格式）并追加到表尾。"""
+    new_tr = copy.deepcopy(src_row._tr)
+    src_row._tr.getparent().append(new_tr)
+    return table.rows[-1]
+
+
+def _fill_cover(doc: Document, meta: dict, now: datetime) -> None:
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text == _TPL_COVER_TITLE:
+            _set_para_text(para, meta.get("title") or "渗透测试报告")
+        elif text == _TPL_COVER_DATE:
+            _set_para_text(para, now.strftime("%Y年%m月%d日"))
+        elif text == _TPL_COMPANY and meta.get("customer"):
+            _set_para_text(para, meta["customer"])
+            # 只替换封面首个公司名段落，统计段等由各自逻辑处理
+            break
+
+
+def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datetime) -> None:
+    table = doc.tables[1]
+    is_retest = any(v.get("is_retest") for v in vulns)
+    row = table.rows[2]
+    values = [
+        now.strftime("%Y-%m-%d"),
+        "V1.0",
+        "复测更新" if is_retest else "初测创建",
+        "内部使用",
+        meta.get("author", ""),
     ]
-    for i, (k, v) in enumerate(items):
-        info.rows[i].cells[0].text = k
-        info.rows[i].cells[1].text = v
-    doc.add_page_break()
+    for cell, value in zip(row.cells, values):
+        _set_cell_text(cell, value)
 
 
-def _summary_table(doc: Document, vulns: list[dict]) -> None:
-    doc.add_heading("漏洞汇总", level=1)
+def _fill_target_table(doc: Document, meta: dict, assets: list[dict]) -> None:
+    table = doc.tables[4]
+    urls: list[str] = []
+    for a in assets:
+        urls.extend(u.get("url", "") for u in a.get("public_urls", []) if isinstance(u, dict))
+        urls.extend(a.get("internal_urls", []))
+    urls = [u for u in dict.fromkeys(urls) if u]
+    domains = list(dict.fromkeys(
+        h for u in urls if (h := urlparse(u if "://" in u else f"http://{u}").hostname)
+    ))
+    system_names = list(dict.fromkeys(a.get("name", "") for a in assets if a.get("name")))
+
+    _set_cell_text(table.rows[0].cells[1], meta.get("project_name") or "、".join(system_names) or meta.get("title", ""))
+    _set_cell_text(table.rows[1].cells[1], "\n".join(urls))
+    _set_cell_text(table.rows[2].cells[1], "\n".join(domains))
+    _set_cell_text(table.rows[3].cells[1], meta.get("target_ip", ""))
+    # rows[4] 被测测试账号：系统无对应数据，留空由人工补充
+
+
+def _fill_schedule_table(doc: Document, meta: dict) -> None:
+    table = doc.tables[5]
+    _set_cell_text(table.rows[1].cells[1], meta.get("test_start", ""))
+    _set_cell_text(table.rows[1].cells[3], meta.get("test_end", ""))
+    if meta.get("author"):
+        _set_cell_text(table.rows[4].cells[0], meta["author"])
+
+
+def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
+    """重写「风险问题汇总」统计段落与汇总表。"""
+    counts = {"超危": 0, "高危": 0, "中危": 0, "低危": 0}
+    for v in vulns:
+        label = VUL_LEVEL_EXPORT.get(v.get("level"))
+        if label in counts:
+            counts[label] += 1
+    system_name = meta.get("project_name") or meta.get("title", "")
+    company = meta.get("customer") or _TPL_COMPANY
+
+    lines = list(counts.items())
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text.startswith("经本次测试"):
+            _set_para_text(para, f"经本次测试，{company}{system_name}共发现：")
+        else:
+            for i, (label, num) in enumerate(lines):
+                if text.startswith(f"{label}漏洞"):
+                    tail = "。" if i == len(lines) - 1 else "，"
+                    _set_para_text(para, f"{label}漏洞{num}个{tail}")
+                    break
+
+    table = doc.tables[6]
+    sample = table.rows[1]
+    for v in vulns:
+        row = _clone_row(table, sample)
+        values = [
+            VUL_LEVEL_EXPORT.get(v.get("level"), "-"),
+            VUL_TYPE.get(v.get("vul_type"), "其他"),
+            v.get("title", ""),
+            VUL_STATUS.get(v.get("status"), "-"),
+        ]
+        for cell, value in zip(row.cells, values):
+            _set_cell_text(cell, value)
     if not vulns:
+        for cell in sample.cells:
+            _set_cell_text(cell, "")
+    else:
+        sample._tr.getparent().remove(sample._tr)
+
+
+def _remove_sample_details(doc: Document) -> None:
+    """删除模板「风险问题详情」小节下的样例漏洞内容（H3 起至文末）。"""
+    body = doc.element.body
+    found_h2 = False
+    removing = False
+    for child in list(body.iterchildren()):
+        if child.tag == qn("w:sectPr"):
+            continue
+        if not removing and child.tag == qn("w:p"):
+            para = Paragraph(child, doc)
+            if not found_h2 and para.text.strip() == "风险问题详情":
+                found_h2 = True
+                continue
+            if found_h2 and para.style.name == "Heading 3":
+                removing = True
+        if removing:
+            body.remove(child)
+
+
+def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> None:
+    by_id = {v.get("id"): v for v in vulns}
+    if not sections:
         doc.add_paragraph("本次报告未关联漏洞记录。")
         return
-    table = doc.add_table(rows=len(vulns) + 1, cols=5)
-    table.style = "Table Grid"
-    headers = ["序号", "漏洞名称", "类型", "等级", "状态"]
-    for i, h in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.text = h
-        cell.paragraphs[0].runs[0].font.bold = True
-    for idx, v in enumerate(vulns, start=1):
-        row = table.rows[idx]
-        row.cells[0].text = str(idx)
-        row.cells[1].text = v.get("title", "")
-        row.cells[2].text = VUL_TYPE.get(v.get("vul_type"), "其他")
-        row.cells[3].text = VUL_LEVEL.get(v.get("level"), "-")
-        row.cells[4].text = VUL_STATUS.get(v.get("status"), "-")
-
-
-def build_report_docx(meta: dict, vulns: list[dict], sections: list[dict], out_path: str) -> str:
-    """生成报告 docx。
-
-    meta: 报告元信息；vulns: 汇总表数据；sections: [{title, content_html}] 有序章节。
-    """
-    doc = Document()
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(11)
-
-    _cover(doc, meta)
-
-    if meta.get("summary_html"):
-        doc.add_heading("测试结论", level=1)
-        _add_html(doc, meta["summary_html"])
-
-    _summary_table(doc, vulns)
-    doc.add_page_break()
-
-    doc.add_heading("漏洞详情", level=1)
-    for i, section in enumerate(sections, start=1):
-        doc.add_heading(f"{i}. {section.get('title') or '未命名章节'}", level=2)
+    for section in sections:
+        vul = by_id.get(section.get("vul_id"))
+        title = section.get("title") or "未命名章节"
+        if vul is not None:
+            title = f"{title}（{VUL_STATUS.get(vul.get('status'), '-')}）"
+        doc.add_paragraph(title, style="Heading 3")
         _add_html(doc, section.get("content_html", ""))
+
+
+def _enable_update_fields(doc: Document) -> None:
+    """标记打开文档时刷新域，Word 会自动更新目录页码。"""
+    element = doc.settings.element
+    if element.find(qn("w:updateFields")) is None:
+        update = OxmlElement("w:updateFields")
+        update.set(qn("w:val"), "true")
+        element.insert(0, update)
+
+
+def build_report_docx(
+    meta: dict,
+    vulns: list[dict],
+    sections: list[dict],
+    out_path: str,
+    assets: list[dict] | None = None,
+) -> str:
+    """基于模板生成报告 docx。
+
+    meta: 报告元信息；vulns: 漏洞数据（含 id/level/status 等）；
+    sections: [{title, content_html, vul_id}] 有序章节；assets: 关联资产聚合。
+    """
+    template = Path(settings.REPORT_TEMPLATE)
+    if not template.exists():
+        raise FileNotFoundError(f"报告模板不存在: {template}")
+
+    doc = Document(str(template))
+    now = datetime.now()
+
+    _fill_cover(doc, meta, now)
+    _fill_version_table(doc, meta, vulns, now)
+    _fill_target_table(doc, meta, assets or [])
+    _fill_schedule_table(doc, meta)
+    _fill_summary(doc, meta, vulns)
+    _remove_sample_details(doc)
+    _append_details(doc, vulns, sections)
+    _enable_update_fields(doc)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     doc.save(out_path)

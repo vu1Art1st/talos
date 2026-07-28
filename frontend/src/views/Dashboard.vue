@@ -51,7 +51,7 @@ const cards = ref([
   { label: '漏洞总数', value: 0, color: '#409EFF', icon: DataLine },
   { label: '未闭环漏洞', value: 0, color: '#F56C6C', icon: Warning },
   { label: '修复率', value: '0%', color: '#67C23A', icon: CircleCheck },
-  { label: '在管应用', value: 0, color: '#909399', icon: Grid },
+  { label: '在管资产', value: 0, color: '#909399', icon: Grid },
 ])
 
 function mk(el: HTMLElement | undefined, option: echarts.EChartsOption) {
@@ -66,7 +66,7 @@ onMounted(async () => {
   cards.value[0].value = data.total_vulns
   cards.value[1].value = data.open_vulns
   cards.value[2].value = `${data.fix_rate}%`
-  cards.value[3].value = data.total_apps
+  cards.value[3].value = data.total_assets
 
   mk(trendRef.value, {
     tooltip: { trigger: 'axis' },

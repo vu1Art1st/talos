@@ -1,4 +1,5 @@
 import html as html_mod
+from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
@@ -8,36 +9,39 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VUL_LEVEL, VUL_TYPE
+from app.constants import VUL_LEVEL_EXPORT
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import ExportJob, Report, ReportSection, User, Vul
+from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
     ExportJobOut,
     Page,
     ReportListOut,
     ReportOut,
     ReportSaveIn,
+    ReportVulnStateOut,
 )
+from app.services import plan_service, vuln_service
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/reports", tags=["报告"])
 
 
 def _vuln_section_html(vul: Vul) -> str:
-    """由漏洞记录生成标准章节 HTML（供报告编辑器继续编辑）。"""
-    info = (
-        f"<p><strong>漏洞等级：</strong>{VUL_LEVEL.get(vul.level, '-')}　"
-        f"<strong>漏洞类型：</strong>{VUL_TYPE.get(vul.vul_type, '其他')}　"
-        f"<strong>影响URL：</strong>{html_mod.escape(vul.affected_url or '-')}</p>"
-    )
-    parts = [info]
+    """由漏洞记录生成标准章节 HTML，标签结构对齐导出模板「风险问题详情」（供报告编辑器继续编辑）。"""
+    parts = [
+        f"<p><strong>测试状态：</strong>{'复测' if vul.is_retest else '初测'}</p>",
+        f"<p><strong>漏洞等级：</strong>{VUL_LEVEL_EXPORT.get(vul.level, '-')}</p>",
+        f"<p><strong>漏洞链接：</strong>{html_mod.escape(vul.affected_url or '-')}</p>",
+    ]
     if vul.description_html:
-        parts.append(f"<h3>漏洞描述</h3>{vul.description_html}")
+        parts.append(f"<p><strong>漏洞描述：</strong></p>{vul.description_html}")
     if vul.reproduce_html:
-        parts.append(f"<h3>复现步骤</h3>{vul.reproduce_html}")
+        parts.append(f"<p><strong>漏洞证明：</strong></p>{vul.reproduce_html}")
     if vul.solution_html:
-        parts.append(f"<h3>修复建议</h3>{vul.solution_html}")
+        parts.append(f"<p><strong>修复建议：</strong></p>{vul.solution_html}")
+    if vul.retest_html:
+        parts.append(f"<p><strong>复测详情：</strong></p>{vul.retest_html}")
     return "".join(parts)
 
 
@@ -46,6 +50,13 @@ async def _get_report(session: AsyncSession, report_id: int) -> Report:
     if report is None:
         raise HTTPException(404, "报告不存在")
     return report
+
+
+async def _auto_mark_fixing(session: AsyncSession, vul_ids: list[int], user: User, report_title: str) -> None:
+    """漏洞关联生成报告后自动流转为「修复中」（仅对处于未修复等可流转状态的漏洞生效）。"""
+    await vuln_service.auto_transition(
+        session, vul_ids, 50, user, f"关联报告《{report_title}》，自动进入修复中",
+    )
 
 
 @router.get("", response_model=Page[ReportListOut])
@@ -82,6 +93,9 @@ async def create_report(
             content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
         ))
     session.add(report)
+    await session.flush()
+    linked_ids = [s.vul_id for s in body.sections if s.vul_id]
+    await _auto_mark_fixing(session, linked_ids, user, report.title)
     await session.commit()
     await session.refresh(report)
     return report
@@ -90,6 +104,7 @@ async def create_report(
 class FromVulnsIn(BaseModel):
     title: str
     vul_ids: list[int]
+    testing_plan_id: int | None = None  # 关联测试计划，联动其状态
 
 
 @router.post("/from-vulns", response_model=ReportOut)
@@ -99,9 +114,15 @@ async def create_report_from_vulns(
     session: AsyncSession = Depends(get_session),
 ):
     """从已有漏洞记录一键生成报告草稿，每个漏洞一个章节。"""
+    plan = None
+    if body.testing_plan_id is not None:
+        plan = await plan_service.get_plan_or_400(session, body.testing_plan_id)
     vulns = (await session.execute(select(Vul).where(Vul.id.in_(body.vul_ids)))).scalars().all()
     by_id = {v.id: v for v in vulns}
-    report = Report(title=body.title, author=user.realname or user.username, creator_id=user.id)
+    report = Report(
+        title=body.title, author=user.realname or user.username,
+        testing_plan_id=body.testing_plan_id, creator_id=user.id,
+    )
     order = 0
     for vid in body.vul_ids:
         vul = by_id.get(vid)
@@ -113,6 +134,14 @@ async def create_report_from_vulns(
         ))
         order += 1
     session.add(report)
+    await session.flush()
+    await _auto_mark_fixing(session, [v.id for v in vulns], user, report.title)
+    if plan is not None:
+        # 报告已生成，计划进入等待复测阶段
+        if plan.status in (10, 20):
+            plan.status = 30
+        if not plan.first_test_done_time:
+            plan.first_test_done_time = date.today().isoformat()
     await session.commit()
     await session.refresh(report)
     return report
@@ -131,7 +160,7 @@ async def get_report(
 async def save_report(
     report_id: int,
     body: ReportSaveIn,
-    _: User = Depends(require_perm("report:manage")),
+    user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """全量保存报告（元信息 + 章节），version 乐观锁防止并发覆盖。"""
@@ -139,6 +168,7 @@ async def save_report(
     if body.version != report.version:
         raise HTTPException(409, "报告已被他人修改，请刷新后重试")
 
+    old_linked = {s.vul_id for s in report.sections if s.vul_id}
     for k, v in body.model_dump(exclude={"sections", "version"}).items():
         setattr(report, k, v)
     report.sections.clear()
@@ -149,9 +179,57 @@ async def save_report(
             content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
         ))
     report.version += 1
+    # 编辑中新关联进来的漏洞同样自动进入修复中
+    new_linked = [s.vul_id for s in body.sections if s.vul_id and s.vul_id not in old_linked]
+    await _auto_mark_fixing(session, new_linked, user, report.title)
     await session.commit()
     await session.refresh(report)
     return report
+
+
+@router.post("/{report_id}/retest", response_model=ReportOut)
+async def retest_report(
+    report_id: int,
+    user: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """报告列表点击「复测」：关联漏洞由修复中自动流转为复测中，随后进入复测报告编辑。"""
+    report = await _get_report(session, report_id)
+    vul_ids = [s.vul_id for s in report.sections if s.vul_id]
+    if not vul_ids:
+        raise HTTPException(400, "该报告没有关联任何漏洞，无法发起复测")
+    await vuln_service.auto_transition(
+        session, vul_ids, 55, user, f"报告《{report.title}》发起复测，自动进入复测中",
+    )
+    if report.testing_plan_id is not None:
+        plan = await session.get(TestingPlan, report.testing_plan_id)
+        if plan is not None and plan.status in (30, 40):
+            plan.status = 50  # 等待复测/复测申请 → 复测中
+    await session.commit()
+    await session.refresh(report)
+    return report
+
+
+@router.get("/{report_id}/vuln-states", response_model=list[ReportVulnStateOut])
+async def report_vuln_states(
+    report_id: int,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """报告关联漏洞的状态与复测详情，供复测编辑面板渲染。"""
+    report = await _get_report(session, report_id)
+    vul_ids = [s.vul_id for s in report.sections if s.vul_id]
+    if not vul_ids:
+        return []
+    vulns = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
+    by_id = {v.id: v for v in vulns}
+    return [
+        ReportVulnStateOut(
+            vul_id=v.id, title=v.title, status=v.status, level=v.level,
+            retest_html=v.retest_html, retest_json=v.retest_json,
+        )
+        for vid in vul_ids if (v := by_id.get(vid))
+    ]
 
 
 @router.delete("/{report_id}")

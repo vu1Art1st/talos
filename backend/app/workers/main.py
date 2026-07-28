@@ -88,27 +88,44 @@ async def export_report_task(ctx, job_id: int) -> None:
                 "author": report.author,
                 "test_start": report.test_start,
                 "test_end": report.test_end,
-                "summary_html": report.summary_html,
+                "target_ip": report.target_ip,
                 "status": report.status,
             }
             sections = [
-                {"title": s.title, "content_html": s.content_html}
+                {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
                 for s in report.sections
             ]
             vul_ids = [s.vul_id for s in report.sections if s.vul_id]
             vulns: list[dict] = []
+            assets: list[dict] = []
             if vul_ids:
                 rows = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
                 by_id = {v.id: v for v in rows}
                 vulns = [
-                    {"title": v.title, "vul_type": v.vul_type, "level": v.level, "status": v.status}
+                    {
+                        "id": v.id,
+                        "title": v.title, "vul_type": v.vul_type, "level": v.level,
+                        "status": v.status, "affected_url": v.affected_url, "is_retest": v.is_retest,
+                    }
                     for vid in vul_ids if (v := by_id.get(vid))
                 ]
+                # 聚合关联资产（去重）供模板「测试目标」表使用
+                seen: set[int] = set()
+                for v in rows:
+                    for a in v.assets:
+                        if a.id in seen:
+                            continue
+                        seen.add(a.id)
+                        assets.append({
+                            "name": a.name,
+                            "public_urls": a.public_urls or [],
+                            "internal_urls": a.internal_urls or [],
+                        })
 
             export_dir = settings.storage_sub("exports")
             stamp = datetime.now().strftime("%Y%m%d%H%M%S")
             docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
-            await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path)
+            await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets)
 
             if job.fmt == "pdf":
                 pdf_path = docx_path.replace(".docx", ".pdf")

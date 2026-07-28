@@ -18,10 +18,10 @@ class Report(Base):
     author: Mapped[str] = mapped_column(String(64), default="")
     test_start: Mapped[str] = mapped_column(String(32), default="")
     test_end: Mapped[str] = mapped_column(String(32), default="")
-    summary_html: Mapped[str] = mapped_column(Text, default="")
-    summary_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final
+    target_ip: Mapped[str] = mapped_column(String(255), default="")  # 被测系统 IP，导出模板测试目标表使用
+    status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final / completed
     version: Mapped[int] = mapped_column(Integer, default=1)
+    testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

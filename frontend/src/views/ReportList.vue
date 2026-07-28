@@ -6,6 +6,9 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
+      <el-button v-if="auth.hasPerm('import:manage')" @click="router.push('/reports/imports')">
+        <el-icon class="mr-1"><Upload /></el-icon>Word 导入
+      </el-button>
       <el-button type="primary" @click="fromVulnsVisible = true">
         <el-icon class="mr-1"><MagicStick /></el-icon>从漏洞生成
       </el-button>
@@ -21,18 +24,19 @@
       <el-table-column prop="author" label="作者" width="120" />
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <el-tag :type="row.status === 'final' ? 'success' : 'info'" size="small">
-            {{ row.status === 'final' ? '已定稿' : '草稿' }}
-          </el-tag>
+          <el-tag :type="statusTag(row.status)" size="small">{{ statusName(row.status) }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="70" />
       <el-table-column label="更新时间" width="170">
         <template #default="{ row }">{{ fmt(row.update_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="140" fixed="right">
+      <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="router.push(`/reports/${row.id}`)">编辑</el-button>
+          <el-button v-if="row.status !== 'completed'" size="small" type="warning" link @click="retest(row.id)">
+            复测
+          </el-button>
           <el-popconfirm title="确认删除该报告？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -49,7 +53,13 @@
   </el-card>
 
   <el-dialog v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
-    <el-form label-width="80px">
+    <el-form label-width="100px">
+      <el-form-item label="关联测试计划">
+        <el-select v-model="genPlanId" clearable filterable class="w-full"
+                   placeholder="可选，关联后联动计划状态" @change="onPlanChange">
+          <el-option v-for="p in plans" :key="p.id" :label="`#${p.id} ${p.system_name}`" :value="p.id" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="报告标题">
         <el-input v-model="genTitle" placeholder="例如：XX系统渗透测试报告" />
       </el-form-item>
@@ -68,11 +78,14 @@
 
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
 
+const auth = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 const items = ref<any[]>([])
 const total = ref(0)
@@ -82,9 +95,22 @@ const loading = ref(false)
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')
 const genVulIds = ref<number[]>([])
+const genPlanId = ref<number | null>(null)
 const vulns = ref<any[]>([])
+const plans = ref<any[]>([])
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
+
+const statusName = (s: string) =>
+  s === 'completed' ? '已完成' : s === 'final' ? '已定稿' : '草稿'
+const statusTag = (s: string) =>
+  s === 'completed' ? 'success' : s === 'final' ? 'primary' : 'info'
+
+async function retest(id: number) {
+  await client.post(`/reports/${id}/retest`)
+  ElMessage.success('已发起复测，关联漏洞进入复测中')
+  router.push(`/reports/${id}`)
+}
 
 async function load(p = page.value) {
   page.value = p
@@ -104,7 +130,11 @@ async function createBlank() {
 }
 
 async function generate() {
-  const { data } = await client.post('/reports/from-vulns', { title: genTitle.value, vul_ids: genVulIds.value })
+  const { data } = await client.post('/reports/from-vulns', {
+    title: genTitle.value,
+    vul_ids: genVulIds.value,
+    testing_plan_id: genPlanId.value,
+  })
   ElMessage.success('报告已生成')
   fromVulnsVisible.value = false
   router.push(`/reports/${data.id}`)
@@ -116,12 +146,42 @@ async function remove(id: number) {
   await load()
 }
 
+// 选中计划后：漏洞列表改为该计划关联漏洞并默认全选，标题预填
+async function onPlanChange(planId: number | null) {
+  if (!planId) {
+    const { data } = await client.get('/vulns', { params: { size: 100 } })
+    vulns.value = data.items
+    return
+  }
+  const { data } = await client.get('/vulns', { params: { testing_plan_id: planId, size: 100 } })
+  vulns.value = data.items
+  genVulIds.value = data.items.map((v: any) => v.id)
+  const plan = plans.value.find((p) => p.id === planId)
+  if (plan && !genTitle.value) genTitle.value = `${plan.system_name}渗透测试报告`
+}
+
 watch(fromVulnsVisible, async (v) => {
-  if (v && !vulns.value.length) {
+  if (!v) return
+  if (!vulns.value.length) {
     const { data } = await client.get('/vulns', { params: { size: 100 } })
     vulns.value = data.items
   }
+  if (!plans.value.length) {
+    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
+    plans.value = data.items
+  }
 })
 
-onMounted(() => load(1))
+onMounted(async () => {
+  await load(1)
+  // 从测试计划「生成报告」进入：自动打开对话框并预选计划
+  const genPlan = Number(route.query.gen_plan)
+  if (genPlan) {
+    fromVulnsVisible.value = true
+    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
+    plans.value = data.items
+    genPlanId.value = genPlan
+    await onPlanChange(genPlan)
+  }
+})
 </script>

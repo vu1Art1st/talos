@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     """全局配置，全部支持环境变量覆盖（前缀 VP_）。"""
 
     APP_NAME: str = "Talos"
+    # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
+    APP_VERSION: str = "0.4.0"
     DEBUG: bool = False
 
     SECRET_KEY: str = "please-change-me-in-production"
@@ -20,6 +22,9 @@ class Settings(BaseSettings):
     DISABLE_QUEUE: bool = False
 
     GOTENBERG_URL: str = "http://localhost:3000"
+
+    # 报告导出 Word 基底模板，默认使用包内模板，可用环境变量指向定制文件
+    REPORT_TEMPLATE: str = str(Path(__file__).resolve().parent.parent / "templates" / "report_template.docx")
 
     STORAGE_DIR: str = "storage"
 

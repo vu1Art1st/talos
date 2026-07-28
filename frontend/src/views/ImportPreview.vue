@@ -5,8 +5,11 @@
         <div class="font-medium">批次 #{{ route.params.id }}</div>
         <el-tag v-if="batch" size="small">{{ batch.filename }}</el-tag>
         <div class="flex-1" />
-        <el-select v-model="appId" filterable clearable placeholder="入库到应用（可选）" class="!w-52">
-          <el-option v-for="a in apps" :key="a.id" :label="a.name" :value="a.id" />
+        <el-select v-model="assetId" filterable clearable placeholder="入库到资产（可选）" class="!w-52">
+          <el-option v-for="a in assets" :key="a.id" :label="a.name" :value="a.id" />
+        </el-select>
+        <el-select v-model="reportId" filterable clearable placeholder="关联到报告（可选）" class="!w-52">
+          <el-option v-for="r in reports" :key="r.id" :label="r.title" :value="r.id" />
         </el-select>
         <el-button type="primary" :disabled="!selected.length" @click="confirm">
           确认入库（{{ selected.length }} 条）
@@ -97,8 +100,10 @@ const route = useRoute()
 const router = useRouter()
 const batch = ref<any>(null)
 const records = ref<any[]>([])
-const apps = ref<any[]>([])
-const appId = ref<number | null>(null)
+const assets = ref<any[]>([])
+const assetId = ref<number | null>(null)
+const reports = ref<any[]>([])
+const reportId = ref<number | null>(null)
 const meta = ref<any>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
@@ -136,7 +141,7 @@ async function discard(rec: any) {
 
 async function confirm() {
   const { data } = await client.post(`/imports/${route.params.id}/confirm`, {
-    record_ids: selected.value, app_id: appId.value,
+    record_ids: selected.value, asset_id: assetId.value, report_id: reportId.value,
   })
   ElMessage.success(data.msg)
   await load()
@@ -144,8 +149,13 @@ async function confirm() {
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
-  const { data } = await client.get('/apps', { params: { size: 100 } })
-  apps.value = data.items
+  const [{ data: assetPage }, { data: reportPage }] = await Promise.all([
+    client.get('/assets', { params: { size: 100 } }),
+    // 无报告权限时静默降级为不可关联
+    client.get('/reports', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
+  ])
+  assets.value = assetPage.items
+  reports.value = reportPage.items
   await load()
 })
 </script>

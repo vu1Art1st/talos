@@ -6,12 +6,11 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import (
-    APP_SEC_LEVEL,
-    APP_STATUS,
-    APP_TYPE,
-    ASSET_LEVEL,
-    ASSET_TYPE,
+    ASSET_SEC_LEVEL,
+    ASSET_STATUS,
     PERMISSIONS,
+    TESTING_PLAN_STATUS,
+    URL_TAG,
     VUL_LAYER,
     VUL_LEVEL,
     VUL_SOURCE,
@@ -37,11 +36,10 @@ async def meta(_: User = Depends(get_current_user)):
         "vul_status": VUL_STATUS,
         "vul_source": VUL_SOURCE,
         "vul_layer": VUL_LAYER,
-        "asset_level": ASSET_LEVEL,
-        "asset_type": ASSET_TYPE,
-        "app_type": APP_TYPE,
-        "app_sec_level": APP_SEC_LEVEL,
-        "app_status": APP_STATUS,
+        "asset_sec_level": ASSET_SEC_LEVEL,
+        "asset_status": ASSET_STATUS,
+        "url_tag": URL_TAG,
+        "testing_plan_status": TESTING_PLAN_STATUS,
         "permissions": PERMISSIONS,
     }
 

@@ -30,7 +30,7 @@
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link :disabled="row.status === 'parsing' || row.status === 'pending'"
-                     @click="router.push(`/imports/${row.id}`)">预览确认</el-button>
+                     @click="router.push(`/reports/imports/${row.id}`)">预览确认</el-button>
           <el-popconfirm title="确认删除该批次？" @confirm="removeBatch(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
