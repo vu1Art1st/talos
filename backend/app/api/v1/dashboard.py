@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import App, Asset, User, Vul
+from app.models import Asset, User, Vul
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -18,7 +18,6 @@ async def stats(
     session: AsyncSession = Depends(get_session),
 ):
     total_vulns = (await session.execute(select(func.count(Vul.id)))).scalar_one()
-    total_apps = (await session.execute(select(func.count(App.id)))).scalar_one()
     total_assets = (await session.execute(select(func.count(Asset.id)))).scalar_one()
 
     by_status_rows = (
@@ -70,12 +69,11 @@ async def stats(
                 trend[key]["fixed"] += 1
 
     fixed = sum(c for s, c in by_status_rows if s == 60)
-    closed = sum(c for s, c in by_status_rows if s in (20, 30, 60))
+    closed = sum(c for s, c in by_status_rows if s in (20, 60))
     fix_rate = round(fixed / total_vulns * 100, 1) if total_vulns else 0.0
 
     return {
         "total_vulns": total_vulns,
-        "total_apps": total_apps,
         "total_assets": total_assets,
         "open_vulns": total_vulns - closed,
         "fix_rate": fix_rate,

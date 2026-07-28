@@ -1,11 +1,22 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索资产（域名 / IP）" clearable class="!w-64"
+    <div class="flex items-center gap-2 mb-4 flex-wrap">
+      <el-input v-model="search" placeholder="搜索系统 / 子系统 / 部门 / URL" clearable class="!w-72"
                 @keyup.enter="load(1)" @clear="load(1)">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
+      <el-button @click="downloadTemplate">
+        <el-icon class="mr-1"><Download /></el-icon>下载模板
+      </el-button>
+      <el-upload :show-file-list="false" accept=".xlsx" :http-request="importExcel">
+        <el-button :loading="importing">
+          <el-icon class="mr-1"><Upload /></el-icon>导入Excel
+        </el-button>
+      </el-upload>
+      <el-button @click="exportExcel">
+        <el-icon class="mr-1"><Download /></el-icon>导出Excel
+      </el-button>
       <el-button type="primary" @click="openEdit()">
         <el-icon class="mr-1"><Plus /></el-icon>新建资产
       </el-button>
@@ -13,24 +24,35 @@
 
     <el-table v-loading="loading" :data="items" stripe>
       <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="value" label="资产" min-width="220" show-overflow-tooltip />
-      <el-table-column label="类型" width="100">
-        <template #default="{ row }">{{ meta?.asset_type?.[row.asset_type] ?? '-' }}</template>
-      </el-table-column>
-      <el-table-column label="等级" width="90">
-        <template #default="{ row }">{{ meta?.asset_level?.[row.level] ?? '-' }}</template>
-      </el-table-column>
-      <el-table-column label="对外开放" width="90">
+      <el-table-column prop="name" label="系统命名" min-width="150" show-overflow-tooltip />
+      <el-table-column prop="sub_system" label="子系统" min-width="110" show-overflow-tooltip />
+      <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip />
+      <el-table-column label="公网URL" min-width="200">
         <template #default="{ row }">
-          <el-tag :type="row.is_open ? 'warning' : 'info'" size="small">{{ row.is_open ? '是' : '否' }}</el-tag>
+          <div v-for="(u, i) in (row.public_urls ?? []).slice(0, 2)" :key="i" class="flex items-center gap-1">
+            <span class="truncate">{{ u.url }}</span>
+            <el-tag size="small" :type="u.tag === 10 ? 'warning' : 'info'">{{ meta?.url_tag?.[u.tag] ?? '-' }}</el-tag>
+          </div>
+          <span v-if="(row.public_urls ?? []).length > 2" class="text-xs text-gray-400">
+            等 {{ row.public_urls.length }} 条
+          </span>
         </template>
       </el-table-column>
-      <el-table-column label="HTTPS" width="90">
+      <el-table-column label="负责人" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">
-          <el-tag :type="row.is_https ? 'success' : 'info'" size="small">{{ row.is_https ? '是' : '否' }}</el-tag>
+          {{ (row.owners ?? []).map((o: any) => o.name).join('、') || '-' }}
         </template>
       </el-table-column>
-      <el-table-column prop="remark" label="备注" min-width="140" show-overflow-tooltip />
+      <el-table-column label="安全等级" width="100">
+        <template #default="{ row }">{{ meta?.asset_sec_level?.[row.sec_level] ?? '-' }}</template>
+      </el-table-column>
+      <el-table-column label="状态" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.status === 10 ? 'success' : 'info'" size="small">
+            {{ meta?.asset_status?.[row.status] ?? row.status }}
+          </el-tag>
+        </template>
+      </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openEdit(row)">编辑</el-button>
@@ -49,42 +71,15 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑资产' : '新建资产'" width="500px">
-    <el-form :model="form" label-width="80px">
-      <el-form-item label="资产值" required>
-        <el-input v-model="form.value" placeholder="域名 / IP / IP段" />
-      </el-form-item>
-      <el-form-item label="类型">
-        <el-select v-model="form.asset_type" class="w-full">
-          <el-option v-for="(name, code) in meta?.asset_type" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="等级">
-        <el-select v-model="form.level" class="w-full">
-          <el-option v-for="(name, code) in meta?.asset_level" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
-      </el-form-item>
-      <el-form-item label="对外开放">
-        <el-switch v-model="form.is_open" />
-      </el-form-item>
-      <el-form-item label="HTTPS">
-        <el-switch v-model="form.is_https" />
-      </el-form-item>
-      <el-form-item label="备注">
-        <el-input v-model="form.remark" type="textarea" :rows="2" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" @click="save">保存</el-button>
-    </template>
-  </el-dialog>
+  <AssetFormDialog v-model:visible="dialogVisible" :asset="editing" @saved="load()" />
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onMounted, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import AssetFormDialog from '../components/AssetFormDialog.vue'
 import { useAuthStore } from '../stores/auth'
 
 const auth = useAuthStore()
@@ -94,8 +89,9 @@ const total = ref(0)
 const page = ref(1)
 const search = ref('')
 const loading = ref(false)
+const importing = ref(false)
 const dialogVisible = ref(false)
-const form = reactive<any>({ id: null, value: '', asset_type: 10, level: 40, is_open: false, is_https: false, remark: '' })
+const editing = ref<any>(null)
 
 async function load(p = page.value) {
   page.value = p
@@ -110,23 +106,55 @@ async function load(p = page.value) {
 }
 
 function openEdit(row?: any) {
-  Object.assign(form, row ?? { id: null, value: '', asset_type: 10, level: 40, is_open: false, is_https: false, remark: '' })
+  editing.value = row ?? null
   dialogVisible.value = true
-}
-
-async function save() {
-  if (!form.value.trim()) return ElMessage.warning('请填写资产值')
-  if (form.id) await client.put(`/assets/${form.id}`, form)
-  else await client.post('/assets', form)
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  await load()
 }
 
 async function remove(id: number) {
   await client.delete(`/assets/${id}`)
   ElMessage.success('删除成功')
   await load()
+}
+
+function saveBlob(data: Blob, filename: string) {
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadTemplate() {
+  const { data } = await client.get('/assets/import/template', { responseType: 'blob' })
+  saveBlob(data, '资产导入模板.xlsx')
+}
+
+async function exportExcel() {
+  const { data } = await client.get('/assets/export', {
+    params: { search: search.value }, responseType: 'blob',
+  })
+  saveBlob(data, '资产导出.xlsx')
+}
+
+async function importExcel(options: any) {
+  importing.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', options.file)
+    const { data } = await client.post('/assets/import', fd)
+    if (data.failed > 0) {
+      await ElMessageBox.alert(
+        `共 ${data.total} 行，成功 ${data.success} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}`,
+        '导入结果', { dangerouslyUseHTMLString: true },
+      )
+    } else {
+      ElMessage.success(`成功导入 ${data.success} 条资产`)
+    }
+    await load(1)
+  } finally {
+    importing.value = false
+  }
 }
 
 onMounted(async () => {

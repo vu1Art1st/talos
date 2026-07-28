@@ -1,41 +1,46 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-
-class App(Base):
-    """应用系统（对应洞察2.0 App 表）。"""
-
-    __tablename__ = "apps"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(String(128), index=True)
-    url: Mapped[str] = mapped_column(String(255), default="")
-    app_type: Mapped[int] = mapped_column(Integer, default=20)
-    sec_level: Mapped[int] = mapped_column(Integer, default=40)
-    status: Mapped[int] = mapped_column(Integer, default=10)
-    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
-    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    remark: Mapped[str] = mapped_column(Text, default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+# 漏洞-资产多对多关联表
+vuln_assets = Table(
+    "vuln_assets",
+    Base.metadata,
+    Column("vul_id", ForeignKey("vulns.id", ondelete="CASCADE"), primary_key=True),
+    Column("asset_id", ForeignKey("assets.id"), primary_key=True),
+    UniqueConstraint("vul_id", "asset_id", name="uq_vuln_asset"),
+)
 
 
 class Asset(Base):
-    """资产（域名 / IP）。"""
+    """资产（系统级，合并原 App 应用与旧域名/IP 资产）。
+
+    JSON 字段约定：
+    - public_urls: [{"url": str, "tag": int}]，tag 见 constants.URL_TAG（互联网/办公网）
+    - internal_urls: [str]
+    - ports: [str]
+    - owners: [{"name": str, "phone": str, "email": str}]
+    """
 
     __tablename__ = "assets"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    value: Mapped[str] = mapped_column(String(255), index=True)
-    asset_type: Mapped[int] = mapped_column(Integer, default=10)
-    level: Mapped[int] = mapped_column(Integer, default=40)
-    is_open: Mapped[bool] = mapped_column(default=False)
-    is_https: Mapped[bool] = mapped_column(default=False)
-    app_id: Mapped[int | None] = mapped_column(ForeignKey("apps.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    sub_system: Mapped[str] = mapped_column(String(128), default="")
+    department: Mapped[str] = mapped_column(String(128), default="")
+    public_urls: Mapped[list | None] = mapped_column(JSON, default=list)
+    internal_urls: Mapped[list | None] = mapped_column(JSON, default=list)
+    ports: Mapped[list | None] = mapped_column(JSON, default=list)
+    services: Mapped[str] = mapped_column(String(255), default="")
+    middleware: Mapped[str] = mapped_column(String(128), default="")
+    database_type: Mapped[str] = mapped_column(String(128), default="")
+    owners: Mapped[list | None] = mapped_column(JSON, default=list)
+    sec_level: Mapped[int] = mapped_column(Integer, default=40)
+    status: Mapped[int] = mapped_column(Integer, default=10)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
     remark: Mapped[str] = mapped_column(Text, default="")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -61,6 +66,8 @@ class Vul(Base):
     reproduce_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     solution_html: Mapped[str] = mapped_column(Text, default="")
     solution_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    retest_html: Mapped[str] = mapped_column(Text, default="")
+    retest_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     score: Mapped[int] = mapped_column(Integer, default=0)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
@@ -70,7 +77,10 @@ class Vul(Base):
     delay_days: Mapped[int] = mapped_column(Integer, default=0)
     delay_reason: Mapped[str] = mapped_column(Text, default="")
 
-    app_id: Mapped[int | None] = mapped_column(ForeignKey("apps.id"), nullable=True)
+    testing_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("testing_plans.id"), nullable=True, index=True,
+    )
+
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     submit_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -79,7 +89,7 @@ class Vul(Base):
     fix_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    app: Mapped[App | None] = relationship(lazy="selectin")
+    assets: Mapped[list[Asset]] = relationship(secondary=vuln_assets, lazy="selectin")
     logs: Mapped[list["VulLog"]] = relationship(back_populates="vul", cascade="all, delete-orphan")
 
 
