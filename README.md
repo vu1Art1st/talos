@@ -104,6 +104,10 @@ cd backend
 
 后续功能设计详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
+## 版本发布
+
+版本号遵循语义化版本 `x.y.z` 管理，历次更新记录详见 [docs/RELEASE.md](docs/RELEASE.md)。
+
 ## 旧数据迁移
 
 从旧版 insight2（MySQL）迁移数据：

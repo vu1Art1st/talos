@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: frontend/imports_reports_feature
+title: 漏洞导入与报告管理视图
+scope:
+    - frontend/src/views/ImportList.vue
+    - frontend/src/views/ImportPreview.vue
+    - frontend/src/views/ReportList.vue
+    - frontend/src/views/ReportEditor.vue
+source_files: []
+depends_on: []
+related_to:
+    - path: backend

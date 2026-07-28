@@ -1,0 +1,12 @@
+schema_version: 1
+module_path: frontend/shared_components
+title: 富文本编辑器、全局色板与 HTTP 客户端
+scope:
+    - frontend/src/components/RichEditor.vue
+    - frontend/src/utils/colors.ts
+    - frontend/src/api/client.ts
+source_files: []
+depends_on: []
+related_to:
+    - path: backend
+    - path: frontend/app_shell
