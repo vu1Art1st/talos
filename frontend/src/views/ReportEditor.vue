@@ -12,17 +12,20 @@
         </template>
         <el-form label-width="80px" size="default">
           <el-form-item label="报告标题">
-            <el-input v-model="report.title" @input="markDirty" />
+            <el-input v-model="report.title" placeholder="标准名称（邮件、台账）-系统名称（网页）" @input="markDirty" />
           </el-form-item>
           <div class="grid grid-cols-1 md:grid-cols-2">
-            <el-form-item label="项目名称">
+            <el-form-item label="系统名称">
               <el-input v-model="report.project_name" @input="markDirty" />
             </el-form-item>
-            <el-form-item label="委托单位">
-              <el-input v-model="report.customer" @input="markDirty" />
+            <el-form-item label="归属单位">
+              <el-input v-model="report.customer" placeholder="默认留空，如为非集成系统在此输入被测单位名称" @input="markDirty" />
             </el-form-item>
             <el-form-item label="报告作者">
-              <el-input v-model="report.author" @input="markDirty" />
+              <el-select v-model="authorNames" multiple filterable allow-create default-first-option
+                         placeholder="选择系统内人员，可多选" class="w-full" @change="onAuthorChange">
+                <el-option v-for="u in userOptions" :key="u.id" :label="u.name" :value="u.name" />
+              </el-select>
             </el-form-item>
             <el-form-item label="测试周期">
               <div class="flex items-center gap-1 w-full">
@@ -31,15 +34,11 @@
                 <el-input v-model="report.test_end" placeholder="2025-01-15" @input="markDirty" />
               </div>
             </el-form-item>
+            <el-form-item label="被测系统IP">
+              <el-input v-model="report.target_ip" placeholder="导出时填入测试目标表" @input="markDirty" />
+            </el-form-item>
           </div>
         </el-form>
-      </el-card>
-
-      <el-card shadow="never" class="!rounded-lg">
-        <template #header>测试结论 / 摘要</template>
-        <RichEditor v-model="report.summary_html"
-                    @update:modelValue="markDirty"
-                    @update:json="(j: any) => { report.summary_json = j; markDirty() }" />
       </el-card>
 
       <el-card v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`" shadow="never" class="!rounded-lg">
@@ -48,6 +47,10 @@
             <span class="text-gray-400">{{ i + 1 }}.</span>
             <el-input v-model="sec.title" placeholder="章节标题" class="!w-80" size="small" @input="markDirty" />
             <el-tag v-if="sec.vul_id" size="small" type="info" effect="plain">关联漏洞 #{{ sec.vul_id }}</el-tag>
+            <el-tag v-if="sec.vul_id && vulnStates[sec.vul_id]" size="small" effect="dark"
+                    :color="statusColor(vulnStates[sec.vul_id].status)" class="!border-0">
+              {{ statusName(vulnStates[sec.vul_id].status) }}
+            </el-tag>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
             <el-button size="small" :disabled="i === report.sections.length - 1" @click="move(i, 1)">下移</el-button>
@@ -57,6 +60,37 @@
         <RichEditor v-model="sec.content_html"
                     @update:modelValue="markDirty"
                     @update:json="(j: any) => { sec.content_json = j; markDirty() }" />
+
+        <!-- 复测处理面板：漏洞处于复测中时逐条填写复测详情并提交结论 -->
+        <div v-if="sec.vul_id && vulnStates[sec.vul_id]?.status === 55"
+             class="mt-4 border border-orange-200 bg-orange-50/40 rounded-lg p-3">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="text-sm font-medium text-orange-600">复测处理</span>
+            <span class="text-xs text-gray-400">填写复测详情并选择结论提交</span>
+          </div>
+          <RichEditor v-model="vulnStates[sec.vul_id].retest_html"
+                      @update:json="(j: any) => { vulnStates[sec.vul_id!].retest_json = j }" />
+          <div class="flex items-center gap-2 mt-2">
+            <el-select v-model="vulnStates[sec.vul_id].next_status" placeholder="选择复测结论" class="!w-44" size="small">
+              <el-option label="已修复" :value="60" />
+              <el-option label="复测未通过" :value="50" />
+              <el-option label="已忽略" :value="20" />
+              <el-option label="暂不处理" :value="35" />
+            </el-select>
+            <el-button type="primary" size="small"
+                       :disabled="!vulnStates[sec.vul_id].next_status"
+                       :loading="retestSubmitting === sec.vul_id"
+                       @click="submitRetest(sec.vul_id)">
+              提交复测结论
+            </el-button>
+          </div>
+        </div>
+        <!-- 已有复测详情且不在复测中：只读展示 -->
+        <div v-else-if="sec.vul_id && vulnStates[sec.vul_id]?.retest_html"
+             class="mt-4 border border-gray-200 rounded-lg p-3">
+          <div class="text-sm font-medium text-gray-600 mb-2">复测详情</div>
+          <div class="text-sm prose max-w-none" v-html="vulnStates[sec.vul_id].retest_html" />
+        </div>
       </el-card>
 
       <div class="flex gap-2">
@@ -123,6 +157,12 @@ import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
+import { statusColor } from '../utils/colors'
+
+const STATUS_NAMES: Record<number, string> = {
+  10: '未修复', 20: '已忽略', 35: '暂不处理', 50: '修复中', 55: '复测中', 60: '已修复',
+}
+const statusName = (s: number) => STATUS_NAMES[s] ?? String(s)
 
 const route = useRoute()
 const report = ref<any>(null)
@@ -132,6 +172,12 @@ const saveState = ref('已保存')
 const insertVulnVisible = ref(false)
 const insertVulIds = ref<number[]>([])
 const vulns = ref<any[]>([])
+// 系统内启用用户选项与已选作者（author 字段以、拼接存储）
+const userOptions = ref<{ id: number; name: string }[]>([])
+const authorNames = ref<string[]>([])
+// 关联漏洞状态与复测详情，key 为 vul_id
+const vulnStates = ref<Record<number, any>>({})
+const retestSubmitting = ref<number | null>(null)
 let saveTimer: number | undefined
 let jobTimer: number | undefined
 
@@ -142,11 +188,30 @@ function markDirty() {
   saveTimer = window.setTimeout(() => save(true), 3000)
 }
 
+async function loadVulnStates() {
+  const { data } = await client.get(`/reports/${route.params.id}/vuln-states`)
+  const map: Record<number, any> = {}
+  for (const v of data) map[v.vul_id] = { ...v, next_status: null }
+  vulnStates.value = map
+}
+
+function syncAuthorNames() {
+  authorNames.value = report.value?.author
+    ? report.value.author.split(/[、,，]+/).filter(Boolean)
+    : []
+}
+
+function onAuthorChange() {
+  report.value.author = authorNames.value.join('、')
+  markDirty()
+}
+
 async function load() {
   const { data } = await client.get(`/reports/${route.params.id}`)
   data.sections.sort((a: any, b: any) => a.order - b.order)
   report.value = data
-  await loadJobs()
+  syncAuthorNames()
+  await Promise.all([loadJobs(), loadVulnStates()])
 }
 
 async function loadJobs() {
@@ -166,7 +231,10 @@ async function save(auto = false) {
     const { data } = await client.put(`/reports/${report.value.id}`, body)
     data.sections.sort((a: any, b: any) => a.order - b.order)
     report.value = data
+    syncAuthorNames()
     saveState.value = '已保存'
+    // 保存可能触发新关联漏洞自动进入修复中，同步刷新状态
+    await loadVulnStates()
     if (!auto) ElMessage.success('保存成功')
   } catch (e: any) {
     if (e?.response?.status === 409) {
@@ -195,6 +263,24 @@ function move(i: number, dir: number) {
   const arr = report.value.sections
   ;[arr[i], arr[i + dir]] = [arr[i + dir], arr[i]]
   markDirty()
+}
+
+// 提交单个漏洞的复测详情与结论（复测中 → 已修复/复测未通过/已忽略/暂不处理）
+async function submitRetest(vulId: number) {
+  const state = vulnStates.value[vulId]
+  if (!state?.next_status) return
+  retestSubmitting.value = vulId
+  try {
+    await client.post(`/vulns/${vulId}/transition`, {
+      status: state.next_status,
+      retest_html: state.retest_html || '',
+      retest_json: state.retest_json ?? null,
+    })
+    ElMessage.success(`漏洞 #${vulId} 复测结论已提交`)
+    await loadVulnStates()
+  } finally {
+    retestSubmitting.value = null
+  }
 }
 
 async function insertVulns() {
@@ -243,6 +329,7 @@ watch(insertVulnVisible, async (v) => {
 
 onMounted(async () => {
   await load()
+  client.get('/users/options').then(({ data }) => { userOptions.value = data })
   jobTimer = window.setInterval(() => {
     if (jobs.value.some((j) => j.status === 'pending' || j.status === 'running')) loadJobs()
   }, 2000)

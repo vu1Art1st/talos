@@ -9,7 +9,7 @@ from app.core.deps import get_current_user, require_perm
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, Role, User
-from app.schemas import GroupIn, GroupOut, Page, RoleIn, RoleOut, UserIn, UserOut
+from app.schemas import GroupIn, GroupOut, Page, RoleIn, RoleOut, UserIn, UserOption, UserOut
 
 router = APIRouter(tags=["用户与权限"])
 
@@ -34,6 +34,18 @@ async def list_users(
         )
     ).scalars().all()
     return Page(total=total, items=[build_user_out(u) for u in users])
+
+
+@router.get("/users/options", response_model=list[UserOption])
+async def list_user_options(
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """启用用户的姓名列表，供报告作者等下拉选择，无需 user:manage 权限。"""
+    users = (
+        await session.execute(select(User).where(User.is_active.is_(True)).order_by(User.id))
+    ).scalars().all()
+    return [UserOption(id=u.id, name=u.realname or u.username) for u in users]
 
 
 @router.post("/users", response_model=UserOut)
