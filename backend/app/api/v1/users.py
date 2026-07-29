@@ -5,7 +5,7 @@ from sqlalchemy.orm import selectinload
 
 from app.api.v1.auth import build_user_out
 from app.constants import PERMISSIONS
-from app.core.deps import get_current_user, require_perm
+from app.core.deps import get_current_user, require_any_perm, require_perm
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, Role, User
@@ -186,11 +186,35 @@ async def list_groups(
 @router.post("/groups", response_model=GroupOut)
 async def create_group(
     body: GroupIn,
+    # 测试计划「所属部门」下拉支持就地新增组织，故 special:manage 亦可创建
+    _: User = Depends(require_any_perm("user:manage", "special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "组织名称不能为空")
+    exists = (await session.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(400, "同名组织已存在")
+    group = Group(name=name, remark=body.remark)
+    session.add(group)
+    await session.commit()
+    await session.refresh(group)
+    return group
+
+
+@router.put("/groups/{group_id}", response_model=GroupOut)
+async def update_group(
+    group_id: int,
+    body: GroupIn,
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    group = Group(name=body.name, remark=body.remark)
-    session.add(group)
+    group = await session.get(Group, group_id)
+    if group is None:
+        raise HTTPException(404, "组不存在")
+    group.name = body.name
+    group.remark = body.remark
     await session.commit()
     await session.refresh(group)
     return group

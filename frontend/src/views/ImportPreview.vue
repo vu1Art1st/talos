@@ -2,8 +2,21 @@
   <div class="space-y-4">
     <el-card shadow="never" class="!rounded-lg">
       <div class="flex flex-wrap items-center gap-3">
+        <el-button @click="router.push('/reports/imports')">
+          <el-icon class="mr-1"><Back /></el-icon>返回
+        </el-button>
         <div class="font-medium">批次 #{{ route.params.id }}</div>
         <el-tag v-if="batch" size="small">{{ batch.filename }}</el-tag>
+        <template v-if="batch?.doc_kind === 'report'">
+          <el-tag type="warning" size="small" effect="plain">报告格式</el-tag>
+          <el-tag v-if="batch.meta_json?.system_name" size="small" effect="plain">
+            {{ batch.meta_json.system_name }}
+          </el-tag>
+          <el-tag v-if="batch.meta_json?.report_date" size="small" effect="plain">
+            {{ batch.meta_json.report_date }}
+          </el-tag>
+          <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
+        </template>
         <div class="flex-1" />
         <el-select v-model="assetId" filterable clearable placeholder="入库到资产（可选）" class="!w-52">
           <el-option v-for="a in assets" :key="a.id" :label="a.name" :value="a.id" />
@@ -14,6 +27,9 @@
         <el-button type="primary" :disabled="!selected.length" @click="confirm">
           确认入库（{{ selected.length }} 条）
         </el-button>
+      </div>
+      <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
+        已识别为平台报告格式，确认入库时将自动创建/关联测试计划「{{ batch.meta_json?.system_name || '-' }}」
       </div>
     </el-card>
 
@@ -77,6 +93,8 @@
               <div v-html="rec.reproduce_html" />
               <h4 v-if="rec.solution_html">修复建议</h4>
               <div v-html="rec.solution_html" />
+              <h4 v-if="rec.retest_html">复测详情</h4>
+              <div v-html="rec.retest_html" />
             </div>
           </el-collapse-item>
         </el-collapse>

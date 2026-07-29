@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import Asset, User, Vul
+from app.models import Asset, TestingPlan, User, Vul
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -72,6 +72,58 @@ async def stats(
     closed = sum(c for s, c in by_status_rows if s in (20, 60))
     fix_rate = round(fixed / total_vulns * 100, 1) if total_vulns else 0.0
 
+    # 部门维度（按测试计划所属部门聚合）：提测次数 / 发现漏洞 / 已修复 / 修复率
+    plan_rows = (
+        await session.execute(
+            select(
+                TestingPlan.id,
+                TestingPlan.department,
+                TestingPlan.stat_critical + TestingPlan.stat_high
+                + TestingPlan.stat_medium + TestingPlan.stat_low,
+            )
+        )
+    ).all()
+    linked_rows = (
+        await session.execute(
+            select(Vul.testing_plan_id, Vul.status).where(Vul.testing_plan_id.is_not(None))
+        )
+    ).all()
+    linked: dict[int, dict[str, int]] = {}
+    for plan_id, vul_status in linked_rows:
+        agg = linked.setdefault(plan_id, {"total": 0, "fixed": 0})
+        agg["total"] += 1
+        if vul_status == 60:
+            agg["fixed"] += 1
+    dept_map: dict[str, dict[str, int]] = {}
+    for plan_id, department, stat_sum in plan_rows:
+        dept = dept_map.setdefault(
+            department or "未填写", {"plans": 0, "vulns": 0, "linked": 0, "fixed": 0}
+        )
+        dept["plans"] += 1
+        agg = linked.get(plan_id)
+        if agg:
+            # 有关联漏洞时以真实漏洞记录为准
+            dept["vulns"] += agg["total"]
+            dept["linked"] += agg["total"]
+            dept["fixed"] += agg["fixed"]
+        else:
+            # 无关联漏洞时用计划手填统计补充发现数
+            dept["vulns"] += stat_sum or 0
+    by_department = sorted(
+        (
+            {
+                "department": name,
+                "plans": d["plans"],
+                "vulns": d["vulns"],
+                "fixed": d["fixed"],
+                "fix_rate": round(d["fixed"] / d["linked"] * 100, 1) if d["linked"] else None,
+            }
+            for name, d in dept_map.items()
+        ),
+        key=lambda x: x["plans"],
+        reverse=True,
+    )
+
     return {
         "total_vulns": total_vulns,
         "total_assets": total_assets,
@@ -80,5 +132,6 @@ async def stats(
         "by_status": by_status,
         "by_level": by_level,
         "by_type": by_type,
+        "by_department": by_department,
         "trend": [{"month": k, **v} for k, v in sorted(trend.items())],
     }

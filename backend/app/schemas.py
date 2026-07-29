@@ -170,6 +170,7 @@ class VulOut(VulIn):
 
     id: int
     status: int = 10
+    department: str = ""  # 归属部门（由关联资产聚合，多个用「、」分隔）
     retest_html: str = ""
     retest_json: dict | None = None
     is_retest: bool = False
@@ -191,6 +192,12 @@ class VulBatchIn(BaseModel):
     vulns: list[VulIn] = Field(min_length=1)
 
 
+class VulUpdateIn(VulIn):
+    """编辑漏洞：在 VulIn 基础上允许直接调整漏洞状态（下拉选项与 VUL_STATUS 一致）。"""
+
+    status: int | None = None
+
+
 class VulTransitionIn(BaseModel):
     status: int
     comment: str = ""
@@ -202,6 +209,32 @@ class VulTransitionIn(BaseModel):
 class VulDelayIn(BaseModel):
     delay_days: int = Field(gt=0)
     delay_reason: str
+
+
+class VulFieldsIn(BaseModel):
+    """报告编辑页漏洞字段下拉框快捷调整：各字段可选，仅更新传入项。"""
+
+    status: int | None = None
+    level: int | None = None
+    vul_type: int | None = None
+    layer: int | None = None
+
+
+class VulRetestRecordIn(BaseModel):
+    """复测处理页的单条复测记录（漏洞修复富文本）。"""
+
+    content_html: str = ""
+    content_json: dict | None = None
+
+
+class VulRetestRecordOut(VulRetestRecordIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    vul_id: int
+    username: str = ""
+    create_time: datetime | None = None
+    update_time: datetime | None = None
 
 
 class VulLogOut(BaseModel):
@@ -227,6 +260,8 @@ class ImportRecordOut(BaseModel):
     description_html: str = ""
     reproduce_html: str = ""
     solution_html: str = ""
+    retest_html: str = ""
+    fixed: bool = False
     status: str = "parsed"
     parse_error: str = ""
     vul_id: int | None = None
@@ -248,6 +283,8 @@ class ImportBatchOut(BaseModel):
     id: int
     filename: str
     status: str
+    doc_kind: str = "template"
+    meta_json: dict | None = None
     total: int = 0
     success: int = 0
     failed: int = 0
@@ -319,6 +356,7 @@ class ExportJobOut(BaseModel):
 
     id: int
     report_id: int
+    title: str = ""  # 导出时的报告名快照
     fmt: str
     status: str
     error: str = ""
@@ -327,12 +365,14 @@ class ExportJobOut(BaseModel):
 
 
 class ReportVulnStateOut(BaseModel):
-    """报告关联漏洞的复测状态视图（复测编辑面板用）。"""
+    """报告关联漏洞的状态字段视图（报告编辑页下拉框表单与复测编辑面板用）。"""
 
     vul_id: int
     title: str = ""
     status: int = 10
     level: int = 30
+    vul_type: int = 75
+    layer: int = 10
     retest_html: str = ""
     retest_json: dict | None = None
 
@@ -372,6 +412,16 @@ class VulBrief(BaseModel):
     status: int = 10
 
 
+class RetestRoundOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    round_no: int
+    start_time: datetime | None = None
+    done_time: datetime | None = None
+    source: str = ""
+
+
 class TestingPlanIn(BaseModel):
     system_name: str = Field(min_length=1, max_length=128)
     test_type: str = ""
@@ -395,6 +445,8 @@ class TestingPlanOut(TestingPlanIn):
     id: int
     testers: list[UserBrief] = []
     vuls: list[VulBrief] = []
+    retest_rounds: list[RetestRoundOut] = []
+    retest_round_count: int = 0
     create_time: datetime | None = None
     update_time: datetime | None = None
 
@@ -402,6 +454,8 @@ class TestingPlanOut(TestingPlanIn):
 class SpringActionIn(BaseModel):
     report_no: str = Field(min_length=1, max_length=128)
     system_name: str = ""
+    year: str = ""  # 年度，如 2026
+    phase: str = ""  # 阶段，如 第一阶段
     appeal_success: bool = False
     score_deduction: float = 0
     doc_no: str = ""
@@ -415,3 +469,16 @@ class SpringActionOut(SpringActionIn):
     vuls: list[VulBrief] = []
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+# ---------- 通用字典 ----------
+class DictOptionIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    sort: int = 0
+
+
+class DictOptionOut(DictOptionIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    category: str

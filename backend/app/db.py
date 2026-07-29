@@ -39,6 +39,24 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN testing_plan_id INTEGER"))
         if "target_ip" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN target_ip VARCHAR(255) NOT NULL DEFAULT ''"))
+        export_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(export_jobs)"))).fetchall()}
+        if export_cols and "title" not in export_cols:
+            await conn.execute(text("ALTER TABLE export_jobs ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''"))
+        spring_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(spring_actions)"))).fetchall()}
+        if spring_cols and "year" not in spring_cols:
+            await conn.execute(text("ALTER TABLE spring_actions ADD COLUMN year VARCHAR(8) NOT NULL DEFAULT ''"))
+        if spring_cols and "phase" not in spring_cols:
+            await conn.execute(text("ALTER TABLE spring_actions ADD COLUMN phase VARCHAR(64) NOT NULL DEFAULT ''"))
+        batch_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(import_batches)"))).fetchall()}
+        if batch_cols and "doc_kind" not in batch_cols:
+            await conn.execute(text("ALTER TABLE import_batches ADD COLUMN doc_kind VARCHAR(16) NOT NULL DEFAULT 'template'"))
+        if batch_cols and "meta_json" not in batch_cols:
+            await conn.execute(text("ALTER TABLE import_batches ADD COLUMN meta_json JSON"))
+        record_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(import_records)"))).fetchall()}
+        if record_cols and "retest_html" not in record_cols:
+            await conn.execute(text("ALTER TABLE import_records ADD COLUMN retest_html TEXT NOT NULL DEFAULT ''"))
+        if record_cols and "fixed" not in record_cols:
+            await conn.execute(text("ALTER TABLE import_records ADD COLUMN fixed BOOLEAN NOT NULL DEFAULT 0"))
         for col in ("summary_html", "summary_json"):
             if col in report_cols:
                 try:
@@ -49,6 +67,32 @@ async def _migrate_lightweight() -> None:
             # 状态码语义升级（六档），仅对旧库一次性重映射：50 已完成→60 复测完成，40 复测中→50 复测中
             await conn.execute(text("UPDATE testing_plans SET status = 60 WHERE status = 50"))
             await conn.execute(text("UPDATE testing_plans SET status = 50 WHERE status = 40"))
+        # 复测轮次表为空时，为已进入复测阶段的存量计划回填第 1 轮记录（幂等）
+        round_count = (
+            await conn.execute(text("SELECT COUNT(*) FROM testing_plan_retest_rounds"))
+        ).scalar_one()
+        if round_count == 0:
+            await conn.execute(text(
+                "INSERT INTO testing_plan_retest_rounds (plan_id, round_no, start_time, done_time, source) "
+                "SELECT id, 1, CURRENT_TIMESTAMP, "
+                "CASE WHEN status = 60 THEN CURRENT_TIMESTAMP ELSE NULL END, '历史数据回填' "
+                "FROM testing_plans WHERE status >= 50 OR retest_done_time != ''"
+            ))
+        # 复测报告导入遗留修复：计划错误停留"复测完成"但仍有未闭环漏洞（幂等，先修漏洞后修计划）
+        await conn.execute(text(
+            "UPDATE vulns SET status = 55, is_retest = 1 "
+            "WHERE source = 60 AND status = 10 "
+            "AND testing_plan_id IN (SELECT id FROM testing_plans WHERE status = 60) "
+            "AND testing_plan_id IN ("
+            "  SELECT DISTINCT testing_plan_id FROM vulns "
+            "  WHERE testing_plan_id IS NOT NULL AND status NOT IN (20, 60))"
+        ))
+        await conn.execute(text(
+            "UPDATE testing_plans SET status = 50 "
+            "WHERE status = 60 AND id IN ("
+            "  SELECT DISTINCT testing_plan_id FROM vulns "
+            "  WHERE testing_plan_id IS NOT NULL AND status NOT IN (20, 60))"
+        ))
 
 
 async def init_db() -> None:
@@ -63,7 +107,7 @@ async def init_db() -> None:
     from sqlalchemy import select
 
     from app.core.security import hash_password
-    from app.models import Role, User
+    from app.models import DictOption, Role, User
 
     async with async_session_maker() as session:
         role = (await session.execute(select(Role).where(Role.name == "超级管理员"))).scalar_one_or_none()
@@ -86,4 +130,15 @@ async def init_db() -> None:
                 realname="管理员",
                 role_id=role.id,
             ))
+
+        # 测试计划-测试类型字典预设项（该分类为空时一次性写入）
+        has_test_type = (
+            await session.execute(
+                select(DictOption.id).where(DictOption.category == "test_type").limit(1)
+            )
+        ).scalar_one_or_none()
+        if has_test_type is None:
+            presets = ["加电上线", "互联网自主测试", "办公网自主测试", "CHBN项目测试", "品质测评"]
+            for i, name in enumerate(presets):
+                session.add(DictOption(category="test_type", name=name, sort=i))
         await session.commit()

@@ -15,6 +15,12 @@
       <el-table-column prop="id" label="ID" width="70" />
       <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip />
       <el-table-column prop="system_name" label="对应系统" min-width="160" show-overflow-tooltip />
+      <el-table-column label="年度" width="90">
+        <template #default="{ row }">{{ row.year || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="阶段" width="110" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.phase || '-' }}</template>
+      </el-table-column>
       <el-table-column label="涉及漏洞" width="110">
         <template #default="{ row }">
           <el-popover v-if="row.vuls?.length" placement="right" width="360" trigger="hover">
@@ -71,6 +77,14 @@
       <el-form-item label="对应系统">
         <el-input v-model="form.system_name" />
       </el-form-item>
+      <div class="grid grid-cols-2">
+        <el-form-item label="年度">
+          <el-date-picker v-model="form.year" type="year" value-format="YYYY" placeholder="选择年度" class="!w-full" />
+        </el-form-item>
+        <el-form-item label="阶段">
+          <el-input v-model="form.phase" placeholder="如：第一阶段" />
+        </el-form-item>
+      </div>
       <el-form-item label="涉及漏洞">
         <el-select v-model="form.vul_ids" multiple filterable class="w-full" placeholder="可多选">
           <el-option v-for="v in vulns" :key="v.id" :label="`#${v.id} ${v.title}`" :value="v.id" />
@@ -116,6 +130,8 @@ const emptyForm = () => ({
   id: null as number | null,
   report_no: '',
   system_name: '',
+  year: '',
+  phase: '',
   appeal_success: false,
   score_deduction: 0,
   doc_no: '',

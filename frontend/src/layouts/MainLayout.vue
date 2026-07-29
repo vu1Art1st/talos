@@ -16,18 +16,22 @@
         <el-menu-item index="/dashboard">
           <el-icon><DataLine /></el-icon><span>安全态势</span>
         </el-menu-item>
+        <el-menu-item v-if="auth.hasPerm('special:manage')" index="/testing-plans">
+          <el-icon><Tickets /></el-icon><span>测试计划</span>
+        </el-menu-item>
         <el-menu-item index="/vulns">
           <el-icon><Warning /></el-icon><span>漏洞管理</span>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('report:manage')" index="/reports">
           <el-icon><Document /></el-icon><span>报告中心</span>
         </el-menu-item>
-        <el-menu-item v-if="auth.hasPerm('asset:manage')" index="/assets">
-          <el-icon><Monitor /></el-icon><span>资产管理</span>
-        </el-menu-item>
-        <el-menu-item v-if="auth.hasPerm('special:manage')" index="/testing-plans">
-          <el-icon><Tickets /></el-icon><span>测试计划</span>
-        </el-menu-item>
+        <el-sub-menu v-if="auth.hasPerm('asset:manage')" index="/asset-manage">
+          <template #title>
+            <el-icon><Monitor /></el-icon><span>资产管理</span>
+          </template>
+          <el-menu-item index="/assets">资产台账</el-menu-item>
+          <el-menu-item index="/assets/groups">组织管理</el-menu-item>
+        </el-sub-menu>
         <el-sub-menu v-if="auth.hasPerm('special:manage')" index="/special">
           <template #title>
             <el-icon><Folder /></el-icon><span>专项管理</span>
@@ -94,7 +98,10 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 
-const activeMenu = computed(() => '/' + route.path.split('/')[1])
+// 二级菜单使用完整路径高亮，其余按一级路径段匹配
+const activeMenu = computed(() =>
+  route.path === '/assets/groups' ? route.path : '/' + route.path.split('/')[1],
+)
 const pwdVisible = ref(false)
 const pwdForm = reactive({ old_password: '', new_password: '' })
 

@@ -47,8 +47,8 @@
           {{ (row.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
         </template>
       </el-table-column>
-      <el-table-column label="来源" width="100">
-        <template #default="{ row }">{{ meta?.vul_source?.[row.source] ?? '-' }}</template>
+      <el-table-column label="归属部门" width="140" show-overflow-tooltip>
+        <template #default="{ row }">{{ row.department || '-' }}</template>
       </el-table-column>
       <el-table-column label="提交时间" width="170">
         <template #default="{ row }">{{ fmt(row.submit_time) }}</template>

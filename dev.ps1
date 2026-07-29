@@ -27,7 +27,7 @@ if (-not (Test-Path $venvPython)) {
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     Write-Host '[dev] 安装前端依赖...' -ForegroundColor Cyan
     Push-Location $frontend
-    npm install
+    npm install 
     Pop-Location
 }
 

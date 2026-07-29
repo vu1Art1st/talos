@@ -56,6 +56,19 @@ docker compose up -d
 
 > **安全提醒**：生产部署前请务必修改 `docker-compose.yml` 中的 `VP_SECRET_KEY` 与数据库口令，并在首次登录后立即修改 admin 密码。
 
+## PDF 转换服务（Gotenberg）配置
+
+`VP_GOTENBERG_URL` 指定 DOCX→PDF 转换服务地址，供「报告 PDF 导出」与「导入原件在线预览」使用。后端默认值 `http://localhost:3000`（见 `backend/app/core/config.py`，所有配置项统一使用 `VP_` 前缀，可写入 `.env` 或以环境变量注入）。
+
+| 环境 | 配置方式 |
+| --- | --- |
+| 生产（Docker Compose） | `docker-compose.yml` 已内置 `gotenberg/gotenberg:8` 服务，并为 api / worker 注入 `VP_GOTENBERG_URL: http://gotenberg:3000`，开箱即用，无需额外配置 |
+| 本地开发 | 可选：`docker run --rm -p 3000:3000 gotenberg/gotenberg:8`，再设 `VP_GOTENBERG_URL=http://localhost:3000`（默认值即为此，通常无需显式设置） |
+
+未部署 Gotenberg 时，仅 PDF 预览/导出会返回 502 并在前端提示「转换服务不可用」，漏洞、报告、资产、导入等其它功能均不受影响。
+
+**最佳实践**：生产环境将 Gotenberg 置于内网、不对外暴露 3000 端口；转换较大文档时可调整 `--api-timeout`（`docker-compose.yml` 已设为 120s）。
+
 ## 本地开发
 
 推荐一键脚本（自动创建虚拟环境、安装依赖，SQLite + 免队列模式，无需 Postgres/Redis）：

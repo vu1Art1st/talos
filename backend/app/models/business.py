@@ -93,6 +93,21 @@ class Vul(Base):
     logs: Mapped[list["VulLog"]] = relationship(back_populates="vul", cascade="all, delete-orphan")
 
 
+class VulRetestRecord(Base):
+    """漏洞复测记录：复测处理页可为同一漏洞新增多条「漏洞修复」富文本记录。"""
+
+    __tablename__ = "vul_retest_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vul_id: Mapped[int] = mapped_column(ForeignKey("vulns.id", ondelete="CASCADE"), index=True)
+    content_html: Mapped[str] = mapped_column(Text, default="")
+    content_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class VulLog(Base):
     __tablename__ = "vul_logs"
 

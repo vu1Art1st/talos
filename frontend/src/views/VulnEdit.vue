@@ -69,6 +69,11 @@
             <el-option v-for="(name, code) in meta?.vul_layer" :key="code" :label="name" :value="Number(code)" />
           </el-select>
         </el-form-item>
+        <el-form-item v-if="editId" label="漏洞状态">
+          <el-select v-model="vul.status" class="w-full" placeholder="选择漏洞状态">
+            <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="影响URL">
           <el-input v-model="vul.affected_url" placeholder="https://..." />
         </el-form-item>
@@ -91,6 +96,9 @@
   <div class="max-w-5xl flex items-center gap-2 mb-6">
     <el-button v-if="!editId" @click="addVuln">
       <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
+    </el-button>
+    <el-button v-if="editId" type="warning" plain @click="router.push(`/vulns/${editId}/retest`)">
+      复测
     </el-button>
     <div class="flex-1" />
     <el-button @click="router.back()">取消</el-button>

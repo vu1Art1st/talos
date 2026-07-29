@@ -185,6 +185,9 @@ async def update_testing_plan(
         raise HTTPException(404, "测试计划不存在")
     if body.status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
+    # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
+    if body.status == 50 and row.status != 50:
+        plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
     for k, v in body.model_dump().items():
         setattr(row, k, v)
     # 有关联漏洞时统计以自动重算为准，覆盖手填值

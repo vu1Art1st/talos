@@ -2,18 +2,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VUL_TRANSITIONS, VUL_STATUS
+from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE
 from app.core.deps import get_current_user, require_perm, user_permissions
 from app.db import get_session
-from app.models import Asset, User, Vul, VulLog
+from app.models import Asset, User, Vul, VulLog, VulRetestRecord
 from app.schemas import (
     Page,
     VulBatchIn,
     VulDelayIn,
+    VulFieldsIn,
     VulIn,
     VulLogOut,
     VulOut,
+    VulRetestRecordIn,
+    VulRetestRecordOut,
     VulTransitionIn,
+    VulUpdateIn,
 )
 from app.services import plan_service, vuln_service
 
@@ -23,6 +27,8 @@ router = APIRouter(prefix="/vulns", tags=["漏洞"])
 def build_vul_out(vul: Vul) -> VulOut:
     out = VulOut.model_validate(vul)
     out.asset_ids = [a.id for a in vul.assets]
+    # 归属部门取自关联资产，去重后拼接
+    out.department = "、".join(dict.fromkeys(a.department for a in vul.assets if a.department))
     return out
 
 
@@ -150,7 +156,7 @@ async def get_vuln(
 @router.put("/{vul_id}", response_model=VulOut)
 async def update_vuln(
     vul_id: int,
-    body: VulIn,
+    body: VulUpdateIn,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -162,6 +168,7 @@ async def update_vuln(
         raise HTTPException(403, "只有提交人或漏洞管理员可以编辑")
     data = body.model_dump()
     asset_ids = data.pop("asset_ids", [])
+    new_status = data.pop("status", None)
     old_plan_id = vul.testing_plan_id
     if data.get("testing_plan_id") != old_plan_id:
         await _check_plan_access(session, data.get("testing_plan_id"), user)
@@ -169,6 +176,10 @@ async def update_vuln(
         setattr(vul, k, v)
     vul.assets = await _fetch_assets(session, asset_ids)
     vuln_service.add_log(session, vul, user, "编辑漏洞")
+    # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
+    if new_status is not None and new_status != vul.status:
+        vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
+        await vuln_service.sync_report_completion(session, [vul.id])
     # 等级或关联计划变化后重算涉及计划的统计
     for plan_id in {old_plan_id, vul.testing_plan_id}:
         await plan_service.refresh_stats(session, plan_id)
@@ -208,6 +219,61 @@ async def allowed_transitions(
     ]
 
 
+@router.post("/{vul_id}/status", response_model=VulOut)
+async def set_vuln_status(
+    vul_id: int,
+    body: VulTransitionIn,
+    user: User = Depends(require_perm("vuln:audit")),
+    session: AsyncSession = Depends(get_session),
+):
+    """直接设置漏洞状态（报告编辑页状态标签点选），不受状态机流转限制。"""
+    vul = await session.get(Vul, vul_id)
+    if vul is None:
+        raise HTTPException(404, "漏洞不存在")
+    vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
+    # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
+    await vuln_service.sync_report_completion(session, [vul.id])
+    await session.commit()
+    await session.refresh(vul)
+    return build_vul_out(vul)
+
+
+@router.patch("/{vul_id}/fields", response_model=VulOut)
+async def patch_vuln_fields(
+    vul_id: int,
+    body: VulFieldsIn,
+    user: User = Depends(require_perm("vuln:audit")),
+    session: AsyncSession = Depends(get_session),
+):
+    """报告编辑页下拉框快捷调整漏洞字段（状态/等级/类型/所在层），仅更新传入且有变化的字段。"""
+    vul = await session.get(Vul, vul_id)
+    if vul is None:
+        raise HTTPException(404, "漏洞不存在")
+    dicts = {"level": VUL_LEVEL, "vul_type": VUL_TYPE, "layer": VUL_LAYER}
+    changed_fields = []
+    for field, label in (("level", "漏洞等级"), ("vul_type", "漏洞类型"), ("layer", "所在层")):
+        value = getattr(body, field)
+        if value is None or value == getattr(vul, field):
+            continue
+        if value not in dicts[field]:
+            raise HTTPException(400, f"非法{label}: {value}")
+        old = getattr(vul, field)
+        setattr(vul, field, value)
+        changed_fields.append(f"{label} {dicts[field][old]} → {dicts[field][value]}")
+    if changed_fields:
+        vuln_service.add_log(session, vul, user, "报告编辑页调整字段", "；".join(changed_fields))
+    status_changed = body.status is not None and body.status != vul.status
+    if status_changed:
+        vuln_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
+        await vuln_service.sync_report_completion(session, [vul.id])
+    # 等级变化后重算关联计划的漏洞统计
+    if any(f.startswith("漏洞等级") for f in changed_fields):
+        await plan_service.refresh_stats(session, vul.testing_plan_id)
+    await session.commit()
+    await session.refresh(vul)
+    return build_vul_out(vul)
+
+
 @router.post("/{vul_id}/transition", response_model=VulOut)
 async def transition_vuln(
     vul_id: int,
@@ -225,9 +291,8 @@ async def transition_vuln(
         vul.retest_json = body.retest_json
         comment = comment or "复测详情已更新"
     await vuln_service.transition(session, vul, body.status, user, comment)
-    # 已修复/已忽略后检查关联报告是否全部处理完毕，自动标记报告已完成
-    if body.status in (20, 60):
-        await vuln_service.sync_report_completion(session, [vul.id])
+    # 状态流转后双向联动报告/测试计划（全部闭环自动标记完成，回退自动重开）
+    await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
     return build_vul_out(vul)
@@ -263,3 +328,81 @@ async def vuln_logs(
         )
     ).scalars().all()
     return logs
+
+
+# ---------- 复测记录（复测处理页） ----------
+async def _get_retest_record(session: AsyncSession, vul_id: int, record_id: int) -> VulRetestRecord:
+    record = await session.get(VulRetestRecord, record_id)
+    if record is None or record.vul_id != vul_id:
+        raise HTTPException(404, "复测记录不存在")
+    return record
+
+
+@router.get("/{vul_id}/retests", response_model=list[VulRetestRecordOut])
+async def list_retest_records(
+    vul_id: int,
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    if await session.get(Vul, vul_id) is None:
+        raise HTTPException(404, "漏洞不存在")
+    records = (
+        await session.execute(
+            select(VulRetestRecord).where(VulRetestRecord.vul_id == vul_id)
+            .order_by(VulRetestRecord.create_time, VulRetestRecord.id)
+        )
+    ).scalars().all()
+    return records
+
+
+@router.post("/{vul_id}/retests", response_model=VulRetestRecordOut)
+async def create_retest_record(
+    vul_id: int,
+    body: VulRetestRecordIn,
+    user: User = Depends(require_perm("vuln:audit")),
+    session: AsyncSession = Depends(get_session),
+):
+    vul = await session.get(Vul, vul_id)
+    if vul is None:
+        raise HTTPException(404, "漏洞不存在")
+    record = VulRetestRecord(
+        vul_id=vul_id, content_html=body.content_html, content_json=body.content_json,
+        creator_id=user.id, username=user.username,
+    )
+    session.add(record)
+    vuln_service.add_log(session, vul, user, "新增复测记录")
+    await session.commit()
+    await session.refresh(record)
+    return record
+
+
+@router.put("/{vul_id}/retests/{record_id}", response_model=VulRetestRecordOut)
+async def update_retest_record(
+    vul_id: int,
+    record_id: int,
+    body: VulRetestRecordIn,
+    user: User = Depends(require_perm("vuln:audit")),
+    session: AsyncSession = Depends(get_session),
+):
+    record = await _get_retest_record(session, vul_id, record_id)
+    record.content_html = body.content_html
+    record.content_json = body.content_json
+    await session.commit()
+    await session.refresh(record)
+    return record
+
+
+@router.delete("/{vul_id}/retests/{record_id}")
+async def delete_retest_record(
+    vul_id: int,
+    record_id: int,
+    user: User = Depends(require_perm("vuln:audit")),
+    session: AsyncSession = Depends(get_session),
+):
+    record = await _get_retest_record(session, vul_id, record_id)
+    vul = await session.get(Vul, vul_id)
+    if vul is not None:
+        vuln_service.add_log(session, vul, user, "删除复测记录", f"记录 #{record_id}")
+    await session.delete(record)
+    await session.commit()
+    return {"msg": "删除成功"}

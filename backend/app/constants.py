@@ -84,13 +84,17 @@ PERMISSIONS = [
 ]
 
 # Word 导入模板中「漏洞信息表格」的行标签 -> 字段映射
+# 标签命名与报告模板「风险问题详情」章节保持一致（漏洞链接/漏洞证明），
+# 同时保留旧模板标签（影响URL/复现步骤）作为兼容别名
 IMPORT_LABEL_MAP = {
     "漏洞名称": "title",
     "漏洞等级": "level",
     "漏洞类型": "vul_type",
+    "漏洞链接": "affected_url",
     "影响URL": "affected_url",
     "影响url": "affected_url",
     "漏洞描述": "description_html",
+    "漏洞证明": "reproduce_html",
     "复现步骤": "reproduce_html",
     "修复建议": "solution_html",
 }

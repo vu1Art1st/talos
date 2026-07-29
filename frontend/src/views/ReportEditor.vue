@@ -28,11 +28,9 @@
               </el-select>
             </el-form-item>
             <el-form-item label="测试周期">
-              <div class="flex items-center gap-1 w-full">
-                <el-input v-model="report.test_start" placeholder="2025-01-01" @input="markDirty" />
-                <span>至</span>
-                <el-input v-model="report.test_end" placeholder="2025-01-15" @input="markDirty" />
-              </div>
+              <el-date-picker v-model="testRange" type="daterange" value-format="YYYY-MM-DD"
+                              range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期"
+                              unlink-panels class="!w-full" />
             </el-form-item>
             <el-form-item label="被测系统IP">
               <el-input v-model="report.target_ip" placeholder="导出时填入测试目标表" @input="markDirty" />
@@ -41,22 +39,48 @@
         </el-form>
       </el-card>
 
-      <el-card v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`" shadow="never" class="!rounded-lg">
+      <el-card v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`" :id="`section-${i}`"
+               shadow="never" class="!rounded-lg scroll-mt-4">
         <template #header>
           <div class="flex items-center gap-2">
             <span class="text-gray-400">{{ i + 1 }}.</span>
             <el-input v-model="sec.title" placeholder="章节标题" class="!w-80" size="small" @input="markDirty" />
             <el-tag v-if="sec.vul_id" size="small" type="info" effect="plain">关联漏洞 #{{ sec.vul_id }}</el-tag>
-            <el-tag v-if="sec.vul_id && vulnStates[sec.vul_id]" size="small" effect="dark"
-                    :color="statusColor(vulnStates[sec.vul_id].status)" class="!border-0">
-              {{ statusName(vulnStates[sec.vul_id].status) }}
-            </el-tag>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
             <el-button size="small" :disabled="i === report.sections.length - 1" @click="move(i, 1)">下移</el-button>
             <el-button size="small" type="danger" plain @click="removeSection(i)">删除</el-button>
           </div>
         </template>
+        <!-- 关联漏洞字段：与漏洞编辑页一致的固定下拉框，修改即时保存到漏洞记录 -->
+        <el-form v-if="sec.vul_id && vulnStates[sec.vul_id]" label-width="90px" class="mb-3">
+          <div class="grid grid-cols-1 md:grid-cols-2">
+            <el-form-item label="漏洞等级">
+              <el-select :model-value="vulnStates[sec.vul_id].level" class="w-full"
+                         @change="(v: number) => changeVulnField(sec.vul_id!, 'level', v)">
+                <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="漏洞类型">
+              <el-select :model-value="vulnStates[sec.vul_id].vul_type" filterable class="w-full"
+                         @change="(v: number) => changeVulnField(sec.vul_id!, 'vul_type', v)">
+                <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="所在层">
+              <el-select :model-value="vulnStates[sec.vul_id].layer" class="w-full"
+                         @change="(v: number) => changeVulnField(sec.vul_id!, 'layer', v)">
+                <el-option v-for="(name, code) in meta?.vul_layer" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="漏洞状态">
+              <el-select :model-value="vulnStates[sec.vul_id].status" class="w-full" placeholder="选择漏洞状态"
+                         @change="(v: number) => changeVulnField(sec.vul_id!, 'status', v)">
+                <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+          </div>
+        </el-form>
         <RichEditor v-model="sec.content_html"
                     @update:modelValue="markDirty"
                     @update:json="(j: any) => { sec.content_json = j; markDirty() }" />
@@ -103,7 +127,26 @@
       </div>
     </div>
 
-    <div class="space-y-4">
+    <div class="space-y-4 xl:sticky xl:top-4 self-start">
+      <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
+      <el-card shadow="never" class="!rounded-lg">
+        <template #header>章节导航</template>
+        <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="50" />
+        <div v-else class="max-h-72 overflow-y-auto -mx-1">
+          <div v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`"
+               class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm hover:bg-gray-100"
+               :class="activeSection === i ? 'bg-blue-50 text-blue-600' : 'text-gray-600'"
+               @click="scrollToSection(i)">
+            <span class="text-gray-400 shrink-0">{{ i + 1 }}.</span>
+            <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
+            <el-tag v-if="sec.vul_id && vulnStates[sec.vul_id]" size="small" effect="dark"
+                    class="!border-0 shrink-0" :color="statusColor(vulnStates[sec.vul_id].status)">
+              {{ statusName(vulnStates[sec.vul_id].status) }}
+            </el-tag>
+          </div>
+        </div>
+      </el-card>
+
       <el-card shadow="never" class="!rounded-lg">
         <template #header>操作</template>
         <div class="space-y-2">
@@ -125,16 +168,29 @@
       <el-card shadow="never" class="!rounded-lg">
         <template #header>导出记录</template>
         <el-empty v-if="!jobs.length" description="暂无导出" :image-size="50" />
-        <div v-for="job in jobs" :key="job.id" class="flex items-center justify-between py-1.5 text-sm border-b border-gray-100 last:border-0">
-          <span class="uppercase font-mono">{{ job.fmt }}</span>
-          <el-tag size="small" :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
-            {{ { pending: '排队中', running: '生成中', done: '完成', failed: '失败' }[job.status as string] ?? job.status }}
-          </el-tag>
-          <el-button v-if="job.status === 'done'" size="small" type="primary" link @click="download(job)">下载</el-button>
-          <el-tooltip v-else-if="job.status === 'failed'" :content="job.error || '生成失败'">
-            <el-icon color="#F56C6C"><WarningFilled /></el-icon>
-          </el-tooltip>
-          <span v-else class="w-10" />
+        <div v-for="job in jobs" :key="job.id" class="py-2 text-sm border-b border-gray-100 last:border-0">
+          <div class="truncate text-gray-700" :title="job.title || report.title">
+            {{ job.title || report.title }}
+          </div>
+          <div class="flex items-center gap-2 mt-1">
+            <span class="uppercase font-mono text-xs text-gray-400">{{ job.fmt }}</span>
+            <el-tag size="small" :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
+              {{ { pending: '排队中', running: '生成中', done: '完成', failed: '失败' }[job.status as string] ?? job.status }}
+            </el-tag>
+            <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
+              <el-icon color="#F56C6C"><WarningFilled /></el-icon>
+            </el-tooltip>
+            <div class="flex-1" />
+            <el-button v-if="job.status === 'done'" size="small" type="primary" link
+                       @click="previewRef?.open(`/reports/exports/${job.id}/preview`, job.title || report.title)">预览</el-button>
+            <el-button v-if="job.status === 'done'" size="small" type="primary" link class="!ml-0" @click="download(job)">下载</el-button>
+            <el-popconfirm v-if="job.status === 'done' || job.status === 'failed'"
+                           title="确认删除该导出记录及报告文件？" @confirm="removeJob(job)">
+              <template #reference>
+                <el-button size="small" type="danger" link class="!ml-0">删除</el-button>
+              </template>
+            </el-popconfirm>
+          </div>
         </div>
       </el-card>
     </div>
@@ -149,14 +205,18 @@
       <el-button type="primary" :disabled="!insertVulIds.length" @click="insertVulns">插入</el-button>
     </template>
   </el-dialog>
+
+  <PdfPreviewDialog ref="previewRef" />
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
+import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import { useAuthStore } from '../stores/auth'
 import { statusColor } from '../utils/colors'
 
 const STATUS_NAMES: Record<number, string> = {
@@ -164,14 +224,22 @@ const STATUS_NAMES: Record<number, string> = {
 }
 const statusName = (s: number) => STATUS_NAMES[s] ?? String(s)
 
+// 报告编辑页漏洞字段下拉框的中文名（提示消息用）
+const FIELD_LABELS: Record<string, string> = {
+  status: '漏洞状态', level: '漏洞等级', vul_type: '漏洞类型', layer: '所在层',
+}
+
+const auth = useAuthStore()
 const route = useRoute()
 const report = ref<any>(null)
+const meta = ref<any>(null)
 const jobs = ref<any[]>([])
 const saving = ref(false)
 const saveState = ref('已保存')
 const insertVulnVisible = ref(false)
 const insertVulIds = ref<number[]>([])
 const vulns = ref<any[]>([])
+const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 // 系统内启用用户选项与已选作者（author 字段以、拼接存储）
 const userOptions = ref<{ id: number; name: string }[]>([])
 const authorNames = ref<string[]>([])
@@ -180,6 +248,18 @@ const vulnStates = ref<Record<number, any>>({})
 const retestSubmitting = ref<number | null>(null)
 let saveTimer: number | undefined
 let jobTimer: number | undefined
+
+// 测试周期：日期范围选择器与 test_start / test_end 字符串字段互转
+const testRange = computed<[string, string] | null>({
+  get: () => (report.value?.test_start || report.value?.test_end)
+    ? [report.value.test_start, report.value.test_end]
+    : null,
+  set: (v) => {
+    report.value.test_start = v?.[0] ?? ''
+    report.value.test_end = v?.[1] ?? ''
+    markDirty()
+  },
+})
 
 function markDirty() {
   saveState.value = '有未保存修改'
@@ -193,6 +273,22 @@ async function loadVulnStates() {
   const map: Record<number, any> = {}
   for (const v of data) map[v.vul_id] = { ...v, next_status: null }
   vulnStates.value = map
+}
+
+// 报告编辑页下拉框直接调整关联漏洞字段（状态/等级/类型/所在层），修改即时保存
+const FIELD_META_KEYS: Record<string, string> = { level: 'vul_level', vul_type: 'vul_type', layer: 'vul_layer' }
+async function changeVulnField(vulId: number, field: string, value: number) {
+  await client.patch(`/vulns/${vulId}/fields`, { [field]: value })
+  const label = field === 'status' ? statusName(value) : (meta.value?.[FIELD_META_KEYS[field]]?.[value] ?? value)
+  ElMessage.success(`漏洞 #${vulId} ${FIELD_LABELS[field]}已更新为「${label}」`)
+  await loadVulnStates()
+}
+
+// 章节导航：点击跳转到对应章节编辑区域
+const activeSection = ref<number | null>(null)
+function scrollToSection(i: number) {
+  activeSection.value = i
+  document.getElementById(`section-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function syncAuthorNames() {
@@ -217,6 +313,12 @@ async function load() {
 async function loadJobs() {
   const { data } = await client.get(`/reports/${route.params.id}/exports`)
   jobs.value = data
+}
+
+async function removeJob(job: any) {
+  await client.delete(`/reports/exports/${job.id}`)
+  ElMessage.success('导出记录已删除')
+  await loadJobs()
 }
 
 async function save(auto = false) {
@@ -314,7 +416,7 @@ function download(job: any) {
     const url = URL.createObjectURL(resp.data)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${report.value.title}.${job.fmt}`
+    a.download = `${job.title || report.value.title}.${job.fmt}`
     a.click()
     URL.revokeObjectURL(url)
   })
@@ -329,6 +431,7 @@ watch(insertVulnVisible, async (v) => {
 
 onMounted(async () => {
   await load()
+  meta.value = await auth.fetchMeta()
   client.get('/users/options').then(({ data }) => { userOptions.value = data })
   jobTimer = window.setInterval(() => {
     if (jobs.value.some((j) => j.status === 'pending' || j.status === 'running')) loadJobs()

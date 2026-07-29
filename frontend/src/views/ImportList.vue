@@ -9,7 +9,7 @@
       <el-button @click="downloadTemplate">
         <el-icon class="mr-1"><Download /></el-icon>下载导入模板
       </el-button>
-      <span class="text-gray-400 text-sm">仅支持按固定模板编写的 .docx 文档，上传后自动解析</span>
+      <span class="text-gray-400 text-sm">支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成测试计划</span>
     </div>
 
     <el-table v-loading="loading" :data="items" stripe>
@@ -27,10 +27,11 @@
       <el-table-column label="上传时间" width="170">
         <template #default="{ row }">{{ fmt(row.create_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right">
+      <el-table-column label="操作" width="200" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link :disabled="row.status === 'parsing' || row.status === 'pending'"
                      @click="router.push(`/reports/imports/${row.id}`)">预览确认</el-button>
+          <el-button size="small" type="primary" link @click="previewRef?.open(`/imports/${row.id}/preview`, row.filename)">预览</el-button>
           <el-popconfirm title="确认删除该批次？" @confirm="removeBatch(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -45,6 +46,8 @@
                      :page-size="query.size" :current-page="query.page" @current-change="load" />
     </div>
   </el-card>
+
+  <PdfPreviewDialog ref="previewRef" />
 </template>
 
 <script setup lang="ts">
@@ -53,11 +56,13 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 
 const router = useRouter()
 const items = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
+const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 const query = reactive({ page: 1, size: 20 })
 let timer: number | undefined
 

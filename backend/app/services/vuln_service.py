@@ -67,6 +67,23 @@ def add_log(session: AsyncSession, vul: Vul, operator: User, action: str, conten
     ))
 
 
+def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, comment: str = "") -> Vul:
+    """直接设置状态（不受状态机流转限制，供编辑页/报告编辑页点选）：校验字典、打时间戳、写日志。"""
+    if target not in VUL_STATUS:
+        raise HTTPException(400, f"非法状态: {target}")
+    if target == vul.status:
+        return vul
+    old_status = vul.status
+    vul.status = target
+    ts_field = STATUS_TIMESTAMP.get(target)
+    if ts_field:
+        setattr(vul, ts_field, datetime.utcnow())
+    if target == 55:
+        vul.is_retest = True
+    add_log(session, vul, operator, f"{VUL_STATUS[old_status]} → {VUL_STATUS[target]}", comment)
+    return vul
+
+
 async def auto_transition(
     session: AsyncSession,
     vul_ids: list[int],
@@ -89,11 +106,14 @@ async def auto_transition(
 
 
 async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> None:
-    """漏洞状态变化后联动报告：某报告关联的全部漏洞均为「已修复/已忽略」时，报告自动标记 completed。
-    报告关联测试计划时，计划同步进入「复测完成」。"""
+    """漏洞状态变化后双向联动报告与测试计划：
+    - 某报告关联的全部漏洞均为「已修复/已忽略」时，报告自动标记 completed，关联计划进入「复测完成」；
+    - 反向：已 completed 的报告出现未闭环漏洞（如已修复改回未修复）时，报告回退 draft，
+      关联计划由「复测完成」回退「复测中」并重开最近一轮复测。"""
     from datetime import date
 
     from app.models import Report, ReportSection, TestingPlan
+    from app.services import plan_service
 
     if not vul_ids:
         return
@@ -112,13 +132,28 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
                 .where(ReportSection.report_id == report_id)
             )
         ).scalars().all()
-        if linked_statuses and all(s in (20, 60) for s in linked_statuses):
-            report = await session.get(Report, report_id)
-            if report and report.status != "completed":
-                report.status = "completed"
-                if report.testing_plan_id is not None:
-                    plan = await session.get(TestingPlan, report.testing_plan_id)
-                    if plan is not None:
-                        plan.status = 60  # 复测完成
-                        if not plan.retest_done_time:
-                            plan.retest_done_time = date.today().isoformat()
+        if not linked_statuses:
+            continue
+        report = await session.get(Report, report_id)
+        if report is None:
+            continue
+        all_closed = all(s in (20, 60) for s in linked_statuses)
+        if all_closed and report.status != "completed":
+            report.status = "completed"
+            if report.testing_plan_id is not None:
+                plan = await session.get(TestingPlan, report.testing_plan_id)
+                if plan is not None:
+                    plan.status = 60  # 复测完成
+                    if not plan.retest_done_time:
+                        plan.retest_done_time = date.today().isoformat()
+                    # 当前复测轮次闭环，打完成点
+                    plan_service.finish_retest_round(plan)
+        elif not all_closed and report.status == "completed":
+            report.status = "draft"
+            if report.testing_plan_id is not None:
+                plan = await session.get(TestingPlan, report.testing_plan_id)
+                if plan is not None and plan.status == 60:
+                    plan.status = 50  # 复测完成 → 复测中
+                    plan.retest_done_time = ""
+                    # 撤销完成点，重开最近一轮复测
+                    plan_service.reopen_retest_round(plan)

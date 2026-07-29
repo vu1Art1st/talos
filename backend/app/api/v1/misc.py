@@ -18,9 +18,10 @@ from app.constants import (
     VUL_TYPE,
 )
 from app.core.config import settings
-from app.core.deps import get_current_user
+from app.core.deps import get_current_user, require_perm
 from app.db import get_session
-from app.models import Message, User
+from app.models import DictOption, Message, User
+from app.schemas import DictOptionIn, DictOptionOut
 
 router = APIRouter(tags=["通用"])
 
@@ -42,6 +43,46 @@ async def meta(_: User = Depends(get_current_user)):
         "testing_plan_status": TESTING_PLAN_STATUS,
         "permissions": PERMISSIONS,
     }
+
+
+@router.get("/dict/{category}", response_model=list[DictOptionOut])
+async def list_dict_options(
+    category: str,
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """可维护业务字典（如测试计划-测试类型 test_type），登录用户可读。"""
+    return (
+        await session.execute(
+            select(DictOption).where(DictOption.category == category)
+            .order_by(DictOption.sort, DictOption.id)
+        )
+    ).scalars().all()
+
+
+@router.post("/dict/{category}", response_model=DictOptionOut)
+async def create_dict_option(
+    category: str,
+    body: DictOptionIn,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """下拉框「新增」入口：新选项持久化，供后续复用。"""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "选项名称不能为空")
+    exists = (
+        await session.execute(
+            select(DictOption).where(DictOption.category == category, DictOption.name == name)
+        )
+    ).scalar_one_or_none()
+    if exists is not None:
+        raise HTTPException(400, "同名选项已存在")
+    row = DictOption(category=category, name=name, sort=body.sort)
+    session.add(row)
+    await session.commit()
+    await session.refresh(row)
+    return row
 
 
 @router.post("/upload/image")

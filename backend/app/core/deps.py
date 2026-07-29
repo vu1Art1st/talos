@@ -44,3 +44,15 @@ def require_perm(perm: str):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"缺少权限: {perm}")
 
     return checker
+
+
+def require_any_perm(*required: str):
+    """权限校验依赖工厂：满足任一权限（或通配符 *）即放行。"""
+
+    async def checker(user: User = Depends(get_current_user)) -> User:
+        perms = user_permissions(user)
+        if "*" in perms or perms & set(required):
+            return user
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"缺少权限: {' / '.join(required)}")
+
+    return checker

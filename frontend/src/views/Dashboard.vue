@@ -32,11 +32,30 @@
         <div ref="typeRef" class="h-72" />
       </el-card>
     </div>
+
+    <el-card shadow="hover" class="!rounded-lg">
+      <template #header>各部门安全概况（按测试计划所属部门统计）</template>
+      <template v-if="deptData.length">
+        <div ref="deptRef" class="h-80" />
+        <el-table :data="deptData" stripe size="small" class="mt-4">
+          <el-table-column prop="department" label="部门" min-width="160" show-overflow-tooltip />
+          <el-table-column prop="plans" label="提测次数" width="110" />
+          <el-table-column prop="vulns" label="发现漏洞" width="110" />
+          <el-table-column prop="fixed" label="已修复" width="110" />
+          <el-table-column label="修复率" width="110">
+            <template #default="{ row }">
+              {{ row.fix_rate === null ? '-' : `${row.fix_rate}%` }}
+            </template>
+          </el-table-column>
+        </el-table>
+      </template>
+      <el-empty v-else description="暂无部门提测数据" :image-size="80" />
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import * as echarts from 'echarts'
 import { DataLine, CircleCheck, Warning, Grid } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -46,6 +65,8 @@ const trendRef = ref<HTMLElement>()
 const levelRef = ref<HTMLElement>()
 const statusRef = ref<HTMLElement>()
 const typeRef = ref<HTMLElement>()
+const deptRef = ref<HTMLElement>()
+const deptData = ref<any[]>([])
 const charts = shallowRef<echarts.ECharts[]>([])
 const cards = ref([
   { label: '漏洞总数', value: 0, color: '#409EFF', icon: DataLine },
@@ -112,6 +133,28 @@ onMounted(async () => {
     yAxis: { type: 'category', data: data.by_type.map((x: any) => x.name).reverse() },
     series: [{ type: 'bar', barMaxWidth: 18, color: '#409EFF', data: data.by_type.map((x: any) => x.count).reverse() }],
   })
+
+  // 部门安全概况：柱状（提测/漏洞/已修复）+ 折线（修复率，右轴）
+  deptData.value = data.by_department ?? []
+  if (deptData.value.length) {
+    await nextTick()
+    mk(deptRef.value, {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['提测次数', '发现漏洞', '已修复', '修复率(%)'] },
+      grid: { left: 48, right: 48, top: 40, bottom: 30 },
+      xAxis: { type: 'category', data: deptData.value.map((d: any) => d.department) },
+      yAxis: [
+        { type: 'value', minInterval: 1 },
+        { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' } },
+      ],
+      series: [
+        { name: '提测次数', type: 'bar', barMaxWidth: 24, color: '#409EFF', data: deptData.value.map((d: any) => d.plans) },
+        { name: '发现漏洞', type: 'bar', barMaxWidth: 24, color: '#E6A23C', data: deptData.value.map((d: any) => d.vulns) },
+        { name: '已修复', type: 'bar', barMaxWidth: 24, color: '#67C23A', data: deptData.value.map((d: any) => d.fixed) },
+        { name: '修复率(%)', type: 'line', yAxisIndex: 1, color: '#F56C6C', data: deptData.value.map((d: any) => d.fix_rate) },
+      ],
+    })
+  }
 
   window.addEventListener('resize', onResize)
 })

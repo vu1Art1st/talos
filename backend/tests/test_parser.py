@@ -6,7 +6,13 @@ from pathlib import Path
 from docx import Document
 from docx.shared import Inches
 
-from app.services.docx_parser import build_import_template, parse_docx
+from app.services.docx_parser import (
+    build_import_template,
+    is_report_docx,
+    parse_any_docx,
+    parse_docx,
+    parse_report_filename,
+)
 
 # 1x1 红色 PNG
 _PNG = base64.b64decode(
@@ -104,3 +110,55 @@ def test_import_template_roundtrip(tmp_path: Path):
     assert len(records) == 1
     assert records[0]["level"] == 20  # 模板示例为高危
     assert records[0]["errors"] == []
+
+
+# ---------- 平台报告格式解析 ----------
+
+_SAMPLE_REPORT = Path(__file__).resolve().parents[1] / "storage" / "uploads" / "imports" / "8776123568ad49f885c239c454641a24.docx"
+
+
+def test_parse_report_filename():
+    info = parse_report_filename("20260729综合办公系统渗透测试复测报告.docx")
+    assert info == {"report_date": "2026-07-29", "system_name": "综合办公系统", "is_retest": True}
+
+    info = parse_report_filename("门户系统渗透测试报告.docx")
+    assert info["system_name"] == "门户系统"
+    assert info["is_retest"] is False
+    assert info["report_date"] == ""
+
+
+def test_is_report_docx_on_template(tmp_path: Path):
+    """固定模板不应被误判为报告格式。"""
+    docx_file = tmp_path / "template.docx"
+    build_import_template().save(str(docx_file))
+    assert is_report_docx(Document(str(docx_file))) is False
+
+
+def test_parse_report_docx_sample(tmp_path: Path):
+    """样例复测报告：meta 与漏洞记录解析。"""
+    if not _SAMPLE_REPORT.exists():
+        import pytest
+        pytest.skip("样例报告文件不存在")
+
+    assert is_report_docx(Document(str(_SAMPLE_REPORT))) is True
+
+    kind, meta, records = parse_any_docx(
+        str(_SAMPLE_REPORT), str(tmp_path / "img"), "/x",
+        "20260729综合办公系统渗透测试复测报告.docx",
+    )
+    assert kind == "report"
+    assert meta["system_name"] == "综合办公系统"
+    assert meta["report_date"] == "2026-07-29"
+    assert meta["is_retest"] is True
+    assert meta["target_ip"] == "10.55.133.37"
+
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["title"].startswith("平行越权")
+    assert "已修复" not in rec["title"]  # 标题尾缀被剔除
+    assert rec["level"] == 20  # 汇总表：高危
+    assert rec["fixed"] is True
+    assert rec["affected_url"].startswith("http://10.55.133.37")
+    assert rec["description_html"]
+    assert rec["retest_html"]  # 「20260729漏洞复测：」段落
+    assert rec["errors"] == []

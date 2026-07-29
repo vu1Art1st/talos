@@ -8,14 +8,15 @@ from datetime import datetime
 from email.header import Header
 from email.mime.text import MIMEText
 
+from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import select
 
 from app.core.config import settings
 from app.db import async_session_maker
 from app.models import ImportBatch, ImportRecord, ExportJob, Report, Vul
-from app.services.docx_parser import parse_docx
-from app.services.exporter import convert_docx_to_pdf
+from app.services.docx_parser import parse_any_docx
+from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
 
 
@@ -29,17 +30,21 @@ async def parse_import_task(ctx, batch_id: int) -> None:
 
         image_dir = settings.storage_sub("uploads", "imports", str(batch_id))
         try:
-            records = await asyncio.to_thread(
-                parse_docx,
+            doc_kind, meta, records = await asyncio.to_thread(
+                parse_any_docx,
                 batch.file_path,
                 str(image_dir),
                 f"/storage/uploads/imports/{batch_id}",
+                batch.filename,
             )
         except Exception as exc:  # 文件损坏 / 非 docx 等
             batch.status = "failed"
             batch.error = f"解析失败: {exc}"
             await session.commit()
             return
+
+        batch.doc_kind = doc_kind
+        batch.meta_json = meta
 
         success = failed = 0
         for seq, rec in enumerate(records, start=1):
@@ -62,7 +67,7 @@ async def parse_import_task(ctx, batch_id: int) -> None:
         batch.failed = failed
         if not records:
             batch.status = "failed"
-            batch.error = "未在文档中找到符合模板的漏洞信息表格，请下载标准模板后重试"
+            batch.error = "未能从文档中解析出漏洞信息：支持标准导入模板或平台导出的渗透测试（复测）报告，请核对格式后重试"
         else:
             batch.status = "parsed"
         await session.commit()
@@ -160,6 +165,11 @@ async def send_mail_task(ctx, to: list[str], subject: str, body: str) -> None:
     await asyncio.to_thread(_send_mail_sync, to, subject, body)
 
 
+async def cleanup_previews_task(ctx) -> None:
+    """定期清理超过 30 分钟未再打开的临时预览 PDF。"""
+    await asyncio.to_thread(cleanup_stale_previews, 30)
+
+
 TASK_FUNCS = {
     "parse_import_task": parse_import_task,
     "export_report_task": export_report_task,
@@ -169,6 +179,7 @@ TASK_FUNCS = {
 
 class WorkerSettings:
     functions = list(TASK_FUNCS.values())
+    cron_jobs = [cron(cleanup_previews_task, minute=set(range(0, 60, 10)))]
     redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
     max_jobs = 4
     job_timeout = 600

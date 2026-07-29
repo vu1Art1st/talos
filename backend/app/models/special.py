@@ -75,10 +75,36 @@ class TestingPlan(Base):
         viewonly=True,
         lazy="selectin",
     )
+    retest_rounds: Mapped[list["TestingPlanRetestRound"]] = relationship(
+        back_populates="plan",
+        order_by="TestingPlanRetestRound.round_no",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     @property
     def tester_ids(self) -> list[int]:
         return [u.id for u in self.testers]
+
+    @property
+    def retest_round_count(self) -> int:
+        return len(self.retest_rounds)
+
+
+class TestingPlanRetestRound(Base):
+    """测试计划复测轮次记录：每次发起复测新增一轮，全部漏洞闭环后打完成点。"""
+
+    __tablename__ = "testing_plan_retest_rounds"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("testing_plans.id", ondelete="CASCADE"), index=True)
+    round_no: Mapped[int] = mapped_column(Integer, default=1)
+    start_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    done_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    source: Mapped[str] = mapped_column(String(255), default="")  # 触发来源，如报告发起/手动流转
+    creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    plan: Mapped[TestingPlan] = relationship(back_populates="retest_rounds")
 
 
 class SpringAction(Base):
@@ -89,6 +115,8 @@ class SpringAction(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     report_no: Mapped[str] = mapped_column(String(128), index=True)  # 原始报告编号
     system_name: Mapped[str] = mapped_column(String(128), default="")
+    year: Mapped[str] = mapped_column(String(8), default="")  # 年度，如 2026
+    phase: Mapped[str] = mapped_column(String(64), default="")  # 阶段，如 第一阶段
     appeal_success: Mapped[bool] = mapped_column(Boolean, default=False)
     score_deduction: Mapped[float] = mapped_column(Float, default=0)  # 最终扣分数值
     doc_no: Mapped[str] = mapped_column(String(128), default="")  # 对应公文文号

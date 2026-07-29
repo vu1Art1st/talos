@@ -22,6 +22,7 @@ from app.schemas import (
     ReportVulnStateOut,
 )
 from app.services import plan_service, vuln_service
+from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/reports", tags=["报告"])
@@ -198,13 +199,19 @@ async def retest_report(
     vul_ids = [s.vul_id for s in report.sections if s.vul_id]
     if not vul_ids:
         raise HTTPException(400, "该报告没有关联任何漏洞，无法发起复测")
-    await vuln_service.auto_transition(
+    changed = await vuln_service.auto_transition(
         session, vul_ids, 55, user, f"报告《{report.title}》发起复测，自动进入复测中",
     )
     if report.testing_plan_id is not None:
         plan = await session.get(TestingPlan, report.testing_plan_id)
-        if plan is not None and plan.status in (30, 40):
-            plan.status = 50  # 等待复测/复测申请 → 复测中
+        if plan is not None:
+            if plan.status in (30, 40):
+                plan.status = 50  # 等待复测/复测申请 → 复测中
+            # 实际有漏洞进入复测时记一轮复测（重复点击不产生流转则不计数）
+            if changed:
+                plan_service.start_retest_round(
+                    session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
+                )
     await session.commit()
     await session.refresh(report)
     return report
@@ -226,6 +233,7 @@ async def report_vuln_states(
     return [
         ReportVulnStateOut(
             vul_id=v.id, title=v.title, status=v.status, level=v.level,
+            vul_type=v.vul_type, layer=v.layer,
             retest_html=v.retest_html, retest_json=v.retest_json,
         )
         for vid in vul_ids if (v := by_id.get(vid))
@@ -262,8 +270,8 @@ async def export_report(
 ):
     if body.fmt not in ("docx", "pdf"):
         raise HTTPException(400, "仅支持导出 docx 或 pdf")
-    await _get_report(session, report_id)
-    job = ExportJob(report_id=report_id, fmt=body.fmt, creator_id=user.id)
+    report = await _get_report(session, report_id)
+    job = ExportJob(report_id=report_id, title=report.title, fmt=body.fmt, creator_id=user.id)
     session.add(job)
     await session.commit()
     await session.refresh(job)
@@ -299,8 +307,54 @@ async def download_export(
     if not path.exists():
         raise HTTPException(404, "导出文件已被清理")
     report = await session.get(Report, job.report_id)
-    filename = quote(f"{report.title if report else 'report'}.{job.fmt}")
+    filename = quote(f"{job.title or (report.title if report else 'report')}.{job.fmt}")
     return FileResponse(
         path,
         headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
     )
+
+
+@router.get("/exports/{job_id}/preview")
+async def preview_export(
+    job_id: int,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """在线预览导出文件：pdf 直接返回，docx 临时转为 PDF 展示。"""
+    job = await session.get(ExportJob, job_id)
+    if job is None or job.status != "done":
+        raise HTTPException(404, "导出文件不存在或尚未生成完成")
+    path = Path(job.file_path)
+    if not path.exists():
+        raise HTTPException(404, "导出文件已被清理")
+    cleanup_stale_previews()  # 顺带清理过期预览
+    try:
+        pdf_path = await ensure_pdf_preview(str(path))
+    except Exception as exc:
+        raise HTTPException(502, f"预览转换失败，请确认转换服务可用: {exc}")
+    report = await session.get(Report, job.report_id)
+    filename = quote(f"{job.title or (report.title if report else 'report')}.pdf")
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+    )
+
+
+@router.delete("/exports/{job_id}")
+async def delete_export(
+    job_id: int,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """删除导出记录及其生成的报告文件。"""
+    job = await session.get(ExportJob, job_id)
+    if job is None:
+        raise HTTPException(404, "导出记录不存在")
+    if job.status in ("pending", "running"):
+        raise HTTPException(400, "导出任务进行中，请稍后再删除")
+    if job.file_path:
+        Path(job.file_path).unlink(missing_ok=True)
+    await session.delete(job)
+    await session.commit()
+    return {"msg": "删除成功"}
