@@ -25,10 +25,19 @@
 
 ## [Unreleased]
 
+（暂无）
+
+---
+
+## [0.9.1] - 2026-07-31
+
+补充生产部署与运维工具链：一键升级 / 备份 / 恢复脚本、Alembic 结构迁移基线与部署手册。
+
 ### 新增
 
 - 部署与运维手册 `docs/DEPLOY.md`：首次部署、SQLite 数据说明、版本升级、备份、更换 VPS 平滑迁移全流程
 - 一键运维脚本 `scripts/backup.sh` / `scripts/restore.sh`（PostgreSQL 逻辑备份 + `storage` 卷打包，可跨机恢复）与 `scripts/migrate.sh`（在 api 容器内执行数据库结构迁移）
+- 一键升级脚本 `scripts/upgrade.sh`：拉取代码 → 升级前备份 → 重建镜像 → 数据库结构迁移（先于 api 启动）→ 重启服务，支持 `--no-backup` / `--no-pull`
 - 建立 Alembic 基线迁移（`backend/alembic/versions/`）与幂等迁移决策脚本 `backend/scripts/migrate.py`：自动纳管历史 `create_all` 库，支撑生产 PostgreSQL 已有表的字段级结构演进
 
 ---

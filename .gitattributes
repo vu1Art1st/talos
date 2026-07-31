@@ -1,0 +1,2 @@
+# Shell 脚本强制 LF 换行，避免在 Windows 上被转成 CRLF 导致 Linux 服务器 bash 执行报错
+*.sh text eol=lf

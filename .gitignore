@@ -10,8 +10,13 @@ test.db*
 test_vp.db
 backend/storage/
 backend/dev.db
+backend/_devrun.db
+backend/_devstorage/
 backend/tests/test_storage/
 /storage/
+
+# 备份产物（scripts/backup.sh 生成，含业务数据，勿入库）
+/backups/
 
 # 前端
 node_modules/
