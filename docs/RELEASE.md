@@ -25,13 +25,47 @@
 
 ## [Unreleased]
 
+（暂无）
+
+---
+
+## [0.5.0] - 2026-07-30
+
+报告编辑与复测闭环增强、测试计划人天与 Excel 导入导出、全面安全加固。
+
+### 新增
+
+- 漏洞复测记录：`VulRetestRecord` 模型与 `/vulns/{id}/retests` CRUD 接口，新增独立复测处理页 `VulnRetest.vue` 及路由
+- 报告编辑页章节导航栏：点击平滑滚动定位并高亮当前章节
+- 报告编辑页漏洞字段改为固定下拉框（等级 / 类型 / 所在层 / 状态），`PATCH /vulns/{id}/fields` 即时保存
+- 测试计划增强：预估 / 实际人天字段，Excel 导出（明细 + 统计汇总双 sheet）、导入模板下载与批量导入（按 ID upsert，测试人员按姓名 / 用户名匹配），统计汇总（初测 / 复测次数、人天合计、按状态与月度漏洞分布），计划详情展示关联报告
+- 仪表盘（安全态势）多维筛选：时间范围 / 部门 / 来源 / 等级，统计口径联动
+- 组织（用户组）管理页 `GroupList.vue`；PDF 预览组件 `PdfPreviewDialog.vue`
+- 环境变量样例文件 `.env.example`
+
 ### 变更
 
 - Word 导出改用渗透测试报告模板（`backend/app/templates/report_template.docx`，可由 `VP_REPORT_TEMPLATE` 覆盖）：封面 / 版本变更记录 / 适用性声明 / 目录 / 测试目标 / 时间与人员 / 风险汇总统计 / 风险详情自动填充，目录页码在 Word 打开时自动刷新
 - 报告新增「被测系统IP」字段（编辑器可填，导出填入测试目标表）；被测 URL / 域名由关联资产自动聚合
 - 漏洞章节初始内容对齐模板标签结构（测试状态 / 漏洞等级 / 漏洞链接 / 描述 / 证明 / 修复建议 / 复测详情）；导出文案层面等级「严重」映射为「超危」
+- 前端包管理迁移至 pnpm（`pnpm-lock.yaml` / `pnpm-workspace.yaml`）
+- 后端公共查询助手 `paginate` / `get_or_404` 重构各列表与详情接口；新增 `timeutil.utcnow` 统一时间获取
 
----
+### 修复
+
+- 报告与测试计划状态由单向改为双向同步：漏洞回退未修复时报告回退 `draft`、测试计划回退「复测中」并重开复测轮次
+
+### 安全
+
+- 登录防爆破：同一用户名 + IP 失败达阈值锁定（`VP_LOGIN_MAX_FAILURES` / `VP_LOGIN_LOCK_SECONDS`），Redis 计数、不可用时降级进程内存
+- JWT 引入令牌版本号 `token_version`：修改密码 / 禁用账号即失效全部存量令牌，改密接口下发新令牌
+- 生产环境（`DEBUG=False`）拒绝默认占位或不足 32 字符的 `VP_SECRET_KEY`，启动即校验
+- CORS 收窄为白名单 `VP_CORS_ORIGINS` 且关闭凭证共享；生产环境关闭 `/api/docs` 与 OpenAPI 端点
+- 富文本双端 XSS 清洗：后端所有入库 `*_html` 字段经 nh3 白名单过滤，前端渲染统一走 DOMPurify（`utils/html.ts`）
+- `storage` 静态托管收窄至公开图片目录 `uploads/images`，导出 / 导入原始文档改走鉴权接口，nginx 代理同步收窄
+- 内置 admin 初始口令不再固定：`VP_INITIAL_ADMIN_PASSWORD` 指定或随机生成（日志仅显示一次），首次登录强制改密
+- docker-compose 敏感配置改由 `.env` 注入（`POSTGRES_PASSWORD` / `VP_SECRET_KEY` 必填）；后端容器改非 root 用户运行，前端改用 nginx-unprivileged（8080 端口）
+- 新增 `defusedxml` 依赖加固 docx 解析，防 XXE
 
 ## [0.4.0] - 2026-07-28
 

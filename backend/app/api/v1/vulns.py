@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE
 from app.core.deps import get_current_user, require_perm, user_permissions
+from app.core.query import get_or_404, paginate
 from app.db import get_session
 from app.models import Asset, User, Vul, VulLog, VulRetestRecord
 from app.schemas import (
@@ -82,13 +83,8 @@ async def list_vulns(
     if mine:
         cond.append(Vul.submitter_id == user.id)
 
-    total = (await session.execute(select(func.count(Vul.id)).where(*cond))).scalar_one()
-    vulns = (
-        await session.execute(
-            select(Vul).where(*cond).order_by(Vul.submit_time.desc())
-            .offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+    stmt = select(Vul).where(*cond).order_by(Vul.submit_time.desc())
+    total, vulns = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_vul_out(v) for v in vulns])
 
 
@@ -147,9 +143,7 @@ async def get_vuln(
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     return build_vul_out(vul)
 
 
@@ -160,9 +154,7 @@ async def update_vuln(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     perms = user_permissions(user)
     if "*" not in perms and "vuln:manage" not in perms and vul.submitter_id != user.id:
         raise HTTPException(403, "只有提交人或漏洞管理员可以编辑")
@@ -210,9 +202,7 @@ async def allowed_transitions(
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     return [
         {"status": s, "name": VUL_STATUS[s]}
         for s in sorted(VUL_TRANSITIONS.get(vul.status, set()))
@@ -227,9 +217,7 @@ async def set_vuln_status(
     session: AsyncSession = Depends(get_session),
 ):
     """直接设置漏洞状态（报告编辑页状态标签点选），不受状态机流转限制。"""
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
     # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
     await vuln_service.sync_report_completion(session, [vul.id])
@@ -246,9 +234,7 @@ async def patch_vuln_fields(
     session: AsyncSession = Depends(get_session),
 ):
     """报告编辑页下拉框快捷调整漏洞字段（状态/等级/类型/所在层），仅更新传入且有变化的字段。"""
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     dicts = {"level": VUL_LEVEL, "vul_type": VUL_TYPE, "layer": VUL_LAYER}
     changed_fields = []
     for field, label in (("level", "漏洞等级"), ("vul_type", "漏洞类型"), ("layer", "所在层")):
@@ -281,9 +267,7 @@ async def transition_vuln(
     user: User = Depends(require_perm("vuln:audit")),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     # 复测编辑面板可随流转一并提交复测详情
     comment = body.comment
     if body.retest_html is not None:
@@ -305,9 +289,7 @@ async def delay_vuln(
     user: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     vul.delay_days = body.delay_days
     vul.delay_reason = body.delay_reason
     vuln_service.add_log(session, vul, user, "延期处理", f"延期{body.delay_days}天：{body.delay_reason}")
@@ -338,6 +320,21 @@ async def _get_retest_record(session: AsyncSession, vul_id: int, record_id: int)
     return record
 
 
+async def _sync_vul_retest_html(session: AsyncSession, vul: Vul) -> None:
+    """将该漏洞全部复测记录聚合写入 Vul.retest_html，保持详情页/报告读取口径一致。"""
+    records = (
+        await session.execute(
+            select(VulRetestRecord).where(VulRetestRecord.vul_id == vul.id)
+            .order_by(VulRetestRecord.create_time, VulRetestRecord.id)
+        )
+    ).scalars().all()
+    parts = [r.content_html for r in records if r.content_html]
+    if len(parts) > 1:
+        parts = [f"<p><strong>复测记录 {i}：</strong></p>{h}" for i, h in enumerate(parts, 1)]
+    vul.retest_html = "".join(parts)
+    vul.retest_json = None
+
+
 @router.get("/{vul_id}/retests", response_model=list[VulRetestRecordOut])
 async def list_retest_records(
     vul_id: int,
@@ -362,15 +359,15 @@ async def create_retest_record(
     user: User = Depends(require_perm("vuln:audit")),
     session: AsyncSession = Depends(get_session),
 ):
-    vul = await session.get(Vul, vul_id)
-    if vul is None:
-        raise HTTPException(404, "漏洞不存在")
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     record = VulRetestRecord(
         vul_id=vul_id, content_html=body.content_html, content_json=body.content_json,
         creator_id=user.id, username=user.username,
     )
     session.add(record)
     vuln_service.add_log(session, vul, user, "新增复测记录")
+    await session.flush()
+    await _sync_vul_retest_html(session, vul)
     await session.commit()
     await session.refresh(record)
     return record
@@ -387,6 +384,9 @@ async def update_retest_record(
     record = await _get_retest_record(session, vul_id, record_id)
     record.content_html = body.content_html
     record.content_json = body.content_json
+    vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
+    await session.flush()
+    await _sync_vul_retest_html(session, vul)
     await session.commit()
     await session.refresh(record)
     return record
@@ -404,5 +404,8 @@ async def delete_retest_record(
     if vul is not None:
         vuln_service.add_log(session, vul, user, "删除复测记录", f"记录 #{record_id}")
     await session.delete(record)
+    await session.flush()
+    if vul is not None:
+        await _sync_vul_retest_html(session, vul)
     await session.commit()
     return {"msg": "删除成功"}

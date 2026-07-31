@@ -8,7 +8,9 @@ _DB_FILE = _TESTS_DIR / "test_vp.db"
 os.environ["VP_DATABASE_URL"] = f"sqlite+aiosqlite:///{_DB_FILE.as_posix()}"
 os.environ["VP_DISABLE_QUEUE"] = "1"
 os.environ["VP_STORAGE_DIR"] = str(_TESTS_DIR / "test_storage")
-os.environ["VP_SECRET_KEY"] = "test-secret"
+# 使用 >=32 字符的密钥以通过生产校验；固定内置 admin 初始口令供登录夹具使用
+os.environ["VP_SECRET_KEY"] = "test-secret-key-0123456789abcdef-0123456789"
+os.environ["VP_INITIAL_ADMIN_PASSWORD"] = "admin123"
 
 if _DB_FILE.exists():
     _DB_FILE.unlink()

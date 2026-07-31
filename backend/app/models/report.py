@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.timeutil import utcnow
 from app.db import Base
 
 
@@ -23,8 +24,8 @@ class Report(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     sections: Mapped[list["ReportSection"]] = relationship(
         back_populates="report",
@@ -59,5 +60,5 @@ class ExportJob(Base):
     file_path: Mapped[str] = mapped_column(String(512), default="")
     error: Mapped[str] = mapped_column(Text, default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

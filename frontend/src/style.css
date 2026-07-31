@@ -2,16 +2,122 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   设计令牌层：明 / 暗两套 CSS 变量 + Element Plus 主题覆盖
+   ============================================================ */
+:root {
+  --tl-bg: #f6f7f9;
+  --tl-surface: #ffffff;
+  --tl-surface-2: #f9fafb;
+  --tl-border: #e5e7eb;
+  --tl-text-1: #111827;
+  --tl-text-2: #4b5563;
+  --tl-text-3: #9ca3af;
+
+  /* Element Plus 品牌主色覆盖：靛蓝 #4F46E5 */
+  --el-color-primary: #4f46e5;
+  --el-color-primary-light-1: #6159e8;
+  --el-color-primary-light-2: #726bea;
+  --el-color-primary-light-3: #847eed;
+  --el-color-primary-light-4: #9590ef;
+  --el-color-primary-light-5: #a7a2f2;
+  --el-color-primary-light-6: #b9b5f5;
+  --el-color-primary-light-7: #cac7f7;
+  --el-color-primary-light-8: #dcdafa;
+  --el-color-primary-light-9: #edecfc;
+  --el-color-primary-dark-2: #3f38b7;
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
+}
+
+html.dark {
+  --tl-bg: #0d1117;
+  --tl-surface: #161b22;
+  --tl-surface-2: #1c2128;
+  --tl-border: #30363d;
+  --tl-text-1: #e6edf3;
+  --tl-text-2: #9da7b3;
+  --tl-text-3: #6e7681;
+
+  --el-color-primary: #6366f1;
+  --el-color-primary-light-1: #5a5edb;
+  --el-color-primary-light-2: #5255c5;
+  --el-color-primary-light-3: #494cb0;
+  --el-color-primary-light-4: #41449a;
+  --el-color-primary-light-5: #383c84;
+  --el-color-primary-light-6: #2f336e;
+  --el-color-primary-light-7: #272b58;
+  --el-color-primary-light-8: #1e2243;
+  --el-color-primary-light-9: #16192d;
+  --el-color-primary-dark-2: #8285f4;
+
+  --el-bg-color: #161b22;
+  --el-bg-color-page: #0d1117;
+  --el-bg-color-overlay: #1c2128;
+  --el-fill-color-blank: #161b22;
+  --el-border-color: #30363d;
+  --el-border-color-light: #30363d;
+  --el-border-color-lighter: #262c33;
+  --el-text-color-primary: #e6edf3;
+  --el-text-color-regular: #9da7b3;
+}
+
 html,
 body,
 #app {
   height: 100%;
   margin: 0;
-  background: #f5f7fa;
-  font-family: 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  background: var(--tl-bg);
+  color: var(--tl-text-1);
+  font-family: 'Inter', 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  transition: background-color .25s ease, color .25s ease;
 }
 
-/* 富文本正文与编辑器统一样式 */
+/* ============ 页面路由过渡 ============ */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity .2s ease, transform .2s ease;
+}
+.fade-slide-enter-from { opacity: 0; transform: translateY(8px); }
+.fade-slide-leave-to { opacity: 0; transform: translateY(-8px); }
+
+/* ============ 卡片现代化：细边框替代重阴影 ============ */
+.el-card {
+  border: 1px solid var(--tl-border);
+  border-radius: 12px;
+  transition: box-shadow .25s ease, transform .25s ease, background-color .25s ease;
+}
+.el-card.is-hover-shadow:hover,
+.el-card.tl-hover:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .08), 0 12px 32px rgba(79, 70, 229, .10);
+  transform: translateY(-2px);
+}
+.el-card__header { font-weight: 600; }
+
+/* ============ 表格现代化 ============ */
+.el-table th.el-table__cell {
+  background: var(--tl-surface-2) !important;
+  color: var(--tl-text-2);
+  font-weight: 600;
+}
+.el-table {
+  --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
+  --el-table-border-color: var(--tl-border);
+}
+
+/* ============ 柔和标签（等级 / 状态） ============ */
+.tl-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+  white-space: nowrap;
+}
+
+/* ============ 富文本正文与编辑器统一样式 ============ */
 .rich-content {
   line-height: 1.75;
   word-break: break-word;
@@ -19,7 +125,7 @@ body,
 .rich-content img {
   max-width: 100%;
   border-radius: 4px;
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--tl-border);
 }
 .rich-content table {
   border-collapse: collapse;
@@ -28,7 +134,7 @@ body,
 }
 .rich-content th,
 .rich-content td {
-  border: 1px solid #dcdfe6;
+  border: 1px solid var(--tl-border);
   padding: 6px 10px;
 }
 .rich-content pre {
@@ -39,14 +145,14 @@ body,
   overflow: auto;
 }
 .rich-content blockquote {
-  border-left: 3px solid #409eff;
+  border-left: 3px solid var(--el-color-primary);
   margin: 8px 0;
   padding: 4px 12px;
-  color: #606266;
-  background: #ecf5ff;
+  color: var(--tl-text-2);
+  background: var(--el-color-primary-light-9);
 }
 
-/* TipTap 编辑区 */
+/* ============ TipTap 编辑区 ============ */
 .tiptap {
   min-height: 220px;
   outline: none;

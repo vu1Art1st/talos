@@ -14,6 +14,9 @@ import re
 import uuid
 from pathlib import Path
 
+# XXE 评估结论：python-docx 的 oxml 解析器以 resolve_entities=False 构造，
+# 不解析外部/内部实体，故 .docx 导入不存在 XXE 风险；xlsx 侧 openpyxl 同样
+# 使用 resolve_entities=False，且安装 defusedxml 后自动启用其安全解析器。
 from docx import Document
 from docx.oxml.ns import qn
 from docx.table import _Cell

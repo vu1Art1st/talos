@@ -6,13 +6,13 @@
           <div>
             <div class="text-xl font-semibold text-gray-800">{{ vul.title }}</div>
             <div class="flex items-center gap-2 mt-2">
-              <el-tag :color="levelColor(vul.level)" effect="dark" size="small" class="!border-0">
+              <span class="tl-tag" :style="levelSoftStyle(vul.level)">
                 {{ meta?.vul_level?.[vul.level] }}
-              </el-tag>
+              </span>
               <el-tag size="small">{{ meta?.vul_type?.[vul.vul_type] }}</el-tag>
-              <el-tag :color="statusColor(vul.status)" effect="dark" size="small" class="!border-0">
-                {{ meta?.vul_status?.[vul.status] }}
-              </el-tag>
+              <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
+                {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
+              </span>
               <el-tag type="info" size="small" effect="plain">来源：{{ meta?.vul_source?.[vul.source] }}</el-tag>
             </div>
           </div>
@@ -38,7 +38,7 @@
 
       <el-card v-for="sec in richSections" :key="sec.title" shadow="never" class="!rounded-lg">
         <template #header>{{ sec.title }}</template>
-        <div class="rich-content" v-html="sec.html" />
+        <div class="rich-content" v-html="safeHtml(sec.html)" />
       </el-card>
     </div>
 
@@ -78,7 +78,8 @@ import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelColor, statusColor } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { safeHtml } from '../utils/html'
 
 const auth = useAuthStore()
 const route = useRoute()

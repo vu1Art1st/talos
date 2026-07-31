@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import ASSET_SEC_LEVEL, ASSET_STATUS, URL_TAG
 from app.core.deps import get_current_user, require_perm
+from app.core.query import get_or_404, paginate
 from app.db import get_session
 from app.models import Asset, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
@@ -56,13 +57,8 @@ async def list_assets(
     session: AsyncSession = Depends(get_session),
 ):
     cond = _asset_conditions(search, department, status)
-    total = (await session.execute(select(func.count(Asset.id)).where(*cond))).scalar_one()
-    items = (
-        await session.execute(
-            select(Asset).where(*cond).order_by(Asset.id.desc())
-            .offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+    stmt = select(Asset).where(*cond).order_by(Asset.id.desc())
+    total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
 
@@ -241,9 +237,7 @@ async def get_asset(
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    asset = await session.get(Asset, asset_id)
-    if asset is None:
-        raise HTTPException(404, "资产不存在")
+    asset = await get_or_404(session, Asset, asset_id, "资产不存在")
     return asset
 
 
@@ -254,9 +248,7 @@ async def update_asset(
     _: User = Depends(require_perm("asset:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    asset = await session.get(Asset, asset_id)
-    if asset is None:
-        raise HTTPException(404, "资产不存在")
+    asset = await get_or_404(session, Asset, asset_id, "资产不存在")
     for k, v in body.model_dump().items():
         setattr(asset, k, v)
     await session.commit()

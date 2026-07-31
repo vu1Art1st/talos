@@ -39,3 +39,20 @@ export const STATUS_COLORS_BY_NAME: Record<string, string> = {
 
 export const levelColor = (lv: number) => LEVEL_COLORS[lv] ?? '#909399'
 export const statusColor = (s: number) => STATUS_COLORS[s] ?? '#909399'
+
+// 复测未通过为展示层状态：修复中(50) 且经历过复测(is_retest)，不新增状态码
+export const RETEST_FAILED_COLOR = '#F56C6C'
+export const isRetestFailed = (status: number, isRetest?: boolean) => status === 50 && !!isRetest
+export const statusLabel = (status: number, isRetest: boolean | undefined, map?: Record<number, string>) =>
+  isRetestFailed(status, isRetest) ? '复测未通过' : (map?.[status] ?? String(status))
+
+// 柔和标签样式：半透明底 + 同色文字（现代化标签风，替代实心 effect="dark"）
+// 返回可直接绑定到 :style 的对象，配合 .tl-tag 类使用
+export const softStyle = (color: string) => ({
+  background: color + '1f',
+  color,
+})
+export const levelSoftStyle = (lv: number) => softStyle(levelColor(lv))
+export const statusSoftStyle = (s: number) => softStyle(statusColor(s))
+export const statusSoftStyleEx = (status: number, isRetest?: boolean) =>
+  softStyle(isRetestFailed(status, isRetest) ? RETEST_FAILED_COLOR : statusColor(status))

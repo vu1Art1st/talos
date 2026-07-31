@@ -78,9 +78,9 @@
       <template v-else>
         <div class="font-semibold text-gray-800">{{ rec.title || '（未识别标题）' }}</div>
         <div class="flex gap-2 mt-1 text-sm text-gray-500">
-          <el-tag :color="levelColor(rec.level)" size="small" effect="dark" class="!border-0">
+          <span class="tl-tag" :style="levelSoftStyle(rec.level)">
             {{ meta?.vul_level?.[rec.level] }}
-          </el-tag>
+          </span>
           <span>{{ meta?.vul_type?.[rec.vul_type] }}</span>
           <span v-if="rec.affected_url" class="truncate">{{ rec.affected_url }}</span>
         </div>
@@ -88,13 +88,13 @@
           <el-collapse-item title="内容预览">
             <div class="rich-content text-sm">
               <h4 v-if="rec.description_html">漏洞描述</h4>
-              <div v-html="rec.description_html" />
+              <div v-html="safeHtml(rec.description_html)" />
               <h4 v-if="rec.reproduce_html">复现步骤</h4>
-              <div v-html="rec.reproduce_html" />
+              <div v-html="safeHtml(rec.reproduce_html)" />
               <h4 v-if="rec.solution_html">修复建议</h4>
-              <div v-html="rec.solution_html" />
+              <div v-html="safeHtml(rec.solution_html)" />
               <h4 v-if="rec.retest_html">复测详情</h4>
-              <div v-html="rec.retest_html" />
+              <div v-html="safeHtml(rec.retest_html)" />
             </div>
           </el-collapse-item>
         </el-collapse>
@@ -111,7 +111,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelColor } from '../utils/colors'
+import { levelSoftStyle } from '../utils/colors'
+import { safeHtml } from '../utils/html'
 
 const auth = useAuthStore()
 const route = useRoute()

@@ -28,6 +28,9 @@ async def _migrate_lightweight() -> None:
             return
         vul_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(vulns)"))).fetchall()}
         legacy_plan_status = "testing_plan_id" not in vul_cols  # 本轮升级前的旧库标记
+        user_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(users)"))).fetchall()}
+        if user_cols and "token_version" not in user_cols:
+            await conn.execute(text("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0"))
         if "retest_html" not in vul_cols:
             await conn.execute(text("ALTER TABLE vulns ADD COLUMN retest_html TEXT NOT NULL DEFAULT ''"))
         if "retest_json" not in vul_cols:
@@ -39,6 +42,11 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN testing_plan_id INTEGER"))
         if "target_ip" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN target_ip VARCHAR(255) NOT NULL DEFAULT ''"))
+        plan_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(testing_plans)"))).fetchall()}
+        if plan_cols and "est_mandays" not in plan_cols:
+            await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))
+        if plan_cols and "actual_mandays" not in plan_cols:
+            await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN actual_mandays REAL NOT NULL DEFAULT 0"))
         export_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(export_jobs)"))).fetchall()}
         if export_cols and "title" not in export_cols:
             await conn.execute(text("ALTER TABLE export_jobs ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''"))
@@ -124,12 +132,23 @@ async def init_db() -> None:
 
         user = (await session.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()
         if user is None:
+            import logging
+            import secrets
+
+            # 初始口令：优先取配置，留空则随机生成并打印（仅显示一次）
+            # 仅当口令为随机生成时强制首登改密；运维显式指定则视为有意为之
+            initial_pwd = settings.INITIAL_ADMIN_PASSWORD or secrets.token_urlsafe(12)
             session.add(User(
                 username="admin",
-                password_hash=hash_password("admin123"),
+                password_hash=hash_password(initial_pwd),
                 realname="管理员",
                 role_id=role.id,
+                must_change_password=not settings.INITIAL_ADMIN_PASSWORD,
             ))
+            if not settings.INITIAL_ADMIN_PASSWORD:
+                logging.getLogger(__name__).warning(
+                    "已创建内置 admin，初始密码（仅显示一次，首次登录必须修改）: %s", initial_pwd
+                )
 
         # 测试计划-测试类型字典预设项（该分类为空时一次性写入）
         has_test_type = (

@@ -27,9 +27,9 @@
       <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip />
       <el-table-column label="等级" width="90">
         <template #default="{ row }">
-          <el-tag :color="levelColor(row.level)" effect="dark" size="small" class="!border-0">
+          <span class="tl-tag" :style="levelSoftStyle(row.level)">
             {{ meta?.vul_level?.[row.level] ?? row.level }}
-          </el-tag>
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="类型" width="150">
@@ -37,9 +37,9 @@
       </el-table-column>
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
-          <el-tag :color="statusColor(row.status)" effect="dark" size="small" class="!border-0">
-            {{ meta?.vul_status?.[row.status] ?? row.status }}
-          </el-tag>
+          <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
+            {{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="关联资产" width="150" show-overflow-tooltip>
@@ -69,7 +69,7 @@ import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelColor, statusColor } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
 
 const auth = useAuthStore()
 const router = useRouter()

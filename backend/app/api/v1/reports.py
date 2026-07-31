@@ -1,4 +1,5 @@
 import html as html_mod
+import logging
 from datetime import date
 from pathlib import Path
 from urllib.parse import quote
@@ -6,11 +7,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LEVEL_EXPORT
 from app.core.deps import require_perm
+from app.core.query import get_or_404, paginate
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
@@ -47,10 +49,7 @@ def _vuln_section_html(vul: Vul) -> str:
 
 
 async def _get_report(session: AsyncSession, report_id: int) -> Report:
-    report = await session.get(Report, report_id)
-    if report is None:
-        raise HTTPException(404, "报告不存在")
-    return report
+    return await get_or_404(session, Report, report_id, "报告不存在")
 
 
 async def _auto_mark_fixing(session: AsyncSession, vul_ids: list[int], user: User, report_title: str) -> None:
@@ -71,13 +70,8 @@ async def list_reports(
     cond = []
     if search:
         cond.append(Report.title.ilike(f"%{search}%") | Report.project_name.ilike(f"%{search}%"))
-    total = (await session.execute(select(func.count(Report.id)).where(*cond))).scalar_one()
-    items = (
-        await session.execute(
-            select(Report).where(*cond).order_by(Report.update_time.desc())
-            .offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+    stmt = select(Report).where(*cond).order_by(Report.update_time.desc())
+    total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
 
@@ -330,8 +324,9 @@ async def preview_export(
     cleanup_stale_previews()  # 顺带清理过期预览
     try:
         pdf_path = await ensure_pdf_preview(str(path))
-    except Exception as exc:
-        raise HTTPException(502, f"预览转换失败，请确认转换服务可用: {exc}")
+    except Exception:
+        logging.getLogger(__name__).exception("预览转换失败 job_id=%s", job_id)
+        raise HTTPException(502, "预览转换失败，请稍后重试或联系管理员")
     report = await session.get(Report, job.report_id)
     filename = quote(f"{job.title or (report.title if report else 'report')}.pdf")
     return FileResponse(

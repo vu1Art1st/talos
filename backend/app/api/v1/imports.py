@@ -1,5 +1,5 @@
+import logging
 import uuid
-from datetime import datetime
 from io import BytesIO
 from urllib.parse import quote
 
@@ -9,7 +9,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants import DOCX_MIME
 from app.core.config import settings
+from app.core.query import get_or_404, paginate
+from app.core.timeutil import utcnow
 from app.core.deps import require_perm
 from app.db import get_session
 from app.models import Asset, ImportBatch, ImportRecord, Report, ReportSection, TestingPlan, User, Vul, VulLog
@@ -27,7 +30,11 @@ from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/imports", tags=["Word导入"])
 
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+logger = logging.getLogger(__name__)
+
+# .docx 本质是 ZIP 包，ZIP 文件头魔术字节为 PK\x03\x04
+DOCX_MAGIC = b"PK\x03\x04"
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 @router.get("/template")
@@ -54,8 +61,11 @@ async def upload_docx(
     if not (file.filename or "").lower().endswith(".docx"):
         raise HTTPException(400, "仅支持 .docx 格式的 Word 文档")
     data = await file.read()
-    if len(data) > 50 * 1024 * 1024:
+    if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(400, "文件大小不能超过 50MB")
+    # 校验魔术字节，防止伪造扩展名的非 ZIP/docx 文件进入解析流程
+    if not data.startswith(DOCX_MAGIC):
+        raise HTTPException(400, "文件内容不是有效的 .docx（Word）文档")
 
     upload_dir = settings.storage_sub("uploads", "imports")
     path = upload_dir / f"{uuid.uuid4().hex}.docx"
@@ -77,13 +87,8 @@ async def list_batches(
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    total = (await session.execute(select(func.count(ImportBatch.id)))).scalar_one()
-    items = (
-        await session.execute(
-            select(ImportBatch).order_by(ImportBatch.id.desc())
-            .offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+    stmt = select(ImportBatch).order_by(ImportBatch.id.desc())
+    total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
 
@@ -114,9 +119,7 @@ async def update_record(
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    record = await session.get(ImportRecord, record_id)
-    if record is None:
-        raise HTTPException(404, "记录不存在")
+    record = await get_or_404(session, ImportRecord, record_id, "记录不存在")
     if record.status == "confirmed":
         raise HTTPException(400, "已确认入库的记录不能修改")
     for k, v in body.model_dump(exclude_none=True).items():
@@ -135,9 +138,7 @@ async def discard_record(
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    record = await session.get(ImportRecord, record_id)
-    if record is None:
-        raise HTTPException(404, "记录不存在")
+    record = await get_or_404(session, ImportRecord, record_id, "记录不存在")
     if record.status == "confirmed":
         raise HTTPException(400, "已确认入库的记录不能丢弃")
     record.status = "discarded"
@@ -152,9 +153,7 @@ async def confirm_batch(
     user: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    batch = await session.get(ImportBatch, batch_id)
-    if batch is None:
-        raise HTTPException(404, "导入批次不存在")
+    batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
     records = (
         await session.execute(
             select(ImportRecord).where(
@@ -271,7 +270,7 @@ async def confirm_batch(
                 vul.testing_plan_id = plan.id
             if rec.fixed:
                 vul.status = 60  # 报告中标记已修复
-                vul.fix_time = datetime.utcnow()
+                vul.fix_time = utcnow()
             elif is_retest:
                 vul.status = 55  # 复测报告中仍未修复：进入复测中，可在报告编辑页填写复测结论
         if asset is not None:
@@ -332,16 +331,15 @@ async def preview_batch(
     session: AsyncSession = Depends(get_session),
 ):
     """在线预览导入原文件：docx 临时转为 PDF 展示。"""
-    batch = await session.get(ImportBatch, batch_id)
-    if batch is None:
-        raise HTTPException(404, "导入批次不存在")
+    batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
     cleanup_stale_previews()  # 顺带清理过期预览
     try:
         pdf_path = await ensure_pdf_preview(batch.file_path)
     except FileNotFoundError:
         raise HTTPException(404, "导入文件已被清理")
-    except Exception as exc:
-        raise HTTPException(502, f"预览转换失败，请确认转换服务可用: {exc}")
+    except Exception:
+        logger.exception("预览转换失败 batch_id=%s", batch_id)
+        raise HTTPException(502, "预览转换失败，请稍后重试或联系管理员")
     filename = quote(f"{batch.filename.rsplit('.', 1)[0]}.pdf")
     return FileResponse(
         pdf_path,

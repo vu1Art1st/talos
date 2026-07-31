@@ -1,18 +1,57 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
+    <div class="flex items-center flex-wrap gap-2 mb-4">
       <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门" clearable class="!w-64"
-                @keyup.enter="load(1)" @clear="load(1)">
+                @keyup.enter="reload" @clear="reload">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-select v-model="statusFilter" clearable placeholder="全部状态" class="!w-36" @change="load(1)">
+      <el-select v-model="statusFilter" clearable placeholder="全部状态" class="!w-32" @change="reload">
         <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)" />
       </el-select>
+      <el-select v-model="typeFilter" filterable clearable placeholder="全部类型" class="!w-32" @change="reload">
+        <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
+      </el-select>
+      <el-select v-model="deptFilter" filterable clearable placeholder="全部部门" class="!w-32" @change="reload">
+        <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
+      </el-select>
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-64"
+                      start-placeholder="接收起" end-placeholder="接收止" @change="reload" />
       <div class="flex-1" />
+      <el-button @click="downloadTemplate">
+        <el-icon class="mr-1"><Download /></el-icon>导入模板
+      </el-button>
+      <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx" class="inline-block">
+        <el-button :loading="importing">
+          <el-icon class="mr-1"><Upload /></el-icon>导入Excel
+        </el-button>
+      </el-upload>
+      <el-button @click="exportExcel">
+        <el-icon class="mr-1"><Download /></el-icon>导出Excel
+      </el-button>
       <el-button type="primary" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增测试计划
       </el-button>
     </div>
+
+    <el-collapse v-model="statsPanel" class="mb-4">
+      <el-collapse-item name="stats">
+        <template #title>
+          <span class="font-medium">统计概览</span>
+          <span class="text-xs text-gray-400 ml-2">（与筛选条件联动实时更新）</span>
+        </template>
+        <el-checkbox-group v-model="dims" class="mb-3">
+          <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
+        </el-checkbox-group>
+        <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div v-for="d in cardDims" :key="d.key"
+               class="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+            <div class="text-xs text-gray-500">{{ d.label }}</div>
+            <div class="text-2xl font-semibold" :style="{ color: d.color }">{{ stats[d.key] ?? 0 }}</div>
+          </div>
+        </div>
+        <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-4" />
+      </el-collapse-item>
+    </el-collapse>
 
     <el-table v-loading="loading" :data="items" stripe>
       <el-table-column prop="id" label="ID" width="70" />
@@ -50,15 +89,39 @@
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="v in row.vuls" :key="v.id" class="flex items-center gap-2">
-                <el-tag size="small" :color="levelColor(v.level)" style="color:#fff;border:none">
+                <span class="tl-tag" :style="levelSoftStyle(v.level)">
                   {{ levelName(v.level) }}
-                </el-tag>
+                </span>
                 <el-button size="small" type="primary" link class="!p-0"
                            @click="router.push(`/vulns/${v.id}`)">#{{ v.id }} {{ v.title }}</el-button>
               </div>
             </div>
           </el-popover>
           <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="关联报告" width="90">
+        <template #default="{ row }">
+          <el-popover v-if="row.reports?.length" placement="right" width="360" trigger="hover">
+            <template #reference>
+              <el-button size="small" type="success" link>{{ row.reports.length }} 份</el-button>
+            </template>
+            <div class="flex flex-col gap-1 max-h-64 overflow-auto">
+              <div v-for="r in row.reports" :key="r.id" class="flex items-center gap-2">
+                <el-tag size="small" :type="r.status === 'completed' ? 'success' : 'info'">
+                  {{ reportStatusName(r.status) }}
+                </el-tag>
+                <el-button size="small" type="primary" link class="!p-0"
+                           @click="router.push(`/reports/${r.id}`)">#{{ r.id }} {{ r.title }}</el-button>
+              </div>
+            </div>
+          </el-popover>
+          <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="预估/实际人天" width="120">
+        <template #default="{ row }">
+          <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
       </el-table-column>
       <el-table-column label="需求接收" width="105">
@@ -177,6 +240,12 @@
         <el-form-item label="低危数">
           <el-input-number v-model="form.stat_low" :min="0" class="!w-full" :disabled="statsAuto" />
         </el-form-item>
+        <el-form-item label="预估人天">
+          <el-input-number v-model="form.est_mandays" :min="0" :precision="1" :step="0.5" class="!w-full" />
+        </el-form-item>
+        <el-form-item label="实际人天">
+          <el-input-number v-model="form.actual_mandays" :min="0" :precision="1" :step="0.5" class="!w-full" />
+        </el-form-item>
       </div>
       <div v-if="statsAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
         已有关联漏洞，统计由系统按漏洞等级自动重算
@@ -199,12 +268,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Download, Upload } from '@element-plus/icons-vue'
+import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelColor } from '../utils/colors'
+import { levelSoftStyle } from '../utils/colors'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -213,12 +284,52 @@ const total = ref(0)
 const page = ref(1)
 const search = ref('')
 const statusFilter = ref<number | null>(null)
+const typeFilter = ref<string>('')
+const deptFilter = ref<string>('')
+const dateRange = ref<[string, string] | null>(null)
 const loading = ref(false)
 const dialogVisible = ref(false)
 const statusMap = ref<Record<number, string>>({})
 const dialogRow = ref<any>(null)
 const testTypes = ref<string[]>([])
 const departments = ref<string[]>([])
+
+// ---------- 统计面板 ----------
+const DIMENSIONS = [
+  { key: 'total_plans', label: '测试计划总数', color: '#409EFF' },
+  { key: 'retest_done_plans', label: '复测完成数', color: '#67C23A' },
+  { key: 'first_test_count', label: '初测次数', color: '#E6A23C' },
+  { key: 'retest_count', label: '复测次数', color: '#F56C6C' },
+  { key: 'total_test_count', label: '总测试次数', color: '#909399' },
+  { key: 'est_mandays_total', label: '预估人天总计', color: '#409EFF' },
+  { key: 'actual_mandays_total', label: '实际人天总计', color: '#67C23A' },
+  { key: 'remaining_est_mandays', label: '剩余预估人天（未测试）', color: '#E6A23C' },
+  { key: 'vulns_by_month', label: '按月漏洞数', color: '#409EFF' },
+] as const
+const STATS_DIMS_KEY = 'testing_plan_stats_dims'
+const statsPanel = ref<string[]>(['stats'])
+const dims = ref<string[]>(loadDims())
+const stats = ref<Record<string, number>>({})
+const statsLoading = ref(false)
+const monthChartRef = ref<HTMLElement>()
+let monthChart: echarts.ECharts | null = null
+
+function loadDims(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STATS_DIMS_KEY) || 'null')
+    if (Array.isArray(saved) && saved.length) return saved
+  } catch { /* ignore */ }
+  return DIMENSIONS.map((d) => d.key)
+}
+
+// 勾选的计数类维度（排除图表维度）以数字卡片展示
+const cardDims = computed(() =>
+  DIMENSIONS.filter((d) => d.key !== 'vulns_by_month' && dims.value.includes(d.key)))
+
+watch(dims, (v) => {
+  localStorage.setItem(STATS_DIMS_KEY, JSON.stringify(v))
+  if (v.includes('vulns_by_month')) nextTick(renderMonthChart)
+})
 
 const statusTag = (s: number) =>
   ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success' } as Record<number, string>)[s] ?? 'info'
@@ -227,6 +338,9 @@ const levelName = (lv: number) =>
   ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
 
 const fmtTime = (t: string | null) => (t ? String(t).slice(0, 10) : '-')
+
+const reportStatusName = (s: string) =>
+  ({ draft: '草稿', final: '定稿', completed: '已完成' } as Record<string, string>)[s] ?? s
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
 const testTypeOptions = computed(() =>
@@ -262,22 +376,111 @@ const emptyForm = () => ({
   stat_high: 0,
   stat_medium: 0,
   stat_low: 0,
+  est_mandays: 0,
+  actual_mandays: 0,
   brief: '',
   detail: '',
 })
 const form = ref(emptyForm())
 
+function filterParams(): Record<string, any> {
+  const params: Record<string, any> = { search: search.value }
+  if (statusFilter.value !== null && statusFilter.value !== ('' as any)) params.status = statusFilter.value
+  if (typeFilter.value) params.test_type = typeFilter.value
+  if (deptFilter.value) params.department = deptFilter.value
+  if (dateRange.value?.length === 2) {
+    params.receive_from = dateRange.value[0]
+    params.receive_to = dateRange.value[1]
+  }
+  return params
+}
+
 async function load(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const params: Record<string, any> = { search: search.value, page: p, size: 20 }
-    if (statusFilter.value !== null && statusFilter.value !== ('' as any)) params.status = statusFilter.value
-    const { data } = await client.get('/testing-plans', { params })
+    const { data } = await client.get('/testing-plans', {
+      params: { ...filterParams(), page: p, size: 20 },
+    })
     items.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
+  }
+}
+
+async function loadStats() {
+  statsLoading.value = true
+  try {
+    const { data } = await client.get('/testing-plans/stats', { params: filterParams() })
+    stats.value = data
+    if (dims.value.includes('vulns_by_month')) nextTick(renderMonthChart)
+  } finally {
+    statsLoading.value = false
+  }
+}
+
+function renderMonthChart() {
+  if (!monthChartRef.value) return
+  if (!monthChart) monthChart = echarts.init(monthChartRef.value)
+  const rows = (stats.value as any).vulns_by_month ?? []
+  monthChart.setOption({
+    tooltip: { trigger: 'axis' },
+    grid: { left: 40, right: 16, top: 30, bottom: 40 },
+    title: { text: '按月漏洞数', textStyle: { fontSize: 13, fontWeight: 'normal', color: '#909399' } },
+    xAxis: { type: 'category', data: rows.map((r: any) => r.month), axisLabel: { rotate: 45 } },
+    yAxis: { type: 'value', minInterval: 1 },
+    series: [{ type: 'bar', data: rows.map((r: any) => r.count), itemStyle: { color: '#409EFF' }, barMaxWidth: 32 }],
+  })
+  monthChart.resize()
+}
+
+// 筛选变化：列表回到首页并同步刷新统计
+async function reload() {
+  await Promise.all([load(1), loadStats()])
+}
+
+async function exportExcel() {
+  const { data } = await client.get('/testing-plans/export', {
+    params: filterParams(), responseType: 'blob',
+  })
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = '测试计划导出.xlsx'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function downloadTemplate() {
+  const { data } = await client.get('/testing-plans/import/template', { responseType: 'blob' })
+  const url = URL.createObjectURL(data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = '测试计划导入模板.xlsx'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const importing = ref(false)
+
+async function doImport(options: any) {
+  importing.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', options.file)
+    const { data } = await client.post('/testing-plans/import', fd)
+    if (data.failed > 0) {
+      await ElMessageBox.alert(
+        `共 ${data.total} 行，新增 ${data.created} 行，更新 ${data.updated} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}`,
+        '导入结果', { dangerouslyUseHTMLString: true },
+      )
+    } else {
+      ElMessage.success(`导入完成：新增 ${data.created} 条，更新 ${data.updated} 条`)
+    }
+    await Promise.all([load(1), loadStats()])
+  } finally {
+    importing.value = false
   }
 }
 
@@ -291,6 +494,7 @@ async function save() {
   const body = { ...form.value }
   delete (body as any).testers
   delete (body as any).vuls
+  delete (body as any).reports
   delete (body as any).retest_rounds
   delete (body as any).retest_round_count
   if (form.value.id) {
@@ -300,7 +504,7 @@ async function save() {
   }
   ElMessage.success('保存成功')
   dialogVisible.value = false
-  await load()
+  await Promise.all([load(), loadStats()])
 }
 
 async function loadTestTypes() {
@@ -338,7 +542,7 @@ async function addDepartment() {
 async function claim(row: any) {
   await client.post(`/testing-plans/${row.id}/claim`)
   ElMessage.success('认领成功，已加入测试人员')
-  await load()
+  await Promise.all([load(), loadStats()])
 }
 
 async function quit(row: any) {
@@ -350,12 +554,23 @@ async function quit(row: any) {
 async function remove(id: number) {
   await client.delete(`/testing-plans/${id}`)
   ElMessage.success('删除成功')
-  await load()
+  await Promise.all([load(), loadStats()])
+}
+
+function onResize() {
+  monthChart?.resize()
 }
 
 onMounted(async () => {
   const meta = await auth.fetchMeta()
   statusMap.value = meta?.testing_plan_status ?? {}
-  await Promise.all([load(1), loadTestTypes(), loadDepartments()])
+  window.addEventListener('resize', onResize)
+  await Promise.all([load(1), loadStats(), loadTestTypes(), loadDepartments()])
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResize)
+  monthChart?.dispose()
+  monthChart = null
 })
 </script>

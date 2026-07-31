@@ -1,11 +1,11 @@
 """漏洞生命周期状态机（简化版：未修复 → 修复中 → 复测中 → 已修复/已忽略/暂不处理）。"""
-from datetime import datetime
+from app.core.timeutil import utcnow
 
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import STATUS_TIMESTAMP, VUL_STATUS, VUL_TRANSITIONS
+from app.constants import STATUS_TIMESTAMP, VUL_STATUS, VUL_TRANSITIONS, PlanStatus, VulStatus
 from app.models import Message, User, Vul, VulLog
 
 
@@ -33,8 +33,8 @@ async def transition(
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)
     if ts_field:
-        setattr(vul, ts_field, datetime.utcnow())
-    if target == 55:
+        setattr(vul, ts_field, utcnow())
+    if target == VulStatus.RETESTING:
         vul.is_retest = True
 
     action = f"{VUL_STATUS[old_status]} → {VUL_STATUS[target]}"
@@ -77,8 +77,8 @@ def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, com
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)
     if ts_field:
-        setattr(vul, ts_field, datetime.utcnow())
-    if target == 55:
+        setattr(vul, ts_field, utcnow())
+    if target == VulStatus.RETESTING:
         vul.is_retest = True
     add_log(session, vul, operator, f"{VUL_STATUS[old_status]} → {VUL_STATUS[target]}", comment)
     return vul
@@ -137,13 +137,13 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
         report = await session.get(Report, report_id)
         if report is None:
             continue
-        all_closed = all(s in (20, 60) for s in linked_statuses)
+        all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s in linked_statuses)
         if all_closed and report.status != "completed":
             report.status = "completed"
             if report.testing_plan_id is not None:
                 plan = await session.get(TestingPlan, report.testing_plan_id)
                 if plan is not None:
-                    plan.status = 60  # 复测完成
+                    plan.status = PlanStatus.RETEST_DONE  # 复测完成
                     if not plan.retest_done_time:
                         plan.retest_done_time = date.today().isoformat()
                     # 当前复测轮次闭环，打完成点
@@ -152,8 +152,8 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
             report.status = "draft"
             if report.testing_plan_id is not None:
                 plan = await session.get(TestingPlan, report.testing_plan_id)
-                if plan is not None and plan.status == 60:
-                    plan.status = 50  # 复测完成 → 复测中
+                if plan is not None and plan.status == PlanStatus.RETEST_DONE:
+                    plan.status = PlanStatus.RETESTING  # 复测完成 → 复测中
                     plan.retest_done_time = ""
                     # 撤销完成点，重开最近一轮复测
                     plan_service.reopen_retest_round(plan)

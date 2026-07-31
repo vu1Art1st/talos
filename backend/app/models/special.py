@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.timeutil import utcnow
 from app.db import Base
 from app.models.business import Vul
 from app.models.user import User
@@ -40,8 +41,8 @@ class RemoteTesting(Base):
     appeal_success: Mapped[bool] = mapped_column(Boolean, default=False)
     appeal_report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id"), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
 class TestingPlan(Base):
@@ -62,11 +63,13 @@ class TestingPlan(Base):
     stat_high: Mapped[int] = mapped_column(Integer, default=0)
     stat_medium: Mapped[int] = mapped_column(Integer, default=0)
     stat_low: Mapped[int] = mapped_column(Integer, default=0)
+    est_mandays: Mapped[float] = mapped_column(Float, default=0)  # 预估人天
+    actual_mandays: Mapped[float] = mapped_column(Float, default=0)  # 实际人天
     brief: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")  # 测试人员、数据来源等
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     testers: Mapped[list[User]] = relationship(secondary=testing_plan_testers, lazy="selectin")
     vuls: Mapped[list[Vul]] = relationship(
@@ -79,6 +82,14 @@ class TestingPlan(Base):
         back_populates="plan",
         order_by="TestingPlanRetestRound.round_no",
         cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    # 反向展示已关联报告（Report.testing_plan_id 外键）。删除计划时在 API 层解除外键，故 viewonly。
+    reports: Mapped[list["Report"]] = relationship(  # noqa: F821
+        primaryjoin="Report.testing_plan_id == TestingPlan.id",
+        foreign_keys="Report.testing_plan_id",
+        viewonly=True,
+        order_by="Report.id",
         lazy="selectin",
     )
 
@@ -99,7 +110,7 @@ class TestingPlanRetestRound(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("testing_plans.id", ondelete="CASCADE"), index=True)
     round_no: Mapped[int] = mapped_column(Integer, default=1)
-    start_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    start_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     done_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     source: Mapped[str] = mapped_column(String(255), default="")  # 触发来源，如报告发起/手动流转
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -121,8 +132,8 @@ class SpringAction(Base):
     score_deduction: Mapped[float] = mapped_column(Float, default=0)  # 最终扣分数值
     doc_no: Mapped[str] = mapped_column(String(128), default="")  # 对应公文文号
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     vuls: Mapped[list[Vul]] = relationship(secondary=spring_action_vulns, lazy="selectin")
 

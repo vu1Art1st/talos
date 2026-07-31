@@ -2,13 +2,13 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: vulnplatform
-      POSTGRES_PASSWORD: vulnplatform
-      POSTGRES_DB: vulnplatform
+      POSTGRES_USER: ${POSTGRES_USER:-vulnplatform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-vulnplatform}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vulnplatform"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vulnplatform}"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -28,10 +28,10 @@ services:
   api:
     build: ./backend
     environment: &backend_env
-      VP_DATABASE_URL: postgresql+asyncpg://vulnplatform:vulnplatform@postgres:5432/vulnplatform
+      VP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vulnplatform}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vulnplatform}
       VP_REDIS_URL: redis://redis:6379/0
       VP_GOTENBERG_URL: http://gotenberg:3000
-      VP_SECRET_KEY: change-me-to-a-long-random-string
+      VP_SECRET_KEY: ${VP_SECRET_KEY:?set VP_SECRET_KEY in .env, e.g. openssl rand -hex 32}
       VP_STORAGE_DIR: /app/storage
     volumes:
       - storage_data:/app/storage
@@ -60,7 +60,7 @@ services:
     depends_on:
       - api
     ports:
-      - "80:80"
+      - "80:8080"
 
 volumes:
   pg_data:

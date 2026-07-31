@@ -113,7 +113,7 @@
         <div v-else-if="sec.vul_id && vulnStates[sec.vul_id]?.retest_html"
              class="mt-4 border border-gray-200 rounded-lg p-3">
           <div class="text-sm font-medium text-gray-600 mb-2">复测详情</div>
-          <div class="text-sm prose max-w-none" v-html="vulnStates[sec.vul_id].retest_html" />
+          <div class="text-sm prose max-w-none" v-html="safeHtml(vulnStates[sec.vul_id].retest_html)" />
         </div>
       </el-card>
 
@@ -139,10 +139,10 @@
                @click="scrollToSection(i)">
             <span class="text-gray-400 shrink-0">{{ i + 1 }}.</span>
             <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
-            <el-tag v-if="sec.vul_id && vulnStates[sec.vul_id]" size="small" effect="dark"
-                    class="!border-0 shrink-0" :color="statusColor(vulnStates[sec.vul_id].status)">
+            <span v-if="sec.vul_id && vulnStates[sec.vul_id]" class="tl-tag shrink-0"
+                  :style="statusSoftStyle(vulnStates[sec.vul_id].status)">
               {{ statusName(vulnStates[sec.vul_id].status) }}
-            </el-tag>
+            </span>
           </div>
         </div>
       </el-card>
@@ -217,7 +217,8 @@ import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import { useAuthStore } from '../stores/auth'
-import { statusColor } from '../utils/colors'
+import { statusSoftStyle } from '../utils/colors'
+import { safeHtml } from '../utils/html'
 
 const STATUS_NAMES: Record<number, string> = {
   10: '未修复', 20: '已忽略', 35: '暂不处理', 50: '修复中', 55: '复测中', 60: '已修复',
@@ -271,7 +272,15 @@ function markDirty() {
 async function loadVulnStates() {
   const { data } = await client.get(`/reports/${route.params.id}/vuln-states`)
   const map: Record<number, any> = {}
-  for (const v of data) map[v.vul_id] = { ...v, next_status: null }
+  for (const v of data) {
+    const prev = vulnStates.value[v.vul_id]
+    // 复测面板有未提交的编辑内容时保留，避免报告保存触发的刷新将其覆盖
+    if (prev?.status === 55 && v.status === 55 && prev.retest_html !== v.retest_html) {
+      map[v.vul_id] = { ...v, retest_html: prev.retest_html, retest_json: prev.retest_json, next_status: prev.next_status }
+    } else {
+      map[v.vul_id] = { ...v, next_status: null }
+    }
+  }
   vulnStates.value = map
 }
 

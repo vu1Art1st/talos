@@ -6,9 +6,8 @@ from pathlib import Path
 
 import httpx
 
+from app.constants import DOCX_MIME
 from app.core.config import settings
-
-DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 
 async def convert_docx_to_pdf(docx_path: str, pdf_path: str) -> str:

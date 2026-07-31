@@ -7,8 +7,9 @@
   <el-card shadow="never" class="!rounded-lg max-w-5xl mb-4">
     <el-form label-width="90px">
       <el-form-item label="测试目标" required>
+        <div class="w-full flex items-start gap-2">
         <el-select v-model="assetIds" multiple filterable remote :remote-method="searchAssets"
-                   :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="w-full"
+                   :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="flex-1"
                    @change="onAssetChange">
           <el-option v-for="a in assetOptions" :key="a.id" :value="a.id"
                      :label="a.sub_system ? `${a.name} / ${a.sub_system}` : a.name">
@@ -26,6 +27,10 @@
             </div>
           </template>
         </el-select>
+        <el-button type="primary" plain @click="openCreateAsset">
+          <el-icon class="mr-1"><Plus /></el-icon>新增资产
+        </el-button>
+        </div>
       </el-form-item>
       <el-form-item v-if="selectedAssets.length" label=" ">
         <div class="text-xs text-gray-500 leading-6">

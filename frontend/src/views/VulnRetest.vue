@@ -5,12 +5,12 @@
         <div>
           <div class="text-xl font-semibold text-gray-800">{{ vul.title }}</div>
           <div class="flex items-center gap-2 mt-2">
-            <el-tag :color="levelColor(vul.level)" effect="dark" size="small" class="!border-0">
+            <span class="tl-tag" :style="levelSoftStyle(vul.level)">
               {{ meta?.vul_level?.[vul.level] }}
-            </el-tag>
-            <el-tag :color="statusColor(vul.status)" effect="dark" size="small" class="!border-0">
-              {{ meta?.vul_status?.[vul.status] }}
-            </el-tag>
+            </span>
+            <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
+              {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
+            </span>
             <span class="text-xs text-gray-400">共 {{ records.length }} 条复测记录</span>
           </div>
         </div>
@@ -60,7 +60,7 @@ import dayjs from 'dayjs'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelColor, statusColor } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
 
 const auth = useAuthStore()
 const route = useRoute()

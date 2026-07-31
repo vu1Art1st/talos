@@ -13,6 +13,7 @@ from arq.connections import RedisSettings
 from sqlalchemy import select
 
 from app.core.config import settings
+from app.core.timeutil import utcnow
 from app.db import async_session_maker
 from app.models import ImportBatch, ImportRecord, ExportJob, Report, Vul
 from app.services.docx_parser import parse_any_docx
@@ -28,13 +29,14 @@ async def parse_import_task(ctx, batch_id: int) -> None:
         batch.status = "parsing"
         await session.commit()
 
-        image_dir = settings.storage_sub("uploads", "imports", str(batch_id))
+        # 导入解析出的图片统一落到公开图片目录，避免暴露导入原始文档所在目录
+        image_dir = settings.storage_sub("uploads", "images")
         try:
             doc_kind, meta, records = await asyncio.to_thread(
                 parse_any_docx,
                 batch.file_path,
                 str(image_dir),
-                f"/storage/uploads/imports/{batch_id}",
+                "/storage/uploads/images",
                 batch.filename,
             )
         except Exception as exc:  # 文件损坏 / 非 docx 等
@@ -111,6 +113,7 @@ async def export_report_task(ctx, job_id: int) -> None:
                         "id": v.id,
                         "title": v.title, "vul_type": v.vul_type, "level": v.level,
                         "status": v.status, "affected_url": v.affected_url, "is_retest": v.is_retest,
+                        "retest_html": v.retest_html,
                     }
                     for vid in vul_ids if (v := by_id.get(vid))
                 ]
@@ -144,7 +147,7 @@ async def export_report_task(ctx, job_id: int) -> None:
             job.status = "failed"
             job.error = str(exc)
         finally:
-            job.finish_time = datetime.utcnow()
+            job.finish_time = utcnow()
             await session.commit()
 
 

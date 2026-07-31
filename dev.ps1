@@ -37,6 +37,9 @@ $backendJob = Start-Job -ScriptBlock {
     Set-Location $backend
     $env:VP_DATABASE_URL = 'sqlite+aiosqlite:///./dev.db'
     $env:VP_DISABLE_QUEUE = '1'
+    # 开发模式：开启 DEBUG（放宽密钥校验、暴露 API 文档），固定内置 admin 初始口令
+    $env:VP_DEBUG = '1'
+    $env:VP_INITIAL_ADMIN_PASSWORD = 'admin123'
     & $py -m uvicorn app.main:app --reload --port 8000
 } -ArgumentList $backend, $venvPython
 

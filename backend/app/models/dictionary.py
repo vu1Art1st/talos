@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.timeutil import utcnow
 from app.db import Base
 
 
@@ -15,4 +16,4 @@ class DictOption(Base):
     category: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str] = mapped_column(String(64))
     sort: Mapped[int] = mapped_column(Integer, default=0)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

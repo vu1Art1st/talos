@@ -1031,3 +1031,354 @@ async def test_dashboard_by_department(client: AsyncClient, auth: dict):
     assert dept2["vulns"] == 2
     assert dept2["fixed"] == 1
     assert dept2["fix_rate"] == 50.0
+
+
+async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict):
+    """测试计划筛选（类型/部门/时间范围）、多维度统计与 Excel 双 sheet 导出。"""
+    from openpyxl import load_workbook
+
+    tag = "筛选统计专用部门"
+    # 三条计划：不同状态 / 类型 / 接收时间，便于区分筛选与统计口径
+    plans = [
+        {"system_name": "过滤系统A", "department": tag, "test_type": "黑盒测试",
+         "receive_time": "2026-01-15", "status": 20},   # 初测中
+        {"system_name": "过滤系统B", "department": tag, "test_type": "白盒测试",
+         "receive_time": "2026-03-20", "status": 60},   # 复测完成
+        {"system_name": "过滤系统C", "department": tag, "test_type": "黑盒测试",
+         "receive_time": "2026-06-10", "status": 10},   # 未测试
+    ]
+    for p in plans:
+        resp = await client.post("/api/v1/testing-plans", headers=auth, json=p)
+        assert resp.status_code == 200, resp.text
+
+    # 部门 + 类型精确筛选
+    resp = await client.get(
+        "/api/v1/testing-plans", headers=auth,
+        params={"department": tag, "test_type": "黑盒测试"},
+    )
+    names = {i["system_name"] for i in resp.json()["items"]}
+    assert names == {"过滤系统A", "过滤系统C"}
+
+    # 时间范围筛选（按需求接收时间）
+    resp = await client.get(
+        "/api/v1/testing-plans", headers=auth,
+        params={"department": tag, "receive_from": "2026-02-01", "receive_to": "2026-04-01"},
+    )
+    names = {i["system_name"] for i in resp.json()["items"]}
+    assert names == {"过滤系统B"}
+
+    # 统计口径：本部门下 3 条计划
+    resp = await client.get("/api/v1/testing-plans/stats", headers=auth, params={"department": tag})
+    assert resp.status_code == 200, resp.text
+    stats = resp.json()
+    assert stats["total_plans"] == 3
+    assert stats["retest_done_plans"] == 1          # 仅 B 为复测完成
+    assert stats["first_test_count"] == 2           # A(20)+B(60) 达到初测中及以上
+    assert stats["total_test_count"] == stats["first_test_count"] + stats["retest_count"]
+    status_counts = {r["status"]: r["count"] for r in stats["by_status"]}
+    assert status_counts == {10: 1, 20: 1, 60: 1}
+    assert isinstance(stats["vulns_by_month"], list)
+
+    # 空结果集：全 0，不报错
+    empty = (await client.get(
+        "/api/v1/testing-plans/stats", headers=auth, params={"department": "不存在的部门XYZ"},
+    )).json()
+    assert empty["total_plans"] == 0
+    assert empty["total_test_count"] == 0
+
+    # 导出：双 sheet，可被 openpyxl 回读
+    resp = await client.get("/api/v1/testing-plans/export", headers=auth, params={"department": tag})
+    assert resp.status_code == 200
+    assert resp.content[:2] == b"PK"
+    wb = load_workbook(BytesIO(resp.content))
+    assert "测试计划" in wb.sheetnames
+    assert "统计汇总" in wb.sheetnames
+    detail_rows = list(wb["测试计划"].iter_rows(values_only=True))
+    assert len(detail_rows) == 4  # 表头 + 3 行
+    assert detail_rows[0][1] == "测试系统"
+
+
+async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict):
+    """人天字段、人天统计（剩余预估人天=未测试计划预估人天之和）与计划反向展示关联报告。"""
+    from openpyxl import load_workbook
+
+    tag = "人天统计专用部门"
+    plans = [
+        {"system_name": "人天系统A", "department": tag, "status": 10,
+         "est_mandays": 3, "actual_mandays": 0},     # 未测试 → 计入剩余
+        {"system_name": "人天系统B", "department": tag, "status": 20,
+         "est_mandays": 5, "actual_mandays": 2.5},
+        {"system_name": "人天系统C", "department": tag, "status": 60,
+         "est_mandays": 2, "actual_mandays": 4},
+    ]
+    plan_ids = []
+    for p in plans:
+        resp = await client.post("/api/v1/testing-plans", headers=auth, json=p)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["est_mandays"] == p["est_mandays"]
+        assert resp.json()["actual_mandays"] == p["actual_mandays"]
+        plan_ids.append(resp.json()["id"])
+
+    # 人天统计：总预估/总实际/剩余预估（仅未测试状态）
+    stats = (await client.get(
+        "/api/v1/testing-plans/stats", headers=auth, params={"department": tag},
+    )).json()
+    assert stats["est_mandays_total"] == 10
+    assert stats["actual_mandays_total"] == 6.5
+    assert stats["remaining_est_mandays"] == 3
+
+    # 导出明细含人天列，汇总含人天指标
+    resp = await client.get("/api/v1/testing-plans/export", headers=auth, params={"department": tag})
+    wb = load_workbook(BytesIO(resp.content))
+    detail_rows = list(wb["测试计划"].iter_rows(values_only=True))
+    header = list(detail_rows[0])
+    assert "预估人天" in header and "实际人天" in header
+    est_col = header.index("预估人天")
+    assert {r[est_col] for r in detail_rows[1:]} == {3, 5, 2}
+    summary = {r[0]: r[1] for r in wb["统计汇总"].iter_rows(values_only=True) if r[0]}
+    assert summary["预估人天总计"] == 10
+    assert summary["实际人天总计"] == 6.5
+    assert summary["剩余预估人天（未测试）"] == 3
+
+    # 计划反向展示关联报告：录入漏洞→生成报告后 reports 列表可见
+    plan_b = plan_ids[1]
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "人天反向资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "人天反向漏洞", "level": 20, "asset_ids": [asset_id],
+              "testing_plan_id": plan_b},
+    )
+    vul_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "人天反向报告", "vul_ids": [vul_id], "testing_plan_id": plan_b},
+    )
+    assert resp.status_code == 200, resp.text
+    report_id = resp.json()["id"]
+
+    plan = await _get_plan(client, auth, plan_b)
+    assert [r["id"] for r in plan["reports"]] == [report_id]
+    assert plan["reports"][0]["title"] == "人天反向报告"
+    assert plan["reports"][0]["status"] == "draft"
+
+
+async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
+    """测试计划 Excel 导入：模板下载、按 ID 更新、无 ID 新增、非法行报错。"""
+    from openpyxl import Workbook
+
+    # 模板下载
+    resp = await client.get("/api/v1/testing-plans/import/template", headers=auth)
+    assert resp.status_code == 200
+    assert resp.content[:2] == b"PK"
+
+    # 先建一条计划供导入更新
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "导入前系统", "department": "导入专用部门", "est_mandays": 1},
+    )
+    exist_id = resp.json()["id"]
+
+    headers_row = ["ID", "测试系统", "测试类型", "所属部门", "状态", "测试人员",
+                   "需求接收", "初测完成", "复测通知", "复测完成",
+                   "预估人天", "实际人天",
+                   "超危数", "高危数", "中危数", "低危数", "复测轮数"]
+    wb = Workbook()
+    ws = wb.active
+    ws.append(headers_row)
+    # 无 ID → 新增（测试人员按用户名匹配 admin）
+    ws.append(["", "导入新增系统", "渗透测试", "导入专用部门", "初测中", "admin",
+               "2025-11-01", "2025-11-05", "", "", 3.5, 1, 1, 2, 0, 0, 0])
+    # 有 ID → 更新同一条计划
+    ws.append([exist_id, "导入后系统", "白盒测试", "导入专用部门", "复测完成", "",
+               "2025-10-01", "", "", "2025-12-31", 6, 5.5, 0, 0, 0, 0, 0])
+    # 缺测试系统 → 失败
+    ws.append(["", "", "黑盒测试", "导入专用部门", "", "", "", "", "", "", 0, 0, 0, 0, 0, 0, 0])
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    resp = await client.post(
+        "/api/v1/testing-plans/import", headers=auth,
+        files={"file": ("plans.xlsx", buf,
+                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert resp.status_code == 200, resp.text
+    result = resp.json()
+    assert result["total"] == 3
+    assert result["created"] == 1
+    assert result["updated"] == 1
+    assert result["failed"] == 1
+    assert "测试系统为必填项" in result["errors"][0]
+
+    # 新增行校验：状态/人天/测试人员匹配
+    resp = await client.get(
+        "/api/v1/testing-plans", headers=auth, params={"search": "导入新增系统"},
+    )
+    created = resp.json()["items"][0]
+    assert created["status"] == 20
+    assert created["est_mandays"] == 3.5
+    assert created["stat_critical"] == 1 and created["stat_high"] == 2
+    assert "admin" in [u["username"] for u in created["testers"]]
+
+    # 更新行校验：同 ID 字段被覆盖
+    updated = await _get_plan(client, auth, exist_id)
+    assert updated["system_name"] == "导入后系统"
+    assert updated["status"] == 60
+    assert updated["est_mandays"] == 6
+    assert updated["actual_mandays"] == 5.5
+
+    # 非 xlsx 拒绝
+    resp = await client.post(
+        "/api/v1/testing-plans/import", headers=auth,
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert resp.status_code == 400
+
+
+async def test_dashboard_event_filters(client: AsyncClient, auth: dict):
+    """安全态势按事件多维筛选：部门/等级/来源/时间范围。"""
+    dept = "态势筛选部门"
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "态势筛选系统", "department": dept},
+    )
+    plan_id = resp.json()["id"]
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "态势筛选资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={
+            "asset_ids": [asset_id],
+            "vulns": [
+                {"title": "态势高危漏洞", "level": 20, "source": 10, "testing_plan_id": plan_id},
+                {"title": "态势中危漏洞", "level": 30, "source": 20, "testing_plan_id": plan_id},
+            ],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 部门筛选：仅统计该部门计划关联的 2 条漏洞
+    stats = (await client.get(
+        "/api/v1/dashboard/stats", headers=auth, params={"department": dept},
+    )).json()
+    assert stats["total_vulns"] == 2
+    assert {x["name"] for x in stats["by_level"]} == {"高危", "中危"}
+    assert [d["department"] for d in stats["by_department"]] == [dept]
+
+    # 部门 + 等级
+    stats = (await client.get(
+        "/api/v1/dashboard/stats", headers=auth,
+        params={"department": dept, "level": 20},
+    )).json()
+    assert stats["total_vulns"] == 1
+
+    # 部门 + 来源
+    stats = (await client.get(
+        "/api/v1/dashboard/stats", headers=auth,
+        params={"department": dept, "source": 20},
+    )).json()
+    assert stats["total_vulns"] == 1
+
+    # 时间范围：未来区间无数据；包含今天则命中
+    stats = (await client.get(
+        "/api/v1/dashboard/stats", headers=auth,
+        params={"department": dept, "date_from": "2099-01-01", "date_to": "2099-12-31"},
+    )).json()
+    assert stats["total_vulns"] == 0
+    stats = (await client.get(
+        "/api/v1/dashboard/stats", headers=auth,
+        params={"department": dept, "date_from": "2000-01-01", "date_to": "2099-12-31"},
+    )).json()
+    assert stats["total_vulns"] == 2
+
+
+async def test_retest_record_sync_to_vul(client: AsyncClient, auth: dict):
+    """复测记录增/改/删同步聚合到 Vul.retest_html（详情页/报告读取口径）。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "复测同步漏洞", "level": 20},
+    )
+    vul_id = resp.json()["id"]
+
+    # 新增一条记录：retest_html 同步为记录内容
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>第一次复测仍存在</p>", "content_json": None},
+    )
+    assert resp.status_code == 200, resp.text
+    rec1_id = resp.json()["id"]
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["retest_html"] == "<p>第一次复测仍存在</p>"
+
+    # 第二条记录：聚合并带"复测记录 N"标题
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>第二次复测已修复</p>", "content_json": None},
+    )
+    rec2_id = resp.json()["id"]
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert "复测记录 1" in vul["retest_html"] and "复测记录 2" in vul["retest_html"]
+    assert "第一次复测仍存在" in vul["retest_html"]
+    assert "第二次复测已修复" in vul["retest_html"]
+
+    # 更新记录：聚合内容跟随变化
+    resp = await client.put(
+        f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth,
+        json={"content_html": "<p>第二次复测部分修复</p>", "content_json": None},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert "第二次复测部分修复" in vul["retest_html"]
+    assert "第二次复测已修复" not in vul["retest_html"]
+
+    # 删除一条：回到单条内容（无编号标题）
+    resp = await client.delete(f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth)
+    assert resp.status_code == 200
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["retest_html"] == "<p>第一次复测仍存在</p>"
+
+    # 全部删除：retest_html 清空
+    resp = await client.delete(f"/api/v1/vulns/{vul_id}/retests/{rec1_id}", headers=auth)
+    assert resp.status_code == 200
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert not vul["retest_html"]
+
+
+async def test_retest_failed_back_to_fixing(client: AsyncClient, auth: dict):
+    """复测未通过打回：50 → 55 → 50 后 status=50 且 is_retest=true（前端据此展示"复测未通过"）。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "复测打回漏洞", "level": 20},
+    )
+    vul_id = resp.json()["id"]
+
+    for status in (50, 55, 50):
+        resp = await client.post(
+            f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": status},
+        )
+        assert resp.status_code == 200, resp.text
+
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["status"] == 50
+    assert vul["is_retest"] is True
+
+
+async def test_report_section_contains_retest(client: AsyncClient, auth: dict):
+    """含复测内容的漏洞生成报告：章节 content_html 嵌入复测详情。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "报告复测漏洞", "level": 20},
+    )
+    vul_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>复测发现仍可利用</p>", "content_json": None},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "复测内容报告", "vul_ids": [vul_id]},
+    )
+    assert resp.status_code == 200, resp.text
+    section = resp.json()["sections"][0]
+    assert "复测详情" in section["content_html"]
+    assert "复测发现仍可利用" in section["content_html"]

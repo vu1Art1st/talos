@@ -15,9 +15,10 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    user_id = decode_token(token, "access")
-    if user_id is None:
+    decoded = decode_token(token, "access")
+    if decoded is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录已过期，请重新登录")
+    user_id, ver = decoded
     user = (
         await session.execute(
             select(User).options(selectinload(User.role)).where(User.id == user_id)
@@ -25,6 +26,9 @@ async def get_current_user(
     ).scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "账号不存在或已禁用")
+    # 令牌版本不一致（已改密/禁用）：拒绝存量令牌
+    if ver != user.token_version:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效，请重新登录")
     return user
 
 

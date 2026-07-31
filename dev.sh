@@ -26,7 +26,8 @@ fi
 echo "[dev] 启动后端 http://localhost:8000 （SQLite + 免队列）"
 (
   cd "$BACKEND"
-  VP_DATABASE_URL='sqlite+aiosqlite:///./dev.db' VP_DISABLE_QUEUE=1 \
+  # 开发模式：开启 DEBUG（放宽密钥校验、暴露 API 文档），固定内置 admin 初始口令
+  VP_DATABASE_URL='sqlite+aiosqlite:///./dev.db' VP_DISABLE_QUEUE=1 VP_DEBUG=1 VP_INITIAL_ADMIN_PASSWORD='admin123' \
     exec "$BACKEND/.venv/bin/python" -m uvicorn app.main:app --reload --port 8000
 ) &
 BACKEND_PID=$!

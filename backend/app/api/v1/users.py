@@ -6,6 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.auth import build_user_out
 from app.constants import PERMISSIONS
 from app.core.deps import get_current_user, require_any_perm, require_perm
+from app.core.query import get_or_404, paginate
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, Role, User
@@ -26,13 +27,10 @@ async def list_users(
     cond = []
     if search:
         cond.append(User.username.ilike(f"%{search}%") | User.realname.ilike(f"%{search}%"))
-    total = (await session.execute(select(func.count(User.id)).where(*cond))).scalar_one()
-    users = (
-        await session.execute(
-            select(User).options(selectinload(User.role)).where(*cond)
-            .order_by(User.id.desc()).offset((page - 1) * size).limit(size)
-        )
-    ).scalars().all()
+    stmt = (
+        select(User).options(selectinload(User.role)).where(*cond).order_by(User.id.desc())
+    )
+    total, users = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_user_out(u) for u in users])
 
 
@@ -82,17 +80,20 @@ async def update_user(
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    user = await session.get(User, user_id)
-    if user is None:
-        raise HTTPException(404, "用户不存在")
+    user = await get_or_404(session, User, user_id, "用户不存在")
     user.realname = body.realname
     user.email = body.email
     user.phone = body.phone
+    # 由启用转为禁用：递增令牌版本，强制已登录会话失效
+    if user.is_active and not body.is_active:
+        user.token_version += 1
     user.is_active = body.is_active
     user.role_id = body.role_id
     if body.password:
         user.password_hash = hash_password(body.password)
         user.must_change_password = True
+        # 重置密码同样失效存量令牌
+        user.token_version += 1
     await session.commit()
     await session.refresh(user)
     return build_user_out(user)
@@ -148,9 +149,7 @@ async def update_role(
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    role = await session.get(Role, role_id)
-    if role is None:
-        raise HTTPException(404, "角色不存在")
+    role = await get_or_404(session, Role, role_id, "角色不存在")
     role.name = body.name
     role.permissions = body.permissions
     role.remark = body.remark
@@ -210,9 +209,7 @@ async def update_group(
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    group = await session.get(Group, group_id)
-    if group is None:
-        raise HTTPException(404, "组不存在")
+    group = await get_or_404(session, Group, group_id, "组不存在")
     group.name = body.name
     group.remark = body.remark
     await session.commit()

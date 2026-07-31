@@ -1,4 +1,29 @@
 """业务字典与漏洞状态机，语义沿用洞察2.0（logic/define.py）。"""
+from enum import IntEnum
+
+# Word (.docx) 文件的标准 MIME 类型，供上传校验与导出响应统一引用
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+class VulStatus(IntEnum):
+    """漏洞状态码。IntEnum 成员与其整数值相等，数据库仍存整数，历史比较不受影响。"""
+    UNFIXED = 10   # 未修复
+    IGNORED = 20   # 已忽略
+    DEFERRED = 35  # 暂不处理
+    FIXING = 50    # 修复中
+    RETESTING = 55  # 复测中
+    FIXED = 60     # 已修复
+
+
+class PlanStatus(IntEnum):
+    """测试计划状态码。"""
+    UNTESTED = 10      # 未测试
+    TESTING = 20       # 初测中
+    WAIT_RETEST = 30   # 等待复测
+    RETEST_APPLY = 40  # 复测申请
+    RETESTING = 50     # 复测中
+    RETEST_DONE = 60   # 复测完成
+
 
 VUL_TYPE = {
     10: "SQL注入漏洞",
@@ -23,32 +48,32 @@ VUL_LEVEL = {10: "严重", 20: "高危", 30: "中危", 40: "低危", 50: "安全
 VUL_LEVEL_EXPORT = {10: "超危", 20: "高危", 30: "中危", 40: "低危", 50: "安全"}
 
 VUL_STATUS = {
-    10: "未修复",
-    20: "已忽略",
-    35: "暂不处理",
-    50: "修复中",
-    55: "复测中",
-    60: "已修复",
+    VulStatus.UNFIXED: "未修复",
+    VulStatus.IGNORED: "已忽略",
+    VulStatus.DEFERRED: "暂不处理",
+    VulStatus.FIXING: "修复中",
+    VulStatus.RETESTING: "复测中",
+    VulStatus.FIXED: "已修复",
 }
 
 # 状态机：当前状态 -> 允许流转到的状态（仅测试人员使用的简化流程）
 # 未修复 --关联生成报告(自动)--> 修复中 --点击复测(自动)--> 复测中
 # 复测中 --测试人员手动--> 已修复 / 复测未通过(回修复中) / 已忽略 / 暂不处理
 VUL_TRANSITIONS = {
-    10: {20, 35, 50},
-    20: {10},
-    35: {10, 50},
-    50: {55},
-    55: {20, 35, 50, 60},
-    60: set(),
+    VulStatus.UNFIXED: {VulStatus.IGNORED, VulStatus.DEFERRED, VulStatus.FIXING},
+    VulStatus.IGNORED: {VulStatus.UNFIXED},
+    VulStatus.DEFERRED: {VulStatus.UNFIXED, VulStatus.FIXING},
+    VulStatus.FIXING: {VulStatus.RETESTING},
+    VulStatus.RETESTING: {VulStatus.IGNORED, VulStatus.DEFERRED, VulStatus.FIXING, VulStatus.FIXED},
+    VulStatus.FIXED: set(),
 }
 
 # 进入某状态时需要打点的时间字段
 STATUS_TIMESTAMP = {
-    50: "notice_time",
-    20: "fix_time",
-    35: "fix_time",
-    60: "fix_time",
+    VulStatus.FIXING: "notice_time",
+    VulStatus.IGNORED: "fix_time",
+    VulStatus.DEFERRED: "fix_time",
+    VulStatus.FIXED: "fix_time",
 }
 
 VUL_SOURCE = {10: "安全部", 20: "SRC", 30: "众测", 40: "公众平台", 50: "合作伙伴", 60: "Word导入"}
@@ -61,12 +86,12 @@ URL_TAG = {10: "互联网", 20: "办公网"}
 
 # 测试计划当前状态
 TESTING_PLAN_STATUS = {
-    10: "未测试",
-    20: "初测中",
-    30: "等待复测",
-    40: "复测申请",
-    50: "复测中",
-    60: "复测完成",
+    PlanStatus.UNTESTED: "未测试",
+    PlanStatus.TESTING: "初测中",
+    PlanStatus.WAIT_RETEST: "等待复测",
+    PlanStatus.RETEST_APPLY: "复测申请",
+    PlanStatus.RETESTING: "复测中",
+    PlanStatus.RETEST_DONE: "复测完成",
 }
 
 # RBAC 权限点

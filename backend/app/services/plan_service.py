@@ -1,5 +1,5 @@
 """测试计划辅助服务：认领权限判定、关联漏洞统计重算与复测轮次记录。"""
-from datetime import datetime
+from app.core.timeutil import utcnow
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -60,7 +60,7 @@ def start_retest_round(
         if not force:
             return
         for r in unfinished:
-            r.done_time = datetime.utcnow()
+            r.done_time = utcnow()
     next_no = max((r.round_no for r in plan.retest_rounds), default=0) + 1
     session.add(TestingPlanRetestRound(
         plan_id=plan.id, round_no=next_no, source=source, creator_id=user_id,
@@ -71,7 +71,7 @@ def finish_retest_round(plan: TestingPlan) -> None:
     """复测完成时为当前进行中的轮次打完成点。"""
     for r in plan.retest_rounds:
         if r.done_time is None:
-            r.done_time = datetime.utcnow()
+            r.done_time = utcnow()
 
 
 def reopen_retest_round(plan: TestingPlan) -> None:

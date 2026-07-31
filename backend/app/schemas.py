@@ -2,7 +2,9 @@
 from datetime import datetime
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.sanitize import sanitize_html
 
 T = TypeVar("T")
 
@@ -143,6 +145,16 @@ class AssetImportResultOut(BaseModel):
     errors: list[str] = []
 
 
+class PlanImportResultOut(BaseModel):
+    """测试计划导入结果：按 ID 更新、无 ID 新增。"""
+
+    total: int = 0
+    created: int = 0
+    updated: int = 0
+    failed: int = 0
+    errors: list[str] = []
+
+
 # ---------- 漏洞 ----------
 class VulIn(BaseModel):
     title: str
@@ -163,6 +175,11 @@ class VulIn(BaseModel):
     asset_level: int = 0
     asset_ids: list[int] = []
     testing_plan_id: int | None = None  # 关联测试计划
+
+    @field_validator("description_html", "reproduce_html", "solution_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str) -> str:
+        return sanitize_html(v)
 
 
 class VulOut(VulIn):
@@ -205,6 +222,11 @@ class VulTransitionIn(BaseModel):
     retest_html: str | None = None
     retest_json: dict | None = None
 
+    @field_validator("retest_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str | None) -> str | None:
+        return sanitize_html(v) if v is not None else v
+
 
 class VulDelayIn(BaseModel):
     delay_days: int = Field(gt=0)
@@ -225,6 +247,11 @@ class VulRetestRecordIn(BaseModel):
 
     content_html: str = ""
     content_json: dict | None = None
+
+    @field_validator("content_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str) -> str:
+        return sanitize_html(v)
 
 
 class VulRetestRecordOut(VulRetestRecordIn):
@@ -276,6 +303,11 @@ class ImportRecordUpdateIn(BaseModel):
     reproduce_html: str | None = None
     solution_html: str | None = None
 
+    @field_validator("description_html", "reproduce_html", "solution_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str | None) -> str | None:
+        return sanitize_html(v) if v is not None else v
+
 
 class ImportBatchOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -306,6 +338,11 @@ class SectionIn(BaseModel):
     content_html: str = ""
     content_json: dict | None = None
     vul_id: int | None = None
+
+    @field_validator("content_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str) -> str:
+        return sanitize_html(v)
 
 
 class SectionOut(SectionIn):
@@ -412,6 +449,16 @@ class VulBrief(BaseModel):
     status: int = 10
 
 
+class ReportBrief(BaseModel):
+    """测试计划反向展示已关联报告的摘要视图。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    title: str
+    status: str = "draft"
+
+
 class RetestRoundOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -435,6 +482,8 @@ class TestingPlanIn(BaseModel):
     stat_high: int = 0
     stat_medium: int = 0
     stat_low: int = 0
+    est_mandays: float = 0  # 预估人天
+    actual_mandays: float = 0  # 实际人天
     brief: str = ""
     detail: str = ""
 
@@ -445,6 +494,7 @@ class TestingPlanOut(TestingPlanIn):
     id: int
     testers: list[UserBrief] = []
     vuls: list[VulBrief] = []
+    reports: list[ReportBrief] = []
     retest_rounds: list[RetestRoundOut] = []
     retest_round_count: int = 0
     create_time: datetime | None = None

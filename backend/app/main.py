@@ -35,20 +35,24 @@ def create_app() -> FastAPI:
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
         lifespan=lifespan,
-        docs_url="/api/docs",
-        openapi_url="/api/openapi.json",
+        # 仅在调试模式暴露交互式文档，生产环境关闭以减少信息面
+        docs_url="/api/docs" if settings.DEBUG else None,
+        redoc_url=None,
+        openapi_url="/api/openapi.json" if settings.DEBUG else None,
     )
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=settings.CORS_ORIGINS,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
     app.include_router(api_router, prefix="/api/v1")
-    app.mount("/storage", StaticFiles(directory=str(settings.storage_path)), name="storage")
+    # 仅公开图片子目录：导出/导入原始文档/预览等敏感文件不再静态暴露，改走鉴权接口
+    images_dir = settings.storage_sub("uploads", "images")
+    app.mount("/storage/uploads/images", StaticFiles(directory=str(images_dir)), name="images")
 
     @app.get("/api/health")
     async def health():

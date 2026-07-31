@@ -29,9 +29,9 @@
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="v in row.vuls" :key="v.id" class="flex items-center gap-2">
-                <el-tag size="small" :color="levelColor(v.level)" style="color:#fff;border:none">
+                <span class="tl-tag" :style="levelSoftStyle(v.level)">
                   {{ levelName(v.level) }}
-                </el-tag>
+                </span>
                 <el-button size="small" type="primary" link class="!p-0"
                            @click="router.push(`/vulns/${v.id}`)">#{{ v.id }} {{ v.title }}</el-button>
               </div>
@@ -112,7 +112,7 @@ import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
-import { levelColor } from '../utils/colors'
+import { levelSoftStyle } from '../utils/colors'
 
 const router = useRouter()
 const items = ref<any[]>([])

@@ -17,7 +17,7 @@ from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
 
-from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE
+from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
@@ -199,9 +199,17 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
         vul = by_id.get(section.get("vul_id"))
         title = section.get("title") or "未命名章节"
         if vul is not None:
-            title = f"{title}（{VUL_STATUS.get(vul.get('status'), '-')}）"
+            # 修复中且经历过复测 = 复测未通过打回，展示层区分（状态码不变）
+            status_name = VUL_STATUS.get(vul.get("status"), "-")
+            if vul.get("status") == VulStatus.FIXING and vul.get("is_retest"):
+                status_name = "复测未通过"
+            title = f"{title}（{status_name}）"
         doc.add_paragraph(title, style="Heading 3")
         _add_html(doc, section.get("content_html", ""))
+        # 章节快照未含复测详情时，追加漏洞最新复测内容（避免与生成时嵌入的快照重复）
+        retest = (vul or {}).get("retest_html", "")
+        if retest and "复测详情" not in (section.get("content_html") or ""):
+            _add_html(doc, f"<p><strong>复测详情：</strong></p>{retest}")
 
 
 def _enable_update_fields(doc: Document) -> None:
