@@ -1,6 +1,9 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
     <div class="flex items-center gap-2 mb-4">
+      <el-input v-model="keyword" placeholder="搜索漏洞名称 / 类型" clearable class="!w-64">
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
       <span class="text-gray-400 text-sm">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
       <div class="flex-1" />
       <template v-if="auth.hasPerm('vuln:manage')">
@@ -16,15 +19,15 @@
       </template>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe @selection-change="(rows: any[]) => (selected = rows)">
+    <el-table v-loading="loading" :data="filteredItems" stripe @selection-change="(rows: any[]) => (selected = rows)">
       <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="44" />
-      <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip />
-      <el-table-column label="漏洞类型" width="140">
+      <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
+      <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
         <template #default="{ row }">
           <el-tag size="small">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="危害等级" width="90">
+      <el-table-column prop="severity_level" label="危害等级" width="90" sortable>
         <template #default="{ row }">
           <span class="tl-tag" :style="levelSoftStyle(row.severity_level)">
             {{ meta?.vul_level?.[row.severity_level] ?? row.severity_level }}
@@ -40,10 +43,10 @@
       <el-table-column label="参考链接" width="90">
         <template #default="{ row }">{{ (row.references ?? []).length || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="username" label="维护人" width="110">
+      <el-table-column prop="username" label="维护人" width="110" sortable>
         <template #default="{ row }">{{ row.username || '-' }}</template>
       </el-table-column>
-      <el-table-column label="更新时间" width="170">
+      <el-table-column prop="update_time" label="更新时间" width="170" sortable>
         <template #default="{ row }">{{ (row.update_time ?? '').replace('T', ' ').slice(0, 19) || '-' }}</template>
       </el-table-column>
       <el-table-column v-if="auth.hasPerm('vuln:manage')" label="操作" width="140" fixed="right">
@@ -118,9 +121,9 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Plus, Upload } from '@element-plus/icons-vue'
+import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
@@ -129,6 +132,14 @@ import { levelSoftStyle } from '../utils/colors'
 const auth = useAuthStore()
 const meta = ref<any>(null)
 const items = ref<any[]>([])
+const keyword = ref('')
+const filteredItems = computed(() => {
+  const k = keyword.value.trim().toLowerCase()
+  if (!k) return items.value
+  return items.value.filter((r) =>
+    (r.vulnerability_name || '').toLowerCase().includes(k) ||
+    (meta.value?.vul_type?.[r.vul_type] || '').toLowerCase().includes(k))
+})
 const selected = ref<any[]>([])
 const loading = ref(false)
 const saving = ref(false)

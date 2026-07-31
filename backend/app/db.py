@@ -42,6 +42,8 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN testing_plan_id INTEGER"))
         if "target_ip" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN target_ip VARCHAR(255) NOT NULL DEFAULT ''"))
+        if report_cols and "revision" not in report_cols:
+            await conn.execute(text("ALTER TABLE reports ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"))
         plan_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(testing_plans)"))).fetchall()}
         if plan_cols and "est_mandays" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))

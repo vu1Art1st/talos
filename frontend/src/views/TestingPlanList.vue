@@ -18,7 +18,7 @@
                       start-placeholder="接收起" end-placeholder="接收止" @change="reload" />
       <div class="flex-1" />
       <el-button @click="downloadTemplate">
-        <el-icon class="mr-1"><Download /></el-icon>导入模板
+        <el-icon class="mr-1"><Download /></el-icon>导入模板下载
       </el-button>
       <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx" class="inline-block">
         <el-button :loading="importing">
@@ -53,12 +53,12 @@
       </el-collapse-item>
     </el-collapse>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="60" />
-      <el-table-column prop="system_name" label="测试系统" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip />
-      <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip />
-      <el-table-column label="状态" width="85">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="ID" width="60" sortable="custom" />
+      <el-table-column prop="system_name" label="测试系统" min-width="150" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="status" label="状态" width="85" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusMap[row.status] ?? row.status }}</el-tag>
         </template>
@@ -74,10 +74,10 @@
       <el-table-column label="漏洞统计" width="165">
         <template #default="{ row }">
           <span class="inline-flex gap-1">
-            <el-tag size="small" color="#A61B29" style="color:#fff;border:none">超 {{ row.stat_critical }}</el-tag>
-            <el-tag size="small" type="danger">高 {{ row.stat_high }}</el-tag>
-            <el-tag size="small" type="warning">中 {{ row.stat_medium }}</el-tag>
-            <el-tag size="small" type="primary">低 {{ row.stat_low }}</el-tag>
+            <span class="tl-tag" :style="levelBadgeStyle(10, row.stat_critical)">超 {{ row.stat_critical }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(20, row.stat_high)">高 {{ row.stat_high }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(30, row.stat_medium)">中 {{ row.stat_medium }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(40, row.stat_low)">低 {{ row.stat_low }}</span>
           </span>
         </template>
       </el-table-column>
@@ -124,10 +124,10 @@
           <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="需求接收" width="100">
+      <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
         <template #default="{ row }">{{ row.receive_time || '-' }}</template>
       </el-table-column>
-      <el-table-column label="复测完成" width="100">
+      <el-table-column prop="retest_done_time" label="复测完成" width="100" sortable="custom">
         <template #default="{ row }">{{ row.retest_done_time || '-' }}</template>
       </el-table-column>
       <el-table-column label="复测轮数" width="78">
@@ -268,14 +268,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Upload } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle } from '../utils/colors'
+import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -287,6 +287,7 @@ const statusFilter = ref<number | null>(null)
 const typeFilter = ref<string>('')
 const deptFilter = ref<string>('')
 const dateRange = ref<[string, string] | null>(null)
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
 const statusMap = ref<Record<number, string>>({})
@@ -392,6 +393,10 @@ function filterParams(): Record<string, any> {
     params.receive_from = dateRange.value[0]
     params.receive_to = dateRange.value[1]
   }
+  if (sort.prop) {
+    params.sort = sort.prop
+    params.order = sort.order
+  }
   return params
 }
 
@@ -407,6 +412,12 @@ async function load(p = page.value) {
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 async function loadStats() {

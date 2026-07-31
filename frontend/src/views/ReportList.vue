@@ -17,18 +17,18 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip />
-      <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip />
-      <el-table-column prop="author" label="作者" width="120" />
-      <el-table-column label="状态" width="90">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="author" label="作者" width="120" sortable="custom" />
+      <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusName(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="version" label="版本" width="70" />
-      <el-table-column label="更新时间" width="170">
+      <el-table-column prop="version" label="版本" width="70" sortable="custom" />
+      <el-table-column prop="update_time" label="更新时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmt(row.update_time) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
@@ -77,7 +77,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import dayjs from 'dayjs'
@@ -91,6 +91,7 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')
@@ -116,12 +117,18 @@ async function load(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const { data } = await client.get('/reports', { params: { search: search.value, page: p, size: 20 } })
+    const { data } = await client.get('/reports', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
     items.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 async function createBlank() {

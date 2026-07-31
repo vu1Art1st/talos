@@ -40,7 +40,7 @@ async def list_entries(
     return (
         await session.execute(
             select(KnowledgeEntry).order_by(
-                KnowledgeEntry.vul_type, KnowledgeEntry.severity_level, KnowledgeEntry.id
+                KnowledgeEntry.severity_level, KnowledgeEntry.vul_type, KnowledgeEntry.id
             )
         )
     ).scalars().all()

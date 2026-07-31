@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.auth import build_user_out
 from app.constants import PERMISSIONS
 from app.core.deps import get_current_user, require_any_perm, require_perm
-from app.core.query import get_or_404, paginate
+from app.core.query import get_or_404, paginate, apply_sort
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, Role, User
@@ -19,6 +19,8 @@ router = APIRouter(tags=["用户与权限"])
 @router.get("/users", response_model=Page[UserOut])
 async def list_users(
     search: str = "",
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("user:manage")),
@@ -27,8 +29,11 @@ async def list_users(
     cond = []
     if search:
         cond.append(User.username.ilike(f"%{search}%") | User.realname.ilike(f"%{search}%"))
-    stmt = (
-        select(User).options(selectinload(User.role)).where(*cond).order_by(User.id.desc())
+    stmt = select(User).options(selectinload(User.role)).where(*cond)
+    stmt = apply_sort(
+        stmt, User, sort, order,
+        {"id", "username", "realname", "email", "is_active", "create_time", "last_login"},
+        User.id.desc(),
     )
     total, users = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_user_out(u) for u in users])

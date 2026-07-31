@@ -447,7 +447,7 @@ class ReportMetaIn(BaseModel):
 
 
 class ReportSaveIn(ReportMetaIn):
-    version: int = 1
+    revision: int = 0
     sections: list[SectionIn] = []
 
 
@@ -456,6 +456,7 @@ class ReportOut(ReportMetaIn):
 
     id: int
     version: int = 1
+    revision: int = 0
     testing_plan_id: int | None = None
     creator_id: int | None = None
     create_time: datetime | None = None
@@ -468,6 +469,7 @@ class ReportListOut(ReportMetaIn):
 
     id: int
     version: int = 1
+    revision: int = 0
     testing_plan_id: int | None = None
     update_time: datetime | None = None
 

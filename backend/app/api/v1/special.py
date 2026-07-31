@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
 from app.core.deps import require_perm
-from app.core.query import get_or_404, paginate
+from app.core.query import get_or_404, paginate, apply_sort
 from app.core.timeutil import utcnow
 from app.db import get_session
 from app.models import (
@@ -41,6 +41,8 @@ router = APIRouter(tags=["专项管理"])
 @router.get("/remote-testings", response_model=Page[RemoteTestingOut])
 async def list_remote_testings(
     search: str = "",
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("special:manage")),
@@ -53,7 +55,12 @@ async def list_remote_testings(
             | RemoteTesting.system_name.ilike(f"%{search}%")
             | RemoteTesting.department.ilike(f"%{search}%")
         )
-    stmt = select(RemoteTesting).where(*cond).order_by(RemoteTesting.id.desc())
+    stmt = select(RemoteTesting).where(*cond)
+    stmt = apply_sort(
+        stmt, RemoteTesting, sort, order,
+        {"id", "title", "system_name", "test_time", "department", "appeal_success", "create_time"},
+        RemoteTesting.id.desc(),
+    )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
@@ -240,13 +247,21 @@ async def list_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to)
-    stmt = select(TestingPlan).where(*cond).order_by(TestingPlan.id.desc())
+    stmt = select(TestingPlan).where(*cond)
+    stmt = apply_sort(
+        stmt, TestingPlan, sort, order,
+        {"id", "system_name", "test_type", "department", "status", "est_mandays",
+         "actual_mandays", "receive_time", "retest_done_time", "create_time"},
+        TestingPlan.id.desc(),
+    )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
@@ -458,6 +473,17 @@ async def import_testing_plans(
     return result
 
 
+# 注意：需注册在 /testing-plans/stats、/testing-plans/export、/testing-plans/import/template 等静态路径之后，防止路径吞噬
+@router.get("/testing-plans/{row_id}", response_model=TestingPlanOut)
+async def get_testing_plan(
+    row_id: int,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """单条计划详情（含测试人员/关联漏洞/关联报告/复测轮次），供流程抽屉刷新。"""
+    return await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+
+
 @router.post("/testing-plans", response_model=TestingPlanOut)
 async def create_testing_plan(
     body: TestingPlanIn,
@@ -558,6 +584,8 @@ async def _load_vulns(session: AsyncSession, vul_ids: list[int]) -> list[Vul]:
 @router.get("/spring-actions", response_model=Page[SpringActionOut])
 async def list_spring_actions(
     search: str = "",
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("special:manage")),
@@ -570,7 +598,13 @@ async def list_spring_actions(
             | SpringAction.system_name.ilike(f"%{search}%")
             | SpringAction.doc_no.ilike(f"%{search}%")
         )
-    stmt = select(SpringAction).where(*cond).order_by(SpringAction.id.desc())
+    stmt = select(SpringAction).where(*cond)
+    stmt = apply_sort(
+        stmt, SpringAction, sort, order,
+        {"id", "report_no", "system_name", "year", "phase", "appeal_success",
+         "score_deduction", "doc_no", "create_time"},
+        SpringAction.id.desc(),
+    )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 

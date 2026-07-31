@@ -54,5 +54,9 @@ export const softStyle = (color: string) => ({
 })
 export const levelSoftStyle = (lv: number) => softStyle(levelColor(lv))
 export const statusSoftStyle = (s: number) => softStyle(statusColor(s))
+
+// 统计徽章双模式：数量>0 深背景白字（醒目），数量=0 浅背景深字（弱化）
+export const levelBadgeStyle = (lv: number, count: number) =>
+  count > 0 ? { background: levelColor(lv), color: '#fff' } : softStyle(levelColor(lv))
 export const statusSoftStyleEx = (status: number, isRetest?: boolean) =>
   softStyle(isRetestFailed(status, isRetest) ? RETEST_FAILED_COLOR : statusColor(status))

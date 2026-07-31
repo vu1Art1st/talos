@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE
 from app.core.deps import get_current_user, require_perm, user_permissions
-from app.core.query import get_or_404, paginate
+from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import Asset, User, Vul, VulLog, VulRetestRecord
 from app.schemas import (
@@ -63,6 +63,8 @@ async def list_vulns(
     asset_id: int | None = None,
     testing_plan_id: int | None = None,
     mine: bool = False,
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     user: User = Depends(get_current_user),
@@ -84,7 +86,12 @@ async def list_vulns(
     if mine:
         cond.append(Vul.submitter_id == user.id)
 
-    stmt = select(Vul).where(*cond).order_by(Vul.submit_time.desc())
+    stmt = select(Vul).where(*cond)
+    stmt = apply_sort(
+        stmt, Vul, sort, order,
+        {"id", "title", "level", "vul_type", "status", "submit_time"},
+        Vul.submit_time.desc(),
+    )
     total, vulns = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_vul_out(v) for v in vulns])
 

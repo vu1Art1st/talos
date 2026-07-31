@@ -24,4 +24,6 @@ dist/
 # 本地测试产物（浏览器手测截图、测试用配置与样例文档）
 /_edgeprofile/
 /*.png
+frontend/*.png
+*.log
 /2026*.docx

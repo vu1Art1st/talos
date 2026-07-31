@@ -7,12 +7,12 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LEVEL_EXPORT
 from app.core.deps import require_perm
-from app.core.query import get_or_404, paginate
+from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
@@ -30,12 +30,18 @@ from app.workers.dispatch import dispatch
 router = APIRouter(prefix="/reports", tags=["报告"])
 
 
+def _affected_urls_html(affected_url: str | None) -> str:
+    """影响 URL 多值以换行分隔存储，逐条转义后换行展示。"""
+    urls = [u.strip() for u in (affected_url or "").splitlines() if u.strip()]
+    return "<br/>".join(html_mod.escape(u) for u in urls) or "-"
+
+
 def _vuln_section_html(vul: Vul) -> str:
     """由漏洞记录生成标准章节 HTML，标签结构对齐导出模板「风险问题详情」（供报告编辑器继续编辑）。"""
     parts = [
         f"<p><strong>测试状态：</strong>{'复测' if vul.is_retest else '初测'}</p>",
         f"<p><strong>漏洞等级：</strong>{VUL_LEVEL_EXPORT.get(vul.level, '-')}</p>",
-        f"<p><strong>漏洞链接：</strong>{html_mod.escape(vul.affected_url or '-')}</p>",
+        f"<p><strong>漏洞链接：</strong>{_affected_urls_html(vul.affected_url)}</p>",
     ]
     if vul.description_html:
         parts.append(f"<p><strong>漏洞描述：</strong></p>{vul.description_html}")
@@ -59,9 +65,26 @@ async def _auto_mark_fixing(session: AsyncSession, vul_ids: list[int], user: Use
     )
 
 
+async def _infer_plan_id(session: AsyncSession, vul_ids: list[int]) -> int | None:
+    """从章节关联漏洞推导归属测试计划：当且仅当这些漏洞归属唯一非空计划时返回该计划 ID。"""
+    ids = [vid for vid in vul_ids if vid]
+    if not ids:
+        return None
+    plan_ids = (
+        await session.execute(
+            select(Vul.testing_plan_id)
+            .where(Vul.id.in_(ids), Vul.testing_plan_id.is_not(None))
+            .distinct()
+        )
+    ).scalars().all()
+    return plan_ids[0] if len(plan_ids) == 1 else None
+
+
 @router.get("", response_model=Page[ReportListOut])
 async def list_reports(
     search: str = "",
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("report:manage")),
@@ -70,7 +93,12 @@ async def list_reports(
     cond = []
     if search:
         cond.append(Report.title.ilike(f"%{search}%") | Report.project_name.ilike(f"%{search}%"))
-    stmt = select(Report).where(*cond).order_by(Report.update_time.desc())
+    stmt = select(Report).where(*cond)
+    stmt = apply_sort(
+        stmt, Report, sort, order,
+        {"id", "title", "project_name", "author", "status", "version", "update_time", "create_time"},
+        Report.update_time.desc(),
+    )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
@@ -81,7 +109,7 @@ async def create_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    report = Report(**body.model_dump(exclude={"sections", "version"}), creator_id=user.id)
+    report = Report(**body.model_dump(exclude={"sections", "revision"}), creator_id=user.id)
     for s in body.sections:
         report.sections.append(ReportSection(
             order=s.order, title=s.title,
@@ -90,6 +118,9 @@ async def create_report(
     session.add(report)
     await session.flush()
     linked_ids = [s.vul_id for s in body.sections if s.vul_id]
+    # 未显式关联计划时，若章节漏洞归属唯一计划则自动回写，保证计划页关联报告数量准确
+    if report.testing_plan_id is None:
+        report.testing_plan_id = await _infer_plan_id(session, linked_ids)
     await _auto_mark_fixing(session, linked_ids, user, report.title)
     await session.commit()
     await session.refresh(report)
@@ -110,13 +141,17 @@ async def create_report_from_vulns(
 ):
     """从已有漏洞记录一键生成报告草稿，每个漏洞一个章节。"""
     plan = None
-    if body.testing_plan_id is not None:
-        plan = await plan_service.get_plan_or_400(session, body.testing_plan_id)
+    plan_id = body.testing_plan_id
+    if plan_id is None:
+        # 未显式选择计划时，若所选漏洞归属唯一计划则自动推导
+        plan_id = await _infer_plan_id(session, body.vul_ids)
+    if plan_id is not None:
+        plan = await plan_service.get_plan_or_400(session, plan_id)
     vulns = (await session.execute(select(Vul).where(Vul.id.in_(body.vul_ids)))).scalars().all()
     by_id = {v.id: v for v in vulns}
     report = Report(
         title=body.title, author=user.realname or user.username,
-        testing_plan_id=body.testing_plan_id, creator_id=user.id,
+        testing_plan_id=plan_id, creator_id=user.id,
     )
     order = 0
     for vid in body.vul_ids:
@@ -158,13 +193,13 @@ async def save_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """全量保存报告（元信息 + 章节），version 乐观锁防止并发覆盖。"""
+    """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。"""
     report = await _get_report(session, report_id)
-    if body.version != report.version:
+    if body.revision != report.revision:
         raise HTTPException(409, "报告已被他人修改，请刷新后重试")
 
     old_linked = {s.vul_id for s in report.sections if s.vul_id}
-    for k, v in body.model_dump(exclude={"sections", "version"}).items():
+    for k, v in body.model_dump(exclude={"sections", "revision"}).items():
         setattr(report, k, v)
     report.sections.clear()
     await session.flush()
@@ -173,10 +208,15 @@ async def save_report(
             order=s.order, title=s.title,
             content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
         ))
-    report.version += 1
+    report.revision += 1
     # 编辑中新关联进来的漏洞同样自动进入修复中
     new_linked = [s.vul_id for s in body.sections if s.vul_id and s.vul_id not in old_linked]
     await _auto_mark_fixing(session, new_linked, user, report.title)
+    # 报告尚未关联计划时，若章节漏洞归属唯一计划则自动回写（不覆盖已有值）
+    if report.testing_plan_id is None:
+        report.testing_plan_id = await _infer_plan_id(
+            session, [s.vul_id for s in body.sections if s.vul_id]
+        )
     await session.commit()
     await session.refresh(report)
     return report
@@ -265,6 +305,20 @@ async def export_report(
     if body.fmt not in ("docx", "pdf"):
         raise HTTPException(400, "仅支持导出 docx 或 pdf")
     report = await _get_report(session, report_id)
+    # 测试周期自动预填（仅当字段为空，不覆盖用户已填写值）：
+    # 开始日期 = 关联漏洞最早提交日期，结束日期 = 当天
+    if not report.test_start or not report.test_end:
+        vul_ids = [s.vul_id for s in report.sections if s.vul_id]
+        if not report.test_start and vul_ids:
+            earliest = (
+                await session.execute(
+                    select(func.min(Vul.submit_time)).where(Vul.id.in_(vul_ids))
+                )
+            ).scalar_one_or_none()
+            if earliest is not None:
+                report.test_start = earliest.date().isoformat()
+        if not report.test_end:
+            report.test_end = date.today().isoformat()
     job = ExportJob(report_id=report_id, title=report.title, fmt=body.fmt, creator_id=user.id)
     session.add(job)
     await session.commit()

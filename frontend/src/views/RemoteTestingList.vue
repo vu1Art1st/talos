@@ -11,15 +11,15 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip />
-      <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip />
-      <el-table-column label="检测时间" width="120">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="test_time" label="检测时间" width="120" sortable="custom">
         <template #default="{ row }">{{ row.test_time || '-' }}</template>
       </el-table-column>
-      <el-table-column prop="department" label="所属部门" width="140" show-overflow-tooltip />
-      <el-table-column label="申诉结果" width="100">
+      <el-table-column prop="department" label="所属部门" width="140" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="appeal_success" label="申诉结果" width="100" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="row.appeal_success ? 'success' : 'info'" size="small">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
@@ -84,7 +84,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
@@ -94,6 +94,7 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
 const reports = ref<any[]>([])
@@ -113,12 +114,18 @@ async function load(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const { data } = await client.get('/remote-testings', { params: { search: search.value, page: p, size: 20 } })
+    const { data } = await client.get('/remote-testings', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
     items.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 async function openDialog(row?: any) {

@@ -24,7 +24,12 @@
           </div>
         </div>
         <el-descriptions :column="2" border class="mt-4" size="small">
-          <el-descriptions-item label="影响URL" :span="2">{{ vul.affected_url || '-' }}</el-descriptions-item>
+          <el-descriptions-item label="影响URL" :span="2">
+            <div v-if="affectedUrls.length" class="flex flex-col gap-0.5">
+              <span v-for="(u, i) in affectedUrls" :key="i">{{ u }}</span>
+            </div>
+            <span v-else>-</span>
+          </el-descriptions-item>
           <el-descriptions-item label="关联资产">
             {{ (vul.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
           </el-descriptions-item>
@@ -94,6 +99,10 @@ const logs = ref<any[]>([])
 const transitions = ref<any[]>([])
 const comment = ref('')
 const meta = ref<any>(null)
+
+// 影响URL 多值（后端换行分隔存储）逐行展示
+const affectedUrls = computed<string[]>(() =>
+  (vul.value?.affected_url ?? '').split('\n').map((u: string) => u.trim()).filter(Boolean))
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 

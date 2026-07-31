@@ -9,13 +9,13 @@
           </el-button>
         </div>
       </template>
-      <el-table v-loading="loading" :data="users" stripe>
-        <el-table-column prop="id" label="ID" width="70" />
-        <el-table-column prop="username" label="用户名" width="140" />
-        <el-table-column prop="realname" label="姓名" width="120" />
-        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip />
+      <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
+        <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+        <el-table-column prop="username" label="用户名" width="140" sortable="custom" />
+        <el-table-column prop="realname" label="姓名" width="120" sortable="custom" />
+        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="role_name" label="角色" width="130" />
-        <el-table-column label="状态" width="90">
+        <el-table-column prop="is_active" label="状态" width="90" sortable="custom">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
               {{ row.is_active ? '正常' : '禁用' }}
@@ -133,6 +133,7 @@ const roles = ref<any[]>([])
 const allPerms = ref<string[]>([])
 const total = ref(0)
 const page = ref(1)
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const userDialog = ref(false)
 const roleDialog = ref(false)
@@ -143,12 +144,18 @@ async function loadUsers(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const { data } = await client.get('/users', { params: { page: p, size: 20 } })
+    const { data } = await client.get('/users', { params: { page: p, size: 20, sort: sort.prop, order: sort.order } })
     users.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  loadUsers(1)
 }
 
 async function loadRoles() {

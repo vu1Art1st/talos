@@ -22,11 +22,11 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="name" label="系统命名" min-width="150" show-overflow-tooltip />
-      <el-table-column prop="sub_system" label="子系统" min-width="110" show-overflow-tooltip />
-      <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip />
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column prop="name" label="系统命名" min-width="150" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="sub_system" label="子系统" min-width="110" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip sortable="custom" />
       <el-table-column label="公网URL" min-width="200">
         <template #default="{ row }">
           <div v-for="(u, i) in (row.public_urls ?? []).slice(0, 2)" :key="i" class="flex items-center gap-1">
@@ -43,10 +43,10 @@
           {{ (row.owners ?? []).map((o: any) => o.name).join('、') || '-' }}
         </template>
       </el-table-column>
-      <el-table-column label="安全等级" width="100">
+      <el-table-column prop="sec_level" label="安全等级" width="100" sortable="custom">
         <template #default="{ row }">{{ meta?.asset_sec_level?.[row.sec_level] ?? '-' }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="90">
+      <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="row.status === 10 ? 'success' : 'info'" size="small">
             {{ meta?.asset_status?.[row.status] ?? row.status }}
@@ -75,7 +75,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -88,6 +88,7 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const importing = ref(false)
 const dialogVisible = ref(false)
@@ -97,12 +98,18 @@ async function load(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const { data } = await client.get('/assets', { params: { search: search.value, page: p, size: 20 } })
+    const { data } = await client.get('/assets', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
     items.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 function openEdit(row?: any) {

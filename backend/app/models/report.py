@@ -8,7 +8,7 @@ from app.db import Base
 
 
 class Report(Base):
-    """漏洞报告：元信息 + 有序富文本章节。version 用于编辑乐观锁。"""
+    """漏洞报告：元信息 + 有序富文本章节。revision 用于编辑乐观锁，version 为导出版本号。"""
 
     __tablename__ = "reports"
 
@@ -21,7 +21,8 @@ class Report(Base):
     test_end: Mapped[str] = mapped_column(String(32), default="")
     target_ip: Mapped[str] = mapped_column(String(255), default="")  # 被测系统 IP，导出模板测试目标表使用
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final / completed
-    version: Mapped[int] = mapped_column(Integer, default=1)
+    version: Mapped[int] = mapped_column(Integer, default=1)  # 导出版本：每次导出成功 +1
+    revision: Mapped[int] = mapped_column(Integer, default=0)  # 编辑乐观锁：每次保存 +1
     testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -9,8 +9,8 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="80" />
-      <el-table-column prop="name" label="组织名称" min-width="160" />
+      <el-table-column prop="id" label="ID" width="80" sortable />
+      <el-table-column prop="name" label="组织名称" min-width="160" sortable />
       <el-table-column label="系统负责人" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">
           <template v-if="row.owner_name">

@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import DOCX_MIME
 from app.core.config import settings
-from app.core.query import get_or_404, paginate
+from app.core.query import get_or_404, paginate, apply_sort
 from app.core.timeutil import utcnow
 from app.core.deps import require_perm
 from app.db import get_session
@@ -82,12 +82,19 @@ async def upload_docx(
 
 @router.get("", response_model=Page[ImportBatchOut])
 async def list_batches(
+    sort: str = "",
+    order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    stmt = select(ImportBatch).order_by(ImportBatch.id.desc())
+    stmt = select(ImportBatch)
+    stmt = apply_sort(
+        stmt, ImportBatch, sort, order,
+        {"id", "filename", "status", "total", "success", "failed", "create_time"},
+        ImportBatch.id.desc(),
+    )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
@@ -318,7 +325,7 @@ async def confirm_batch(
         created += 1
 
     if report is not None and not report_auto_created:
-        report.version += 1
+        report.revision += 1  # 追加章节属编辑操作，仅自增编辑锁；导出版本号只在导出成功时 +1
         # 与报告编辑关联漏洞的行为一致：自动进入修复中
         await vuln_service.auto_transition(
             session, new_vul_ids, 50, user, f"关联报告《{report.title}》，自动进入修复中",

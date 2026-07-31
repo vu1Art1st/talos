@@ -461,23 +461,24 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     assert len(report["sections"]) == len(vul_ids)
     report_id = report["id"]
 
-    # 错误 version 保存应 409（乐观锁）
+    # 错误 revision 保存应 409（乐观锁）
     save_body = {
         "title": "季度渗透测试报告 V2",
         "project_name": "商城安全测试",
-        "version": report["version"] + 99,
+        "revision": report["revision"] + 99,
         "sections": report["sections"],
     }
     resp = await client.put(f"/api/v1/reports/{report_id}", headers=auth, json=save_body)
     assert resp.status_code == 409
 
-    # 正确 version 保存成功且版本 +1
-    save_body["version"] = report["version"]
+    # 正确 revision 保存成功：revision +1，导出 version 不受编辑影响
+    save_body["revision"] = report["revision"]
     save_body["target_ip"] = "10.0.0.8"
     resp = await client.put(f"/api/v1/reports/{report_id}", headers=auth, json=save_body)
     assert resp.status_code == 200, resp.text
     saved = resp.json()
-    assert saved["version"] == report["version"] + 1
+    assert saved["revision"] == report["revision"] + 1
+    assert saved["version"] == report["version"]  # 保存不改导出版本号
     assert saved["title"] == "季度渗透测试报告 V2"
     assert saved["target_ip"] == "10.0.0.8"
 
@@ -495,14 +496,22 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     assert resp.status_code == 200
     assert resp.content[:2] == b"PK"  # docx 是 zip 容器
 
-    # 产物基于渗透测试报告模板：验证封面标题、测试目标 IP、汇总表与详情标题
+    # 导出成功后导出版本 +1；测试周期在字段为空时自动预填（开始=最早提交日期，结束=当天）
+    from datetime import date as _date
+
+    after = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
+    assert after["version"] == saved["version"] + 1
+    assert after["test_start"]
+    assert after["test_end"] == _date.today().isoformat()
+
+    # 产物基于渗透测试报告模板：验证封面系统名称、测试目标 IP、汇总表与详情标题
     from io import BytesIO
 
     from docx import Document
 
     doc = Document(BytesIO(resp.content))
     texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
-    assert "季度渗透测试报告 V2" in texts  # 封面报告名
+    assert "商城安全测试" in texts  # 封面第二行=系统名称(project_name)，报告标题作为文件名
     assert any(t == "风险问题详情" for t in texts)
     # 测试目标表：被测系统 IP
     target_tbl = doc.tables[4]
@@ -515,6 +524,58 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     h3 = [p.text for p in doc.paragraphs if p.style.name == "Heading 3"]
     assert len(h3) == len(vul_ids)
     assert all(t.endswith("）") for t in h3)
+
+
+async def test_report_from_vulns_infer_plan_id(client: AsyncClient, auth: dict):
+    """from-vulns 未显式指定计划时：漏洞归属唯一计划则自动回写，多计划则不回写。"""
+    # 计划一 + 归属该计划的两个漏洞
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "回写系统A", "test_type": "渗透测试"},
+    )
+    plan_a = resp.json()["id"]
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "回写资产A"})
+    asset_a = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_a], "vulns": [
+            {"title": "回写漏洞A1", "level": 20, "testing_plan_id": plan_a},
+            {"title": "回写漏洞A2", "level": 30, "testing_plan_id": plan_a},
+        ]},
+    )
+    a1, a2 = [v["id"] for v in resp.json()]
+
+    # 未传 testing_plan_id：唯一归属计划应被自动回写
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "自动回写报告", "vul_ids": [a1, a2]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["testing_plan_id"] == plan_a
+
+    # 计划二 + 归属该计划的漏洞
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "回写系统B", "test_type": "渗透测试"},
+    )
+    plan_b = resp.json()["id"]
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "回写资产B"})
+    asset_b = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_b], "vulns": [
+            {"title": "回写漏洞B1", "level": 20, "testing_plan_id": plan_b},
+        ]},
+    )
+    b1 = resp.json()[0]["id"]
+
+    # 跨两个计划的漏洞：归属不唯一，不回写
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "多计划报告", "vul_ids": [a1, b1]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["testing_plan_id"] is None
 
 
 async def test_report_vuln_state_automation(client: AsyncClient, auth: dict):
@@ -625,11 +686,11 @@ async def test_import_confirm_into_report(client: AsyncClient, auth: dict):
     assert resp.status_code == 200, resp.text
     assert resp.json()["created"] == 1
 
-    # 报告新增关联章节且版本 +1
+    # 报告新增关联章节且编辑锁 revision +1（导出版本号 version 不受编辑影响）
     saved = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
     assert len(saved["sections"]) == 1
     assert saved["sections"][0]["vul_id"] is not None
-    assert saved["version"] == report["version"] + 1
+    assert saved["revision"] == report["revision"] + 1
 
     # 入库漏洞自动进入修复中
     vul = (await client.get(f"/api/v1/vulns/{saved['sections'][0]['vul_id']}", headers=auth)).json()
@@ -878,6 +939,43 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     resp = await client.put(
         f"/api/v1/testing-plans/{plan_id}", headers=auth2, json={**plan_body, "status": 50},
     )
+    assert resp.status_code == 403
+
+
+async def test_testing_plan_detail(client: AsyncClient, auth: dict):
+    """单条计划详情端点：返回关联字段；不存在 404；无 special:manage 权限 403。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "详情端点系统", "test_type": "渗透测试"},
+    )
+    plan_id = resp.json()["id"]
+    resp = await client.get(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["id"] == plan_id
+    for key in ("testers", "vuls", "reports", "retest_rounds", "retest_round_count"):
+        assert key in detail
+
+    resp = await client.get("/api/v1/testing-plans/999999", headers=auth)
+    assert resp.status_code == 404
+
+    # 无 special:manage 权限的用户被拒绝
+    resp = await client.post(
+        "/api/v1/roles", headers=auth,
+        json={"name": "无专项权限", "permissions": ["vuln:submit"], "remark": ""},
+    )
+    role_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/users", headers=auth,
+        json={"username": "no_special", "password": "Tester@123", "realname": "无专项",
+              "email": "", "phone": "", "is_active": True, "role_id": role_id},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/auth/login", data={"username": "no_special", "password": "Tester@123"},
+    )
+    auth2 = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    resp = await client.get(f"/api/v1/testing-plans/{plan_id}", headers=auth2)
     assert resp.status_code == 403
 
 
@@ -1599,3 +1697,54 @@ async def test_word_import_knowledge_backfill(client: AsyncClient, auth: dict):
     assert "危害说明" in vul["description_html"]
     assert "回填危害说明" in vul["description_html"]
     assert vul["solution_html"] == "<p>回填修复建议</p>"
+
+
+async def test_vuln_list_sorting(client: AsyncClient, auth: dict):
+    """漏洞列表按 level 升序排序结果非降序；sort 非法字段回退默认排序不报错。"""
+    # 造三条不同等级的漏洞
+    for lv in (40, 10, 30):
+        resp = await client.post(
+            "/api/v1/vulns", headers=auth,
+            json={"title": f"排序用例漏洞-{lv}", "level": lv, "vul_type": 30},
+        )
+        assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"sort": "level", "order": "asc", "size": 100},
+    )
+    assert resp.status_code == 200, resp.text
+    levels = [v["level"] for v in resp.json()["items"]]
+    assert levels == sorted(levels), levels
+
+    # 降序
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"sort": "level", "order": "desc", "size": 100},
+    )
+    levels = [v["level"] for v in resp.json()["items"]]
+    assert levels == sorted(levels, reverse=True), levels
+
+    # 非法排序字段回退默认排序（不报错）
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"sort": "drop table", "order": "asc"},
+    )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_knowledge_default_sorting(client: AsyncClient, auth: dict):
+    """知识库列表默认按 severity_level 升序为主、vul_type 升序为次。"""
+    entries = [
+        {"vulnerability_name": "排序模板A", "vul_type": 40, "severity_level": 30},
+        {"vulnerability_name": "排序模板B", "vul_type": 20, "severity_level": 30},
+        {"vulnerability_name": "排序模板C", "vul_type": 60, "severity_level": 10},
+    ]
+    for e in entries:
+        resp = await client.post("/api/v1/knowledge", headers=auth, json=e)
+        assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/api/v1/knowledge", headers=auth)
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    # 主关键字 severity_level 升序，同级时 vul_type 升序
+    keys = [(r["severity_level"], r["vul_type"]) for r in rows]
+    assert keys == sorted(keys), keys
+

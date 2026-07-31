@@ -143,6 +143,8 @@ async def export_report_task(ctx, job_id: int) -> None:
                 job.file_path = docx_path
 
             job.status = "done"
+            # 导出成功后报告导出版本 +1（编辑保存不影响该版本号）
+            report.version += 1
         except Exception as exc:
             job.status = "failed"
             job.error = str(exc)

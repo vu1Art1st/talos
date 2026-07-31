@@ -25,21 +25,22 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @row-click="(row: any) => router.push(`/vulns/${row.id}`)"
-              class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)">
+              class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
+              @sort-change="onSortChange">
       <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="42" />
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip />
-      <el-table-column label="等级" width="90">
+      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="level" label="等级" width="90" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="levelSoftStyle(row.level)">
             {{ meta?.vul_level?.[row.level] ?? row.level }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="类型" width="150">
+      <el-table-column prop="vul_type" label="类型" width="150" sortable="custom">
         <template #default="{ row }">{{ meta?.vul_type?.[row.vul_type] ?? '-' }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="100">
+      <el-table-column prop="status" label="状态" width="100" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
             {{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
@@ -54,7 +55,7 @@
       <el-table-column label="归属部门" width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.department || '-' }}</template>
       </el-table-column>
-      <el-table-column label="提交时间" width="170">
+      <el-table-column prop="submit_time" label="提交时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmt(row.submit_time) }}</template>
       </el-table-column>
     </el-table>
@@ -85,8 +86,14 @@ const loading = ref(false)
 const selected = ref<any[]>([])
 const query = reactive({
   search: '', status: undefined, level: undefined, vul_type: undefined,
-  mine: false, page: 1, size: 20,
+  mine: false, page: 1, size: 20, sort: '', order: '',
 })
+
+function onSortChange({ prop, order }: any) {
+  query.sort = order ? prop : ''
+  query.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
+}
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 

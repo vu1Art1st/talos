@@ -85,7 +85,20 @@
           </el-select>
         </el-form-item>
         <el-form-item label="影响URL">
-          <el-input v-model="vul.affected_url" placeholder="https://..." />
+          <div class="w-full flex flex-col gap-2">
+            <div v-for="(_, uidx) in vul.affected_urls" :key="uidx" class="flex items-center gap-2">
+              <el-input v-model="vul.affected_urls[uidx]" placeholder="https://..." class="flex-1" />
+              <el-button v-if="vul.affected_urls.length > 1" type="danger" link
+                         @click="vul.affected_urls.splice(uidx, 1)">
+                <el-icon><Delete /></el-icon>
+              </el-button>
+            </div>
+            <div>
+              <el-button size="small" plain @click="vul.affected_urls.push('')">
+                <el-icon class="mr-1"><Plus /></el-icon>添加URL
+              </el-button>
+            </div>
+          </div>
         </el-form-item>
       </div>
       <el-form-item label="漏洞描述">
@@ -124,7 +137,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -182,13 +195,13 @@ function onAssetChange() {
   const url = (first.public_urls ?? [])[0]?.url || (first.internal_urls ?? [])[0] || ''
   if (!url) return
   for (const vul of vulns.value) {
-    if (!vul.affected_url) vul.affected_url = url
+    if (!vul.affected_urls.some((u: string) => u.trim())) vul.affected_urls = [url]
   }
 }
 
 // ---------- 漏洞表单（新建支持多块，编辑单块） ----------
 const emptyVul = () => ({
-  title: '', level: 30, vul_type: 75, layer: 10, affected_url: '',
+  title: '', level: 30, vul_type: 75, layer: 10, affected_urls: [''],
   description_html: '', description_json: null,
   reproduce_html: '', reproduce_json: null,
   solution_html: '', solution_json: null,
@@ -196,10 +209,18 @@ const emptyVul = () => ({
 })
 const vulns = ref<any[]>([emptyVul()])
 
+// 影响URL 多值与后端单字段（换行分隔）互转
+const joinUrls = (urls: string[]) => (urls ?? []).map((u) => u.trim()).filter(Boolean).join('\n')
+const splitUrls = (raw: string) => {
+  const arr = (raw ?? '').split('\n').map((u) => u.trim()).filter(Boolean)
+  return arr.length ? arr : ['']
+}
+
 function addVuln() {
   const block = emptyVul()
   const first = selectedAssets.value[0]
-  block.affected_url = (first?.public_urls ?? [])[0]?.url || (first?.internal_urls ?? [])[0] || ''
+  const url = (first?.public_urls ?? [])[0]?.url || (first?.internal_urls ?? [])[0] || ''
+  if (url) block.affected_urls = [url]
   vulns.value.push(block)
 }
 
@@ -234,14 +255,22 @@ async function save() {
   if (!assetIds.value.length) return ElMessage.warning('请选择测试目标资产')
   saving.value = true
   try {
+    // 影响URL 多值序列化为后端单字段（换行分隔），剔除前端临时字段
+    const toPayload = (v: any) => {
+      const { affected_urls, ...rest } = v
+      return { ...rest, affected_url: joinUrls(affected_urls) }
+    }
     if (editId) {
-      await client.put(`/vulns/${editId}`, { ...vulns.value[0], asset_ids: assetIds.value })
+      await client.put(`/vulns/${editId}`, { ...toPayload(vulns.value[0]), asset_ids: assetIds.value })
       ElMessage.success('保存成功')
       router.push(`/vulns/${editId}`)
     } else {
       const { data } = await client.post('/vulns/batch', {
         asset_ids: assetIds.value,
-        vulns: vulns.value.map((v) => (planId ? { ...v, testing_plan_id: planId } : v)),
+        vulns: vulns.value.map((v) => {
+          const payload = toPayload(v)
+          return planId ? { ...payload, testing_plan_id: planId } : payload
+        }),
       })
       ElMessage.success(`成功提交 ${data.length} 个漏洞`)
       router.push(data.length === 1 ? `/vulns/${data[0].id}` : '/vulns')
@@ -260,7 +289,7 @@ onMounted(async () => {
   }
   if (editId) {
     const { data: vul } = await client.get(`/vulns/${editId}`)
-    vulns.value = [{ ...emptyVul(), ...vul }]
+    vulns.value = [{ ...emptyVul(), ...vul, affected_urls: splitUrls(vul.affected_url) }]
     assetIds.value = vul.asset_ids ?? []
     for (const a of vul.assets ?? []) {
       if (!assetCache.value[a.id]) {

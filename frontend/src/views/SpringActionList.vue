@@ -11,14 +11,14 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip />
-      <el-table-column prop="system_name" label="对应系统" min-width="160" show-overflow-tooltip />
-      <el-table-column label="年度" width="90">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="system_name" label="对应系统" min-width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="year" label="年度" width="90" sortable="custom">
         <template #default="{ row }">{{ row.year || '-' }}</template>
       </el-table-column>
-      <el-table-column label="阶段" width="110" show-overflow-tooltip>
+      <el-table-column prop="phase" label="阶段" width="110" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.phase || '-' }}</template>
       </el-table-column>
       <el-table-column label="涉及漏洞" width="110">
@@ -40,17 +40,17 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="申诉结果" width="100">
+      <el-table-column prop="appeal_success" label="申诉结果" width="100" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="row.appeal_success ? 'success' : 'info'" size="small">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="最终扣分" width="100">
+      <el-table-column prop="score_deduction" label="最终扣分" width="100" sortable="custom">
         <template #default="{ row }">{{ row.score_deduction }}</template>
       </el-table-column>
-      <el-table-column prop="doc_no" label="公文文号" width="160" show-overflow-tooltip />
+      <el-table-column prop="doc_no" label="公文文号" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
@@ -108,7 +108,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
@@ -119,6 +119,7 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
+const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
 const vulns = ref<any[]>([])
@@ -143,12 +144,18 @@ async function load(p = page.value) {
   page.value = p
   loading.value = true
   try {
-    const { data } = await client.get('/spring-actions', { params: { search: search.value, page: p, size: 20 } })
+    const { data } = await client.get('/spring-actions', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
     items.value = data.items
     total.value = data.total
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  sort.prop = order ? prop : ''
+  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 async function openDialog(row?: any) {

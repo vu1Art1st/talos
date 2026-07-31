@@ -24,6 +24,8 @@ from app.core.config import settings
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
 _HEADING_OPEN = re.compile(r"<h[1-6][^>]*>", re.IGNORECASE)
 _HEADING_CLOSE = re.compile(r"</h[1-6]>", re.IGNORECASE)
+# 章节快照中「测试状态：」后的初测/复测标记，导出时按漏洞最新 is_retest 重写
+_TEST_STATE = re.compile(r"(测试状态：</strong>)\s*(?:初测|复测)")
 
 # 漏洞详情中需要 1.5 倍行距的字段段落前缀
 _SPACED_FIELD_PREFIXES = ("测试状态：", "漏洞等级：")
@@ -35,6 +37,9 @@ _LEVEL_COLORS = {
     "中危": RGBColor(0xFF, 0xC0, 0x00),
     "低危": RGBColor(0x00, 0x70, 0xC0),
 }
+
+# 汇总表「问题状态」已修复漏洞的绿色
+FIXED_STATUS_COLOR = RGBColor(0x00, 0xB0, 0x50)
 
 # 模板中用于定位替换的封面/统计段落文案
 _TPL_COVER_TITLE = "标准名称（邮件、台账）-系统名称（网页）"
@@ -97,10 +102,12 @@ def _clone_row(table: Table, src_row: _Row) -> _Row:
 
 
 def _fill_cover(doc: Document, meta: dict, now: datetime) -> None:
+    system_name = meta.get("project_name") or meta.get("title") or "渗透测试报告"
     for para in doc.paragraphs:
         text = para.text.strip()
         if text == _TPL_COVER_TITLE:
-            _set_para_text(para, meta.get("title") or "渗透测试报告")
+            # 封面第二行 = 系统名称（上一行为公司名、下两行为“渗透测试/报告”）
+            _set_para_text(para, system_name)
         elif text == _TPL_COVER_DATE:
             _set_para_text(para, now.strftime("%Y年%m月%d日"))
         elif text == _TPL_COMPANY and meta.get("customer"):
@@ -155,6 +162,9 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
     """重写「风险问题汇总」统计段落与汇总表。"""
     counts = {"超危": 0, "高危": 0, "中危": 0, "低危": 0}
     for v in vulns:
+        # 统计段仅计入当前未修复漏洞（状态非已修复）
+        if v.get("status") == VulStatus.FIXED:
+            continue
         label = VUL_LEVEL_EXPORT.get(v.get("level"))
         if label in counts:
             counts[label] += 1
@@ -190,6 +200,10 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
         if color is not None:
             for run in row.cells[0].paragraphs[0].runs:
                 run.font.color.rgb = color
+        # 已修复漏洞状态列显示为绿色
+        if v.get("status") == VulStatus.FIXED:
+            for run in row.cells[3].paragraphs[0].runs:
+                run.font.color.rgb = FIXED_STATUS_COLOR
     if not vulns:
         for cell in sample.cells:
             _set_cell_text(cell, "")
@@ -231,7 +245,11 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
     for section in sections:
         vul = by_id.get(section.get("vul_id"))
         title = section.get("title") or "未命名章节"
+        content_html = section.get("content_html", "")
         if vul is not None:
+            # 测试状态：按漏洞最新 is_retest 重写快照（复测未通过也属于复测）
+            state = "复测" if vul.get("is_retest") else "初测"
+            content_html = _TEST_STATE.sub(rf"\g<1>{state}", content_html)
             # 修复中且经历过复测 = 复测未通过打回，展示层区分（状态码不变）
             status_name = VUL_STATUS.get(vul.get("status"), "-")
             if vul.get("status") == VulStatus.FIXING and vul.get("is_retest"):
@@ -239,21 +257,38 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
             title = f"{title}（{status_name}）"
         doc.add_paragraph(title, style="Heading 3")
         body_start = len(doc.paragraphs)
-        _add_html(doc, section.get("content_html", ""))
+        _add_html(doc, content_html)
         # 章节快照未含复测详情时，追加漏洞最新复测内容（避免与生成时嵌入的快照重复）
         retest = (vul or {}).get("retest_html", "")
-        if retest and "复测详情" not in (section.get("content_html") or ""):
+        if retest and "复测详情" not in (content_html or ""):
             _add_html(doc, f"<p><strong>复测详情：</strong></p>{retest}")
         _apply_field_spacing(doc, body_start)
 
 
 def _enable_update_fields(doc: Document) -> None:
-    """标记打开文档时刷新域，Word 会自动更新目录页码。"""
+    """标记打开文档时刷新域，Word 会自动更新目录页码。
+
+    w:updateFields 必须位于 CT_Settings 规定的早期位置（在 hdrShapeDefaults / footnotePr /
+    endnotePr / compat / rsids 等之前），否则 Word 会忽略该设置导致打开不刷新目录。"""
     element = doc.settings.element
-    if element.find(qn("w:updateFields")) is None:
-        update = OxmlElement("w:updateFields")
-        update.set(qn("w:val"), "true")
-        element.insert(0, update)
+    if element.find(qn("w:updateFields")) is not None:
+        return
+    update = OxmlElement("w:updateFields")
+    update.set(qn("w:val"), "true")
+    # 定位首个“应排在 updateFields 之后”的元素，插入其前；均不存在时追加到末尾
+    anchor_tags = (
+        "w:hdrShapeDefaults", "w:footnotePr", "w:endnotePr",
+        "w:compat", "w:rsids", "m:mathPr", "w:themeFontLang",
+    )
+    anchor = None
+    for child in element:
+        if child.tag in {qn(t) for t in anchor_tags}:
+            anchor = child
+            break
+    if anchor is not None:
+        anchor.addprevious(update)
+    else:
+        element.append(update)
 
 
 def build_report_docx(

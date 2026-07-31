@@ -12,19 +12,19 @@
       <span class="text-gray-400 text-sm">支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成测试计划</span>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="批次" width="80" />
-      <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip />
-      <el-table-column label="状态" width="120">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <el-table-column prop="id" label="批次" width="80" sortable="custom" />
+      <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="status" label="状态" width="120" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusName(row.status) }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column prop="total_count" label="解析条数" width="100" />
+      <el-table-column prop="total" label="解析条数" width="100" sortable="custom" />
       <el-table-column label="失败原因" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ row.error || '-' }}</template>
       </el-table-column>
-      <el-table-column label="上传时间" width="170">
+      <el-table-column prop="create_time" label="上传时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmt(row.create_time) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="200" fixed="right">
@@ -63,7 +63,7 @@ const items = ref<any[]>([])
 const total = ref(0)
 const loading = ref(false)
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
-const query = reactive({ page: 1, size: 20 })
+const query = reactive({ page: 1, size: 20, sort: '', order: '' })
 let timer: number | undefined
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
@@ -82,6 +82,12 @@ async function load(page = query.page) {
   } finally {
     loading.value = false
   }
+}
+
+function onSortChange({ prop, order }: any) {
+  query.sort = order ? prop : ''
+  query.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
+  load(1)
 }
 
 async function doUpload(opt: any) {
