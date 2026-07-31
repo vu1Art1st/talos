@@ -33,7 +33,7 @@ async def test_meta(client: AsyncClient, auth: dict):
 
 
 async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
-    # 建资产（系统级：负责人 / URL 标签 / 端口）
+    # 建资产（系统级：负责人 / URL 标签 / 端口服务对 / 中间件与数据库多条目）
     resp = await client.post(
         "/api/v1/assets", headers=auth,
         json={
@@ -42,10 +42,12 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
             "department": "电商事业部",
             "public_urls": [{"url": "https://shop.example.com", "tag": 10}],
             "internal_urls": ["http://10.0.0.8:8080"],
-            "ports": ["80", "443"],
-            "services": "Web服务",
-            "middleware": "Nginx",
-            "database_type": "MySQL",
+            "port_services": [
+                {"port": "80", "service": "Web服务"},
+                {"port": "443", "service": "HTTPS"},
+            ],
+            "middlewares": [{"name": "Nginx", "version": "1.24"}],
+            "databases": [{"name": "MySQL", "version": "8.0"}],
             "owners": [{"name": "张三", "phone": "13800000000", "email": "zhangsan@example.com"}],
         },
     )
@@ -54,6 +56,9 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
     asset_id = asset["id"]
     assert asset["owners"][0]["name"] == "张三"
     assert asset["public_urls"][0]["tag"] == 10
+    assert asset["port_services"][1] == {"port": "443", "service": "HTTPS"}
+    assert asset["middlewares"][0]["version"] == "1.24"
+    assert asset["databases"][0] == {"name": "MySQL", "version": "8.0"}
 
     # 系统命名必填
     resp = await client.post("/api/v1/assets", headers=auth, json={"name": ""})
@@ -162,14 +167,14 @@ async def test_asset_excel_import_export(client: AsyncClient, auth: dict):
     # 构造导入文件：1 行合法 + 1 行缺系统命名
     wb = Workbook()
     ws = wb.active
-    ws.append(["系统命名*", "子系统名称", "部门", "公网URL", "内网URL", "开放端口",
-               "对应服务", "中间件类型", "数据库类型", "系统负责人", "安全等级", "状态", "备注"])
+    ws.append(["系统命名*", "子系统名称", "部门", "公网URL", "内网URL", "开放端口与服务",
+               "中间件", "数据库", "系统负责人", "安全等级", "状态", "备注"])
     ws.append(["Excel导入系统", "支付子系统", "金融部",
                "https://pay.example.com|互联网;https://oa.example.com|办公网",
-               "http://192.168.1.10", "443;8443", "支付服务", "Tomcat", "Oracle",
+               "http://192.168.1.10", "443:支付服务;8443:管理后台", "Tomcat/9.0", "Oracle/19c",
                "李四/13900000000/lisi@example.com;王五//wangwu@example.com",
                "安全一级", "线上", "备注内容"])
-    ws.append(["", "无名子系统", "", "", "", "", "", "", "", "", "", "", ""])
+    ws.append(["", "无名子系统", "", "", "", "", "", "", "", "", "", ""])
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -202,7 +207,12 @@ async def test_asset_excel_import_export(client: AsyncClient, auth: dict):
         {"url": "https://pay.example.com", "tag": 10},
         {"url": "https://oa.example.com", "tag": 20},
     ]
-    assert imported["ports"] == ["443", "8443"]
+    assert imported["port_services"] == [
+        {"port": "443", "service": "支付服务"},
+        {"port": "8443", "service": "管理后台"},
+    ]
+    assert imported["middlewares"] == [{"name": "Tomcat", "version": "9.0"}]
+    assert imported["databases"] == [{"name": "Oracle", "version": "19c"}]
     assert len(imported["owners"]) == 2
     assert imported["owners"][1] == {"name": "王五", "phone": "", "email": "wangwu@example.com"}
     assert imported["sec_level"] == 10
@@ -215,6 +225,8 @@ async def test_asset_excel_import_export(client: AsyncClient, auth: dict):
     assert len(rows) == 2  # 表头 + 1 行数据
     assert rows[1][0] == "Excel导入系统"
     assert "互联网" in rows[1][3]
+    assert rows[1][5] == "443:支付服务;8443:管理后台"
+    assert rows[1][6] == "Tomcat/9.0"
 
     # 模板下载
     resp = await client.get("/api/v1/assets/import/template", headers=auth)
@@ -935,6 +947,28 @@ async def test_group_create_by_special_manage(client: AsyncClient, auth: dict):
     assert "网络安全部" in [g["name"] for g in resp.json()]
 
 
+async def test_group_owner_fields(client: AsyncClient, auth: dict):
+    """组织系统负责人字段：创建/更新写入姓名、电话、邮箱。"""
+    resp = await client.post(
+        "/api/v1/groups", headers=auth,
+        json={"name": "负责人测试部", "owner_name": "赵六", "owner_phone": "13700000000",
+              "owner_email": "zhaoliu@example.com", "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    group = resp.json()
+    assert group["owner_name"] == "赵六"
+    assert group["owner_email"] == "zhaoliu@example.com"
+
+    resp = await client.put(
+        f"/api/v1/groups/{group['id']}", headers=auth,
+        json={"name": "负责人测试部", "owner_name": "钱七", "owner_phone": "",
+              "owner_email": "", "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["owner_name"] == "钱七"
+    assert resp.json()["owner_phone"] == ""
+
+
 async def test_retest_round_tracking(client: AsyncClient, auth: dict):
     """复测轮次统计：手动流转记轮、重复流转不重复计数、报告发起复测强制开新轮、闭环打完成点。"""
     resp = await client.post(
@@ -1382,3 +1416,186 @@ async def test_report_section_contains_retest(client: AsyncClient, auth: dict):
     section = resp.json()["sections"][0]
     assert "复测详情" in section["content_html"]
     assert "复测发现仍可利用" in section["content_html"]
+
+
+async def test_knowledge_crud_and_from_vul(client: AsyncClient, auth: dict):
+    """漏洞知识库：upsert / 按类型查询 / 存为模板 / 删除。"""
+    # 新建条目（vul_type=10 SQL注入类，以 meta 字典为准）
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "SQL注入", "vul_type": 10, "severity_level": 10,
+              "description_html": "<p>标准SQL注入描述</p>",
+              "harm_html": "<p>可拖库</p>", "solution_html": "<p>参数化查询</p>",
+              "references": ["https://owasp.org/Top10/"]},
+    )
+    assert resp.status_code == 200, resp.text
+    entry = resp.json()
+    assert entry["vulnerability_name"] == "SQL注入"
+    assert entry["vul_type"] == 10
+    assert entry["severity_level"] == 10
+    assert entry["references"] == ["https://owasp.org/Top10/"]
+
+    # 同名称再提交：覆盖而非新建（POST 为整体覆盖，未传字段取默认值）
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "SQL注入", "vul_type": 10, "severity_level": 10,
+              "description_html": "<p>描述V2</p>"},
+    )
+    assert resp.json()["id"] == entry["id"]
+    assert resp.json()["description_html"] == "<p>描述V2</p>"
+
+    # 同类型可存多条（不同名称）
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "SQL盲注", "vul_type": 10, "severity_level": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.get("/api/v1/knowledge", headers=auth)
+    assert len([e for e in resp.json() if e["vul_type"] == 10]) == 2
+
+    # 按类型查询：多条时返回危害等级最高的一条；未知类型 404
+    resp = await client.get("/api/v1/knowledge/by-type/10", headers=auth)
+    assert resp.status_code == 200
+    assert resp.json()["vulnerability_name"] == "SQL注入"
+    resp = await client.get("/api/v1/knowledge/by-type/9999", headers=auth)
+    assert resp.status_code == 404
+
+    # 未知类型/等级/空名称/非法参考链接拒绝
+    resp = await client.post("/api/v1/knowledge", headers=auth,
+                             json={"vulnerability_name": "x", "vul_type": 9999})
+    assert resp.status_code == 400
+    resp = await client.post("/api/v1/knowledge", headers=auth,
+                             json={"vulnerability_name": "x", "vul_type": 10, "severity_level": 99})
+    assert resp.status_code == 400
+    resp = await client.post("/api/v1/knowledge", headers=auth,
+                             json={"vulnerability_name": "   ", "vul_type": 10})
+    assert resp.status_code == 422
+    resp = await client.post("/api/v1/knowledge", headers=auth,
+                             json={"vulnerability_name": "x", "vul_type": 10,
+                                   "references": ["javascript:alert(1)"]})
+    assert resp.status_code == 422
+
+    # PUT 按 ID 编辑：改名、改等级；改为已存在名称被拒
+    resp = await client.put(
+        f"/api/v1/knowledge/{entry['id']}", headers=auth,
+        json={"vulnerability_name": "SQL注入（联合查询）", "vul_type": 10, "severity_level": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["vulnerability_name"] == "SQL注入（联合查询）"
+    assert resp.json()["severity_level"] == 20
+    resp = await client.put(
+        f"/api/v1/knowledge/{entry['id']}", headers=auth,
+        json={"vulnerability_name": "SQL盲注", "vul_type": 10},
+    )
+    assert resp.status_code == 400
+
+    # 从已有漏洞存为模板：按标题作为名称 upsert，携带等级与描述/修复建议
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "知识库模板源漏洞", "level": 20, "vul_type": 10,
+              "description_html": "<p>高质量描述</p>", "solution_html": "<p>高质量修复建议</p>"},
+    )
+    vul_id = resp.json()["id"]
+    resp = await client.post(f"/api/v1/knowledge/from-vul/{vul_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["vulnerability_name"] == "知识库模板源漏洞"
+    assert resp.json()["severity_level"] == 20
+    assert resp.json()["description_html"] == "<p>高质量描述</p>"
+    assert resp.json()["solution_html"] == "<p>高质量修复建议</p>"
+
+    # 未登录拒绝
+    resp = await client.get("/api/v1/knowledge")
+    assert resp.status_code == 401
+
+    # 删除
+    resp = await client.delete(f"/api/v1/knowledge/{entry['id']}", headers=auth)
+    assert resp.status_code == 200
+    resp = await client.get("/api/v1/knowledge", headers=auth)
+    assert entry["id"] not in [e["id"] for e in resp.json()]
+
+
+async def test_knowledge_batch_import_and_delete(client: AsyncClient, auth: dict):
+    """漏洞知识库：批量导入（按名称 upsert）与批量删除。"""
+    items = [
+        {"vulnerability_name": "批量-SSRF", "vul_type": 75, "severity_level": 20,
+         "description_html": "<p>SSRF描述</p>", "references": ["https://portswigger.net/web-security/ssrf"]},
+        {"vulnerability_name": "批量-垂直越权", "vul_type": 40, "severity_level": 10},
+        {"vulnerability_name": "批量-弱口令", "vul_type": 65, "severity_level": 20},
+    ]
+    resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": items})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"created": 3, "updated": 0, "total": 3}
+
+    # 再次导入：同名覆盖，新名新增
+    items[0]["description_html"] = "<p>SSRF描述V2</p>"
+    items.append({"vulnerability_name": "批量-未授权访问", "vul_type": 40, "severity_level": 20})
+    resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": items})
+    assert resp.json() == {"created": 1, "updated": 3, "total": 4}
+    resp = await client.get("/api/v1/knowledge", headers=auth)
+    batch_rows = [e for e in resp.json() if e["vulnerability_name"].startswith("批量-")]
+    assert len(batch_rows) == 4
+    assert next(e for e in batch_rows if e["vulnerability_name"] == "批量-SSRF")["description_html"] == "<p>SSRF描述V2</p>"
+
+    # 批内重名 / 字典码非法：整批拒绝
+    resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": [
+        {"vulnerability_name": "重名", "vul_type": 10}, {"vulnerability_name": "重名", "vul_type": 15},
+    ]})
+    assert resp.status_code == 400
+    resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": [
+        {"vulnerability_name": "非法类型", "vul_type": 9999},
+    ]})
+    assert resp.status_code == 400
+    resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": []})
+    assert resp.status_code == 422
+
+    # 批量删除（含不存在的 ID，忽略）
+    ids = [e["id"] for e in batch_rows]
+    resp = await client.post("/api/v1/knowledge/batch-delete", headers=auth,
+                             json={"ids": ids + [999999]})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 4
+    resp = await client.get("/api/v1/knowledge", headers=auth)
+    assert not [e for e in resp.json() if e["vulnerability_name"].startswith("批量-")]
+
+
+async def test_word_import_knowledge_backfill(client: AsyncClient, auth: dict):
+    """Word 导入确认入库：描述/修复建议为空时自动套用知识库模板。"""
+    # 准备 vul_type=15 的模板
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "存储型XSS", "vul_type": 15, "severity_level": 20,
+              "description_html": "<p>回填标准描述</p>",
+              "harm_html": "<p>回填危害说明</p>", "solution_html": "<p>回填修复建议</p>"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 上传官方模板样例并等待解析
+    resp = await client.get("/api/v1/imports/template", headers=auth)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": ("知识库回填样例.docx", BytesIO(resp.content),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    rec = detail["records"][0]
+
+    # 清空描述/修复建议并改为模板类型，确认入库触发回填
+    resp = await client.put(
+        f"/api/v1/imports/records/{rec['id']}", headers=auth,
+        json={"title": "知识库回填漏洞", "vul_type": 15,
+              "description_html": "", "solution_html": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/imports/{batch_id}/confirm", headers=auth,
+        json={"record_ids": [rec["id"]]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/api/v1/vulns", headers=auth, params={"search": "知识库回填漏洞"})
+    vul = resp.json()["items"][0]
+    assert "回填标准描述" in vul["description_html"]
+    assert "危害说明" in vul["description_html"]
+    assert "回填危害说明" in vul["description_html"]
+    assert vul["solution_html"] == "<p>回填修复建议</p>"

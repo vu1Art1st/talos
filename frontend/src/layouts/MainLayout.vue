@@ -24,6 +24,9 @@
         <el-menu-item index="/vulns">
           <el-icon><Warning /></el-icon><template #title>漏洞管理</template>
         </el-menu-item>
+        <el-menu-item index="/knowledge">
+          <el-icon><Collection /></el-icon><template #title>漏洞知识库</template>
+        </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('report:manage')" index="/reports">
           <el-icon><Document /></el-icon><template #title>报告中心</template>
         </el-menu-item>

@@ -65,6 +65,42 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE import_records ADD COLUMN retest_html TEXT NOT NULL DEFAULT ''"))
         if record_cols and "fixed" not in record_cols:
             await conn.execute(text("ALTER TABLE import_records ADD COLUMN fixed BOOLEAN NOT NULL DEFAULT 0"))
+        # 组织新增系统负责人三字段
+        group_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(groups)"))).fetchall()}
+        for col, ddl in (("owner_name", "VARCHAR(64)"), ("owner_phone", "VARCHAR(32)"), ("owner_email", "VARCHAR(128)")):
+            if group_cols and col not in group_cols:
+                await conn.execute(text(f"ALTER TABLE groups ADD COLUMN {col} {ddl} NOT NULL DEFAULT ''"))
+        # 资产技术信息结构化：端口与服务成对、中间件/数据库多条目带版本
+        asset_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(assets)"))).fetchall()}
+        for col in ("port_services", "middlewares", "databases"):
+            if asset_cols and col not in asset_cols:
+                await conn.execute(text(f"ALTER TABLE assets ADD COLUMN {col} JSON"))
+        # 知识库新增漏洞名称/危害等级：唯一键从漏洞类型迁至漏洞名称（同类型可多条）
+        kb_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(knowledge_entries)"))).fetchall()}
+        if kb_cols and "vulnerability_name" not in kb_cols:
+            from app.constants import VUL_TYPE
+
+            await conn.execute(text(
+                "ALTER TABLE knowledge_entries ADD COLUMN vulnerability_name VARCHAR(255) NOT NULL DEFAULT ''"
+            ))
+            await conn.execute(text(
+                "ALTER TABLE knowledge_entries ADD COLUMN severity_level INTEGER NOT NULL DEFAULT 30"
+            ))
+            # 存量行名称回填为类型名（旧库 vul_type 唯一，回填后名称不重复）
+            for code, name in VUL_TYPE.items():
+                await conn.execute(
+                    text("UPDATE knowledge_entries SET vulnerability_name = :name "
+                         "WHERE vul_type = :code AND vulnerability_name = ''"),
+                    {"name": name, "code": code},
+                )
+            await conn.execute(text("DROP INDEX IF EXISTS ix_knowledge_entries_vul_type"))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_knowledge_entries_vul_type ON knowledge_entries (vul_type)"
+            ))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_knowledge_entries_vulnerability_name "
+                "ON knowledge_entries (vulnerability_name)"
+            ))
         for col in ("summary_html", "summary_json"):
             if col in report_cols:
                 try:
@@ -103,6 +139,45 @@ async def _migrate_lightweight() -> None:
         ))
 
 
+async def _backfill_asset_tech_fields() -> None:
+    """历史技术字段一次性回填（幂等）：ports/services/middleware/database_type → 新 JSON 字段。"""
+    import re
+
+    from sqlalchemy import select
+
+    from app.models import Asset
+
+    def _split(text_: str) -> list[str]:
+        return [p for p in (s.strip() for s in re.split(r"[;；/、,，]", text_ or "")) if p]
+
+    async with async_session_maker() as session:
+        assets = (await session.execute(select(Asset))).scalars().all()
+        changed = False
+        for a in assets:
+            # 新增列对存量行为 NULL，归一化为空列表，避免序列化校验失败
+            for col in ("port_services", "middlewares", "databases"):
+                if getattr(a, col) is None:
+                    setattr(a, col, [])
+                    changed = True
+            if not a.port_services and (a.ports or a.services):
+                pairs = [{"port": p, "service": ""} for p in (a.ports or [])]
+                if a.services:
+                    if pairs:
+                        pairs[0]["service"] = a.services
+                    else:
+                        pairs = [{"port": "", "service": a.services}]
+                a.port_services = pairs
+                changed = True
+            if not a.middlewares and a.middleware:
+                a.middlewares = [{"name": n, "version": ""} for n in _split(a.middleware)]
+                changed = True
+            if not a.databases and a.database_type:
+                a.databases = [{"name": n, "version": ""} for n in _split(a.database_type)]
+                changed = True
+        if changed:
+            await session.commit()
+
+
 async def init_db() -> None:
     """建表并写入初始角色与管理员（幂等）。生产环境版本化演进使用 Alembic。"""
     import app.models  # noqa: F401  确保模型全部注册
@@ -111,6 +186,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     await _migrate_lightweight()
+    await _backfill_asset_tech_fields()
 
     from sqlalchemy import select
 

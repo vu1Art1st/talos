@@ -2,10 +2,6 @@
   <div class="border border-gray-300 rounded-md bg-white">
     <div v-if="editor" class="flex flex-wrap gap-1 border-b border-gray-200 p-1.5">
       <el-button-group size="small">
-        <el-button :type="editor.isActive('heading', { level: 2 }) ? 'primary' : ''"
-                   @click="editor.chain().focus().toggleHeading({ level: 2 }).run()">H2</el-button>
-        <el-button :type="editor.isActive('heading', { level: 3 }) ? 'primary' : ''"
-                   @click="editor.chain().focus().toggleHeading({ level: 3 }).run()">H3</el-button>
         <el-button :type="editor.isActive('bold') ? 'primary' : ''"
                    @click="editor.chain().focus().toggleBold().run()"><b>B</b></el-button>
         <el-button :type="editor.isActive('italic') ? 'primary' : ''"
@@ -66,7 +62,8 @@ const fileInput = ref<HTMLInputElement>()
 
 const editor = new Editor({
   extensions: [
-    StarterKit,
+    // 禁用标题：目录层级由导出模板统一管理，正文不允许出现 h1-h6
+    StarterKit.configure({ heading: false }),
     Image.configure({ inline: false }),
     Link.configure({ openOnClick: false }),
     Table.configure({ resizable: true }),

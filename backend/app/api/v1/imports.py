@@ -15,7 +15,7 @@ from app.core.query import get_or_404, paginate
 from app.core.timeutil import utcnow
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import Asset, ImportBatch, ImportRecord, Report, ReportSection, TestingPlan, User, Vul, VulLog
+from app.models import Asset, ImportBatch, ImportRecord, KnowledgeEntry, Report, ReportSection, TestingPlan, User, Vul, VulLog
 from app.schemas import (
     ImportBatchOut,
     ImportConfirmIn,
@@ -251,15 +251,37 @@ async def confirm_batch(
 
     created = 0
     new_vul_ids: list[int] = []
+    # 知识库回填：解析内容为空的描述/修复建议，自动套用对应漏洞类型的模板
+    # 同类型多条时取危害等级最高、最早创建的一条（与 /knowledge/by-type 语义一致）
+    kb_types = {rec.vul_type for rec in records}
+    kb_map: dict[int, KnowledgeEntry] = {}
+    for e in (
+        await session.execute(
+            select(KnowledgeEntry)
+            .where(KnowledgeEntry.vul_type.in_(kb_types))
+            .order_by(KnowledgeEntry.severity_level.desc(), KnowledgeEntry.id.desc())
+        )
+    ).scalars().all():
+        kb_map[e.vul_type] = e  # 降序遍历，最后覆盖的即为等级最高、id 最小的一条
     for rec in records:
+        kb = kb_map.get(rec.vul_type)
+        description_html = rec.description_html
+        solution_html = rec.solution_html
+        if kb is not None:
+            if not (description_html or "").strip() and kb.description_html:
+                description_html = kb.description_html
+                if kb.harm_html:
+                    description_html += f"<p><strong>危害说明：</strong></p>{kb.harm_html}"
+            if not (solution_html or "").strip() and kb.solution_html:
+                solution_html = kb.solution_html
         vul = Vul(
             title=rec.title,
             vul_type=rec.vul_type,
             level=rec.level,
             affected_url=rec.affected_url,
-            description_html=rec.description_html,
+            description_html=description_html,
             reproduce_html=rec.reproduce_html,
-            solution_html=rec.solution_html,
+            solution_html=solution_html,
             source=60,  # Word导入
             submitter_id=user.id,
         )

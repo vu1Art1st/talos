@@ -195,7 +195,11 @@ async def create_group(
     exists = (await session.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(400, "同名组织已存在")
-    group = Group(name=name, remark=body.remark)
+    group = Group(
+        name=name, remark=body.remark,
+        owner_name=body.owner_name.strip(), owner_phone=body.owner_phone.strip(),
+        owner_email=body.owner_email.strip(),
+    )
     session.add(group)
     await session.commit()
     await session.refresh(group)
@@ -212,6 +216,9 @@ async def update_group(
     group = await get_or_404(session, Group, group_id, "组不存在")
     group.name = body.name
     group.remark = body.remark
+    group.owner_name = body.owner_name.strip()
+    group.owner_phone = body.owner_phone.strip()
+    group.owner_email = body.owner_email.strip()
     await session.commit()
     await session.refresh(group)
     return group

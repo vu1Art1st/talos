@@ -19,8 +19,8 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Excel 列定义（顺序即模板列顺序）
 EXCEL_HEADERS = [
-    "系统命名*", "子系统名称", "部门", "公网URL", "内网URL", "开放端口",
-    "对应服务", "中间件类型", "数据库类型", "系统负责人", "安全等级", "状态", "备注",
+    "系统命名*", "子系统名称", "部门", "公网URL", "内网URL", "开放端口与服务",
+    "中间件", "数据库", "系统负责人", "安全等级", "状态", "备注",
 ]
 
 SEC_LEVEL_REVERSE = {v: k for k, v in ASSET_SEC_LEVEL.items()}
@@ -113,6 +113,36 @@ def _parse_list(text: str) -> list[str]:
     return [p.strip() for p in text.split(";") if p.strip()]
 
 
+def _dump_port_services(items: list | None) -> str:
+    return ";".join(
+        f"{i.get('port', '')}:{i.get('service', '')}".strip(":") for i in (items or [])
+    )
+
+
+def _parse_port_services(text: str) -> list[dict]:
+    """解析「[端口]:[服务]」对，分号分隔多组，如 80:Web服务;443:HTTPS。"""
+    items = []
+    for part in filter(None, (p.strip() for p in text.split(";"))):
+        port, _, service = part.partition(":")
+        items.append({"port": port.strip(), "service": service.strip()})
+    return items
+
+
+def _dump_name_versions(items: list | None) -> str:
+    return ";".join(
+        "/".join(filter(None, [i.get("name", ""), i.get("version", "")])) for i in (items or [])
+    )
+
+
+def _parse_name_versions(text: str) -> list[dict]:
+    """解析「名称/版本」条目，分号分隔多组，如 Nginx/1.24;Tomcat/9.0。"""
+    items = []
+    for part in filter(None, (p.strip() for p in text.split(";"))):
+        name, _, version = part.partition("/")
+        items.append({"name": name.strip(), "version": version.strip()})
+    return items
+
+
 def _build_workbook(assets: list[Asset]):
     from openpyxl import Workbook
 
@@ -125,8 +155,9 @@ def _build_workbook(assets: list[Asset]):
             a.name, a.sub_system, a.department,
             _dump_public_urls(a.public_urls),
             ";".join(a.internal_urls or []),
-            ";".join(a.ports or []),
-            a.services, a.middleware, a.database_type,
+            _dump_port_services(a.port_services),
+            _dump_name_versions(a.middlewares),
+            _dump_name_versions(a.databases),
             _dump_owners(a.owners),
             ASSET_SEC_LEVEL.get(a.sec_level, "其他"),
             ASSET_STATUS.get(a.status, "线上"),
@@ -172,7 +203,8 @@ async def download_import_template(_: User = Depends(require_perm("asset:manage"
     ws.append([
         "示例商城系统", "订单中心", "电商事业部",
         "https://shop.example.com|互联网;https://oa-shop.example.com|办公网",
-        "http://10.0.0.8:8080", "80;443;8080", "Web服务", "Nginx/Tomcat", "MySQL",
+        "http://10.0.0.8:8080", "80:Web服务;443:HTTPS;8080:管理后台",
+        "Nginx/1.24;Tomcat/9.0", "MySQL/8.0",
         "张三/13800000000/zhangsan@example.com;李四/13900000000/lisi@example.com",
         "安全二级", "线上", "示例行，导入前请删除",
     ])
@@ -217,14 +249,13 @@ async def import_assets(
             department=cells[2],
             public_urls=_parse_public_urls(cells[3]),
             internal_urls=_parse_list(cells[4]),
-            ports=_parse_list(cells[5]),
-            services=cells[6],
-            middleware=cells[7],
-            database_type=cells[8],
-            owners=_parse_owners(cells[9]),
-            sec_level=SEC_LEVEL_REVERSE.get(cells[10], 40),
-            status=STATUS_REVERSE.get(cells[11], 10),
-            remark=cells[12],
+            port_services=_parse_port_services(cells[5]),
+            middlewares=_parse_name_versions(cells[6]),
+            databases=_parse_name_versions(cells[7]),
+            owners=_parse_owners(cells[8]),
+            sec_level=SEC_LEVEL_REVERSE.get(cells[9], 40),
+            status=STATUS_REVERSE.get(cells[10], 10),
+            remark=cells[11],
         ))
         result.success += 1
     await session.commit()

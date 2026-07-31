@@ -46,6 +46,10 @@ class Group(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
+    # 系统负责人（姓名/电话/邮箱）：供新建资产页下拉选择既有负责人
+    owner_name: Mapped[str] = mapped_column(String(64), default="")
+    owner_phone: Mapped[str] = mapped_column(String(32), default="")
+    owner_email: Mapped[str] = mapped_column(String(128), default="")
     remark: Mapped[str] = mapped_column(String(255), default="")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

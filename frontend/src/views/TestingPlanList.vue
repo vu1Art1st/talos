@@ -54,16 +54,16 @@
     </el-collapse>
 
     <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="70" />
-      <el-table-column prop="system_name" label="测试系统" min-width="160" show-overflow-tooltip />
-      <el-table-column prop="test_type" label="测试类型" width="110" show-overflow-tooltip />
-      <el-table-column prop="department" label="所属部门" width="120" show-overflow-tooltip />
-      <el-table-column label="状态" width="95">
+      <el-table-column prop="id" label="ID" width="60" />
+      <el-table-column prop="system_name" label="测试系统" min-width="150" show-overflow-tooltip />
+      <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip />
+      <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip />
+      <el-table-column label="状态" width="85">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusMap[row.status] ?? row.status }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="测试人员" width="140" show-overflow-tooltip>
+      <el-table-column label="测试人员" width="120" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.testers?.length">
             {{ row.testers.map((u: any) => u.realname || u.username).join('、') }}
@@ -71,7 +71,7 @@
           <span v-else class="text-gray-400">未认领</span>
         </template>
       </el-table-column>
-      <el-table-column label="漏洞统计" width="180">
+      <el-table-column label="漏洞统计" width="165">
         <template #default="{ row }">
           <span class="inline-flex gap-1">
             <el-tag size="small" color="#A61B29" style="color:#fff;border:none">超 {{ row.stat_critical }}</el-tag>
@@ -81,7 +81,7 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="关联漏洞" width="90">
+      <el-table-column label="关联漏洞" width="78">
         <template #default="{ row }">
           <el-popover v-if="row.vuls?.length" placement="right" width="360" trigger="hover">
             <template #reference>
@@ -100,7 +100,7 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="关联报告" width="90">
+      <el-table-column label="关联报告" width="78">
         <template #default="{ row }">
           <el-popover v-if="row.reports?.length" placement="right" width="360" trigger="hover">
             <template #reference>
@@ -119,18 +119,18 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="预估/实际人天" width="120">
+      <el-table-column label="预估/实际人天" width="105">
         <template #default="{ row }">
           <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="需求接收" width="105">
+      <el-table-column label="需求接收" width="100">
         <template #default="{ row }">{{ row.receive_time || '-' }}</template>
       </el-table-column>
-      <el-table-column label="复测完成" width="105">
+      <el-table-column label="复测完成" width="100">
         <template #default="{ row }">{{ row.retest_done_time || '-' }}</template>
       </el-table-column>
-      <el-table-column label="复测轮数" width="90">
+      <el-table-column label="复测轮数" width="78">
         <template #default="{ row }">
           <el-popover v-if="row.retest_round_count" placement="left" width="380" trigger="hover">
             <template #reference>
@@ -157,7 +157,7 @@
           <span v-else class="text-gray-400">0 轮</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="290" fixed="right">
+      <el-table-column label="操作" width="250" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button v-if="!isTester(row)" size="small" type="success" link @click="claim(row)">认领</el-button>
           <el-popconfirm v-else title="确认退出该计划的认领？" @confirm="quit(row)">
@@ -574,3 +574,16 @@ onBeforeUnmount(() => {
   monthChart = null
 })
 </script>
+
+<style scoped>
+/* 操作列紧凑排列：压缩按钮间距避免换行 */
+:deep(.op-col .cell) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+:deep(.op-col .el-button) {
+  margin-left: 0;
+}
+</style>

@@ -10,6 +10,7 @@ from app.models.special import (
     spring_action_vulns,
 )
 from app.models.dictionary import DictOption
+from app.models.knowledge import KnowledgeEntry
 
 __all__ = [
     "Role", "User", "Group", "GroupUser",
@@ -18,4 +19,5 @@ __all__ = [
     "ImportBatch", "ImportRecord",
     "RemoteTesting", "TestingPlan", "TestingPlanRetestRound", "SpringAction", "spring_action_vulns",
     "DictOption",
+    "KnowledgeEntry",
 ]

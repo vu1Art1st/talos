@@ -84,11 +84,18 @@ class GroupOut(BaseModel):
 
     id: int
     name: str
+    # 系统负责人（姓名/电话/邮箱）
+    owner_name: str = ""
+    owner_phone: str = ""
+    owner_email: str = ""
     remark: str = ""
 
 
 class GroupIn(BaseModel):
     name: str
+    owner_name: str = ""
+    owner_phone: str = ""
+    owner_email: str = ""
     remark: str = ""
 
 
@@ -104,16 +111,29 @@ class AssetOwnerItem(BaseModel):
     email: str = ""
 
 
+class PortServiceItem(BaseModel):
+    """开放端口与对应服务，成对维护（[端口]:[服务]）。"""
+
+    port: str = ""
+    service: str = ""
+
+
+class NameVersionItem(BaseModel):
+    """带版本号的条目（中间件/数据库）。"""
+
+    name: str = ""
+    version: str = ""
+
+
 class AssetIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     sub_system: str = ""
     department: str = ""
     public_urls: list[PublicUrlItem] = []
     internal_urls: list[str] = []
-    ports: list[str] = []
-    services: str = ""
-    middleware: str = ""
-    database_type: str = ""
+    port_services: list[PortServiceItem] = []
+    middlewares: list[NameVersionItem] = []
+    databases: list[NameVersionItem] = []
     owners: list[AssetOwnerItem] = []
     sec_level: int = 40
     status: int = 10
@@ -209,6 +229,12 @@ class VulBatchIn(BaseModel):
     vulns: list[VulIn] = Field(min_length=1)
 
 
+class VulBatchDeleteIn(BaseModel):
+    """批量删除漏洞。"""
+
+    ids: list[int] = Field(min_length=1)
+
+
 class VulUpdateIn(VulIn):
     """编辑漏洞：在 VulIn 基础上允许直接调整漏洞状态（下拉选项与 VUL_STATUS 一致）。"""
 
@@ -272,6 +298,64 @@ class VulLogOut(BaseModel):
     action: str = ""
     content: str = ""
     create_time: datetime | None = None
+
+
+# ---------- 漏洞知识库 ----------
+class KnowledgeIn(BaseModel):
+    """知识库条目：每个漏洞名称至多一条，同一漏洞类型可含多条。"""
+
+    vulnerability_name: str = Field(min_length=1, max_length=255)
+    vul_type: int
+    severity_level: int = 30
+    description_html: str = ""
+    description_json: dict | None = None
+    harm_html: str = ""
+    harm_json: dict | None = None
+    solution_html: str = ""
+    solution_json: dict | None = None
+    references: list[str] = []
+
+    @field_validator("vulnerability_name", mode="after")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("漏洞名称不能为空")
+        return v
+
+    @field_validator("references", mode="after")
+    @classmethod
+    def _clean_references(cls, v: list[str]) -> list[str]:
+        # 去除空白项，仅接受 http/https 链接，避免 javascript: 等危险协议入库
+        cleaned = [s.strip() for s in v if s and s.strip()]
+        for url in cleaned:
+            if not url.lower().startswith(("http://", "https://")):
+                raise ValueError(f"参考链接必须以 http:// 或 https:// 开头：{url}")
+        return cleaned
+
+    @field_validator("description_html", "harm_html", "solution_html", mode="after")
+    @classmethod
+    def _clean_html(cls, v: str) -> str:
+        return sanitize_html(v)
+
+
+class KnowledgeBatchIn(BaseModel):
+    """批量导入：按漏洞名称 upsert，单次至多 500 条。"""
+
+    items: list[KnowledgeIn] = Field(min_length=1, max_length=500)
+
+
+class KnowledgeBatchDeleteIn(BaseModel):
+    ids: list[int] = Field(min_length=1, max_length=500)
+
+
+class KnowledgeOut(KnowledgeIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str = ""
+    create_time: datetime | None = None
+    update_time: datetime | None = None
 
 
 # ---------- Word 导入 ----------

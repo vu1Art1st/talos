@@ -10,7 +10,10 @@
           <el-input v-model="form.sub_system" placeholder="例如：订单中心（可选）" />
         </el-form-item>
         <el-form-item label="部门">
-          <el-input v-model="form.department" placeholder="例如：电商事业部" />
+          <el-select v-model="form.department" filterable allow-create default-first-option clearable
+                     placeholder="选择部门，或输入后回车新增" class="w-full">
+            <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
+          </el-select>
         </el-form-item>
         <el-form-item label="安全等级">
           <el-select v-model="form.sec_level" class="w-full">
@@ -39,24 +42,58 @@
                    :reserve-keyword="false" placeholder="输入后回车添加，例如 http://10.0.0.8:8080" class="w-full" />
       </el-form-item>
 
-      <div class="grid grid-cols-1 md:grid-cols-2">
-        <el-form-item label="开放端口">
-          <el-select v-model="form.ports" multiple filterable allow-create default-first-option
-                     :reserve-keyword="false" placeholder="输入后回车添加，例如 443" class="w-full" />
-        </el-form-item>
-        <el-form-item label="对应服务">
-          <el-input v-model="form.services" placeholder="例如：Web服务 / API网关" />
-        </el-form-item>
-        <el-form-item label="中间件类型">
-          <el-input v-model="form.middleware" placeholder="例如：Nginx / Tomcat" />
-        </el-form-item>
-        <el-form-item label="数据库类型">
-          <el-input v-model="form.database_type" placeholder="例如：MySQL / Redis" />
-        </el-form-item>
-      </div>
+      <el-form-item label="端口与服务">
+        <div class="w-full space-y-2">
+          <div v-for="(item, i) in form.port_services" :key="i" class="flex items-center gap-2">
+            <el-input v-model="item.port" placeholder="端口，例如 443" class="!w-36" />
+            <span class="text-gray-400">:</span>
+            <el-input v-model="item.service" placeholder="服务，例如 HTTPS / Web服务" class="flex-1" />
+            <el-button type="danger" link @click="form.port_services.splice(i, 1)">删除</el-button>
+          </div>
+          <el-button size="small" @click="form.port_services.push({ port: '', service: '' })">
+            <el-icon class="mr-1"><Plus /></el-icon>新增
+          </el-button>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="中间件">
+        <div class="w-full space-y-2">
+          <div v-for="(item, i) in form.middlewares" :key="i" class="flex gap-2">
+            <el-input v-model="item.name" placeholder="名称，例如 Nginx" class="flex-1" />
+            <el-input v-model="item.version" placeholder="版本号，例如 1.24" class="!w-40" />
+            <el-button type="danger" link @click="form.middlewares.splice(i, 1)">删除</el-button>
+          </div>
+          <el-button size="small" @click="form.middlewares.push({ name: '', version: '' })">
+            <el-icon class="mr-1"><Plus /></el-icon>新增
+          </el-button>
+        </div>
+      </el-form-item>
+
+      <el-form-item label="数据库">
+        <div class="w-full space-y-2">
+          <div v-for="(item, i) in form.databases" :key="i" class="flex gap-2">
+            <el-input v-model="item.name" placeholder="名称，例如 MySQL" class="flex-1" />
+            <el-input v-model="item.version" placeholder="版本号，例如 8.0" class="!w-40" />
+            <el-button type="danger" link @click="form.databases.splice(i, 1)">删除</el-button>
+          </div>
+          <el-button size="small" @click="form.databases.push({ name: '', version: '' })">
+            <el-icon class="mr-1"><Plus /></el-icon>新增
+          </el-button>
+        </div>
+      </el-form-item>
 
       <el-form-item label="系统负责人">
         <div class="w-full space-y-2">
+          <el-select v-if="ownerOptions.length" :model-value="undefined" filterable
+                     placeholder="从组织的系统负责人中选择添加" class="w-full" @change="pickOwner">
+            <el-option v-for="(o, i) in ownerOptions" :key="i" :value="i"
+                       :label="`${o.name}（${o.group}）`">
+              <div class="flex justify-between gap-4">
+                <span>{{ o.name }}<span class="text-xs text-gray-400 ml-1">{{ o.group }}</span></span>
+                <span class="text-xs text-gray-400">{{ [o.phone, o.email].filter(Boolean).join(' / ') }}</span>
+              </div>
+            </el-option>
+          </el-select>
           <div v-for="(owner, i) in form.owners" :key="i" class="flex gap-2">
             <el-input v-model="owner.name" placeholder="姓名" class="!w-28" />
             <el-input v-model="owner.phone" placeholder="联系方式" class="flex-1" />
@@ -88,7 +125,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -107,22 +144,47 @@ const emit = defineEmits<{
 const auth = useAuthStore()
 const meta = ref<any>(null)
 const saving = ref(false)
+const groups = ref<any[]>([])
+
+// 组织管理维护的系统负责人，供下拉选择快速添加
+const ownerOptions = computed(() =>
+  groups.value
+    .filter((g) => (g.owner_name ?? '').trim())
+    .map((g) => ({ name: g.owner_name, phone: g.owner_phone ?? '', email: g.owner_email ?? '', group: g.name })))
 
 const emptyForm = () => ({
   id: null, name: '', sub_system: '', department: '',
-  public_urls: [] as any[], internal_urls: [] as string[], ports: [] as string[],
-  services: '', middleware: '', database_type: '',
+  public_urls: [] as any[], internal_urls: [] as string[],
+  port_services: [] as any[], middlewares: [] as any[], databases: [] as any[],
   owners: [] as any[], sec_level: 40, status: 10, remark: '',
 })
 const form = reactive<any>(emptyForm())
 
 function onOpen() {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(props.asset ?? {})))
+  loadGroups()
+}
+
+async function loadGroups() {
+  const { data } = await client.get('/groups')
+  groups.value = data
+}
+
+function pickOwner(idx: number) {
+  const o = ownerOptions.value[idx]
+  if (!o) return
+  if (form.owners.some((x: any) => x.name === o.name && x.phone === o.phone)) {
+    return ElMessage.info('该负责人已添加')
+  }
+  form.owners.push({ name: o.name, phone: o.phone, email: o.email })
 }
 
 async function save() {
   if (!form.name.trim()) return ElMessage.warning('请填写系统命名')
   form.public_urls = form.public_urls.filter((u: any) => u.url.trim())
+  form.port_services = form.port_services.filter((p: any) => (p.port ?? '').trim() || (p.service ?? '').trim())
+  form.middlewares = form.middlewares.filter((m: any) => (m.name ?? '').trim())
+  form.databases = form.databases.filter((d: any) => (d.name ?? '').trim())
   form.owners = form.owners.filter((o: any) => o.name.trim())
   saving.value = true
   try {
@@ -139,5 +201,6 @@ async function save() {
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
+  await loadGroups()
 })
 </script>

@@ -9,6 +9,7 @@ from app.db import get_session
 from app.models import Asset, User, Vul, VulLog, VulRetestRecord
 from app.schemas import (
     Page,
+    VulBatchDeleteIn,
     VulBatchIn,
     VulDelayIn,
     VulFieldsIn,
@@ -194,6 +195,26 @@ async def delete_vuln(
         await plan_service.refresh_stats(session, plan_id)
         await session.commit()
     return {"msg": "删除成功"}
+
+
+@router.post("/batch-delete")
+async def delete_vulns_batch(
+    body: VulBatchDeleteIn,
+    _: User = Depends(require_perm("vuln:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量删除漏洞，删除后重算涉及测试计划的统计。"""
+    vulns = (
+        await session.execute(select(Vul).where(Vul.id.in_(body.ids)))
+    ).scalars().all()
+    plan_ids = {v.testing_plan_id for v in vulns}
+    for v in vulns:
+        await session.delete(v)
+    await session.flush()
+    for plan_id in plan_ids:
+        await plan_service.refresh_stats(session, plan_id)
+    await session.commit()
+    return {"msg": "删除成功", "deleted": len(vulns)}
 
 
 @router.get("/{vul_id}/transitions")

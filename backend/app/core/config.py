@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
-    APP_VERSION: str = "0.5.0"
+    APP_VERSION: str = "0.7.0"
     DEBUG: bool = False
 
     SECRET_KEY: str = "please-change-me-in-production"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     LOGIN_LOCK_SECONDS: int = 900
 
     # 允许携带凭证的跨域来源白名单（前端部署地址），生产环境务必按实际域名收窄
-    CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:5173"]
+    CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27012"]
 
     DATABASE_URL: str = "postgresql+asyncpg://vuln:vulnpass@localhost:5432/vulnplatform"
     REDIS_URL: str = "redis://localhost:6379/0"

@@ -16,7 +16,12 @@
               <el-tag type="info" size="small" effect="plain">来源：{{ meta?.vul_source?.[vul.source] }}</el-tag>
             </div>
           </div>
-          <el-button @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
+          <div class="flex gap-2">
+            <el-tooltip v-if="auth.hasPerm('vuln:manage')" content="将本漏洞的描述与修复建议存入知识库，作为该类型的标准模板" placement="top">
+              <el-button plain @click="saveAsTemplate">存为模板</el-button>
+            </el-tooltip>
+            <el-button @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
+          </div>
         </div>
         <el-descriptions :column="2" border class="mt-4" size="small">
           <el-descriptions-item label="影响URL" :span="2">{{ vul.affected_url || '-' }}</el-descriptions-item>
@@ -74,7 +79,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -124,6 +129,18 @@ async function doTransition(status: number) {
   ElMessage.success('状态更新成功')
   comment.value = ''
   await load()
+}
+
+// 将当前漏洞的描述/修复建议沉淀为该类型的知识库模板（存在则覆盖）
+async function saveAsTemplate() {
+  const typeName = meta.value?.vul_type?.[vul.value.vul_type] ?? vul.value.vul_type
+  try {
+    await ElMessageBox.confirm(`将覆盖类型「${typeName}」已有的知识库模板，是否继续？`, '存为模板', { type: 'warning' })
+  } catch {
+    return
+  }
+  await client.post(`/knowledge/from-vul/${vul.value.id}`)
+  ElMessage.success('已存入漏洞知识库')
 }
 
 onMounted(async () => {

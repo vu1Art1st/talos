@@ -65,9 +65,14 @@
           </el-select>
         </el-form-item>
         <el-form-item label="漏洞类型">
-          <el-select v-model="vul.vul_type" filterable class="w-full">
-            <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
-          </el-select>
+          <div class="w-full flex items-center gap-2">
+            <el-select v-model="vul.vul_type" filterable class="flex-1">
+              <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+            </el-select>
+            <el-tooltip content="从漏洞知识库套用该类型的标准描述与修复建议" placement="top">
+              <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
+            </el-tooltip>
+          </div>
         </el-form-item>
         <el-form-item label="所在层">
           <el-select v-model="vul.layer" class="w-full">
@@ -118,7 +123,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
@@ -196,6 +201,30 @@ function addVuln() {
   const first = selectedAssets.value[0]
   block.affected_url = (first?.public_urls ?? [])[0]?.url || (first?.internal_urls ?? [])[0] || ''
   vulns.value.push(block)
+}
+
+// 从知识库按漏洞类型套用标准描述 / 修复建议（危害说明附加在描述后）
+async function applyTemplate(vul: any) {
+  let entry: any
+  try {
+    ;({ data: entry } = await client.get(`/knowledge/by-type/${vul.vul_type}`))
+  } catch {
+    return // 404 提示由拦截器统一处理
+  }
+  if ((vul.description_html || '').trim() || (vul.solution_html || '').trim()) {
+    try {
+      await ElMessageBox.confirm('当前已填写漏洞描述或修复建议，套用模板将覆盖这些内容，是否继续？', '套用模板', { type: 'warning' })
+    } catch {
+      return
+    }
+  }
+  let descHtml = entry.description_html || ''
+  if (entry.harm_html) descHtml += `<p><strong>危害说明：</strong></p>${entry.harm_html}`
+  vul.description_html = descHtml
+  vul.description_json = entry.harm_html ? null : entry.description_json
+  vul.solution_html = entry.solution_html || ''
+  vul.solution_json = entry.solution_json
+  ElMessage.success('已套用知识库模板')
 }
 
 async function save() {

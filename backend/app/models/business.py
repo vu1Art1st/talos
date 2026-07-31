@@ -22,8 +22,12 @@ class Asset(Base):
     JSON 字段约定：
     - public_urls: [{"url": str, "tag": int}]，tag 见 constants.URL_TAG（互联网/办公网）
     - internal_urls: [str]
-    - ports: [str]
+    - port_services: [{"port": str, "service": str}]，开放端口与对应服务成对维护
+    - middlewares: [{"name": str, "version": str}]
+    - databases: [{"name": str, "version": str}]
     - owners: [{"name": str, "phone": str, "email": str}]
+
+    ports/services/middleware/database_type 为历史字段，启动时一次性迁移到新 JSON 字段后不再读写。
     """
 
     __tablename__ = "assets"
@@ -34,10 +38,13 @@ class Asset(Base):
     department: Mapped[str] = mapped_column(String(128), default="")
     public_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     internal_urls: Mapped[list | None] = mapped_column(JSON, default=list)
-    ports: Mapped[list | None] = mapped_column(JSON, default=list)
-    services: Mapped[str] = mapped_column(String(255), default="")
-    middleware: Mapped[str] = mapped_column(String(128), default="")
-    database_type: Mapped[str] = mapped_column(String(128), default="")
+    ports: Mapped[list | None] = mapped_column(JSON, default=list)  # 历史字段
+    services: Mapped[str] = mapped_column(String(255), default="")  # 历史字段
+    middleware: Mapped[str] = mapped_column(String(128), default="")  # 历史字段
+    database_type: Mapped[str] = mapped_column(String(128), default="")  # 历史字段
+    port_services: Mapped[list | None] = mapped_column(JSON, default=list)
+    middlewares: Mapped[list | None] = mapped_column(JSON, default=list)
+    databases: Mapped[list | None] = mapped_column(JSON, default=list)
     owners: Mapped[list | None] = mapped_column(JSON, default=list)
     sec_level: Mapped[int] = mapped_column(Integer, default=40)
     status: Mapped[int] = mapped_column(Integer, default=10)

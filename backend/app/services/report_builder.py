@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import RGBColor
 from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
@@ -21,6 +22,19 @@ from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
+_HEADING_OPEN = re.compile(r"<h[1-6][^>]*>", re.IGNORECASE)
+_HEADING_CLOSE = re.compile(r"</h[1-6]>", re.IGNORECASE)
+
+# 漏洞详情中需要 1.5 倍行距的字段段落前缀
+_SPACED_FIELD_PREFIXES = ("测试状态：", "漏洞等级：")
+
+# 汇总表「问题等级」字体颜色，与模板统计段落（超危/高危/中危/低危漏洞N个）保持一致
+_LEVEL_COLORS = {
+    "超危": RGBColor(0xC0, 0x00, 0x00),
+    "高危": RGBColor(0xFF, 0x00, 0x00),
+    "中危": RGBColor(0xFF, 0xC0, 0x00),
+    "低危": RGBColor(0x00, 0x70, 0xC0),
+}
 
 # 模板中用于定位替换的封面/统计段落文案
 _TPL_COVER_TITLE = "标准名称（邮件、台账）-系统名称（网页）"
@@ -38,8 +52,15 @@ def _localize_images(html: str) -> str:
     return _STORAGE_SRC.sub(repl, html or "")
 
 
+def _demote_headings(html: str) -> str:
+    """正文富文本中的 h1-h6 降级为加粗段落，确保目录层级仅由模板章节标题构成
+    （一级：二、测试结果综述 / 二级：2.1、风险问题汇总 / 三级：2.2.1、漏洞标题）。"""
+    html = _HEADING_OPEN.sub("<p><strong>", html or "")
+    return _HEADING_CLOSE.sub("</strong></p>", html)
+
+
 def _add_html(doc: Document, html: str) -> None:
-    html = _localize_images(html)
+    html = _localize_images(_demote_headings(html))
     if not html.strip():
         return
     parser = HtmlToDocx()
@@ -164,6 +185,11 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
         ]
         for cell, value in zip(row.cells, values):
             _set_cell_text(cell, value)
+        # 问题等级字体颜色对齐上方统计段落中对应等级的颜色
+        color = _LEVEL_COLORS.get(values[0])
+        if color is not None:
+            for run in row.cells[0].paragraphs[0].runs:
+                run.font.color.rgb = color
     if not vulns:
         for cell in sample.cells:
             _set_cell_text(cell, "")
@@ -190,6 +216,13 @@ def _remove_sample_details(doc: Document) -> None:
             body.remove(child)
 
 
+def _apply_field_spacing(doc: Document, start: int) -> None:
+    """漏洞详情中状态/等级字段段落统一 1.5 倍行距。"""
+    for para in doc.paragraphs[start:]:
+        if para.text.strip().startswith(_SPACED_FIELD_PREFIXES):
+            para.paragraph_format.line_spacing = 1.5
+
+
 def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> None:
     by_id = {v.get("id"): v for v in vulns}
     if not sections:
@@ -205,11 +238,13 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
                 status_name = "复测未通过"
             title = f"{title}（{status_name}）"
         doc.add_paragraph(title, style="Heading 3")
+        body_start = len(doc.paragraphs)
         _add_html(doc, section.get("content_html", ""))
         # 章节快照未含复测详情时，追加漏洞最新复测内容（避免与生成时嵌入的快照重复）
         retest = (vul or {}).get("retest_html", "")
         if retest and "复测详情" not in (section.get("content_html") or ""):
             _add_html(doc, f"<p><strong>复测详情：</strong></p>{retest}")
+        _apply_field_spacing(doc, body_start)
 
 
 def _enable_update_fields(doc: Document) -> None:
