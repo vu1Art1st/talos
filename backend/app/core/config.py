@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
-    APP_VERSION: str = "0.8.0"
+    APP_VERSION: str = "0.9.0"
     DEBUG: bool = False
 
     SECRET_KEY: str = "please-change-me-in-production"

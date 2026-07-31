@@ -25,7 +25,28 @@
 
 ## [Unreleased]
 
-（暂无）
+### 新增
+
+- 部署与运维手册 `docs/DEPLOY.md`：首次部署、SQLite 数据说明、版本升级、备份、更换 VPS 平滑迁移全流程
+- 一键运维脚本 `scripts/backup.sh` / `scripts/restore.sh`（PostgreSQL 逻辑备份 + `storage` 卷打包，可跨机恢复）与 `scripts/migrate.sh`（在 api 容器内执行数据库结构迁移）
+- 建立 Alembic 基线迁移（`backend/alembic/versions/`）与幂等迁移决策脚本 `backend/scripts/migrate.py`：自动纳管历史 `create_all` 库，支撑生产 PostgreSQL 已有表的字段级结构演进
+
+---
+
+## [0.9.0] - 2026-07-31
+
+测试计划页集成测试全流程「统一流程抽屉」，从认领到复测完成可在单页一站式完成。
+
+### 新增
+
+- 测试计划列表操作列新增「流程」按钮，打开统一流程抽屉 `PlanWorkflowDrawer.vue`：顶部步骤条（认领 → 录入漏洞 → 生成报告 → 发起复测 → 复测处理 → 复测完成）按计划状态高亮；抽屉内完成认领 / 退出、录入漏洞、生成报告、发起复测、复测记录处理与漏洞状态流转、报告 Word/PDF 导出（提交后轮询任务并支持下载 / 预览），除报告章节深度编辑外全流程一站直达
+- 抽取可复用组件 `VulnFormPanel.vue`（漏洞录入 / 编辑表单主体）与 `VulnRetestPanel.vue`（复测记录增删改面板），供独立页与流程抽屉共用
+- 计划详情端点 `GET /testing-plans/{id}`（含测试人员 / 关联漏洞 / 关联报告 / 复测轮次），供抽屉打开与每次操作后局部刷新单条数据
+
+### 变更
+
+- `TestingPlanList.vue` 操作列精简为「流程 / 编辑 / 删除」，原「认领 / 退出、录入漏洞、生成报告」入口统一收敛进流程抽屉，消除重复入口
+- `VulnEdit.vue` / `VulnRetest.vue` 改为薄壳，主体逻辑迁移至可复用组件，独立专项管理页功能与行为保持不变
 
 ---
 

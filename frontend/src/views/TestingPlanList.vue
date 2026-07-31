@@ -157,18 +157,9 @@
           <span v-else class="text-gray-400">0 轮</span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="250" fixed="right" class-name="op-col">
+      <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button v-if="!isTester(row)" size="small" type="success" link @click="claim(row)">认领</el-button>
-          <el-popconfirm v-else title="确认退出该计划的认领？" @confirm="quit(row)">
-            <template #reference>
-              <el-button size="small" type="info" link>退出</el-button>
-            </template>
-          </el-popconfirm>
-          <el-button v-if="canOperate(row)" size="small" type="warning" link
-                     @click="router.push(`/vulns/new?plan_id=${row.id}`)">录入漏洞</el-button>
-          <el-button v-if="canOperate(row)" size="small" type="success" link
-                     @click="router.push(`/reports?gen_plan=${row.id}`)">生成报告</el-button>
+          <el-button size="small" type="primary" @click="openWorkflow(row)">流程</el-button>
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该计划？" @confirm="remove(row.id)">
             <template #reference>
@@ -265,6 +256,8 @@
       <el-button type="primary" :disabled="!form.system_name" @click="save">保存</el-button>
     </template>
   </el-dialog>
+
+  <PlanWorkflowDrawer v-model:visible="workflowVisible" :plan-id="workflowPlanId" @changed="onWorkflowChanged" />
 </template>
 
 <script setup lang="ts">
@@ -276,6 +269,7 @@ import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
+import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -550,21 +544,23 @@ async function addDepartment() {
   form.value.department = value.trim()
 }
 
-async function claim(row: any) {
-  await client.post(`/testing-plans/${row.id}/claim`)
-  ElMessage.success('认领成功，已加入测试人员')
-  await Promise.all([load(), loadStats()])
-}
-
-async function quit(row: any) {
-  await client.post(`/testing-plans/${row.id}/quit`)
-  ElMessage.success('已退出该计划')
-  await load()
-}
-
 async function remove(id: number) {
   await client.delete(`/testing-plans/${id}`)
   ElMessage.success('删除成功')
+  await Promise.all([load(), loadStats()])
+}
+
+// ---------- 流程抽屉 ----------
+const workflowVisible = ref(false)
+const workflowPlanId = ref<number | null>(null)
+
+function openWorkflow(row: any) {
+  workflowPlanId.value = row.id
+  workflowVisible.value = true
+}
+
+// 抽屉内发生认领/漏洞/报告/复测等变更后刷新列表与统计
+async function onWorkflowChanged() {
   await Promise.all([load(), loadStats()])
 }
 
