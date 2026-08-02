@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: frontend/build_and_config
+title: 前端构建与开发环境配置
+scope:
+    - frontend/package.json
+    - frontend/vite.config.ts
+    - frontend/tailwind.config.js
+source_files: []
+depends_on: []
+related_to: []

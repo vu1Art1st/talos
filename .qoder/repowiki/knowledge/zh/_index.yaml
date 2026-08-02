@@ -3,11 +3,11 @@ schema_version: 1
 locale: zh-CN
 branch: main
 nodes_managed: true
-exported_at: "2026-07-28T01:02:41Z"
+exported_at: "2026-07-31T16:05:20Z"
 modules:
     "":
-        dir_name: Talos 漏洞管理平台（前后端一体化仓库）
-        title: Talos 漏洞管理平台（前后端一体化仓库）
+        dir_name: Talos 漏洞管理平台（全栈项目根）
+        title: Talos 漏洞管理平台（全栈项目根）
         scope:
             - .gitignore
             - dev.sh
@@ -35,95 +35,62 @@ modules:
         source_files: []
         children:
             - backend
+            - docs
             - frontend
+            - scripts
         depends_on: []
         related_to: []
     backend:
-        dir_name: Talos 漏洞管理平台后端服务
-        title: Talos 漏洞管理平台后端服务
+        dir_name: 漏洞管理平台后端服务（FastAPI + arq）
+        title: 漏洞管理平台后端服务（FastAPI + arq）
         scope:
             - backend/
         source_files: []
         children: []
         depends_on: []
         related_to:
-            - path: frontend/imports_reports_feature
-            - path: frontend/shared_components
-            - path: frontend/users_feature
-            - path: frontend/vulnerabilities_feature
+            - path: frontend
+            - path: scripts
+    docs:
+        dir_name: 项目文档与运维手册
+        title: 项目文档与运维手册
+        scope:
+            - docs/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to:
+            - path: scripts
     frontend:
-        dir_name: Talos 前端单页应用（Vue 3 + Vite）
-        title: Talos 前端单页应用（Vue 3 + Vite）
+        dir_name: Talos 前端应用（Vue 3 + Vite）
+        title: Talos 前端应用（Vue 3 + Vite）
         scope:
             - frontend/
         source_files: []
         children:
-            - frontend/app_shell
-            - frontend/imports_reports_feature
-            - frontend/shared_components
-            - frontend/users_feature
-            - frontend/vulnerabilities_feature
+            - frontend/build_and_config
+        depends_on: []
+        related_to:
+            - path: backend
+    frontend/build_and_config:
+        dir_name: 前端构建与开发环境配置
+        title: 前端构建与开发环境配置
+        scope:
+            - frontend/package.json
+            - frontend/vite.config.ts
+            - frontend/tailwind.config.js
+        source_files: []
+        children: []
         depends_on: []
         related_to: []
-    frontend/app_shell:
-        dir_name: Vue 应用外壳与全局初始化
-        title: Vue 应用外壳与全局初始化
+    scripts:
+        dir_name: Talos 生产运维脚本集
+        title: Talos 生产运维脚本集
         scope:
-            - frontend/src/App.vue
-            - frontend/src/main.ts
-            - frontend/src/style.css
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: frontend/shared_components
-    frontend/imports_reports_feature:
-        dir_name: 漏洞导入与报告管理视图
-        title: 漏洞导入与报告管理视图
-        scope:
-            - frontend/src/views/ImportList.vue
-            - frontend/src/views/ImportPreview.vue
-            - frontend/src/views/ReportList.vue
-            - frontend/src/views/ReportEditor.vue
+            - scripts/
         source_files: []
         children: []
         depends_on: []
         related_to:
             - path: backend
-    frontend/shared_components:
-        dir_name: 富文本编辑器、全局色板与 HTTP 客户端
-        title: 富文本编辑器、全局色板与 HTTP 客户端
-        scope:
-            - frontend/src/components/RichEditor.vue
-            - frontend/src/utils/colors.ts
-            - frontend/src/api/client.ts
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend
-            - path: frontend/app_shell
-    frontend/users_feature:
-        dir_name: 用户与角色管理前端界面
-        title: 用户与角色管理前端界面
-        scope:
-            - frontend/src/views/UserList.vue
-            - frontend/src/stores/auth.ts
-            - frontend/src/views/Login.vue
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend
-    frontend/vulnerabilities_feature:
-        dir_name: 漏洞管理视图（列表、详情、编辑）
-        title: 漏洞管理视图（列表、详情、编辑）
-        scope:
-            - frontend/src/views/VulnList.vue
-            - frontend/src/views/VulnDetail.vue
-            - frontend/src/views/VulnEdit.vue
-        source_files: []
-        children: []
-        depends_on: []
-        related_to:
-            - path: backend
+            - path: docs

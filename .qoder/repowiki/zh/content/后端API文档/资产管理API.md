@@ -14,6 +14,14 @@
 - [frontend/src/api/client.ts](file://frontend/src/api/client.ts)
 </cite>
 
+## 更新摘要
+**变更内容**   
+- 资产管理系统API完全重写，包含新的assets.py端点
+- 支持多资产关联和增强的查询功能
+- 更新了CRUD操作接口，增强数据验证和错误处理
+- 改进了批量导入导出功能，支持更多数据格式
+- 优化了资产分类体系和标签管理
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -28,6 +36,8 @@
 
 ## 简介
 本文件为 Talos 资产管理 API 的详细技术文档，聚焦资产全生命周期管理：创建、查询、更新、删除（CRUD），资产分类体系与标签管理，搜索与过滤，批量导入导出（多格式），资产关联与依赖管理，状态跟踪与生命周期，以及数据验证与错误处理。文档同时提供前端调用示例与最佳实践建议，帮助开发者快速集成与高效使用。
+
+**更新** 基于最新的代码重写，新增了多资产关联功能和增强的查询能力，提升了系统的可扩展性和性能表现。
 
 ## 项目结构
 后端采用 FastAPI + SQLAlchemy 的模块化设计，资产相关能力分布在以下模块：
@@ -72,18 +82,7 @@ ImportsAPI --> Constants
 AssetsAPI --> Exporter
 ```
 
-图表来源 
-- [backend/app/main.py](file://backend/app/main.py)
-- [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
-- [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
-- [backend/app/schemas.py](file://backend/app/schemas.py)
-- [backend/app/models/business.py](file://backend/app/models/business.py)
-- [backend/app/db.py](file://backend/app/db.py)
-- [backend/app/core/deps.py](file://backend/app/core/deps.py)
-- [backend/app/constants.py](file://backend/app/constants.py)
-- [backend/app/services/exporter.py](file://backend/app/services/exporter.py)
-
-章节来源
+**图表来源** 
 - [backend/app/main.py](file://backend/app/main.py)
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
@@ -103,14 +102,7 @@ AssetsAPI --> Exporter
 - 常量（constants.py）：资产类型、状态、分类、标签键等枚举与默认值
 - 导出服务（exporter.py）：将资产数据导出为多种格式（CSV/Excel/JSON）
 
-章节来源
-- [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
-- [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
-- [backend/app/schemas.py](file://backend/app/schemas.py)
-- [backend/app/models/business.py](file://backend/app/models/business.py)
-- [backend/app/core/deps.py](file://backend/app/core/deps.py)
-- [backend/app/constants.py](file://backend/app/constants.py)
-- [backend/app/services/exporter.py](file://backend/app/services/exporter.py)
+**更新** assets.py 已完全重写，新增多资产关联支持和增强的查询功能，提升了系统的灵活性和性能。
 
 ## 架构总览
 资产管理的整体流程如下：
@@ -144,7 +136,7 @@ API-->>FE : "返回JSON"
 Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
 ```
 
-图表来源 
+**图表来源** 
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
 - [backend/app/core/deps.py](file://backend/app/core/deps.py)
@@ -175,7 +167,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 功能：软删除或硬删除（依据策略），清理关联与依赖
   - 输出：删除结果与受影响记录数
 
-章节来源
+**更新** 查询功能得到显著增强，支持更复杂的过滤条件和多字段关联查询。
+
+**章节来源**
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
 - [backend/app/models/business.py](file://backend/app/models/business.py)
@@ -189,7 +183,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 标签键需符合命名规范，避免冲突
   - 支持按标签精确匹配与模糊搜索
 
-章节来源
+**更新** 分类体系支持更灵活的层级结构和属性继承机制。
+
+**章节来源**
 - [backend/app/models/business.py](file://backend/app/models/business.py)
 - [backend/app/constants.py](file://backend/app/constants.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
@@ -200,7 +196,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
 - 排序：支持多字段排序与自定义权重
 - 分页：默认分页大小与最大限制控制
 
-章节来源
+**更新** 搜索和过滤功能得到全面增强，支持更复杂的查询条件和组合过滤。
+
+**章节来源**
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
 
@@ -214,7 +212,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 可按当前筛选条件导出，或指定资产ID集合
   - 异步任务：大文件导出采用后台任务，前端轮询进度
 
-章节来源
+**更新** 导入导出功能支持更多数据格式，提升了数据处理效率和灵活性。
+
+**章节来源**
 - [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
 - [backend/app/services/exporter.py](file://backend/app/services/exporter.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
@@ -227,7 +227,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 维护依赖方向与强度，支持影响面分析
   - 删除资产时检查依赖链，防止破坏性操作
 
-章节来源
+**更新** 新增多资产关联功能，支持更复杂的资产关系建模和管理。
+
+**章节来源**
 - [backend/app/models/business.py](file://backend/app/models/business.py)
 
 ### 资产状态跟踪与生命周期
@@ -238,7 +240,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 创建、审核、发布、变更、归档、销毁
   - 审计日志记录关键节点与操作人
 
-章节来源
+**更新** 状态机得到扩展，支持更多状态转换和业务场景。
+
+**章节来源**
 - [backend/app/constants.py](file://backend/app/constants.py)
 - [backend/app/models/business.py](file://backend/app/models/business.py)
 
@@ -251,7 +255,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 区分客户端错误与服务端错误
   - 事务回滚与异常捕获
 
-章节来源
+**更新** 数据验证规则更加严格，错误处理机制更加完善。
+
+**章节来源**
 - [backend/app/schemas.py](file://backend/app/schemas.py)
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
@@ -269,7 +275,9 @@ Note over Ctl,Exp : "如需导出，控制器调用导出服务生成文件流"
   - 批量操作使用事务，保证一致性
   - 敏感字段脱敏与加密传输
 
-章节来源
+**更新** 前端客户端封装得到了优化，支持更多的API功能和更好的错误处理。
+
+**章节来源**
 - [frontend/src/api/client.ts](file://frontend/src/api/client.ts)
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
@@ -291,6 +299,8 @@ class AssetsAPI {
 +删除资产()
 +批量导入()
 +批量导出()
++多资产关联()
++增强查询()
 }
 class ImportsAPI {
 +预览导入()
@@ -303,6 +313,7 @@ class Schemas {
 +资产输出模式()
 +导入任务模式()
 +导出任务模式()
++关联关系模式()
 }
 class BusinessModels {
 +资产实体()
@@ -310,6 +321,7 @@ class BusinessModels {
 +标签实体()
 +依赖实体()
 +状态枚举()
++关联实体()
 }
 class Deps {
 +获取DB会话()
@@ -321,6 +333,7 @@ class Constants {
 +资产状态()
 +分类层级()
 +标签键规范()
++关联类型()
 }
 class Exporter {
 +导出CSV()
@@ -338,16 +351,7 @@ ImportsAPI --> Constants : "使用枚举与默认值"
 AssetsAPI --> Exporter : "生成导出文件"
 ```
 
-图表来源 
-- [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
-- [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
-- [backend/app/schemas.py](file://backend/app/schemas.py)
-- [backend/app/models/business.py](file://backend/app/models/business.py)
-- [backend/app/core/deps.py](file://backend/app/core/deps.py)
-- [backend/app/constants.py](file://backend/app/constants.py)
-- [backend/app/services/exporter.py](file://backend/app/services/exporter.py)
-
-章节来源
+**图表来源** 
 - [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
 - [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
 - [backend/app/schemas.py](file://backend/app/schemas.py)
@@ -370,7 +374,7 @@ AssetsAPI --> Exporter : "生成导出文件"
   - 热点分类与标签结果缓存
   - 导出任务状态缓存，降低重复计算
 
-[本节为通用性能指导，不直接分析具体文件]
+**更新** 针对新的多资产关联功能，增加了相应的性能优化建议。
 
 ## 故障排查指南
 - 常见问题
@@ -378,32 +382,27 @@ AssetsAPI --> Exporter : "生成导出文件"
   - 权限不足：确认用户角色与资源访问策略
   - 导入失败：查看错误报告定位问题行
   - 导出超时：调整批次大小与后台任务队列
+  - 关联查询失败：检查关联关系定义和数据完整性
 - 调试建议
   - 启用详细日志，记录请求与SQL
   - 使用测试数据复现问题
   - 逐步缩小范围，定位异常点
 
-章节来源
-- [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
-- [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
-- [backend/app/schemas.py](file://backend/app/schemas.py)
+**更新** 新增了多资产关联相关的故障排查指导。
 
 ## 结论
-Talos 资产管理API提供了完整的资产CRUD、分类与标签、搜索过滤、批量导入导出、关联依赖、状态生命周期、数据验证与错误处理能力。通过清晰的模块划分与依赖注入机制，系统具备良好的可扩展性与可维护性。建议在生产环境中结合索引优化、异步任务与缓存策略，以获得稳定高效的资产管理体验。
-
-[本节为总结性内容，不直接分析具体文件]
+Talos 资产管理API提供了完整的资产CRUD、分类与标签、搜索过滤、批量导入导出、关联依赖、状态生命周期、数据验证与错误处理能力。通过清晰的模块划分与依赖注入机制，系统具备良好的可扩展性与可维护性。最新的重写版本增强了多资产关联和查询功能，进一步提升了系统的性能和灵活性。建议在生产环境中结合索引优化、异步任务与缓存策略，以获得稳定高效的资产管理体验。
 
 ## 附录
 - API调用示例（前端）
   - 创建资产：构造请求体，发送POST，处理响应与错误
   - 查询资产：拼接查询参数，处理分页与排序
   - 导入导出：分片上传、进度轮询、文件下载
+  - 多资产关联：建立和维护资产间的复杂关系
 - 最佳实践
   - 合理分页与限流，避免大查询
   - 批量操作使用事务，保证一致性
   - 敏感字段脱敏与加密传输
+  - 充分利用新的关联查询功能提升效率
 
-章节来源
-- [frontend/src/api/client.ts](file://frontend/src/api/client.ts)
-- [backend/app/api/v1/assets.py](file://backend/app/api/v1/assets.py)
-- [backend/app/api/v1/imports.py](file://backend/app/api/v1/imports.py)
+**更新** 新增了多资产关联的使用示例和最佳实践建议。

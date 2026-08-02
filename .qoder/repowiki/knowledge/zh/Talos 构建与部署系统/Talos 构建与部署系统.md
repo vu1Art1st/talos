@@ -10,95 +10,79 @@ source_files:
     - frontend/Dockerfile
     - dev.sh
     - dev.ps1
+    - frontend/nginx.conf
     - backend/requirements.txt
     - frontend/package.json
-    - backend/pytest.ini
     - backend/alembic.ini
+    - docs/RELEASE.md
 ---
 
 ## 构建系统与部署架构
 
-### 1. 多环境构建策略
+### 一、构建工具链
 
-项目采用**双轨构建模式**：本地开发使用轻量级 SQLite + 内存队列，生产环境使用 Docker Compose 编排完整依赖栈。
+**后端（Python/FastAPI）**：
+- 依赖管理：requirements.txt + requirements-dev.txt，通过 pip install -r requirements.txt 安装
+- 运行环境：Python 3.12-slim 基础镜像，Uvicorn ASGI 服务器启动 FastAPI 应用
+- 数据库迁移：Alembic 管理版本化迁移脚本（alembic/versions/），连接串从环境变量 VP_DATABASE_URL 读取
 
-- **后端（Python/FastAPI）**：通过 `requirements.txt` 管理依赖，使用 `uvicorn` 作为 ASGI 服务器，支持异步数据库操作（asyncpg）和任务队列（arq + Redis）
-- **前端（Vue 3/Vite）**：通过 `package.json` 管理依赖，使用 Vite 构建静态资源，Nginx 反向代理提供静态文件服务
-- **容器化**：每个服务独立 Dockerfile，docker-compose.yml 统一编排 PostgreSQL、Redis、Gotenberg 等依赖服务
+**前端（Vue 3 + Vite）**：
+- 包管理：pnpm（pnpm-lock.yaml）+ npm（package-lock.json 并存），使用淘宝镜像 https://registry.npmmirror.com
+- 构建工具：Vite 5.x，TypeScript 支持，Tailwind CSS + PostCSS 处理样式
+- 构建产物：输出到 frontend/dist/，由 Nginx 静态托管
 
-### 2. 核心构建文件与工具链
+### 二、容器化部署
 
-**后端构建配置：**
-- `backend/Dockerfile`：基于 python:3.12-slim 的多阶段镜像，安装依赖后启动 uvicorn
-- `backend/requirements.txt`：定义运行时依赖，包含 FastAPI、SQLAlchemy、Pydantic、Redis、arq 等
-- `backend/pytest.ini`：配置 pytest 的 asyncio 自动模式
-- `backend/alembic.ini`：数据库迁移配置
+**Docker 多阶段构建**：
+- 后端镜像：python:3.12-slim → 安装依赖 → 复制代码 → Uvicorn 启动 8000 端口
+- 前端镜像：node:20-alpine 构建 → nginx:1.27-alpine 托管静态资源 → 反向代理 /api/ 和 /storage/
 
-**前端构建配置：**
-- `frontend/Dockerfile`：Node.js 构建阶段 + Nginx 运行阶段的二阶段构建
-- `frontend/package.json`：定义 npm scripts（dev/build/preview）和依赖版本
-- `frontend/vite.config.ts`：Vite 构建配置
-- `frontend/nginx.conf`：Nginx 反向代理配置
+**服务编排（docker-compose.yml）**：
+- postgres:16-alpine：PostgreSQL 数据库，健康检查 pg_isready
+- redis:7-alpine：任务队列缓存
+- gotenberg/gotenberg:8：Word/PDF 文档转换服务
+- api：FastAPI 后端，暴露 8000 端口
+- worker：arq 异步任务处理器，复用后端镜像
+- frontend：Nginx 前端，暴露 80 端口，反向代理 API 请求
 
-**开发脚本：**
-- `dev.sh`：Linux/macOS 一键开发脚本，自动创建 Python venv、安装依赖、启动前后端
-- `dev.ps1`：Windows PowerShell 版本的开发脚本
-- `docker-compose.yml`：生产环境编排，包含健康检查和数据卷持久化
+### 三、开发环境
 
-### 3. 构建流程与依赖管理
+**一键启动脚本**：
+- dev.sh（Linux/macOS）：自动创建 Python venv，SQLite 免队列模式，Vite 热重载
+- dev.ps1（Windows PowerShell）：等效 Windows 版本，支持 UTF-8 BOM 编码
 
-**本地开发流程：**
-```bash
-# 执行 dev.sh 或 dev.ps1 自动完成：
-# 1. 检查 Python/Node/npm 依赖
-# 2. 初始化 backend/.venv 虚拟环境
-# 3. 安装 requirements-dev.txt 依赖
-# 4. 安装 frontend/node_modules
-# 5. 启动后端（SQLite + 免队列模式）
-# 6. 启动前端 Vite Dev Server
-```
+**开发模式特点**：
+- 后端使用 SQLite + VP_DISABLE_QUEUE=1 禁用 Redis 队列
+- 前端 Vite Dev Server 监听 5173 端口
+- 自动依赖检测与环境初始化
 
-**生产构建流程：**
-```bash
-# Docker Compose 构建顺序：
-# 1. postgres:16-alpine - PostgreSQL 数据库
-# 2. redis:7-alpine - Redis 缓存和任务队列
-# 3. gotenberg/gotenberg:8 - PDF 生成服务
-# 4. api - FastAPI 应用（端口 8000）
-# 5. worker - arq 任务处理器
-# 6. frontend - Nginx 静态文件服务（端口 80）
-```
+### 四、版本管理与发布流程
 
-### 4. 环境变量与配置管理
+**语义化版本控制**：
+- 遵循 SemVer x.y.z 规范，当前处于 0.y.z 快速迭代阶段
+- 版本号同步位置：docs/RELEASE.md、backend/app/core/config.py 的 APP_VERSION、frontend/package.json 的 version
+- Git 标签：git tag -a v x.y.z -m "release x.y.z"
 
-**后端环境变量（VP_ 前缀）：**
-- `VP_DATABASE_URL`：数据库连接字符串（支持 SQLite/PostgreSQL）
-- `VP_REDIS_URL`：Redis 连接地址
-- `VP_GOTENBERG_URL`：PDF 生成服务地址
-- `VP_SECRET_KEY`：JWT 密钥
-- `VP_STORAGE_DIR`：文件存储目录
-- `VP_DISABLE_QUEUE`：禁用队列模式（开发用）
+**变更日志**：按 Keep a Changelog 格式组织，分类为新增/变更/修复/移除/安全
 
-**测试环境：**
-- 使用 SQLite 内存数据库进行单元测试
-- pytest 自动处理异步测试用例
-- 测试数据存储在 `tests/test_vp.db` 中
+### 五、配置管理
 
-### 5. 部署与运维约定
+**环境变量驱动**：
+- 数据库连接：VP_DATABASE_URL（支持 PostgreSQL/SQLite）
+- Redis 连接：VP_REDIS_URL
+- Gotenberg 地址：VP_GOTENBERG_URL
+- 存储路径：VP_STORAGE_DIR
+- 安全密钥：VP_SECRET_KEY
 
-**容器化规范：**
-- 每个服务独立 Dockerfile，遵循最小化镜像原则
-- 使用 Alpine 基础镜像减小体积
-- 健康检查确保服务就绪后再启动依赖服务
-- 数据持久化通过 Docker volumes 管理
+**Nginx 反向代理配置**：
+- 前端路由 history 模式支持
+- API 代理到后端 8000 端口
+- 文件上传代理到后端 storage 接口
+- 最大上传大小 64MB
 
-**开发环境优化：**
-- 后端使用 `--reload` 参数实现热重载
-- 前端使用 Vite Dev Server 提供快速刷新
-- 默认账号 `admin/admin123` 便于快速体验
-- API 文档自动生成为 `/api/docs`（Swagger UI）
+### 六、关键约束
 
-**跨平台支持：**
-- 提供 bash 和 PowerShell 两套开发脚本
-- 路径处理适配不同操作系统
-- 错误提示使用彩色输出提升可读性
+- 前后端分离部署，通过 Nginx 统一入口
+- 异步任务依赖 Redis，无 Redis 时自动降级为进程内执行
+- 所有服务通过 Docker Compose 统一编排，卷持久化数据库和存储数据
+- 开发环境与生产环境通过不同脚本和环境变量区分

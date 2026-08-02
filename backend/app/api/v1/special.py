@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
 from app.core.deps import require_perm
 from app.core.query import get_or_404, paginate, apply_sort
+from app.core.sanitize import excel_safe
 from app.core.timeutil import utcnow
 from app.db import get_session
 from app.models import (
@@ -315,7 +316,7 @@ async def export_testing_plans(
     ws.title = "测试计划"
     ws.append(PLAN_EXCEL_HEADERS)
     for p in plans:
-        ws.append([
+        ws.append([excel_safe(v) for v in (
             p.id, p.system_name, p.test_type, p.department,
             TESTING_PLAN_STATUS.get(p.status, str(p.status)),
             "、".join(u.realname or u.username for u in p.testers),
@@ -323,7 +324,7 @@ async def export_testing_plans(
             p.est_mandays, p.actual_mandays,
             p.stat_critical, p.stat_high, p.stat_medium, p.stat_low,
             p.retest_round_count,
-        ])
+        )])
 
     ws2 = wb.create_sheet("统计汇总")
     ws2.append(["指标", "数值"])

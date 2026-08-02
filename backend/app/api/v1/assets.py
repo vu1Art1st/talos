@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import ASSET_SEC_LEVEL, ASSET_STATUS, URL_TAG
 from app.core.deps import get_current_user, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
+from app.core.sanitize import excel_safe
 from app.db import get_session
 from app.models import Asset, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
@@ -158,7 +159,7 @@ def _build_workbook(assets: list[Asset]):
     ws.title = "资产"
     ws.append(EXCEL_HEADERS)
     for a in assets:
-        ws.append([
+        ws.append([excel_safe(v) for v in (
             a.name, a.sub_system, a.department,
             _dump_public_urls(a.public_urls),
             ";".join(a.internal_urls or []),
@@ -169,7 +170,7 @@ def _build_workbook(assets: list[Asset]):
             ASSET_SEC_LEVEL.get(a.sec_level, "其他"),
             ASSET_STATUS.get(a.status, "线上"),
             a.remark,
-        ])
+        )])
     return wb
 
 

@@ -49,6 +49,13 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    @app.middleware("http")
+    async def _security_headers(request, call_next):
+        # 阻止浏览器 MIME 嗅探，降低上传文件（如图片）被当作其他类型执行的风险
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        return response
+
     app.include_router(api_router, prefix="/api/v1")
     # 仅公开图片子目录：导出/导入原始文档/预览等敏感文件不再静态暴露，改走鉴权接口
     images_dir = settings.storage_sub("uploads", "images")

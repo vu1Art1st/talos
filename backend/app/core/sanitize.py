@@ -30,3 +30,15 @@ def sanitize_html(html: str | None) -> str:
     if not html:
         return html or ""
     return nh3.clean(html, tags=_TAGS, attributes=_ATTRS, url_schemes=_URL_SCHEMES)
+
+
+# Excel/CSV 公式注入：单元格以这些字符开头时会被表格软件当作公式求值
+EXCEL_FORMULA_PREFIXES = ("=", "+", "-", "@")
+
+
+def excel_safe(value):
+    """导出 Excel 时中和公式注入：对以 =/+/-/@ 开头的字符串前置单引号。
+    非字符串（数字/日期/None 等）原样返回，不影响数值列。"""
+    if isinstance(value, str) and value.startswith(EXCEL_FORMULA_PREFIXES):
+        return "'" + value
+    return value

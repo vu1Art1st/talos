@@ -28,6 +28,16 @@ router = APIRouter(tags=["通用"])
 ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
 
+def _is_allowed_image(data: bytes) -> bool:
+    """校验图片文件头魔术字节，防止伪造扩展名的非图片文件入库。"""
+    return (
+        data.startswith(b"\x89PNG\r\n\x1a\n")            # png
+        or data.startswith(b"\xff\xd8\xff")               # jpg/jpeg
+        or data[:6] in (b"GIF87a", b"GIF89a")             # gif
+        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")  # webp
+    )
+
+
 @router.get("/meta")
 async def meta(_: User = Depends(get_current_user)):
     """业务字典，前端下拉框统一从此获取。"""
@@ -94,6 +104,8 @@ async def upload_image(file: UploadFile, _: User = Depends(get_current_user)):
     data = await file.read()
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(400, "图片大小不能超过 10MB")
+    if not _is_allowed_image(data):
+        raise HTTPException(400, "文件内容不是有效的图片")
     name = f"{uuid.uuid4().hex}{ext}"
     (settings.storage_sub("uploads", "images") / name).write_bytes(data)
     return {"url": f"/storage/uploads/images/{name}"}

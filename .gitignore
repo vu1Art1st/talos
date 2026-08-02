@@ -1,21 +1,24 @@
 # Python
 __pycache__/
-*.pyc
+*.py[co]
 .venv/
 .pytest_cache/
 
-# 本地运行时数据
+# 本地 SQLite 库（dev.db 无路径前缀，已覆盖 backend/dev.db 等同名文件）
+# 及其 WAL / journal 附属文件
 dev.db
+_devrun.db
 test.db*
 test_vp.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# 本地存储与备份产物（含业务数据，勿入库）
+/storage/
 backend/storage/
-backend/dev.db
-backend/_devrun.db
 backend/_devstorage/
 backend/tests/test_storage/
-/storage/
-
-# 备份产物（scripts/backup.sh 生成，含业务数据，勿入库）
 /backups/
 
 # 前端
@@ -26,7 +29,7 @@ dist/
 .env
 .env.local
 
-# 本地测试产物（浏览器手测截图、测试用配置与样例文档）
+# 本地手测产物（浏览器 profile / 截图 / 日志 / 样例导出）
 /_edgeprofile/
 /*.png
 frontend/*.png

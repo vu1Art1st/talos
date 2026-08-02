@@ -48,11 +48,17 @@ _TPL_COMPANY = "中移系统集成有限公司"
 
 
 def _localize_images(html: str) -> str:
-    """把 /storage/xx 图片 URL 替换为本地文件路径，供 htmldocx 内嵌图片。"""
+    """把 /storage/xx 图片 URL 替换为本地文件路径，供 htmldocx 内嵌图片。
+
+    仅接受解析后仍位于 storage 根目录内的路径，防止 ../ 路径遍历读取任意文件；
+    越界路径保持原样（本地无此文件将被后续降级处理跳过）。"""
+    base = settings.storage_path.resolve()
 
     def repl(m: re.Match) -> str:
-        local = settings.storage_path / m.group(1)
-        return f'src="{local.as_posix()}"'
+        candidate = (settings.storage_path / m.group(1)).resolve()
+        if not candidate.is_relative_to(base):
+            return m.group(0)
+        return f'src="{candidate.as_posix()}"'
 
     return _STORAGE_SRC.sub(repl, html or "")
 
