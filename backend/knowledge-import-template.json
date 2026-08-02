@@ -1,0 +1,13 @@
+[
+  {
+    "vulnerability_name": "SQL注入",
+    "vul_type": 10,
+    "severity_level": 10,
+    "description_html": "<p>应用程序未对用户输入做有效过滤，攻击者可构造恶意 SQL 语句操纵数据库查询。</p>",
+    "harm_html": "<p>可导致数据库信息泄露、数据被篡改甚至服务器被控制。</p>",
+    "solution_html": "<p>使用参数化查询（预编译语句），并对输入做白名单校验。</p>",
+    "references": [
+      "https://owasp.org/Top10/"
+    ]
+  }
+]

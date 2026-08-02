@@ -26,7 +26,10 @@ services:
     command: ["gotenberg", "--api-timeout=120s"]
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     environment: &backend_env
       VP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vulnplatform}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vulnplatform}
       VP_REDIS_URL: redis://redis:6379/0
@@ -42,7 +45,10 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     command: ["arq", "app.workers.main.WorkerSettings"]
     environment: *backend_env
     volumes:
@@ -58,7 +64,7 @@ services:
     depends_on:
       - api
     ports:
-      - "80:8080"
+      - "27012:8080"
 
 volumes:
   pg_data:

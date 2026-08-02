@@ -6,7 +6,7 @@ RUN npm install --registry=https://registry.npmmirror.com
 COPY . .
 RUN npm run build
 
-# 非 root 运行：使用官方 unprivileged 镜像，默认以 uid 101 运行并监听 8080，
+# 非 root 运行：使用官方 unprivileged 镜像，默认以 uid 101 运行并监听 8080（容器内端口；对外发布端口由 docker-compose 的 ports 映射决定），
 # pid/临时目录均已指向可写位置，无需额外提权。
 FROM nginxinc/nginx-unprivileged:1.27-alpine
 COPY --from=build /app/dist /usr/share/nginx/html

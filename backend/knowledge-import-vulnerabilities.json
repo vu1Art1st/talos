@@ -1,0 +1,700 @@
+[
+  {
+    "vulnerability_name": "水平越权",
+    "vul_type": 40,
+    "severity_level": 20,
+    "description_html": "<p>应用未校验资源归属，攻击者通过修改对象 ID 等资源标识，即可访问或操作同级别其他用户的数据。</p>",
+    "harm_html": "<p>可越权读取或修改其他用户的隐私数据、订单、消息等，造成大规模数据泄露。</p>",
+    "solution_html": "<p>对每次数据访问校验资源所有者与当前用户一致；使用不可预测的资源标识；服务端强制做归属校验。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/",
+      "https://portswigger.net/web-security/access-control"
+    ]
+  },
+  {
+    "vulnerability_name": "垂直越权",
+    "vul_type": 40,
+    "severity_level": 10,
+    "description_html": "<p>低权限用户可访问仅应由高权限角色使用的功能或接口，权限校验缺失或仅在前端实现。</p>",
+    "harm_html": "<p>普通用户可执行管理员操作（如用户管理、系统配置），导致权限体系整体失守。</p>",
+    "solution_html": "<p>服务端对每个敏感接口做基于角色/权限点的强制校验，采用默认拒绝的 RBAC 模型，前端隐藏不能替代后端校验。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "未授权访问",
+    "vul_type": 40,
+    "severity_level": 20,
+    "description_html": "<p>接口或页面未做任何身份认证即可访问，攻击者无需登录即可直接调用敏感功能或读取数据，涉及 Nacos、API 接口、备份文件、存储桶、Docker、Redis、Kibana、ES、Harbor 及系统功能页面等。</p>",
+    "harm_html": "<p>可导致敏感数据泄露、管理功能被匿名调用，中间件控制台等被直接接管，是权限体系失效的典型表现。</p>",
+    "solution_html": "<p>所有敏感接口强制身份认证，采用统一鉴权中间件默认拒绝；中间件控制台绑定访问来源并设置强口令；备份文件与存储桶设置私有访问策略。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "任意用户登录",
+    "vul_type": 40,
+    "severity_level": 20,
+    "description_html": "<p>登录认证逻辑存在缺陷，攻击者可绕过正常认证流程登录任意用户账号。</p>",
+    "harm_html": "<p>可冒充任意用户身份（含管理员）登录系统，导致系统被完全控制。</p>",
+    "solution_html": "<p>服务端严格校验登录凭证与用户身份的绑定关系，禁止信任客户端提交的用户标识，对登录接口增加频率限制与风控。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "JWT安全漏洞",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>JWT 实现存在缺陷，如使用弱密钥、密钥泄露、接受 alg=none 或校验签名不严，攻击者可伪造 Token。</p>",
+    "harm_html": "<p>攻击者可伪造任意用户的 Token 实现身份伪造与权限提升。</p>",
+    "solution_html": "<p>固定并强制校验签名算法，使用高强度密钥并妥善保管，校验有效期与签发者，敏感场景引入 Token 吊销机制。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/",
+      "https://portswigger.net/web-security/jwt"
+    ]
+  },
+  {
+    "vulnerability_name": "Session注销失效",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>用户注销后服务端会话未真正失效，攻击者可继续使用旧会话凭证访问系统。</p>",
+    "harm_html": "<p>注销后的会话仍可被滥用，公共终端场景下易造成账号冒用与数据泄露。</p>",
+    "solution_html": "<p>注销时服务端立即销毁会话并清除相关缓存，设置合理会话超时，支持会话全端失效。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Session_fixation"
+    ]
+  },
+  {
+    "vulnerability_name": "密码重置漏洞",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>密码重置流程存在缺陷，如可任意指定目标账号、验证码可绕过或重置链接可预测。</p>",
+    "harm_html": "<p>攻击者可重置任意账号（含管理员）密码，接管系统。</p>",
+    "solution_html": "<p>重置凭证绑定目标账号且一次一用，服务端强制校验；验证码用后即失效；重置链接使用高熵随机值并限时有效。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Password_recovery_flaw"
+    ]
+  },
+  {
+    "vulnerability_name": "SQL注入",
+    "vul_type": 10,
+    "severity_level": 10,
+    "description_html": "<p>应用程序将未经过滤的用户输入直接拼接进 SQL 语句，攻击者可构造恶意输入改变查询逻辑，操纵数据库执行任意查询或命令，多处接口存在该问题。</p>",
+    "harm_html": "<p>可导致数据库敏感信息泄露被拖库、数据被篡改或删除，结合数据库特性还可能进一步获取服务器操作系统权限。</p>",
+    "solution_html": "<p>使用参数化查询（预编译语句）或 ORM 框架，禁止字符串拼接 SQL；对输入做白名单校验；数据库账号遵循最小权限原则，关闭详细错误回显。</p>",
+    "references": [
+      "https://owasp.org/Top10/",
+      "https://portswigger.net/web-security/sql-injection"
+    ]
+  },
+  {
+    "vulnerability_name": "命令注入",
+    "vul_type": 20,
+    "severity_level": 10,
+    "description_html": "<p>应用将用户输入拼接进操作系统命令并交由 shell 执行，攻击者可注入命令分隔符执行任意系统命令。</p>",
+    "harm_html": "<p>可直接获取服务器操作系统权限、读取或删除任意文件、横向渗透内网，危害极其严重。</p>",
+    "solution_html": "<p>避免调用系统 shell，改用语言内置 API；必须调用时使用参数数组方式并对参数做严格白名单校验，禁止拼接。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Command_Injection"
+    ]
+  },
+  {
+    "vulnerability_name": "JDBC反序列化",
+    "vul_type": 25,
+    "severity_level": 10,
+    "description_html": "<p>应用存在 JDBC 反序列化利用面（如通过 JDBC 连接串触发恶意反序列化），攻击者可构造恶意数据流触发远程代码执行。</p>",
+    "harm_html": "<p>可导致远程代码执行，完全控制服务器。</p>",
+    "solution_html": "<p>禁止将不可信数据传入 JDBC 连接参数，对连接串做白名单校验，升级相关组件并启用反序列化防护。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data"
+    ]
+  },
+  {
+    "vulnerability_name": "Fastjson反序列化",
+    "vul_type": 25,
+    "severity_level": 10,
+    "description_html": "<p>应用使用存在漏洞的 Fastjson 版本解析不可信 JSON，攻击者可利用反序列化 gadget 链执行任意代码（涉及历史漏洞如 CVE-2022-25845 等）。</p>",
+    "harm_html": "<p>可导致远程代码执行，完全控制服务器。</p>",
+    "solution_html": "<p>升级 Fastjson 至最新安全版本或迁移至 Jackson 等替代方案，启用 safeMode，禁止反序列化不可信数据。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Deserialization_of_untrusted_data"
+    ]
+  },
+  {
+    "vulnerability_name": "Shiro反序列化",
+    "vul_type": 25,
+    "severity_level": 10,
+    "description_html": "<p>Apache Shiro 存在反序列化漏洞（如 CVE-2016-4437），攻击者可利用 rememberMe 特性构造恶意序列化数据执行任意命令。</p>",
+    "harm_html": "<p>可导致远程代码执行，完全控制服务器。</p>",
+    "solution_html": "<p>升级 Shiro 至安全版本，更换默认 AES 密钥为随机强密钥，禁用不必要的 rememberMe 或对其数据做完整性校验。</p>",
+    "references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-4437"
+    ]
+  },
+  {
+    "vulnerability_name": "Spring Cloud Gateway命令执行",
+    "vul_type": 20,
+    "severity_level": 10,
+    "description_html": "<p>Spring Cloud Gateway 存在 SpEL 表达式注入漏洞（CVE-2022-22947），攻击者可构造恶意请求在网关执行任意命令。</p>",
+    "harm_html": "<p>可导致远程代码执行，完全控制网关及后端服务。</p>",
+    "solution_html": "<p>升级至安全版本（3.1.1+ / 3.0.7+），限制 Actuator 网关端点暴露，对路由配置增加鉴权。</p>",
+    "references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2022-22947"
+    ]
+  },
+  {
+    "vulnerability_name": "SSRF服务器端请求伪造",
+    "vul_type": 75,
+    "severity_level": 20,
+    "description_html": "<p>服务端根据用户可控的 URL 发起网络请求且未做限制（如通过 kkfileview 等组件），攻击者可借服务器身份访问内网或本机服务。</p>",
+    "harm_html": "<p>可探测扫描内网、读取云主机元数据（窃取临时凭证）、攻击内网未授权服务（如 Redis）进而横向渗透。</p>",
+    "solution_html": "<p>对目标地址做协议与域名白名单校验，解析后禁止私有网段与本机回环地址，禁用重定向跟随，屏蔽 file/gopher/dict 等协议，升级修复 kkfileview 等相关组件漏洞。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Server_Side_Request_Forgery",
+      "https://portswigger.net/web-security/ssrf"
+    ]
+  },
+  {
+    "vulnerability_name": "存储型XSS",
+    "vul_type": 15,
+    "severity_level": 20,
+    "description_html": "<p>攻击者提交的恶意脚本被持久化存储到服务端，其他用户浏览相关页面时脚本在其浏览器中执行，涉及短信设置、发文管理、产品/服务分级、政策解读、日程管理、企业社区、供应商管理等模块，多处存在。</p>",
+    "harm_html": "<p>可批量窃取用户会话凭证、伪造操作、植入钓鱼页面或挂马，影响所有访问该页面的用户，危害面广。</p>",
+    "solution_html": "<p>对输出到页面的内容做上下文相关的 HTML 编码；入库前按白名单过滤富文本标签与属性；设置 CSP 与 Cookie 的 HttpOnly 属性。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/xss/",
+      "https://portswigger.net/web-security/cross-site-scripting/stored"
+    ]
+  },
+  {
+    "vulnerability_name": "敏感信息泄露",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>数据库/云服务密钥、账号密码硬编码在代码或配置中，JWT、个人信息、大模型 API Key 等在页面、接口响应或日志中泄露。</p>",
+    "harm_html": "<p>泄露的信息可被攻击者用于进一步攻击或直接造成隐私合规风险；API Key 泄露还可造成云资源滥用与资损。</p>",
+    "solution_html": "<p>敏感信息使用环境变量或密钥管理系统存储，禁止硬编码；对敏感字段脱敏展示，关闭生产环境详细报错，加强日志中的敏感信息过滤。</p>",
+    "references": [
+      "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"
+    ]
+  },
+  {
+    "vulnerability_name": "源代码泄露",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>版本控制目录（.git）或 webpack 等构建产物中源码相关文件可被直接访问下载。</p>",
+    "harm_html": "<p>攻击者可获取完整源代码与配置，分析出更多漏洞并窃取硬编码的密钥。</p>",
+    "solution_html": "<p>禁止在 Web 目录存放版本控制目录与源码包，服务器配置拒绝访问 .git 等敏感路径，前端构建产物去除调试信息与源码映射。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "Nacos权限绕过/默认密钥",
+    "vul_type": 70,
+    "severity_level": 20,
+    "description_html": "<p>Nacos 控制台存在认证绕过漏洞（如 CVE-2021-29441）或使用默认密钥可伪造身份，配置中心未授权可访问。</p>",
+    "harm_html": "<p>攻击者可未授权访问配置中心，窃取数据库口令等敏感配置，甚至篡改配置执行恶意操作。</p>",
+    "solution_html": "<p>升级至安全版本，修改默认密钥与默认口令，开启严格认证与鉴权，控制台限制访问来源。</p>",
+    "references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2021-29441"
+    ]
+  },
+  {
+    "vulnerability_name": "Druid弱口令",
+    "vul_type": 65,
+    "severity_level": 20,
+    "description_html": "<p>Druid 监控页面（StatViewServlet）使用弱口令或未设置登录口令即可访问。</p>",
+    "harm_html": "<p>攻击者可查看 SQL 监控、会话监控等敏感信息，分析出数据库结构与访问规律。</p>",
+    "solution_html": "<p>为 Druid 监控页设置强口令并限制访问来源，生产环境关闭监控页面或做网络隔离。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Weak_password_requirements"
+    ]
+  },
+  {
+    "vulnerability_name": "Text4shell漏洞",
+    "vul_type": 70,
+    "severity_level": 20,
+    "description_html": "<p>应用使用的 Apache Commons Text 存在 CVE-2022-42889 漏洞（Text4Shell），攻击者可利用字符串替换函数执行远程代码。</p>",
+    "harm_html": "<p>可导致远程代码执行，完全控制服务器。</p>",
+    "solution_html": "<p>升级 Apache Commons Text 至 1.10.0 及以上，或禁用 StringSubstitutor 的 lookup 功能。</p>",
+    "references": [
+      "https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2022-42889"
+    ]
+  },
+  {
+    "vulnerability_name": "目录遍历/列目录",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>Web 服务器开启目录浏览功能，或应用存在路径穿越可遍历目录结构，访问无索引页的目录时列出全部文件。</p>",
+    "harm_html": "<p>暴露目录结构与文件清单，可能泄露备份、配置等敏感文件。</p>",
+    "solution_html": "<p>关闭 Web 服务器的目录列表功能（如 Apache Options -Indexes、Nginx autoindex off），对文件路径做规范化与白名单校验。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Forced_browsing"
+    ]
+  },
+  {
+    "vulnerability_name": "Actuator端点泄露",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>Spring Boot Actuator 端点未授权访问，如 /actuator/env、/actuator/heapdump、/actuator/jolokia 等，或配置为开放所有端点。</p>",
+    "harm_html": "<p>可获取环境变量、内存转储中的敏感信息，部分端点可被利用执行命令或修改配置。</p>",
+    "solution_html": "<p>仅暴露 health/info 等必要端点，通过 management.endpoints.web.exposure.include 限制，对敏感端点增加鉴权与网络隔离。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "Swagger/Knife4j接口文档泄露",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>Swagger/Knife4j 接口文档未授权访问，暴露全部 API 结构、参数与调用方式。</p>",
+    "harm_html": "<p>攻击者可据此快速定位未授权接口与参数构造攻击，大幅降低攻击成本。</p>",
+    "solution_html": "<p>生产环境关闭 Swagger/Knife4j，或增加鉴权与访问来源限制。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "高危端口违规开放公网",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>数据库、Redis、Docker、ES 等中间件高危端口违规对外开放公网。</p>",
+    "harm_html": "<p>攻击者可直接访问中间件服务，尝试弱口令或未授权访问，导致数据泄露或服务器被控制。</p>",
+    "solution_html": "<p>高危端口禁止对外开放公网，通过防火墙与安全组白名单限制访问来源，收敛暴露面。</p>",
+    "references": [
+      "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    ]
+  },
+  {
+    "vulnerability_name": "演示系统暴露",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>演示系统或测试环境直接暴露在公网且使用默认/弱口令。</p>",
+    "harm_html": "<p>攻击者可进入演示系统获取业务数据或作为跳板攻击内网。</p>",
+    "solution_html": "<p>演示系统下线或与生产网络隔离，收敛暴露面，使用独立账号与强口令。</p>",
+    "references": [
+      "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    ]
+  },
+  {
+    "vulnerability_name": "短信轰炸",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>短信/邮件发送接口未做频率限制，攻击者可高频调用向指定号码发送大量验证码，多处存在。</p>",
+    "harm_html": "<p>可对目标用户实施骚扰轰炸，消耗企业短信费用，影响业务信誉。</p>",
+    "solution_html": "<p>对发送接口按手机号、IP、设备维度做频率与总量限制，增加图形验证码与滑块校验。</p>",
+    "references": [
+      "https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks"
+    ]
+  },
+  {
+    "vulnerability_name": "任意文件读取",
+    "vul_type": 35,
+    "severity_level": 20,
+    "description_html": "<p>应用提供文件读取功能但未校验路径归属，攻击者可指定任意路径读取服务器文件（如启明VPN等系统存在该问题）。</p>",
+    "harm_html": "<p>可窃取源代码、数据库配置、密钥凭证等敏感文件，为后续攻击提供关键信息。</p>",
+    "solution_html": "<p>使用文件 ID 到真实路径的服务端映射，对路径做规范化与归属校验，限制可访问目录。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Path_Traversal"
+    ]
+  },
+  {
+    "vulnerability_name": "任意文件上传",
+    "vul_type": 60,
+    "severity_level": 10,
+    "description_html": "<p>文件上传功能未校验文件类型与内容，攻击者可上传 WebShell 等可执行脚本文件。</p>",
+    "harm_html": "<p>可直接获取服务器命令执行权限，是最常见的服务器沦陷入口之一。</p>",
+    "solution_html": "<p>对上传文件做扩展名与 MIME 白名单校验、重命名存储、存储目录禁用执行权限、校验文件内容魔术字节。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Unrestricted_File_Upload"
+    ]
+  },
+  {
+    "vulnerability_name": "任意文件下载",
+    "vul_type": 35,
+    "severity_level": 20,
+    "description_html": "<p>文件下载接口直接接收文件路径参数且缺少校验，攻击者可下载 Web 目录外的任意文件。</p>",
+    "harm_html": "<p>可导致敏感配置、备份文件、源代码泄露。</p>",
+    "solution_html": "<p>对下载资源使用白名单或 ID 映射，禁止路径参数直传，校验最终路径位于受控目录。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Path_Traversal"
+    ]
+  },
+  {
+    "vulnerability_name": "任意文件删除",
+    "vul_type": 35,
+    "severity_level": 20,
+    "description_html": "<p>文件删除接口未校验目标路径归属，攻击者可构造路径删除服务器上的任意文件。</p>",
+    "harm_html": "<p>可删除关键业务文件或系统文件，造成业务中断，甚至通过删除校验文件绕过安全机制。</p>",
+    "solution_html": "<p>对删除目标做白名单与归属校验，规范化路径后确认位于允许目录，记录删除操作审计日志。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Path_Traversal"
+    ]
+  },
+  {
+    "vulnerability_name": "URL重定向漏洞",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>跳转功能的目标地址由用户参数控制且未校验，攻击者可构造跳转到外部恶意站点的链接。</p>",
+    "harm_html": "<p>常用于钓鱼攻击，借助可信域名诱导用户跳转到仿冒页面。</p>",
+    "solution_html": "<p>对跳转目标做白名单校验，仅允许站内地址或预置的可信域名，避免开放式重定向。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Unvalidated_Redirects_and_Forwards"
+    ]
+  },
+  {
+    "vulnerability_name": "JSONP劫持",
+    "vul_type": 45,
+    "severity_level": 20,
+    "description_html": "<p>接口以 JSONP 形式返回敏感数据且未校验回调来源，攻击者可诱导用户浏览器跨域窃取数据。</p>",
+    "harm_html": "<p>可窃取已登录用户的个人敏感信息。</p>",
+    "solution_html": "<p>使用 CORS 白名单替代 JSONP；JSONP 回调函数名严格白名单校验；敏感接口禁止 JSONP 输出。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Cross-site_scripting"
+    ]
+  },
+  {
+    "vulnerability_name": "点击劫持",
+    "vul_type": 55,
+    "severity_level": 20,
+    "description_html": "<p>页面未限制被 iframe 嵌套，攻击者可用透明层覆盖诱导用户点击执行非预期操作。</p>",
+    "harm_html": "<p>可诱骗用户完成点赞、授权、转账等操作，用户以为在操作正常页面。</p>",
+    "solution_html": "<p>设置 X-Frame-Options 为 DENY/SAMEORIGIN，或使用 CSP 的 frame-ancestors 指令限制嵌套来源。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Clickjacking"
+    ]
+  },
+  {
+    "vulnerability_name": "越权访问（影响有限）",
+    "vul_type": 40,
+    "severity_level": 30,
+    "description_html": "<p>存在水平/垂直越权，但可访问的均为非敏感信息或影响范围较小的功能。</p>",
+    "harm_html": "<p>可能查看其他用户的非敏感信息或调用部分受限功能，危害相对较小。</p>",
+    "solution_html": "<p>完善服务端资源归属与角色权限校验，逐步收敛越权面。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "未授权访问（低敏感资源）",
+    "vul_type": 40,
+    "severity_level": 30,
+    "description_html": "<p>测试页面、部分 API 文档、pprof 调试信息、部分存储桶遍历等资源未授权可访问。</p>",
+    "harm_html": "<p>暴露测试信息、调试接口与资源清单，辅助攻击者了解系统结构。</p>",
+    "solution_html": "<p>对测试页面与调试端点增加鉴权或下线，存储桶设置私有访问策略，接口文档限制访问。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "信息泄露-报错回显",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>生产环境返回详细的异常堆栈或数据库错误信息，报错内容包含 SQL 语句、内部路径等。</p>",
+    "harm_html": "<p>暴露技术栈、路径、SQL 语句等内部信息，辅助攻击者构造精准攻击。</p>",
+    "solution_html": "<p>生产环境统一返回友好错误页，关闭调试模式，将详细错误仅记录到服务端日志。</p>",
+    "references": [
+      "https://owasp.org/www-community/Improper_Error_Handling"
+    ]
+  },
+  {
+    "vulnerability_name": "服务器Banner/中间件版本泄露",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>HTTP 响应头与错误页暴露服务器 Banner、中间件类型及版本号。</p>",
+    "harm_html": "<p>攻击者可据此匹配已知漏洞实施针对性攻击。</p>",
+    "solution_html": "<p>隐藏或伪装修复响应头与 Banner，统一错误页面输出。</p>",
+    "references": [
+      "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    ]
+  },
+  {
+    "vulnerability_name": "SourceMap文件泄露",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>前端构建产物的 SourceMap 文件可被直接访问。</p>",
+    "harm_html": "<p>攻击者可通过 SourceMap 还原前端源码，分析业务逻辑与潜在接口漏洞。</p>",
+    "solution_html": "<p>生产环境不发布 SourceMap 文件，或仅对受信环境开放访问。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "DS_Store文件泄露",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>Web 目录存在 .DS_Store 文件可被直接下载。</p>",
+    "harm_html": "<p>.DS_Store 中可能记录目录结构信息，辅助攻击者探测文件清单。</p>",
+    "solution_html": "<p>删除服务器上的 .DS_Store 文件，配置服务器拒绝访问隐藏文件。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "前端JS敏感信息泄露",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>前端 JS 中嵌入弱加密逻辑或泄露密钥（如加密密钥、接口签名密钥）。</p>",
+    "harm_html": "<p>攻击者可破解弱加密或利用泄露密钥伪造请求数据。</p>",
+    "solution_html": "<p>密钥仅保存在服务端，前端不承载加密密钥；弱加密算法替换为服务端强加密方案。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "Spring接口信息泄露",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>Spring 框架默认错误页与接口信息暴露框架内部路径与处理逻辑。</p>",
+    "harm_html": "<p>暴露框架结构与内部路径，辅助攻击者探测攻击面。</p>",
+    "solution_html": "<p>自定义统一错误页，隐藏框架默认信息。</p>",
+    "references": [
+      "https://owasp.org/www-community/Improper_Error_Handling"
+    ]
+  },
+  {
+    "vulnerability_name": "API接口文档未授权访问",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>Swagger、API-Docs 等接口文档未授权可访问，暴露接口清单与参数。</p>",
+    "harm_html": "<p>泄露接口结构，辅助攻击者构造攻击。</p>",
+    "solution_html": "<p>生产环境关闭接口文档，或增加鉴权与访问来源限制。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "反射型XSS",
+    "vul_type": 15,
+    "severity_level": 30,
+    "description_html": "<p>服务端将请求参数未经编码直接回显到响应页面，部分参数存在反射型 XSS，攻击者构造含恶意脚本的链接诱骗用户点击后在其浏览器执行。</p>",
+    "harm_html": "<p>可窃取受害用户的会话凭证、执行伪造操作，常与钓鱼邮件、短链接结合实施定向攻击。</p>",
+    "solution_html": "<p>对所有回显到页面的参数做 HTML/JS 上下文编码，设置 CSP 与 HttpOnly，避免将用户输入直接写入页面。</p>",
+    "references": [
+      "https://portswigger.net/web-security/cross-site-scripting/reflected"
+    ]
+  },
+  {
+    "vulnerability_name": "PDF XSS",
+    "vul_type": 15,
+    "severity_level": 30,
+    "description_html": "<p>文件上传或预览功能允许上传含恶意 JavaScript 的 PDF，用户预览时脚本在浏览器中执行。</p>",
+    "harm_html": "<p>可窃取浏览该 PDF 用户的会话信息，常结合文件上传与预览功能传播。</p>",
+    "solution_html": "<p>对上传 PDF 做内容安全校验，预览组件沙箱化，设置 CSP 与合适的 Content-Disposition 响应头，禁用 PDF 内脚本执行。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/xss/"
+    ]
+  },
+  {
+    "vulnerability_name": "路径访问限制绕过",
+    "vul_type": 40,
+    "severity_level": 30,
+    "description_html": "<p>访问控制基于路径匹配实现，攻击者通过大小写、URL 编码、路径穿越等方式绕过限制。</p>",
+    "harm_html": "<p>可访问本应受限的路径与资源。</p>",
+    "solution_html": "<p>基于统一网关或中间件做路径归一化后再鉴权，拒绝包含编码混淆与穿越序列的请求。</p>",
+    "references": [
+      "https://owasp.org/Top10/A01_2021-Broken_Access_Control/"
+    ]
+  },
+  {
+    "vulnerability_name": "验证码绕过",
+    "vul_type": 45,
+    "severity_level": 30,
+    "description_html": "<p>验证码机制存在缺陷，如可重复使用、服务端不校验、可空值绕过或响应中回显答案。</p>",
+    "harm_html": "<p>可绕过人机校验实施暴力破解、短信轰炸、批量注册等自动化攻击。</p>",
+    "solution_html": "<p>验证码一次一用、服务端强制校验且用后即失效，禁止在响应中返回答案，结合频率限制使用。</p>",
+    "references": [
+      "https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks"
+    ]
+  },
+  {
+    "vulnerability_name": "IP限制绕过",
+    "vul_type": 45,
+    "severity_level": 30,
+    "description_html": "<p>基于 IP 的访问限制可被绕过，如通过 X-Forwarded-For 等请求头伪造来源 IP 或切换代理。</p>",
+    "harm_html": "<p>可绕过 IP 维度的频率限制与访问控制，实施暴力破解等攻击。</p>",
+    "solution_html": "<p>不信任客户端可伪造的请求头，从可信链路获取真实 IP 后做限制；结合账号、设备等多维度风控。</p>",
+    "references": [
+      "https://owasp.org/www-community/controls/Blocking_Brute_Force_Attacks"
+    ]
+  },
+  {
+    "vulnerability_name": "业务逻辑绕过",
+    "vul_type": 45,
+    "severity_level": 30,
+    "description_html": "<p>部分业务流程校验可被绕过，如修改审批状态、关闭加密开关等。</p>",
+    "harm_html": "<p>可绕过业务关键校验，造成越权审批或数据保护机制失效。</p>",
+    "solution_html": "<p>关键业务状态变更由服务端校验权限与流程顺序，加密开关等安全配置禁止由前端控制。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Business_logic_vulnerability"
+    ]
+  },
+  {
+    "vulnerability_name": "CORS配置错误",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>跨域资源共享策略配置过于宽松，如允许任意 Origin 且携带凭证。</p>",
+    "harm_html": "<p>攻击者站点可通过用户浏览器跨域读取受害者的敏感数据。</p>",
+    "solution_html": "<p>严格配置允许的 Origin 白名单，避免将 Access-Control-Allow-Origin 设为通配同时允许携带凭证。</p>",
+    "references": [
+      "https://portswigger.net/web-security/cors"
+    ]
+  },
+  {
+    "vulnerability_name": "Host头注入",
+    "vul_type": 75,
+    "severity_level": 30,
+    "description_html": "<p>应用使用 Host 头生成链接或参与校验逻辑，且未校验 Host 头合法性。</p>",
+    "harm_html": "<p>可导致密码重置链接投毒、缓存污染、绕过访问控制。</p>",
+    "solution_html": "<p>服务端配置合法的 Host 白名单，生成链接使用固定站点地址，拒绝非法 Host 请求。</p>",
+    "references": [
+      "https://portswigger.net/web-security/host-header"
+    ]
+  },
+  {
+    "vulnerability_name": "启用不安全的TLS版本",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>服务启用 TLS 1.0/1.1 等已过时协议或弱加密套件。</p>",
+    "harm_html": "<p>通信可被降级攻击与中间人解密，敏感信息存在被窃取风险。</p>",
+    "solution_html": "<p>仅启用 TLS 1.2/1.3，禁用 RC4、3DES 等弱加密套件。</p>",
+    "references": [
+      "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"
+    ]
+  },
+  {
+    "vulnerability_name": "明文传输敏感信息",
+    "vul_type": 55,
+    "severity_level": 30,
+    "description_html": "<p>部分接口使用 HTTP 明文传输敏感数据。</p>",
+    "harm_html": "<p>数据在传输过程中可被窃听与篡改。</p>",
+    "solution_html": "<p>全站启用 HTTPS 并配置 HSTS，敏感接口强制 HTTPS 且拒绝明文回退。</p>",
+    "references": [
+      "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"
+    ]
+  },
+  {
+    "vulnerability_name": "用户枚举",
+    "vul_type": 45,
+    "severity_level": 30,
+    "description_html": "<p>登录、注册、找回密码等接口对不同账号存在不同的响应差异（错误提示、状态码、响应时间）。</p>",
+    "harm_html": "<p>攻击者可枚举有效用户名，为定向爆破与钓鱼攻击提供目标。</p>",
+    "solution_html": "<p>统一各认证接口的响应文案与行为，错误信息不区分账号是否存在，增加频率限制。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Brute_force_attack"
+    ]
+  },
+  {
+    "vulnerability_name": "目录暴露",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>部分目录可直接浏览列出文件结构。</p>",
+    "harm_html": "<p>暴露目录结构与文件清单，可能存在低敏感信息。</p>",
+    "solution_html": "<p>关闭目录浏览功能，对敏感目录设置访问控制。</p>",
+    "references": [
+      "https://owasp.org/www-community/attacks/Forced_browsing"
+    ]
+  },
+  {
+    "vulnerability_name": "非必要配置文件泄露",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>非必要的配置文件（如示例配置、开发配置）可被直接访问。</p>",
+    "harm_html": "<p>泄露内部配置信息，可能包含低敏感参数。</p>",
+    "solution_html": "<p>清理并下线非必要配置文件，服务器拒绝访问常见敏感文件名。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "内网IP泄露",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>页面源码、响应头或报错信息中泄露内网 IP 地址。</p>",
+    "harm_html": "<p>暴露内网拓扑信息，辅助攻击者定位内网目标。</p>",
+    "solution_html": "<p>对外展示内容与响应头中去除内网 IP，统一出口地址。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "HTTP Banner信息",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>HTTP 响应头暴露服务器类型等 Banner 信息。</p>",
+    "harm_html": "<p>暴露服务器指纹，辅助针对性攻击。</p>",
+    "solution_html": "<p>隐藏或伪装修复响应头 Banner。</p>",
+    "references": [
+      "https://owasp.org/Top10/A05_2021-Security_Misconfiguration/"
+    ]
+  },
+  {
+    "vulnerability_name": "测试人员信息泄露",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>页面或文件中残留测试人员姓名、联系方式等信息。</p>",
+    "harm_html": "<p>泄露测试信息，可能被用于社工攻击。</p>",
+    "solution_html": "<p>清理测试残留信息，规范交付物检查。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "非敏感SourceMap文件泄露",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>非敏感页面的 SourceMap 文件可被访问。</p>",
+    "harm_html": "<p>可还原部分前端代码结构，敏感度较低。</p>",
+    "solution_html": "<p>生产构建默认不输出 SourceMap 文件。</p>",
+    "references": [
+      "https://owasp.org/www-project-web-security-testing-guide/"
+    ]
+  },
+  {
+    "vulnerability_name": "CORS配置缺陷（影响有限）",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>CORS 配置存在缺陷但未构成严重威胁，如允许部分非必要来源。</p>",
+    "harm_html": "<p>存在跨域数据被读取的潜在风险，当前影响有限。</p>",
+    "solution_html": "<p>收紧 Origin 白名单，避免通配符与携带凭证的组合。</p>",
+    "references": [
+      "https://portswigger.net/web-security/cors"
+    ]
+  },
+  {
+    "vulnerability_name": "HTTP安全响应头缺失",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>HTTP 响应缺少 X-Frame-Options、X-Content-Type-Options、CSP 等安全字段。</p>",
+    "harm_html": "<p>增加点击劫持、MIME 嗅探等攻击风险。</p>",
+    "solution_html": "<p>全局配置安全响应头（CSP、X-Frame-Options、X-Content-Type-Options、Referrer-Policy 等）。</p>",
+    "references": [
+      "https://owasp.org/www-community/controls/Clickjacking_Defense_Cheat_Sheet"
+    ]
+  },
+  {
+    "vulnerability_name": "业务逻辑缺陷（低危）",
+    "vul_type": 45,
+    "severity_level": 40,
+    "description_html": "<p>下拉菜单可自定义内容、字段可被修改等影响较小的业务逻辑问题。</p>",
+    "harm_html": "<p>可造成展示内容篡改或低敏感数据被修改，影响有限。</p>",
+    "solution_html": "<p>对前端可编辑项做服务端校验与权限控制，完善输入校验。</p>",
+    "references": [
+      "https://owasp.org/www-community/vulnerabilities/Business_logic_vulnerability"
+    ]
+  },
+  {
+    "vulnerability_name": "部分接口明文传输",
+    "vul_type": 55,
+    "severity_level": 40,
+    "description_html": "<p>部分低敏感接口使用 HTTP 明文传输数据。</p>",
+    "harm_html": "<p>数据可被窃听，但因内容敏感度低，风险有限。</p>",
+    "solution_html": "<p>逐步将全站迁移至 HTTPS，配置 HSTS。</p>",
+    "references": [
+      "https://owasp.org/Top10/A02_2021-Cryptographic_Failures/"
+    ]
+  }
+]
