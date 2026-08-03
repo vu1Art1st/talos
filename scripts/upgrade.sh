@@ -10,21 +10,31 @@
 # 后端的 create_all 应用结构变更，避免「新增表被 create_all 抢先建好导致迁移冲突」。
 set -euo pipefail
 
-cd "$(dirname "$0")/.."  # 切到仓库根目录（docker-compose.yml 所在处）
+cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处）
 
 DO_BACKUP=1
 DO_PULL=1
 for arg in "$@"; do
   case "$arg" in
-    --no-backup) DO_BACKUP=0 ;;
-    --no-pull)   DO_PULL=0 ;;
-    *) echo "未知参数：$arg"; echo "用法： bash scripts/upgrade.sh [--no-backup] [--no-pull]"; exit 2 ;;
+  --no-backup) DO_BACKUP=0 ;;
+  --no-pull) DO_PULL=0 ;;
+  *)
+    echo "未知参数：$arg"
+    echo "用法： bash scripts/upgrade.sh [--no-backup] [--no-pull]"
+    exit 2
+    ;;
   esac
 done
 
 # 前置校验
-[ -f .env ] || { echo "缺少 .env，请先按 docs/DEPLOY.md 完成首次配置"; exit 1; }
-command -v docker >/dev/null || { echo "未安装 docker"; exit 1; }
+[ -f .env ] || {
+  echo "缺少 .env，请先按 docs/DEPLOY.md 完成首次配置"
+  exit 1
+}
+command -v docker >/dev/null || {
+  echo "未安装 docker"
+  exit 1
+}
 
 OLD_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "========== Talos 升级开始（当前版本 ${OLD_COMMIT}）=========="
@@ -56,7 +66,7 @@ fi
 
 # [3/5] 重建镜像
 echo "[3/5] 重建镜像 docker compose build"
-docker compose build
+sudo docker compose build
 
 # [4/5] 先迁移数据库结构（api 服务尚未启动，Alembic 先行）
 echo "[4/5] 数据库结构迁移"
@@ -64,12 +74,12 @@ bash scripts/migrate.sh
 
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
-docker compose up -d
+sudo docker compose up -d
 
 echo "========== 升级完成：${OLD_COMMIT} -> ${NEW_COMMIT} =========="
-docker compose ps
+sudo docker compose ps
 echo "当前数据库迁移版本："
-docker compose exec -T api python -m alembic current 2>/dev/null || echo "（无法读取，可稍后用 docker compose exec api python -m alembic current 查看）"
+sudo docker compose exec -T api python -m alembic current 2>/dev/null || echo "（无法读取，可稍后用 docker compose exec api python -m alembic current 查看）"
 echo
 echo "如需回滚代码： git checkout ${OLD_COMMIT} && docker compose up -d --build"
 echo "（数据库回滚请用升级前备份 scripts/restore.sh，见 docs/DEPLOY.md）"
