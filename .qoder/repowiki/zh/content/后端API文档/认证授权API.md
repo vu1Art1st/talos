@@ -12,6 +12,14 @@
 - [frontend/src/views/Login.vue](file://frontend/src/views/Login.vue)
 </cite>
 
+## 更新摘要
+**变更内容**   
+- 新增登录暴力破解保护机制，包含尝试次数限制和账户锁定功能
+- 实现JWT令牌版本控制，支持令牌撤销和强制刷新
+- 生产环境弱密钥检测与拒绝机制
+- CORS白名单配置增强，支持动态源验证
+- 安全中间件集成，提供请求级安全防护
+
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -26,6 +34,8 @@
 
 ## 简介
 本文件面向Talos项目的认证与授权API，系统化说明用户登录、注册、令牌获取与验证的完整流程；覆盖JWT令牌的生成、刷新与撤销机制；文档化密码加密存储与安全策略；阐述权限控制模型（角色定义与访问权限管理）；并提供完整的请求/响应示例、错误处理与安全最佳实践。读者无需深入源码即可理解并正确使用该认证体系。
+
+**最新更新**：系统已集成全面的安全加固措施，包括暴力破解防护、JWT版本控制、生产环境密钥验证和CORS白名单管理等高级安全特性。
 
 ## 项目结构
 认证授权相关代码主要位于后端模块：
@@ -44,6 +54,9 @@ API --> SCH["模式定义<br/>schemas.py"]
 API --> DB["数据库模型<br/>user.py"]
 API --> DEP["依赖注入<br/>deps.py"]
 API --> APP["应用入口<br/>main.py"]
+SEC --> RATE["速率限制<br/>ratelimit.py"]
+SEC --> CORS["CORS配置<br/>main.py"]
+SEC --> KEY["密钥验证<br/>config.py"]
 ```
 
 **图示来源** 
@@ -70,6 +83,8 @@ API --> APP["应用入口<br/>main.py"]
 - 依赖注入（deps.py）：提供当前用户解析、权限校验、数据库会话等依赖。
 - 应用入口（main.py）：挂载路由、配置CORS、异常处理、健康检查等。
 
+**最新更新**：安全服务现已集成暴力破解防护、JWT版本控制和生产环境密钥验证功能。
+
 **章节来源**
 - [backend/app/api/v1/auth.py](file://backend/app/api/v1/auth.py)
 - [backend/app/core/security.py](file://backend/app/core/security.py)
@@ -79,16 +94,19 @@ API --> APP["应用入口<br/>main.py"]
 - [backend/app/main.py](file://backend/app/main.py)
 
 ## 架构总览
-下图展示了从前端发起登录到后端鉴权、签发JWT、以及后续受保护资源访问的整体流程。
+下图展示了从前端发起登录到后端鉴权、签发JWT、以及后续受保护资源访问的整体流程，包含新增的安全防护措施。
 
 ```mermaid
 sequenceDiagram
 participant FE as "前端"
 participant API as "认证API(auth.py)"
 participant SEC as "安全服务(security.py)"
+participant RATE as "速率限制(ratelimit.py)"
 participant DB as "数据库(user.py)"
 participant DEP as "依赖注入(deps.py)"
 FE->>API : "POST /api/v1/auth/login"
+API->>RATE : "检查登录频率"
+RATE-->>API : "允许/拒绝"
 API->>API : "校验请求体(schemas.py)"
 API->>DB : "查询用户(用户名/邮箱)"
 DB-->>API : "用户记录"
@@ -127,9 +145,14 @@ API-->>FE : "受保护资源响应"
 - 错误处理
   - 参数错误、用户不存在、密码错误、重复注册、令牌无效等场景均返回明确错误码与信息。
 
+**最新更新**：登录接口现已集成暴力破解防护，包含IP级别的速率限制和用户级别的尝试次数监控。
+
 ```mermaid
 flowchart TD
-Start(["请求进入"]) --> Validate["校验请求体"]
+Start(["请求进入"]) --> RateCheck["检查登录频率"]
+RateCheck --> RateOk{"频率限制?"}
+RateOk --> |否| ErrRate["返回频率限制错误"]
+RateOk --> |是| Validate["校验请求体"]
 Validate --> Valid{"校验通过?"}
 Valid --> |否| ErrParam["返回参数错误"]
 Valid --> |是| Lookup["查找用户"]
@@ -137,12 +160,14 @@ Lookup --> Found{"找到用户?"}
 Found --> |否| ErrUser["返回用户不存在"]
 Found --> |是| CheckPwd["校验密码"]
 CheckPwd --> PwdOk{"密码正确?"}
-PwdOk --> |否| ErrPwd["返回密码错误"]
+PwdOk --> |否| UpdateAttempts["更新失败计数"]
+UpdateAttempts --> PwdErr["返回密码错误"]
 PwdOk --> |是| Issue["签发JWT"]
 Issue --> Return["返回令牌与过期时间"]
-ErrParam --> End(["结束"])
+ErrRate --> End(["结束"])
+ErrParam --> End
 ErrUser --> End
-ErrPwd --> End
+PwdErr --> End
 Return --> End
 ```
 
@@ -168,16 +193,21 @@ Return --> End
   - 令牌最短有效期：access_token短生命周期，refresh_token较长但可撤销。
   - 防重放与暴力破解：限制登录尝试次数、锁定账户、验证码辅助。
 
+**最新更新**：安全服务现已支持JWT版本控制，每个令牌包含版本号，支持细粒度的令牌撤销和强制刷新机制。
+
 ```mermaid
 classDiagram
 class SecurityService {
 +hash_password(password) string
 +verify_password(hashed, plain) bool
-+create_access_token(user_id, roles) string
++create_access_token(user_id, roles, version) string
 +create_refresh_token(user_id) string
 +decode_and_verify(token) dict
 +revoke_token(token_id) bool
 +is_token_revoked(token_id) bool
++check_brute_force(ip, username) bool
++lock_account(username, duration) void
++validate_production_key(key) bool
 }
 ```
 
@@ -195,6 +225,8 @@ class SecurityService {
 - 关联关系
   - 与业务实体（如报告、漏洞、资产）通过外键或逻辑关联。
 
+**最新更新**：用户模型现已包含登录失败计数和账户锁定状态字段，支持暴力破解防护。
+
 ```mermaid
 erDiagram
 USER {
@@ -204,6 +236,8 @@ string email UK
 string password_hash
 enum role
 boolean is_active
+int login_attempts
+timestamp locked_until
 timestamp created_at
 timestamp updated_at
 }
@@ -224,6 +258,8 @@ timestamp updated_at
   - TokenResponse：access_token、refresh_token、expires_in。
   - ErrorResponse：code、message、details。
 
+**最新更新**：新增BruteForceProtectionRequest模式，用于暴力破解防护相关的请求处理。
+
 ```mermaid
 classDiagram
 class LoginRequest {
@@ -238,6 +274,11 @@ class RegisterRequest {
 }
 class RefreshRequest {
 +string refresh_token
+}
+class BruteForceProtectionRequest {
++string ip_address
++string username
++int attempts
 }
 class TokenResponse {
 +string access_token
@@ -265,6 +306,8 @@ class ErrorResponse {
 - 数据库会话
   - 提供事务化会话上下文，确保读写一致性与回滚。
 
+**最新更新**：依赖注入现已包含JWT版本验证和生产环境密钥检查功能。
+
 ```mermaid
 sequenceDiagram
 participant API as "API层"
@@ -274,6 +317,8 @@ participant DB as "数据库"
 API->>DEP : "get_current_user(request)"
 DEP->>SEC : "decode_and_verify(bearer_token)"
 SEC-->>DEP : "用户上下文"
+DEP->>SEC : "验证JWT版本"
+SEC-->>DEP : "版本验证结果"
 DEP->>DB : "加载用户详情与角色"
 DB-->>DEP : "用户对象"
 DEP-->>API : "已认证用户"
@@ -295,6 +340,8 @@ DEP-->>API : "已认证用户"
 - 中间件
   - 请求/响应拦截、审计、限流等。
 
+**最新更新**：应用入口现已集成CORS白名单配置和生产环境密钥验证中间件。
+
 **章节来源**
 - [backend/app/main.py](file://backend/app/main.py)
 
@@ -305,6 +352,8 @@ DEP-->>API : "已认证用户"
   - 维护登录态、过期时间、自动刷新策略。
 - 错误处理
   - 捕获网络与业务错误，提示用户并重试或跳转。
+
+**最新更新**：前端现已支持暴力破解防护的错误处理和账户锁定状态的显示。
 
 **章节来源**
 - [frontend/src/stores/auth.ts](file://frontend/src/stores/auth.ts)
@@ -317,6 +366,8 @@ DEP-->>API : "已认证用户"
 - 依赖注入解耦用户解析与权限校验，便于测试与扩展。
 - 前端通过HTTP客户端与后端交互，遵循统一的错误与成功响应格式。
 
+**最新更新**：安全服务现在依赖速率限制、CORS配置和密钥验证模块，形成完整的安全防护链。
+
 ```mermaid
 graph LR
 AUTH_API["认证API(auth.py)"] --> SECURITY["安全服务(security.py)"]
@@ -324,6 +375,9 @@ AUTH_API --> SCHEMAS["模式定义(schemas.py)"]
 AUTH_API --> DEPS["依赖注入(deps.py)"]
 AUTH_API --> USER_MODEL["用户模型(user.py)"]
 AUTH_API --> MAIN_APP["应用入口(main.py)"]
+SECURITY --> RATE_LIMIT["速率限制(ratelimit.py)"]
+SECURITY --> CORS_CONFIG["CORS配置(main.py)"]
+SECURITY --> KEY_VALIDATION["密钥验证(config.py)"]
 FRONT["前端(auth.ts / Login.vue)"] --> AUTH_API
 ```
 
@@ -354,7 +408,7 @@ FRONT["前端(auth.ts / Login.vue)"] --> AUTH_API
 - 连接池：合理配置数据库连接池大小，避免高并发下连接耗尽。
 - 限流与熔断：对登录与注册接口实施速率限制，防止滥用与DDoS。
 
-[本节为通用指导，不直接分析具体文件]
+**最新更新**：新增暴力破解防护的性能优化，包括内存缓存的尝试次数统计和分布式锁支持。
 
 ## 故障排查指南
 - 常见错误
@@ -363,10 +417,15 @@ FRONT["前端(auth.ts / Login.vue)"] --> AUTH_API
   - 密码错误：核对密码复杂度与历史密码策略。
   - 令牌无效：检查Authorization头格式、令牌是否过期或被撤销。
   - 权限不足：确认用户角色与目标资源权限匹配。
+  - 暴力破解防护：检查IP地址是否被临时锁定，等待锁定时间结束后重试。
+  - 生产环境密钥错误：验证JWT_SECRET_KEY和其他安全配置的正确性。
 - 调试建议
   - 开启详细日志，记录请求ID、用户ID、错误堆栈。
   - 使用健康检查端点验证服务可用性。
   - 在本地复现问题，逐步缩小范围定位。
+  - 检查CORS配置，确保前端域名在白名单中。
+
+**最新更新**：新增暴力破解防护和生产环境密钥验证的故障排查指导。
 
 **章节来源**
 - [backend/app/api/v1/auth.py](file://backend/app/api/v1/auth.py)
@@ -374,9 +433,9 @@ FRONT["前端(auth.ts / Login.vue)"] --> AUTH_API
 - [backend/app/core/deps.py](file://backend/app/core/deps.py)
 
 ## 结论
-Talos的认证授权体系以清晰的模块化设计与严格的输入校验为基础，结合安全的密码哈希与JWT令牌机制，提供了可靠的登录、注册、令牌管理与权限控制能力。通过依赖注入与统一模式定义，系统具备良好的可扩展性与可维护性。遵循本文档的最佳实践与故障排查建议，可有效保障生产环境的安全与稳定。
+Talos的认证授权体系以清晰的模块化设计与严格的输入校验为基础，结合安全的密码哈希与JWT令牌机制，提供了可靠的登录、注册、令牌管理与权限控制能力。通过依赖注入与统一模式定义，系统具备良好的可扩展性与可维护性。
 
-[本节为总结性内容，不直接分析具体文件]
+**最新更新**：系统现已集成全面的安全加固措施，包括暴力破解防护、JWT版本控制、生产环境密钥验证和CORS白名单管理，为生产环境提供了企业级的安全保障。遵循本文档的最佳实践与故障排查建议，可有效保障生产环境的安全与稳定。
 
 ## 附录
 
@@ -386,7 +445,7 @@ Talos的认证授权体系以清晰的模块化设计与严格的输入校验为
   - 路径：/api/v1/auth/login
   - 请求体：{username_or_email, password}
   - 响应：{access_token, refresh_token, expires_in}
-  - 错误：参数错误、用户不存在、密码错误
+  - 错误：参数错误、用户不存在、密码错误、暴力破解防护触发
 - 注册
   - 方法：POST
   - 路径：/api/v1/auth/register
@@ -398,7 +457,7 @@ Talos的认证授权体系以清晰的模块化设计与严格的输入校验为
   - 路径：/api/v1/auth/refresh
   - 请求体：{refresh_token}
   - 响应：{access_token, expires_in}
-  - 错误：令牌无效、令牌已撤销
+  - 错误：令牌无效、令牌已撤销、JWT版本不匹配
 - 注销（可选）
   - 方法：POST
   - 路径：/api/v1/auth/logout
@@ -406,7 +465,7 @@ Talos的认证授权体系以清晰的模块化设计与严格的输入校验为
   - 响应：{message}
   - 错误：令牌无效
 
-[本节为概念性接口说明，不直接分析具体文件]
+**最新更新**：所有接口现已支持暴力破解防护和JWT版本控制。
 
 ### 安全最佳实践
 - 密码策略：强制复杂度、定期更换、禁止历史重复。
@@ -414,13 +473,17 @@ Talos的认证授权体系以清晰的模块化设计与严格的输入校验为
 - 传输安全：全站HTTPS，启用HSTS，禁用不安全协议。
 - 防护策略：限流、账户锁定、验证码、IP白名单（可选）。
 - 审计与监控：记录登录、注册、令牌操作日志，设置告警阈值。
+- 生产环境安全：使用强随机密钥，定期轮换，禁止硬编码。
+- CORS配置：精确配置允许的源、方法和头，避免使用通配符。
 
-[本节为通用指导，不直接分析具体文件]
+**最新更新**：新增生产环境密钥管理和CORS白名单配置的最佳实践。
 
 ### 常见问题解决方案
 - 令牌频繁过期：调整expires_in策略，前端实现自动刷新。
 - 跨域问题：配置CORS允许的源、方法与头。
 - 并发登录冲突：引入会话管理与设备绑定策略。
 - 权限误配：定期审查角色与资源映射，最小权限原则。
+- 暴力破解防护：检查IP白名单配置，调整锁定时间和尝试次数限制。
+- JWT版本不匹配：确保客户端和服务端的JWT版本兼容，实现平滑升级。
 
-[本节为通用指导，不直接分析具体文件]
+**最新更新**：新增暴力破解防护和JWT版本控制的常见问题解决方案。

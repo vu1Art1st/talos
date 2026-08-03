@@ -1,0 +1,10 @@
+schema_version: 1
+module_path: frontend/app_shell
+title: Vue 应用外壳与全局初始化
+scope:
+    - frontend/src/App.vue
+    - frontend/src/main.ts
+    - frontend/src/style.css
+source_files: []
+depends_on: []
+related_to: []

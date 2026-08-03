@@ -9,9 +9,9 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 BACKEND="$ROOT/backend"
 FRONTEND="$ROOT/frontend"
 
-# 默认端口：前端 27012，后端 27013（可用环境变量覆盖）
-FRONTEND_PORT="${FRONTEND_PORT:-27012}"
-BACKEND_PORT="${BACKEND_PORT:-27013}"
+# 默认端口：前端 27014，后端 27015（可用环境变量覆盖）
+FRONTEND_PORT="${FRONTEND_PORT:-27014}"
+BACKEND_PORT="${BACKEND_PORT:-27015}"
 
 for cmd in python3 node npm; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[dev] 未找到 $cmd，请先安装后重试"; exit 1; }

@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: frontend/users_feature
+title: 用户与角色管理前端界面
+scope:
+    - frontend/src/views/UserList.vue
+    - frontend/src/stores/auth.ts
+    - frontend/src/views/Login.vue
+source_files: []
+depends_on: []
+related_to:
+    - path: backend

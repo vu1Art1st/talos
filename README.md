@@ -81,7 +81,7 @@ powershell -ExecutionPolicy Bypass -File .\dev.ps1
 bash dev.sh
 ```
 
-启动后访问 http://localhost:27012（服务绑定 0.0.0.0，也可通过 http://<服务器IP>:27012 外部访问，需放行该端口），默认账号 `admin` / `admin123`，Ctrl+C 一并停止前后端。可用 `FRONTEND_PORT` / `BACKEND_PORT` 环境变量（或 dev.ps1 的 `-FrontendPort` / `-BackendPort` 参数）覆盖默认端口 27012 / 27013。
+启动后访问 http://localhost:27014（服务绑定 0.0.0.0，也可通过 http://<服务器IP>:27014 外部访问，需放行该端口），默认账号 `admin` / `admin123`，Ctrl+C 一并停止前后端。可用 `FRONTEND_PORT` / `BACKEND_PORT` 环境变量（或 dev.ps1 的 `-FrontendPort` / `-BackendPort` 参数）覆盖默认端口 27014 / 27015。
 
 <details>
 <summary>手动步骤</summary>
@@ -93,7 +93,7 @@ cd backend
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
 set VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db
 set VP_DISABLE_QUEUE=1
-.venv/Scripts/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 27013
+.venv/Scripts/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 27015
 ```
 
 前端：
@@ -101,7 +101,7 @@ set VP_DISABLE_QUEUE=1
 ```bash
 cd frontend
 npm install
-npm run dev   # http://localhost:27012，代理 /api 与 /storage 到 27013
+npm run dev   # http://localhost:27014，代理 /api 与 /storage 到 27015
 ```
 
 </details>

@@ -3,12 +3,12 @@ Talos 一键本地开发脚本（Windows）
 - 后端：SQLite + 免队列模式，无需 Postgres/Redis，绑定 0.0.0.0:$BackendPort
 - 前端：Vite Dev Server，绑定 0.0.0.0:$FrontendPort，支持通过 VPS_IP:PORT 外部访问
 用法：powershell -ExecutionPolicy Bypass -File .\dev.ps1
-可选：powershell -ExecutionPolicy Bypass -File .\dev.ps1 -FrontendPort 27012 -BackendPort 27013
+可选：powershell -ExecutionPolicy Bypass -File .\dev.ps1 -FrontendPort 27014 -BackendPort 27015
 #>
 param(
-    # 默认端口：前端 27012，后端 27013
-    [int]$FrontendPort = 27012,
-    [int]$BackendPort = 27013
+    # 默认端口：前端 27014，后端 27015
+    [int]$FrontendPort = 27014,
+    [int]$BackendPort = 27015
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path

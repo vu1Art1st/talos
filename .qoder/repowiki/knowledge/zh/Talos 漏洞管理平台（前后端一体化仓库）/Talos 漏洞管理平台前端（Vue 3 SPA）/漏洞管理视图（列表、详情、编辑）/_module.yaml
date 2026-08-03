@@ -1,0 +1,11 @@
+schema_version: 1
+module_path: frontend/vulnerabilities_feature
+title: 漏洞管理视图（列表、详情、编辑）
+scope:
+    - frontend/src/views/VulnList.vue
+    - frontend/src/views/VulnDetail.vue
+    - frontend/src/views/VulnEdit.vue
+source_files: []
+depends_on: []
+related_to:
+    - path: backend

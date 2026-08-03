@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
-// 端口支持环境变量覆盖（dev.sh / dev.ps1 会注入），默认前端 27012、后端 27013
-const frontendPort = Number(process.env.VP_FRONTEND_PORT || 27012)
-const backendPort = Number(process.env.VP_BACKEND_PORT || 27013)
+// 端口支持环境变量覆盖（dev.sh / dev.ps1 会注入），默认前端 27014、后端 27015
+const frontendPort = Number(process.env.VP_FRONTEND_PORT || 27014)
+const backendPort = Number(process.env.VP_BACKEND_PORT || 27015)
 
 export default defineConfig({
   plugins: [vue()],

@@ -13,14 +13,6 @@
 - [UserList.vue](file://frontend/src/views/UserList.vue)
 </cite>
 
-## 更新摘要
-**所做更改**
-- 更新了用户管理API的CRUD操作接口说明，增强了40行功能
-- 完善了用户状态管理和权限分配机制的详细文档
-- 补充了批量用户操作接口和导入导出功能的实现细节
-- 增强了错误处理和异常情况的处理方式说明
-- 更新了API调用示例，展示用户管理的各种场景
-
 ## 目录
 1. [简介](#简介)
 2. [项目结构](#项目结构)
@@ -34,9 +26,7 @@
 10. [附录](#附录)
 
 ## 简介
-本文件面向Talos系统的"用户管理API"，提供完整的接口说明与实现要点，覆盖用户的创建、查询、更新、删除（CRUD）、状态管理与权限分配机制、批量操作、导入导出能力，以及错误处理与异常场景。文档同时给出调用示例与最佳实践，帮助开发者快速集成并稳定使用用户管理能力。
-
-**更新** 本次更新重点增强了用户管理API的功能，包括更完善的CRUD操作、增强的权限控制、改进的错误处理机制，以及优化的批量操作和导入导出功能。
+本文件面向Talos系统的“用户管理API”，提供完整的接口说明与实现要点，覆盖用户的创建、查询、更新、删除（CRUD）、状态管理与权限分配机制、批量操作、导入导出能力，以及错误处理与异常场景。文档同时给出调用示例与最佳实践，帮助开发者快速集成并稳定使用用户管理能力。
 
 ## 项目结构
 用户管理相关代码主要位于后端API层、数据模型与Schema定义中，前端通过API客户端与页面组件进行交互。关键路径如下：
@@ -57,7 +47,7 @@ API --> Auth["认证与安全<br/>auth.py / security.py / deps.py"]
 API --> DB["数据库(由ORM驱动)"]
 ```
 
-**图表来源**
+图表来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [user.py](file://backend/app/models/user.py)
 - [schemas.py](file://backend/app/schemas.py)
@@ -67,7 +57,7 @@ API --> DB["数据库(由ORM驱动)"]
 - [client.ts](file://frontend/src/api/client.ts)
 - [UserList.vue](file://frontend/src/views/UserList.vue)
 
-**章节来源**
+章节来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [user.py](file://backend/app/models/user.py)
 - [schemas.py](file://backend/app/schemas.py)
@@ -85,9 +75,7 @@ API --> DB["数据库(由ORM驱动)"]
 - 认证与安全：基于令牌鉴权、依赖注入当前用户上下文、密码哈希与权限检查。
 - 前端集成：API客户端封装HTTP调用，用户列表页负责展示与交互。
 
-**更新** 增强了核心组件的功能，包括更严格的Schema验证、更完善的权限控制机制，以及改进的错误处理逻辑。
-
-**章节来源**
+章节来源
 - [user.py](file://backend/app/models/user.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [users.py](file://backend/app/api/v1/users.py)
@@ -120,7 +108,7 @@ MOD-->>API : "用户对象"
 API-->>FE : "返回201 + 用户信息"
 ```
 
-**图表来源**
+图表来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [user.py](file://backend/app/models/user.py)
@@ -155,10 +143,10 @@ class User {
 }
 ```
 
-**图表来源**
+图表来源
 - [user.py](file://backend/app/models/user.py)
 
-**章节来源**
+章节来源
 - [user.py](file://backend/app/models/user.py)
 
 ### 请求/响应Schema与数据验证
@@ -175,9 +163,7 @@ class User {
   - 长度与范围限制
   - 自定义业务规则（如状态变更合法性）
 
-**更新** 增强了Schema验证规则，包括更严格的字段验证、更好的错误消息提示，以及支持更多的数据类型。
-
-**章节来源**
+章节来源
 - [schemas.py](file://backend/app/schemas.py)
 
 ### 用户API接口设计（CRUD与扩展）
@@ -205,8 +191,6 @@ class User {
   - 导入：POST /api/v1/users/import（CSV/Excel）
   - 导出：GET /api/v1/users/export（CSV/Excel）
 
-**更新** 增强了API接口的功能，包括更完善的错误处理、更好的响应格式、以及支持更多的操作类型。
-
 ```mermaid
 flowchart TD
 Start(["请求进入"]) --> Validate["参数与权限校验"]
@@ -233,12 +217,12 @@ Import --> Return
 Export --> Return
 ```
 
-**图表来源**
+图表来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [user.py](file://backend/app/models/user.py)
 
-**章节来源**
+章节来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [user.py](file://backend/app/models/user.py)
@@ -255,9 +239,7 @@ Export --> Return
   - 最小权限原则
   - 审计日志（可选）
 
-**更新** 增强了认证与权限控制机制，包括更细粒度的权限控制、更好的令牌管理机制，以及增强的安全策略。
-
-**章节来源**
+章节来源
 - [auth.py](file://backend/app/api/v1/auth.py)
 - [security.py](file://backend/app/core/security.py)
 - [deps.py](file://backend/app/core/deps.py)
@@ -270,9 +252,7 @@ Export --> Return
   - 执行删除、状态切换、角色分配
   - 导入/导出按钮触发文件上传/下载
 
-**更新** 改进了前端集成体验，包括更好的错误处理、更友好的用户界面，以及更高效的API调用。
-
-**章节来源**
+章节来源
 - [client.ts](file://frontend/src/api/client.ts)
 - [UserList.vue](file://frontend/src/views/UserList.vue)
 
@@ -289,7 +269,7 @@ UsersAPI --> Security["security.py / deps.py"]
 Frontend["client.ts / UserList.vue"] --> UsersAPI
 ```
 
-**图表来源**
+图表来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [user.py](file://backend/app/models/user.py)
@@ -298,7 +278,7 @@ Frontend["client.ts / UserList.vue"] --> UsersAPI
 - [client.ts](file://frontend/src/api/client.ts)
 - [UserList.vue](file://frontend/src/views/UserList.vue)
 
-**章节来源**
+章节来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [schemas.py](file://backend/app/schemas.py)
 - [user.py](file://backend/app/models/user.py)
@@ -313,8 +293,6 @@ Frontend["client.ts / UserList.vue"] --> UsersAPI
 - 导入导出：大文件流式处理，异步任务队列（可选）提升响应速度。
 - 缓存策略：只读热点数据可缓存（如角色/权限字典）。
 - 连接池：数据库连接池配置合理，避免连接耗尽。
-
-**更新** 优化了性能考虑，包括更好的分页策略、更高效的批量操作处理，以及改进的缓存机制。
 
 [本节为通用指导，无需特定文件来源]
 
@@ -337,17 +315,13 @@ Frontend["client.ts / UserList.vue"] --> UsersAPI
   - 使用API测试工具（如Postman）构造最小用例
   - 逐步缩小问题范围（先单条后批量）
 
-**更新** 增强了故障排查指南，包括更详细的错误码说明、更全面的排查步骤，以及更好的调试技巧。
-
-**章节来源**
+章节来源
 - [users.py](file://backend/app/api/v1/users.py)
 - [auth.py](file://backend/app/api/v1/auth.py)
 - [security.py](file://backend/app/core/security.py)
 
 ## 结论
 Talos的用户管理API提供了完善的CRUD、状态与权限管理、批量操作与导入导出能力。通过清晰的Schema定义、严格的鉴权与错误处理，确保系统的安全性与稳定性。建议在生产环境中结合监控与审计，持续优化性能与用户体验。
-
-**更新** 经过本次增强，用户管理API在功能完整性、安全性、性能和用户体验方面都有了显著提升，能够更好地满足企业级应用的需求。
 
 [本节为总结，无需特定文件来源]
 
@@ -370,7 +344,5 @@ Talos的用户管理API提供了完善的CRUD、状态与权限管理、批量�
   - 批量操作：POST请求携带用户数组
   - 导入：上传CSV/Excel文件
   - 导出：GET请求下载文件
-
-**更新** 完善了附录内容，包括更详细的接口清单和更丰富的调用示例，帮助开发者更好地理解和使用用户管理API。
 
 [本节为补充信息，无需特定文件来源]

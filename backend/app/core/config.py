@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     LOGIN_LOCK_SECONDS: int = 900
 
     # 允许携带凭证的跨域来源白名单（前端部署地址），生产环境务必按实际域名收窄
-    CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27012"]
+    CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27014"]
 
     DATABASE_URL: str = "postgresql+asyncpg://vuln:vulnpass@localhost:5432/vulnplatform"
     REDIS_URL: str = "redis://localhost:6379/0"
