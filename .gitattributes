@@ -1,2 +1,6 @@
+# 文本文件统一按 LF 入库（git 自动识别文本类型），检出时按平台转换（Windows→CRLF / Linux→LF），
+# 避免同一目录被 Windows(WSL 挂载 /mnt/e) 双环境检出时出现 CRLF/LF 假 diff。
+* text=auto
+
 # Shell 脚本强制 LF 换行，避免在 Windows 上被转成 CRLF 导致 Linux 服务器 bash 执行报错
 *.sh text eol=lf
