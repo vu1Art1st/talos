@@ -4,7 +4,7 @@
 # 逻辑见 backend/scripts/migrate.py 与 docs/DEPLOY.md「三、版本升级」。
 set -euo pipefail
 
-cd "$(dirname "$0")/.."  # 切到仓库根目录（docker-compose.yml 所在处）
+cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处）
 
 # run --rm 起一个临时 api 容器执行迁移命令，复用其环境变量与依赖，完事即删
-docker compose run --rm api python -m scripts.migrate
+sudo docker compose run --rm api python -m scripts.migrate
