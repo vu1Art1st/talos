@@ -1,8 +1,11 @@
 FROM node:20-alpine AS build
 
+# 使用国内 npm 镜像源加速依赖下载；构建时可通过 --build-arg NPM_REGISTRY=xxx 覆盖
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+
 WORKDIR /app
 COPY package.json ./
-RUN npm install --registry=https://registry.npmmirror.com
+RUN npm config set registry ${NPM_REGISTRY} && npm install
 COPY . .
 RUN npm run build
 

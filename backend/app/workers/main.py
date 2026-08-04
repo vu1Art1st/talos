@@ -146,11 +146,20 @@ async def export_report_task(ctx, job_id: int) -> None:
             # 导出成功后报告导出版本 +1（编辑保存不影响该版本号）
             report.version += 1
         except Exception as exc:
+            # 先回滚失败事务：PostgreSQL 事务报错后进入 aborted 状态，
+            # 不 rollback 直接 commit 会抛 InFailedSQLTransactionError，任务将永远卡在 running。
+            await session.rollback()
+            job = await session.get(ExportJob, job_id)
+            if job is None:
+                return
             job.status = "failed"
             job.error = str(exc)
-        finally:
             job.finish_time = utcnow()
             await session.commit()
+            return
+
+        job.finish_time = utcnow()
+        await session.commit()
 
 
 def _send_mail_sync(to: list[str], subject: str, body: str) -> None:
