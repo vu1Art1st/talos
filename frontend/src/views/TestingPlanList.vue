@@ -195,6 +195,19 @@
         <el-form-item label="计划名称">
           <el-input v-model="form.plan_name" placeholder="与测试系统区分的测试计划名称" />
         </el-form-item>
+        <el-form-item label="关联资产">
+          <div class="w-full flex gap-2">
+            <el-select v-model="form.asset_ids" multiple filterable remote clearable
+                       :remote-method="searchAssets" :loading="assetLoading"
+                       placeholder="输入资产名称搜索并选择，漏洞录入时将自动带入" class="flex-1"
+                       @change="onAssetsChange">
+              <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
+            </el-select>
+            <el-button v-if="!form.id" @click="openCreateAsset">
+              <el-icon class="mr-1"><Plus /></el-icon>新增资产
+            </el-button>
+          </div>
+        </el-form-item>
         <el-form-item label="测试系统" required>
           <el-input v-model="form.system_name" placeholder="影响报告首页名称" />
         </el-form-item>
@@ -271,18 +284,6 @@
       <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
         认领该计划后才可修改测试状态
       </div>
-      <el-form-item label="关联资产">
-        <div class="w-full flex gap-2">
-          <el-select v-model="form.asset_ids" multiple filterable remote clearable
-                     :remote-method="searchAssets" :loading="assetLoading"
-                     placeholder="输入资产名称搜索并选择，漏洞录入时将自动带入" class="flex-1">
-            <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
-          </el-select>
-          <el-button v-if="!form.id" @click="openCreateAsset">
-            <el-icon class="mr-1"><Plus /></el-icon>新增资产
-          </el-button>
-        </div>
-      </el-form-item>
       <el-form-item label="漏洞简述">
         <el-input v-model="form.brief" type="textarea" :rows="2" placeholder="漏洞情况简述" />
       </el-form-item>
@@ -545,16 +546,27 @@ function openDialog(row?: any) {
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
   assetOptions.value = []
   if (form.value.asset_ids.length) loadAssetLabels()
+  prevAssetIds = [...form.value.asset_ids]
   dialogVisible.value = true
 }
 
 // ---------- 关联资产 ----------
 const assetOptions = ref<any[]>([])
 const assetLoading = ref(false)
+const assetCache = ref<Record<number, any>>({})
 let assetSearchTimer: ReturnType<typeof setTimeout> | null = null
 const assetDialogVisible = ref(false)
 const assetPrefill = ref<any>(null)
 let lastAssetKeyword = ''
+let prevAssetIds: number[] = []
+
+// 下拉展示：系统名称 +（子系统）+（系统类型，用于区分同名系统的不同环境）
+function assetLabel(a: any) {
+  const parts = [a.name]
+  if (a.sub_system) parts.push(`（${a.sub_system}）`)
+  if (a.system_type) parts.push(`（${a.system_type}）`)
+  return parts.join('')
+}
 
 async function searchAssets(keyword: string) {
   lastAssetKeyword = keyword
@@ -563,10 +575,10 @@ async function searchAssets(keyword: string) {
     const { data } = await client.get('/assets', {
       params: { search: keyword, page: 1, size: 50 },
     })
-    assetOptions.value = data.items.map((a: any) => ({
-      id: a.id,
-      label: a.name + (a.sub_system ? `（${a.sub_system}）` : ''),
-    }))
+    assetOptions.value = data.items.map((a: any) => {
+      assetCache.value[a.id] = a
+      return { id: a.id, label: assetLabel(a) }
+    })
   } finally {
     assetLoading.value = false
   }
@@ -580,7 +592,8 @@ function openCreateAsset() {
 
 function onAssetCreated(asset: any) {
   if (!asset?.id) return
-  const label = asset.name + (asset.sub_system ? `（${asset.sub_system}）` : '')
+  assetCache.value[asset.id] = asset
+  const label = assetLabel(asset)
   if (!assetOptions.value.some((o: any) => o.id === asset.id)) {
     assetOptions.value.push({ id: asset.id, label })
   }
@@ -589,6 +602,19 @@ function onAssetCreated(asset: any) {
   }
   // 自动填充测试系统与所属部门（资产信息），用户仍可手动修改/覆盖
   form.value.system_name = label
+  form.value.department = asset.department || ''
+  prevAssetIds = [...form.value.asset_ids]
+}
+
+// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仍可手动修改
+function onAssetsChange(ids: number[]) {
+  if (form.value.id) return
+  const added = ids.filter((id) => !prevAssetIds.includes(id))
+  prevAssetIds = [...ids]
+  if (!added.length) return
+  const asset = assetCache.value[added[added.length - 1]]
+  if (!asset) return
+  form.value.system_name = assetLabel(asset)
   form.value.department = asset.department || ''
 }
 
@@ -601,10 +627,8 @@ async function loadAssetLabels() {
   for (const r of rows) {
     const a = r?.data
     if (a && !assetOptions.value.some((o: any) => o.id === a.id)) {
-      assetOptions.value.push({
-        id: a.id,
-        label: a.name + (a.sub_system ? `（${a.sub_system}）` : ''),
-      })
+      assetCache.value[a.id] = a
+      assetOptions.value.push({ id: a.id, label: assetLabel(a) })
     }
   }
 }

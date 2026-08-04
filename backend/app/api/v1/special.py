@@ -131,6 +131,7 @@ def _plan_conditions(
 
     tester_id 非空时过滤「当前可测试系统」：当前用户为测试人且状态为初测中/复测申请/复测中。
     unclaimed 为真时过滤「无人认领的测试」：测试人员列表为空。
+    两者同时启用时按并集处理：满足任一条件的记录均展示。
     """
     cond = []
     if search:
@@ -151,7 +152,23 @@ def _plan_conditions(
         # 空 receive_time 恒小于任意日期串，仅需上界比较时排除空值
         cond.append(TestingPlan.receive_time != "")
         cond.append(TestingPlan.receive_time <= receive_to)
-    if tester_id is not None:
+    if tester_id is not None and unclaimed:
+        # 并集：当前可测试系统 OR 无人认领（与其他筛选条件保持 AND）
+        cond.append(
+            or_(
+                and_(
+                    TestingPlan.status.in_([
+                        PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
+                    ]),
+                    exists().where(
+                        testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+                        testing_plan_testers.c.user_id == tester_id,
+                    ),
+                ),
+                ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id),
+            )
+        )
+    elif tester_id is not None:
         cond.append(
             TestingPlan.status.in_([
                 PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
@@ -163,7 +180,7 @@ def _plan_conditions(
                 testing_plan_testers.c.user_id == tester_id,
             )
         )
-    if unclaimed:
+    elif unclaimed:
         cond.append(
             ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
         )
