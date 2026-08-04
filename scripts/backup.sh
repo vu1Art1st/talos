@@ -12,7 +12,8 @@ sudo mkdir -p "${out}"
 
 echo "[1/2] 备份数据库 -> ${out}/db.sql.gz"
 # 在 postgres 容器内用其自带凭证做 pg_dump，无需知道卷名/密码
-sudo docker compose exec -T postgres sh -c 'pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB"' | sudo gzip >"${out}/db.sql.gz"
+# --clean --if-exists: 生成的 SQL 以 DROP ... IF EXISTS 开头，支持重复导入到有数据的库（幂等恢复）
+sudo docker compose exec -T postgres sh -c 'pg_dump --clean --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB"' | sudo gzip >"${out}/db.sql.gz"
 
 echo "[2/2] 备份上传文件 -> ${out}/storage.tar.gz"
 # api 容器把 storage_data 卷挂在 /app/storage，直接打包免去卷名依赖
