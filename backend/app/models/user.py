@@ -62,3 +62,20 @@ class GroupUser(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"))
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"))
+
+
+class GroupMember(Base):
+    """组织成员：供资产系统负责人下拉选择与组织人员管理。
+
+    取代 Group 表原 owner_name/owner_phone/owner_email 单字段设计，
+    一个组织可录入多名成员，资产编辑时从全部成员聚合读取下拉。
+    """
+
+    __tablename__ = "group_members"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)
+    name: Mapped[str] = mapped_column(String(64))
+    phone: Mapped[str] = mapped_column(String(32), default="")
+    email: Mapped[str] = mapped_column(String(128), default="")
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

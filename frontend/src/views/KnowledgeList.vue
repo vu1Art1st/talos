@@ -68,9 +68,14 @@
         <el-input v-model="form.vulnerability_name" maxlength="255" placeholder="例如 SQL注入、SSRF服务器端请求伪造" class="!w-96" />
       </el-form-item>
       <el-form-item label="漏洞类型" required>
-        <el-select v-model="form.vul_type" filterable class="!w-64">
-          <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
+        <div class="w-full flex items-center gap-2">
+          <el-select v-model="form.vul_type" filterable class="flex-1">
+            <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+          </el-select>
+          <el-button v-if="auth.hasPerm('vuln:manage')" plain @click="addVulnType">
+            <el-icon class="mr-1"><Plus /></el-icon>新增
+          </el-button>
+        </div>
       </el-form-item>
       <el-form-item label="危害等级" required>
         <el-select v-model="form.severity_level" class="!w-64">
@@ -211,6 +216,17 @@ async function remove(id: number) {
   await client.delete(`/knowledge/${id}`)
   ElMessage.success('删除成功')
   await load()
+}
+
+async function addVulnType() {
+  const { value } = await ElMessageBox.prompt('请输入新的漏洞类型名称', '新增漏洞类型', {
+    confirmButtonText: '保存', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+  }).catch(() => ({ value: '' }))
+  if (!value?.trim()) return
+  const { data } = await client.post('/vuln-types', { name: value.trim() })
+  if (auth.meta?.vul_type) auth.meta.vul_type[data.code] = data.name
+  ElMessage.success('漏洞类型已新增')
+  form.vul_type = data.code
 }
 
 async function removeBatch() {

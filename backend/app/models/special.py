@@ -1,7 +1,7 @@
 """专项管理：远程检测 / 测试计划 / 春耕行动。"""
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import utcnow
@@ -52,9 +52,13 @@ class TestingPlan(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     system_name: Mapped[str] = mapped_column(String(128), index=True)
+    plan_name: Mapped[str] = mapped_column(String(128), default="")  # 测试计划名称，与测试系统区分
     test_type: Mapped[str] = mapped_column(String(64), default="")
     department: Mapped[str] = mapped_column(String(128), default="")
     receive_time: Mapped[str] = mapped_column(String(32), default="")
+    ticket_time: Mapped[str] = mapped_column(String(32), default="")  # 工单提起时间
+    ticket_seq: Mapped[int] = mapped_column(Integer, default=0)  # 当日录入次序，配合 receive_time 生成 ticket_id
+    ticket_id_manual: Mapped[str] = mapped_column(String(64), default="")  # 手动指定的工单ID，优先于自动生成
     first_test_done_time: Mapped[str] = mapped_column(String(32), default="")
     status: Mapped[int] = mapped_column(Integer, default=10)
     retest_notice_time: Mapped[str] = mapped_column(String(32), default="")
@@ -65,6 +69,7 @@ class TestingPlan(Base):
     stat_low: Mapped[int] = mapped_column(Integer, default=0)
     est_mandays: Mapped[float] = mapped_column(Float, default=0)  # 预估人天
     actual_mandays: Mapped[float] = mapped_column(Float, default=0)  # 实际人天
+    asset_ids: Mapped[list | None] = mapped_column(JSON, default=list)  # 关联资产ID数组，前置至计划编制
     brief: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")  # 测试人员、数据来源等
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -100,6 +105,16 @@ class TestingPlan(Base):
     @property
     def retest_round_count(self) -> int:
         return len(self.retest_rounds)
+
+    @property
+    def ticket_id(self) -> str:
+        """工单ID：优先返回手动指定值；否则按需求接收日期自动生成 YYYYMMDD-N。"""
+        if self.ticket_id_manual:
+            return self.ticket_id_manual
+        if not self.receive_time or self.ticket_seq == 0:
+            return ""
+        date_str = self.receive_time.replace("-", "")[:8]
+        return f"{date_str}-{self.ticket_seq}"
 
 
 class TestingPlanRetestRound(Base):

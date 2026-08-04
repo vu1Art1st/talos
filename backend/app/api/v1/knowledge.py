@@ -7,19 +7,22 @@ from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.query import get_or_404
-from app.constants import VUL_LEVEL, VUL_TYPE
+from app.constants import VUL_LEVEL
 from app.core.deps import get_current_user, require_perm
 from app.db import get_session
-from app.models import KnowledgeEntry, Vul
+from app.models import KnowledgeEntry, Vul, VulnType
 from app.models.user import User
 from app.schemas import KnowledgeBatchDeleteIn, KnowledgeBatchIn, KnowledgeIn, KnowledgeOut
 
 router = APIRouter(prefix="/knowledge", tags=["漏洞知识库"])
 
 
-def _validate_dict_codes(body: KnowledgeIn) -> None:
-    """校验字典码合法性（Pydantic 负责格式，这里负责业务字典成员）。"""
-    if body.vul_type not in VUL_TYPE:
+async def _validate_dict_codes(session: AsyncSession, body: KnowledgeIn) -> None:
+    """校验字典码合法性：漏洞类型查 vuln_types 表，危害等级沿用常量。"""
+    vt = (
+        await session.execute(select(VulnType).where(VulnType.code == body.vul_type))
+    ).scalar_one_or_none()
+    if vt is None:
         raise HTTPException(400, f"未知的漏洞类型：{body.vul_type}")
     if body.severity_level not in VUL_LEVEL:
         raise HTTPException(400, f"未知的危害等级：{body.severity_level}")
@@ -46,27 +49,23 @@ async def list_entries(
     ).scalars().all()
 
 
-@router.get("/by-type/{vul_type}", response_model=KnowledgeOut)
+@router.get("/by-type/{vul_type}", response_model=list[KnowledgeOut])
 async def get_by_type(
     vul_type: int,
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """按漏洞类型取模板（提交/编辑页「一键套用模板」入口）。
+    """按漏洞类型取模板列表（提交/编辑页「套用模板」入口）。
 
-    同类型存在多条时返回危害等级最高（数值最小）、最早创建的一条。
+    返回该类型下全部模板，危害等级高（数值小）者在前；由前端弹窗选择具体条目。
     """
-    entry = (
+    return (
         await session.execute(
             select(KnowledgeEntry)
             .where(KnowledgeEntry.vul_type == vul_type)
             .order_by(KnowledgeEntry.severity_level, KnowledgeEntry.id)
-            .limit(1)
         )
-    ).scalar_one_or_none()
-    if entry is None:
-        raise HTTPException(404, "该漏洞类型暂无知识库模板")
-    return entry
+    ).scalars().all()
 
 
 @router.post("", response_model=KnowledgeOut)
@@ -76,7 +75,7 @@ async def upsert_entry(
     session: AsyncSession = Depends(get_session),
 ):
     """新建或更新条目：每个漏洞名称至多一条，存在则覆盖。"""
-    _validate_dict_codes(body)
+    await _validate_dict_codes(session, body)
     entry = (
         await session.execute(
             select(KnowledgeEntry).where(KnowledgeEntry.vulnerability_name == body.vulnerability_name)
@@ -99,7 +98,7 @@ async def update_entry(
     session: AsyncSession = Depends(get_session),
 ):
     """按 ID 编辑条目；改名时校验与其他条目不冲突。"""
-    _validate_dict_codes(body)
+    await _validate_dict_codes(session, body)
     entry = await get_or_404(session, KnowledgeEntry, entry_id, "知识库条目不存在")
     dup = (
         await session.execute(
@@ -129,8 +128,9 @@ async def batch_import(
     dup_names = {n for n in names if names.count(n) > 1}
     if dup_names:
         raise HTTPException(400, f"导入数据内漏洞名称重复：{'、'.join(sorted(dup_names))}")
+    valid_codes = set((await session.execute(select(VulnType.code))).scalars().all())
     for i, item in enumerate(body.items, start=1):
-        if item.vul_type not in VUL_TYPE:
+        if item.vul_type not in valid_codes:
             raise HTTPException(400, f"第 {i} 条（{item.vulnerability_name}）漏洞类型非法：{item.vul_type}")
         if item.severity_level not in VUL_LEVEL:
             raise HTTPException(400, f"第 {i} 条（{item.vulnerability_name}）危害等级非法：{item.severity_level}")

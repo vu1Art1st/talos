@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-vulnplatform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -15,6 +16,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -23,6 +25,7 @@ services:
 
   gotenberg:
     image: gotenberg/gotenberg:8
+    restart: unless-stopped
     command: ["gotenberg", "--api-timeout=120s"]
 
   api:
@@ -30,6 +33,7 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    restart: unless-stopped
     environment: &backend_env
       VP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vulnplatform}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vulnplatform}
       VP_REDIS_URL: redis://redis:6379/0
@@ -49,6 +53,7 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    restart: unless-stopped
     command: ["arq", "app.workers.main.WorkerSettings"]
     environment: *backend_env
     volumes:
@@ -61,6 +66,7 @@ services:
 
   frontend:
     build: ./frontend
+    restart: unless-stopped
     depends_on:
       - api
     ports:

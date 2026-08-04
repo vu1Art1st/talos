@@ -1,11 +1,12 @@
 """专项管理 API：远程检测 / 测试计划 / 春耕行动，统一 special:manage 权限。"""
+import re
 from datetime import timedelta
 from io import BytesIO
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
@@ -22,6 +23,7 @@ from app.models import (
     TestingPlanRetestRound,
     User,
     Vul,
+    testing_plan_testers,
 )
 from app.schemas import (
     Page,
@@ -122,8 +124,14 @@ def _plan_conditions(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    tester_id: int | None = None,
+    unclaimed: bool = False,
 ) -> list:
-    """测试计划筛选条件，供列表/统计/导出共用。receive_time 为 YYYY-MM-DD 字符串，直接比较。"""
+    """测试计划筛选条件，供列表/统计/导出共用。receive_time 为 YYYY-MM-DD 字符串，直接比较。
+
+    tester_id 非空时过滤「当前可测试系统」：当前用户为测试人且状态为初测中/复测申请/复测中。
+    unclaimed 为真时过滤「无人认领的测试」：测试人员列表为空。
+    """
     cond = []
     if search:
         cond.append(
@@ -143,6 +151,22 @@ def _plan_conditions(
         # 空 receive_time 恒小于任意日期串，仅需上界比较时排除空值
         cond.append(TestingPlan.receive_time != "")
         cond.append(TestingPlan.receive_time <= receive_to)
+    if tester_id is not None:
+        cond.append(
+            TestingPlan.status.in_([
+                PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
+            ])
+        )
+        cond.append(
+            exists().where(
+                testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+                testing_plan_testers.c.user_id == tester_id,
+            )
+        )
+    if unclaimed:
+        cond.append(
+            ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
+        )
     return cond
 
 
@@ -248,18 +272,25 @@ async def list_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    my_tests: bool = False,
+    unclaimed: bool = False,
     sort: str = "",
     order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    _: User = Depends(require_perm("special:manage")),
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to)
+    """测试计划列表。my_tests 显示当前可测试系统，unclaimed 显示无人认领的测试。"""
+    cond = _plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        tester_id=user.id if my_tests else None,
+        unclaimed=unclaimed,
+    )
     stmt = select(TestingPlan).where(*cond)
     stmt = apply_sort(
         stmt, TestingPlan, sort, order,
-        {"id", "system_name", "test_type", "department", "status", "est_mandays",
+        {"id", "system_name", "plan_name", "test_type", "department", "status", "est_mandays",
          "actual_mandays", "receive_time", "retest_done_time", "create_time"},
         TestingPlan.id.desc(),
     )
@@ -284,7 +315,8 @@ async def testing_plan_stats(
 
 
 PLAN_EXCEL_HEADERS = [
-    "ID", "测试系统", "测试类型", "所属部门", "状态", "测试人员",
+    "ID", "测试计划名称", "测试系统", "测试类型", "所属部门",
+    "工单ID", "工单提起时间", "状态", "测试人员",
     "需求接收", "初测完成", "复测通知", "复测完成",
     "预估人天", "实际人天",
     "超危数", "高危数", "中危数", "低危数", "复测轮数",
@@ -317,7 +349,8 @@ async def export_testing_plans(
     ws.append(PLAN_EXCEL_HEADERS)
     for p in plans:
         ws.append([excel_safe(v) for v in (
-            p.id, p.system_name, p.test_type, p.department,
+            p.id, p.plan_name, p.system_name, p.test_type, p.department,
+            p.ticket_id, p.ticket_time,
             TESTING_PLAN_STATUS.get(p.status, str(p.status)),
             "、".join(u.realname or u.username for u in p.testers),
             p.receive_time, p.first_test_done_time, p.retest_notice_time, p.retest_done_time,
@@ -383,7 +416,8 @@ async def download_plan_import_template(_: User = Depends(require_perm("special:
     ws.title = "测试计划"
     ws.append(PLAN_EXCEL_HEADERS)
     ws.append([
-        "", "示例商城系统", "渗透测试", "电商事业部", "未测试", "张三、李四",
+        "", "示例测试计划", "示例商城系统", "渗透测试", "电商事业部",
+        "", "2026-01-01", "未测试", "张三、李四",
         "2026-01-01", "", "", "",
         5, 0,
         0, 0, 0, 0, 0,
@@ -427,6 +461,13 @@ async def import_testing_plans(
             user_map.setdefault(u.realname, u)
         user_map.setdefault(u.username, u)
 
+    # 预加载工单ID占用表（手动值或自动生成值均计入），用于导入时的唯一性校验
+    occupied: dict[str, int | str] = {}
+    for p in (await session.execute(select(TestingPlan))).scalars().all():
+        tid = p.ticket_id
+        if tid:
+            occupied[tid] = p.id
+
     ws = wb.active
     result = PlanImportResultOut()
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
@@ -435,7 +476,7 @@ async def import_testing_plans(
         if not any(cells):
             continue
         result.total += 1
-        system_name = cells[1]
+        system_name = cells[2]
         if not system_name:
             result.failed += 1
             result.errors.append(f"第{idx}行：测试系统为必填项")
@@ -448,23 +489,36 @@ async def import_testing_plans(
             plan = TestingPlan(creator_id=user.id)
             session.add(plan)
 
+        plan.plan_name = cells[1]
         plan.system_name = system_name
-        plan.test_type = cells[2]
-        plan.department = cells[3]
-        plan.status = PLAN_STATUS_REVERSE.get(cells[4], PlanStatus.UNTESTED)
-        plan.receive_time = cells[6]
-        plan.first_test_done_time = cells[7]
-        plan.retest_notice_time = cells[8]
-        plan.retest_done_time = cells[9]
-        plan.est_mandays = _to_float(cells[10])
-        plan.actual_mandays = _to_float(cells[11])
-        plan.stat_critical = _to_int(cells[12])
-        plan.stat_high = _to_int(cells[13])
-        plan.stat_medium = _to_int(cells[14])
-        plan.stat_low = _to_int(cells[15])
-        matched = [user_map[name] for name in cells[5].split("、") if name.strip() and name.strip() in user_map]
+        plan.test_type = cells[3]
+        plan.department = cells[4]
+        # cells[5] 工单ID：显式填写则作为手动指定值，未填写则保持原值（新记录由系统自动生成）
+        plan.ticket_id_manual = cells[5] or plan.ticket_id_manual or ""
+        plan.ticket_time = cells[6]
+        plan.status = PLAN_STATUS_REVERSE.get(cells[7], PlanStatus.UNTESTED)
+        plan.receive_time = cells[9]
+        plan.first_test_done_time = cells[10]
+        plan.retest_notice_time = cells[11]
+        plan.retest_done_time = cells[12]
+        plan.est_mandays = _to_float(cells[13])
+        plan.actual_mandays = _to_float(cells[14])
+        plan.stat_critical = _to_int(cells[15])
+        plan.stat_high = _to_int(cells[16])
+        plan.stat_medium = _to_int(cells[17])
+        plan.stat_low = _to_int(cells[18])
+        matched = [user_map[name] for name in cells[8].split("、") if name.strip() and name.strip() in user_map]
         if matched:
             plan.testers = matched
+        # 新增或历史数据无序号时按需求接收日期自动补号
+        await _assign_ticket_seq(session, plan)
+
+        # 工单ID唯一性校验：与库中或批内其他行重复则整批终止并提示
+        tid = plan.ticket_id
+        if tid:
+            if tid in occupied and occupied[tid] != row_id:
+                raise HTTPException(400, f"第{idx}行：工单ID「{tid}」已存在，请更换后重新导入")
+            occupied[tid] = "new" if is_new else row_id
 
         if is_new:
             result.created += 1
@@ -485,6 +539,57 @@ async def get_testing_plan(
     return await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
 
 
+async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
+    """按需求接收日期生成当日录入次序（ticket_seq），无日期时不生成。
+
+    - 新对象 ticket_seq 为 None（SQLAlchemy default 在构造时不生效），
+      需用 falsy 判断（None/0 均视为未分配）。
+    - 仅当对象已持久化（更新场景）时才排除自身，避免新对象 id 为 None 时
+      生成 `id != NULL` 恒为假的 SQL 条件导致序号始终为 1。
+    - 手动指定了工单ID时不自动分配序号，避免浪费当日序号。
+    """
+    if not row.receive_time or row.ticket_seq or row.ticket_id_manual:
+        return
+    date_like = f"{row.receive_time[:10]}%"
+    stmt = select(func.max(TestingPlan.ticket_seq)).where(
+        TestingPlan.receive_time.like(date_like)
+    )
+    if row.id is not None:
+        stmt = stmt.where(TestingPlan.id != row.id)
+    max_seq = (await session.execute(stmt)).scalar_one()
+    row.ticket_seq = (max_seq or 0) + 1
+
+
+async def _check_ticket_id_unique(
+    session: AsyncSession, ticket_id: str, exclude_id: int | None = None
+) -> None:
+    """校验工单ID唯一性：手动指定值或自动生成值（需求接收日期+序号）均不得与其他记录重复。
+
+    工单ID为派生属性（手动指定优先，否则由 receive_time+ticket_seq 生成），
+    无法直接建数据库唯一约束，此处按两种生成方式构造条件做应用层校验。
+    """
+    if not ticket_id:
+        return
+    # 手动指定值匹配
+    conds = [TestingPlan.ticket_id_manual == ticket_id]
+    # 自动生成值匹配：YYYYMMDD-N，对应 receive_time(YYYY-MM-DD) + ticket_seq
+    m = re.fullmatch(r"(\d{8})-(\d+)", ticket_id)
+    if m:
+        date_part, seq = m.group(1), int(m.group(2))
+        date_like = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:]}%"
+        conds.append(
+            and_(
+                TestingPlan.receive_time.like(date_like),
+                TestingPlan.ticket_seq == seq,
+            )
+        )
+    stmt = select(TestingPlan.id).where(or_(*conds))
+    if exclude_id is not None:
+        stmt = stmt.where(TestingPlan.id != exclude_id)
+    if (await session.execute(stmt)).first() is not None:
+        raise HTTPException(400, f"工单ID「{ticket_id}」已存在，请更换后保存")
+
+
 @router.post("/testing-plans", response_model=TestingPlanOut)
 async def create_testing_plan(
     body: TestingPlanIn,
@@ -492,6 +597,8 @@ async def create_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     row = TestingPlan(**body.model_dump(), creator_id=user.id)
+    await _assign_ticket_seq(session, row)
+    await _check_ticket_id_unique(session, row.ticket_id)
     session.add(row)
     await session.commit()
     await session.refresh(row)
@@ -544,6 +651,10 @@ async def update_testing_plan(
         plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
     for k, v in body.model_dump().items():
         setattr(row, k, v)
+    # 补生成工单ID序号（历史/导入数据无序号时自动补齐）
+    await _assign_ticket_seq(session, row)
+    # 保存前校验工单ID唯一性（手动指定值或自动生成值均不可重复）
+    await _check_ticket_id_unique(session, row.ticket_id, exclude_id=row.id)
     # 有关联漏洞时统计以自动重算为准，覆盖手填值
     if row.vuls:
         await plan_service.refresh_stats(session, row.id)

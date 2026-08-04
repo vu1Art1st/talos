@@ -6,12 +6,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import cast, func, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import ASSET_SEC_LEVEL, ASSET_STATUS, URL_TAG
+from app.constants import ASSET_STATUS, URL_TAG
 from app.core.deps import get_current_user, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
 from app.db import get_session
-from app.models import Asset, User, vuln_assets
+from app.models import Asset, Group, GroupMember, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
 
 router = APIRouter(prefix="/assets", tags=["资产"])
@@ -20,11 +20,10 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Excel 列定义（顺序即模板列顺序）
 EXCEL_HEADERS = [
-    "系统命名*", "子系统名称", "部门", "公网URL", "内网URL", "开放端口与服务",
-    "中间件", "数据库", "系统负责人", "安全等级", "状态", "备注",
+    "系统命名*", "子系统名称", "部门", "系统类型", "公网URL", "内网URL",
+    "开放端口与服务", "中间件", "数据库", "系统负责人", "状态", "备注",
 ]
 
-SEC_LEVEL_REVERSE = {v: k for k, v in ASSET_SEC_LEVEL.items()}
 STATUS_REVERSE = {v: k for k, v in ASSET_STATUS.items()}
 URL_TAG_REVERSE = {v: k for k, v in URL_TAG.items()}
 
@@ -63,7 +62,7 @@ async def list_assets(
     stmt = select(Asset).where(*cond)
     stmt = apply_sort(
         stmt, Asset, sort, order,
-        {"id", "name", "sub_system", "department", "sec_level", "status", "create_time"},
+        {"id", "name", "sub_system", "department", "system_type", "status", "create_time"},
         Asset.id.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
@@ -78,6 +77,9 @@ async def create_asset(
 ):
     asset = Asset(**body.model_dump())
     session.add(asset)
+    await _sync_owners_to_group_members(
+        session, body.department, [o.model_dump() for o in body.owners],
+    )
     await session.commit()
     await session.refresh(asset)
     return asset
@@ -107,6 +109,33 @@ def _parse_owners(text: str) -> list[dict]:
             "email": fields[2].strip() if len(fields) > 2 else "",
         })
     return owners
+
+
+async def _sync_owners_to_group_members(
+    session: AsyncSession, department: str, owners: list[dict],
+) -> None:
+    """录入的系统负责人自动同步到组织管理（GroupMember）。
+
+    以资产部门作为归属组织；同名负责人已存在时跳过，保证幂等。
+    """
+    if not department or not owners:
+        return
+    group = (
+        await session.execute(select(Group).where(Group.name == department))
+    ).scalar_one_or_none()
+    if group is None:
+        return
+    existing = set((await session.execute(select(GroupMember.name))).scalars().all())
+    for o in owners:
+        name = (o.get("name") or "").strip()
+        if name and name not in existing:
+            session.add(GroupMember(
+                group_id=group.id,
+                name=name,
+                phone=(o.get("phone") or "").strip(),
+                email=(o.get("email") or "").strip(),
+            ))
+            existing.add(name)
 
 
 def _parse_public_urls(text: str) -> list[dict]:
@@ -160,14 +189,13 @@ def _build_workbook(assets: list[Asset]):
     ws.append(EXCEL_HEADERS)
     for a in assets:
         ws.append([excel_safe(v) for v in (
-            a.name, a.sub_system, a.department,
+            a.name, a.sub_system, a.department, a.system_type,
             _dump_public_urls(a.public_urls),
             ";".join(a.internal_urls or []),
             _dump_port_services(a.port_services),
             _dump_name_versions(a.middlewares),
             _dump_name_versions(a.databases),
             _dump_owners(a.owners),
-            ASSET_SEC_LEVEL.get(a.sec_level, "其他"),
             ASSET_STATUS.get(a.status, "线上"),
             a.remark,
         )])
@@ -209,12 +237,12 @@ async def download_import_template(_: User = Depends(require_perm("asset:manage"
     ws.title = "资产"
     ws.append(EXCEL_HEADERS)
     ws.append([
-        "示例商城系统", "订单中心", "电商事业部",
+        "示例商城系统", "订单中心", "电商事业部", "自有系统（正式）",
         "https://shop.example.com|互联网;https://oa-shop.example.com|办公网",
         "http://10.0.0.8:8080", "80:Web服务;443:HTTPS;8080:管理后台",
         "Nginx/1.24;Tomcat/9.0", "MySQL/8.0",
         "张三/13800000000/zhangsan@example.com;李四/13900000000/lisi@example.com",
-        "安全二级", "线上", "示例行，导入前请删除",
+        "线上", "示例行，导入前请删除",
     ])
     return _xlsx_response(wb, "资产导入模板.xlsx")
 
@@ -251,20 +279,22 @@ async def import_assets(
             result.failed += 1
             result.errors.append(f"第{idx}行：系统命名为必填项")
             continue
+        owners = _parse_owners(cells[9])
         session.add(Asset(
             name=name,
             sub_system=cells[1],
             department=cells[2],
-            public_urls=_parse_public_urls(cells[3]),
-            internal_urls=_parse_list(cells[4]),
-            port_services=_parse_port_services(cells[5]),
-            middlewares=_parse_name_versions(cells[6]),
-            databases=_parse_name_versions(cells[7]),
-            owners=_parse_owners(cells[8]),
-            sec_level=SEC_LEVEL_REVERSE.get(cells[9], 40),
+            system_type=cells[3],
+            public_urls=_parse_public_urls(cells[4]),
+            internal_urls=_parse_list(cells[5]),
+            port_services=_parse_port_services(cells[6]),
+            middlewares=_parse_name_versions(cells[7]),
+            databases=_parse_name_versions(cells[8]),
+            owners=owners,
             status=STATUS_REVERSE.get(cells[10], 10),
             remark=cells[11],
         ))
+        await _sync_owners_to_group_members(session, cells[2], owners)
         result.success += 1
     await session.commit()
     return result
@@ -290,6 +320,9 @@ async def update_asset(
     asset = await get_or_404(session, Asset, asset_id, "资产不存在")
     for k, v in body.model_dump().items():
         setattr(asset, k, v)
+    await _sync_owners_to_group_members(
+        session, body.department, [o.model_dump() for o in body.owners],
+    )
     await session.commit()
     await session.refresh(asset)
     return asset

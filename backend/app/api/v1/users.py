@@ -9,8 +9,8 @@ from app.core.deps import get_current_user, require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.security import hash_password
 from app.db import get_session
-from app.models import Group, Role, User
-from app.schemas import GroupIn, GroupOut, Page, RoleIn, RoleOut, UserIn, UserOption, UserOut
+from app.models import Group, GroupMember, Role, User
+from app.schemas import GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, RoleIn, RoleOut, UserIn, UserOption, UserOut
 
 router = APIRouter(tags=["用户与权限"])
 
@@ -200,11 +200,7 @@ async def create_group(
     exists = (await session.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(400, "同名组织已存在")
-    group = Group(
-        name=name, remark=body.remark,
-        owner_name=body.owner_name.strip(), owner_phone=body.owner_phone.strip(),
-        owner_email=body.owner_email.strip(),
-    )
+    group = Group(name=name, remark=body.remark)
     session.add(group)
     await session.commit()
     await session.refresh(group)
@@ -221,9 +217,6 @@ async def update_group(
     group = await get_or_404(session, Group, group_id, "组不存在")
     group.name = body.name
     group.remark = body.remark
-    group.owner_name = body.owner_name.strip()
-    group.owner_phone = body.owner_phone.strip()
-    group.owner_email = body.owner_email.strip()
     await session.commit()
     await session.refresh(group)
     return group
@@ -240,3 +233,88 @@ async def delete_group(
         await session.delete(group)
         await session.commit()
     return {"msg": "删除成功"}
+
+
+# ---------- 组织成员 ----------
+@router.get("/groups/{group_id}/members", response_model=list[GroupMemberOut])
+async def list_group_members(
+    group_id: int,
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """组织成员列表（登录用户可读）。"""
+    await get_or_404(session, Group, group_id, "组织不存在")
+    return (
+        await session.execute(
+            select(GroupMember).where(GroupMember.group_id == group_id).order_by(GroupMember.id)
+        )
+    ).scalars().all()
+
+
+@router.post("/groups/{group_id}/members", response_model=GroupMemberOut)
+async def create_group_member(
+    group_id: int,
+    body: GroupMemberIn,
+    _: User = Depends(require_perm("user:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """组织录入人员：姓名/电话/邮箱。"""
+    await get_or_404(session, Group, group_id, "组织不存在")
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "姓名不能为空")
+    member = GroupMember(
+        group_id=group_id, name=name,
+        phone=body.phone.strip(), email=body.email.strip(),
+    )
+    session.add(member)
+    await session.commit()
+    await session.refresh(member)
+    return member
+
+
+@router.put("/groups/{group_id}/members/{member_id}", response_model=GroupMemberOut)
+async def update_group_member(
+    group_id: int,
+    member_id: int,
+    body: GroupMemberIn,
+    _: User = Depends(require_perm("user:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """编辑组织成员。"""
+    member = await get_or_404(session, GroupMember, member_id, "成员不存在")
+    if member.group_id != group_id:
+        raise HTTPException(400, "成员不属于该组织")
+    member.name = body.name.strip()
+    member.phone = body.phone.strip()
+    member.email = body.email.strip()
+    await session.commit()
+    await session.refresh(member)
+    return member
+
+
+@router.delete("/groups/{group_id}/members/{member_id}")
+async def delete_group_member(
+    group_id: int,
+    member_id: int,
+    _: User = Depends(require_perm("user:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """删除组织成员。"""
+    member = await get_or_404(session, GroupMember, member_id, "成员不存在")
+    if member.group_id != group_id:
+        raise HTTPException(400, "成员不属于该组织")
+    await session.delete(member)
+    await session.commit()
+    return {"msg": "删除成功"}
+
+
+@router.get("/group-members/all", response_model=list[GroupMemberOut])
+async def list_all_group_members(
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """全部组织成员聚合列表，供资产「系统负责人」下拉选择。"""
+    return (
+        await session.execute(select(GroupMember).order_by(GroupMember.group_id, GroupMember.id))
+    ).scalars().all()

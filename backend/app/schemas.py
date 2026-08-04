@@ -84,19 +84,25 @@ class GroupOut(BaseModel):
 
     id: int
     name: str
-    # 系统负责人（姓名/电话/邮箱）
-    owner_name: str = ""
-    owner_phone: str = ""
-    owner_email: str = ""
     remark: str = ""
 
 
 class GroupIn(BaseModel):
     name: str
-    owner_name: str = ""
-    owner_phone: str = ""
-    owner_email: str = ""
     remark: str = ""
+
+
+class GroupMemberIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    phone: str = ""
+    email: str = ""
+
+
+class GroupMemberOut(GroupMemberIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    group_id: int
 
 
 # ---------- 资产 ----------
@@ -129,13 +135,13 @@ class AssetIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     sub_system: str = ""
     department: str = ""
+    system_type: str = ""  # 系统类型：自有系统（正式）/自有系统（测试）/DCIT系统 等
     public_urls: list[PublicUrlItem] = []
     internal_urls: list[str] = []
     port_services: list[PortServiceItem] = []
     middlewares: list[NameVersionItem] = []
     databases: list[NameVersionItem] = []
     owners: list[AssetOwnerItem] = []
-    sec_level: int = 40
     status: int = 10
     group_id: int | None = None
     remark: str = ""
@@ -410,8 +416,9 @@ class ImportBatchOut(BaseModel):
 
 class ImportConfirmIn(BaseModel):
     record_ids: list[int]
-    asset_id: int | None = None
+    asset_id: int | None = None  # 入库到已有资产
     report_id: int | None = None  # 入库后自动追加为该报告的漏洞章节
+    testing_plan_id: int | None = None  # 显式关联测试计划；报告格式未指定时按系统名自动匹配/创建
 
 
 # ---------- 报告 ----------
@@ -557,9 +564,12 @@ class RetestRoundOut(BaseModel):
 
 class TestingPlanIn(BaseModel):
     system_name: str = Field(min_length=1, max_length=128)
+    plan_name: str = ""  # 测试计划名称，与测试系统区分
     test_type: str = ""
     department: str = ""
     receive_time: str = ""
+    ticket_time: str = ""  # 工单提起时间
+    ticket_id_manual: str = ""  # 手动指定的工单ID，留空则由系统按需求接收日期自动生成
     first_test_done_time: str = ""
     status: int = 10  # TESTING_PLAN_STATUS
     retest_notice_time: str = ""
@@ -570,6 +580,7 @@ class TestingPlanIn(BaseModel):
     stat_low: int = 0
     est_mandays: float = 0  # 预估人天
     actual_mandays: float = 0  # 实际人天
+    asset_ids: list[int] = []  # 关联资产ID，编制计划时前置录入
     brief: str = ""
     detail: str = ""
 
@@ -578,6 +589,8 @@ class TestingPlanOut(TestingPlanIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    ticket_seq: int = 0  # 当日录入次序，配合 receive_time 生成工单ID
+    ticket_id: str = ""  # 工单ID：YYYYMMDD-N
     testers: list[UserBrief] = []
     vuls: list[VulBrief] = []
     reports: list[ReportBrief] = []
@@ -585,6 +598,12 @@ class TestingPlanOut(TestingPlanIn):
     retest_round_count: int = 0
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+    @field_validator("asset_ids", mode="before")
+    @classmethod
+    def _normalize_asset_ids(cls, v):
+        """旧库迁移后 asset_ids 可能为 NULL，归一化为空数组避免序列化失败。"""
+        return v or []
 
 
 class SpringActionIn(BaseModel):
@@ -618,3 +637,16 @@ class DictOptionOut(DictOptionIn):
 
     id: int
     category: str
+
+
+class VulnTypeIn(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    sort: int = 0
+
+
+class VulnTypeOut(VulnTypeIn):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: int
+    is_builtin: bool = False

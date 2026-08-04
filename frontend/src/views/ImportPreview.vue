@@ -18,7 +18,12 @@
           <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
         </template>
         <div class="flex-1" />
-        <el-select v-model="assetId" filterable clearable placeholder="入库到资产（可选）" class="!w-52">
+        <el-select v-model="planId" filterable clearable placeholder="关联测试计划（可选）" class="!w-52"
+                   :disabled="batch?.doc_kind === 'report'">
+          <el-option v-for="p in plans" :key="p.id"
+                     :label="p.plan_name ? `${p.plan_name}（${p.system_name}）` : p.system_name" :value="p.id" />
+        </el-select>
+        <el-select v-model="assetId" filterable clearable placeholder="入库到已有资产（可选）" class="!w-52">
           <el-option v-for="a in assets" :key="a.id" :label="a.name" :value="a.id" />
         </el-select>
         <el-select v-model="reportId" filterable clearable placeholder="关联到报告（可选）" class="!w-52">
@@ -29,7 +34,7 @@
         </el-button>
       </div>
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
-        已识别为平台报告格式，确认入库时将自动创建/关联测试计划「{{ batch.meta_json?.system_name || '-' }}」
+        报告格式确认入库时将自动创建/关联测试计划「{{ batch.meta_json?.system_name || '-' }}」与资产（无系统名时复用计划首个关联资产）
       </div>
     </el-card>
 
@@ -123,6 +128,8 @@ const assets = ref<any[]>([])
 const assetId = ref<number | null>(null)
 const reports = ref<any[]>([])
 const reportId = ref<number | null>(null)
+const plans = ref<any[]>([])
+const planId = ref<number | null>(null)
 const meta = ref<any>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
@@ -160,7 +167,10 @@ async function discard(rec: any) {
 
 async function confirm() {
   const { data } = await client.post(`/imports/${route.params.id}/confirm`, {
-    record_ids: selected.value, asset_id: assetId.value, report_id: reportId.value,
+    record_ids: selected.value,
+    asset_id: assetId.value,
+    report_id: reportId.value,
+    testing_plan_id: batch.value?.doc_kind === 'report' ? null : planId.value,
   })
   ElMessage.success(data.msg)
   await load()
@@ -168,13 +178,16 @@ async function confirm() {
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
-  const [{ data: assetPage }, { data: reportPage }] = await Promise.all([
+  const [{ data: assetPage }, { data: reportPage }, { data: planPage }] = await Promise.all([
     client.get('/assets', { params: { size: 100 } }),
     // 无报告权限时静默降级为不可关联
     client.get('/reports', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
+    // 无专项权限时静默降级为不可关联计划
+    client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
   ])
   assets.value = assetPage.items
   reports.value = reportPage.items
+  plans.value = planPage.items
   await load()
 })
 </script>

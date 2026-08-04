@@ -15,9 +15,10 @@
             <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
           </el-select>
         </el-form-item>
-        <el-form-item label="安全等级">
-          <el-select v-model="form.sec_level" class="w-full">
-            <el-option v-for="(name, code) in meta?.asset_sec_level" :key="code" :label="name" :value="Number(code)" />
+        <el-form-item label="系统类型">
+          <el-select v-model="form.system_type" filterable allow-create default-first-option clearable
+                     placeholder="选择或输入新类型" class="w-full">
+            <el-option v-for="name in (meta?.system_type ?? [])" :key="name" :label="name" :value="name" />
           </el-select>
         </el-form-item>
       </div>
@@ -84,9 +85,9 @@
 
       <el-form-item label="系统负责人">
         <div class="w-full space-y-2">
-          <el-select v-if="ownerOptions.length" :model-value="undefined" filterable
-                     placeholder="从组织的系统负责人中选择添加" class="w-full" @change="pickOwner">
-            <el-option v-for="(o, i) in ownerOptions" :key="i" :value="i"
+          <el-select v-if="memberOptions.length" :model-value="undefined" filterable
+                     placeholder="从组织成员中选择添加，或下方直接录入" class="w-full" @change="pickMember">
+            <el-option v-for="(o, i) in memberOptions" :key="i" :value="i"
                        :label="`${o.name}（${o.group}）`">
               <div class="flex justify-between gap-4">
                 <span>{{ o.name }}<span class="text-xs text-gray-400 ml-1">{{ o.group }}</span></span>
@@ -145,24 +146,27 @@ const auth = useAuthStore()
 const meta = ref<any>(null)
 const saving = ref(false)
 const groups = ref<any[]>([])
+const members = ref<any[]>([])
 
-// 组织管理维护的系统负责人，供下拉选择快速添加
-const ownerOptions = computed(() =>
-  groups.value
-    .filter((g) => (g.owner_name ?? '').trim())
-    .map((g) => ({ name: g.owner_name, phone: g.owner_phone ?? '', email: g.owner_email ?? '', group: g.name })))
+// 组织成员（含所属组织名），供资产系统负责人下拉选择快速添加
+const memberOptions = computed(() =>
+  members.value.map((m) => ({
+    name: m.name, phone: m.phone ?? '', email: m.email ?? '',
+    group: groups.value.find((g) => g.id === m.group_id)?.name ?? '',
+  })))
 
 const emptyForm = () => ({
-  id: null, name: '', sub_system: '', department: '',
+  id: null, name: '', sub_system: '', department: '', system_type: '',
   public_urls: [] as any[], internal_urls: [] as string[],
   port_services: [] as any[], middlewares: [] as any[], databases: [] as any[],
-  owners: [] as any[], sec_level: 40, status: 10, remark: '',
+  owners: [] as any[], status: 10, remark: '',
 })
 const form = reactive<any>(emptyForm())
 
 function onOpen() {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(props.asset ?? {})))
   loadGroups()
+  loadMembers()
 }
 
 async function loadGroups() {
@@ -170,13 +174,30 @@ async function loadGroups() {
   groups.value = data
 }
 
-function pickOwner(idx: number) {
-  const o = ownerOptions.value[idx]
+async function loadMembers() {
+  const { data } = await client.get('/group-members/all')
+  members.value = data
+}
+
+function pickMember(idx: number) {
+  const o = memberOptions.value[idx]
   if (!o) return
   if (form.owners.some((x: any) => x.name === o.name && x.phone === o.phone)) {
     return ElMessage.info('该负责人已添加')
   }
   form.owners.push({ name: o.name, phone: o.phone, email: o.email })
+}
+
+async function persistSystemType() {
+  // 新录入的系统类型持久化到字典，供后续复用（无权限时仅保存到资产）
+  const name = (form.system_type ?? '').trim()
+  if (!name || (meta.value?.system_type ?? []).includes(name)) return
+  try {
+    await client.post('/dict/system_type', { name, sort: 999 })
+    if (auth.meta?.system_type) auth.meta.system_type.push(name)
+  } catch {
+    /* 权限不足时静默，资产仍保存该类型 */
+  }
 }
 
 async function save() {
@@ -186,6 +207,7 @@ async function save() {
   form.middlewares = form.middlewares.filter((m: any) => (m.name ?? '').trim())
   form.databases = form.databases.filter((d: any) => (d.name ?? '').trim())
   form.owners = form.owners.filter((o: any) => o.name.trim())
+  await persistSystemType()
   saving.value = true
   try {
     const { data } = form.id
@@ -202,5 +224,6 @@ async function save() {
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   await loadGroups()
+  await loadMembers()
 })
 </script>

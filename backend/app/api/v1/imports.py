@@ -184,6 +184,14 @@ async def confirm_batch(
         report = await session.get(Report, body.report_id)
         if report is None:
             raise HTTPException(400, "指定的报告不存在")
+
+    # 显式关联的测试计划（任何文档格式均可指定）
+    plan = None
+    if body.testing_plan_id is not None:
+        plan = await session.get(TestingPlan, body.testing_plan_id)
+        if plan is None:
+            raise HTTPException(400, "指定的测试计划不存在")
+
     from app.api.v1.reports import _vuln_section_html
 
     batch_meta = batch.meta_json or {}
@@ -191,19 +199,21 @@ async def confirm_batch(
     all_fixed = all(rec.fixed for rec in records)  # records 恒非空（上方已校验）
 
     # 报告格式批次：确认入库时自动创建/关联测试计划、资产与报告
-    plan = None
     report_auto_created = False
     if batch.doc_kind == "report":
         system_name = (batch_meta.get("system_name") or "").strip()
-        if system_name:
-            plan = (
-                await session.execute(
-                    select(TestingPlan).where(TestingPlan.system_name == system_name)
-                )
-            ).scalars().first()
-            if plan is None:
-                plan = TestingPlan(system_name=system_name, test_type="渗透测试", creator_id=user.id)
-                session.add(plan)
+        if plan is None:
+            # 未显式指定计划：按系统名自动匹配，不存在则创建
+            if system_name:
+                plan = (
+                    await session.execute(
+                        select(TestingPlan).where(TestingPlan.system_name == system_name)
+                    )
+                ).scalars().first()
+                if plan is None:
+                    plan = TestingPlan(system_name=system_name, test_type="渗透测试", creator_id=user.id)
+                    session.add(plan)
+        if plan is not None:
             await session.flush()  # 确保 plan.id 可用于复测轮次与报告关联
             # 复测轮次为惰性关系，新建计划需显式加载后才能在同步逻辑中访问
             await session.refresh(plan, attribute_names=["retest_rounds"])
@@ -223,29 +233,39 @@ async def confirm_batch(
 
             # 自动新增/更新资产：按系统名匹配，无则创建，被测 URL/IP 补齐
             if asset is None:
-                asset = (
-                    await session.execute(select(Asset).where(Asset.name == system_name))
-                ).scalars().first()
-                target_url = (batch_meta.get("target_url") or "").strip()
-                target_ip = (batch_meta.get("target_ip") or "").strip()
-                if asset is None:
-                    remark = "导入报告自动创建"
-                    if target_ip:
-                        remark += f"；被测IP：{target_ip}"
-                    asset = Asset(name=system_name, remark=remark)
-                    session.add(asset)
-                if target_url:
-                    urls = list(asset.internal_urls or [])
-                    if target_url not in urls:
-                        urls.append(target_url)
-                        asset.internal_urls = urls
-                await session.flush()
+                if system_name:
+                    asset = (
+                        await session.execute(select(Asset).where(Asset.name == system_name))
+                    ).scalars().first()
+                    target_url = (batch_meta.get("target_url") or "").strip()
+                    target_ip = (batch_meta.get("target_ip") or "").strip()
+                    if asset is None:
+                        remark = "导入报告自动创建"
+                        if target_ip:
+                            remark += f"；被测IP：{target_ip}"
+                        asset = Asset(name=system_name, remark=remark)
+                        session.add(asset)
+                    if target_url:
+                        urls = list(asset.internal_urls or [])
+                        if target_url not in urls:
+                            urls.append(target_url)
+                            asset.internal_urls = urls
+                    await session.flush()
+                elif plan.asset_ids:
+                    # 无系统名但计划已关联资产时，默认入库到首个关联资产
+                    asset = await session.get(Asset, plan.asset_ids[0])
+            # 本次入库的资产自动关联到计划，保持「资产关联前置至计划」的一致性
+            if plan is not None and asset is not None:
+                plan_asset_ids = list(plan.asset_ids or [])
+                if asset.id not in plan_asset_ids:
+                    plan_asset_ids.append(asset.id)
+                    plan.asset_ids = plan_asset_ids
 
             # 自动创建报告：使导入报告显示在报告中心，并支持复测信息编辑
             if report is None:
                 report = Report(
                     title=batch.filename.rsplit(".", 1)[0],
-                    project_name=system_name,
+                    project_name=system_name or plan.system_name,
                     target_ip=(batch_meta.get("target_ip") or ""),
                     testing_plan_id=plan.id,
                     creator_id=user.id,
@@ -292,11 +312,12 @@ async def confirm_batch(
             source=60,  # Word导入
             submitter_id=user.id,
         )
+        # 显式指定或报告格式自动匹配的测试计划：任何文档格式均关联漏洞
+        if plan is not None:
+            vul.testing_plan_id = plan.id
         if batch.doc_kind == "report":
             vul.is_retest = bool(batch_meta.get("is_retest"))
             vul.retest_html = rec.retest_html
-            if plan is not None:
-                vul.testing_plan_id = plan.id
             if rec.fixed:
                 vul.status = 60  # 报告中标记已修复
                 vul.fix_time = utcnow()

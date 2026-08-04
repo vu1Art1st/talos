@@ -49,6 +49,19 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))
         if plan_cols and "actual_mandays" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN actual_mandays REAL NOT NULL DEFAULT 0"))
+        # 测试计划增强字段：工单时间/工单序号/计划名称/手动工单ID/关联资产
+        for col, ddl in (
+            ("ticket_time", "VARCHAR(32) NOT NULL DEFAULT ''"),
+            ("ticket_seq", "INTEGER NOT NULL DEFAULT 0"),
+            ("plan_name", "VARCHAR(128) NOT NULL DEFAULT ''"),
+            ("ticket_id_manual", "VARCHAR(64) NOT NULL DEFAULT ''"),
+        ):
+            if plan_cols and col not in plan_cols:
+                await conn.execute(text(f"ALTER TABLE testing_plans ADD COLUMN {col} {ddl}"))
+        if plan_cols and "asset_ids" not in plan_cols:
+            await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN asset_ids JSON"))
+        # 存量资产关联为空时回填空数组（幂等），避免 NULL 导致 TestingPlanOut 序列化 500
+        await conn.execute(text("UPDATE testing_plans SET asset_ids = '[]' WHERE asset_ids IS NULL"))
         export_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(export_jobs)"))).fetchall()}
         if export_cols and "title" not in export_cols:
             await conn.execute(text("ALTER TABLE export_jobs ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''"))
@@ -77,6 +90,9 @@ async def _migrate_lightweight() -> None:
         for col in ("port_services", "middlewares", "databases"):
             if asset_cols and col not in asset_cols:
                 await conn.execute(text(f"ALTER TABLE assets ADD COLUMN {col} JSON"))
+        # 资产系统类型字段
+        if asset_cols and "system_type" not in asset_cols:
+            await conn.execute(text("ALTER TABLE assets ADD COLUMN system_type VARCHAR(64) NOT NULL DEFAULT ''"))
         # 知识库新增漏洞名称/危害等级：唯一键从漏洞类型迁至漏洞名称（同类型可多条）
         kb_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(knowledge_entries)"))).fetchall()}
         if kb_cols and "vulnerability_name" not in kb_cols:
@@ -238,4 +254,24 @@ async def init_db() -> None:
             presets = ["加电上线", "互联网自主测试", "办公网自主测试", "CHBN项目测试", "品质测评"]
             for i, name in enumerate(presets):
                 session.add(DictOption(category="test_type", name=name, sort=i))
+
+        # 资产系统类型字典预置（该分类为空时一次性写入）
+        has_system_type = (
+            await session.execute(
+                select(DictOption.id).where(DictOption.category == "system_type").limit(1)
+            )
+        ).scalar_one_or_none()
+        if has_system_type is None:
+            for i, name in enumerate(["自有系统（正式）", "自有系统（测试）", "DCIT系统"]):
+                session.add(DictOption(category="system_type", name=name, sort=i))
+
+        # 漏洞类型字典预置（表为空时从 VUL_TYPE 常量一次性写入内置类型）
+        from app.models import VulnType
+        has_vuln_type = (
+            await session.execute(select(VulnType.id).limit(1))
+        ).scalar_one_or_none()
+        if has_vuln_type is None:
+            from app.constants import VUL_TYPE
+            for i, (code, name) in enumerate(sorted(VUL_TYPE.items())):
+                session.add(VulnType(code=code, name=name, sort=i, is_builtin=True))
         await session.commit()

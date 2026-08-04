@@ -27,6 +27,9 @@
       <el-table-column prop="name" label="系统命名" min-width="150" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="sub_system" label="子系统" min-width="110" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="system_type" label="系统类型" min-width="120" show-overflow-tooltip sortable="custom">
+        <template #default="{ row }">{{ row.system_type || '-' }}</template>
+      </el-table-column>
       <el-table-column label="公网URL" min-width="200">
         <template #default="{ row }">
           <div v-for="(u, i) in (row.public_urls ?? []).slice(0, 2)" :key="i" class="flex items-center gap-1">
@@ -42,9 +45,6 @@
         <template #default="{ row }">
           {{ (row.owners ?? []).map((o: any) => o.name).join('、') || '-' }}
         </template>
-      </el-table-column>
-      <el-table-column prop="sec_level" label="安全等级" width="100" sortable="custom">
-        <template #default="{ row }">{{ meta?.asset_sec_level?.[row.sec_level] ?? '-' }}</template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">

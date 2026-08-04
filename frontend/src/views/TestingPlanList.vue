@@ -16,6 +16,8 @@
       </el-select>
       <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-64"
                       start-placeholder="接收起" end-placeholder="接收止" @change="reload" />
+      <el-checkbox v-model="myTests" @change="reload">显示当前可测试系统</el-checkbox>
+      <el-checkbox v-model="unclaimed" @change="reload">显示无人认领的测试</el-checkbox>
       <div class="flex-1" />
       <el-button @click="downloadTemplate">
         <el-icon class="mr-1"><Download /></el-icon>导入模板下载
@@ -55,7 +57,15 @@
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
       <el-table-column prop="id" label="ID" width="60" sortable="custom" />
-      <el-table-column prop="system_name" label="测试系统" min-width="150" show-overflow-tooltip sortable="custom" />
+      <el-table-column label="工单ID" min-width="130" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="font-mono">{{ row.ticket_id || '-' }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="plan_name" label="计划名称" min-width="130" show-overflow-tooltip sortable="custom">
+        <template #default="{ row }">{{ row.plan_name || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="system_name" label="测试系统" min-width="140" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="status" label="状态" width="85" sortable="custom">
@@ -71,7 +81,7 @@
           <span v-else class="text-gray-400">未认领</span>
         </template>
       </el-table-column>
-      <el-table-column label="漏洞统计" width="165">
+      <el-table-column label="漏洞统计" min-width="230">
         <template #default="{ row }">
           <span class="inline-flex gap-1">
             <span class="tl-tag" :style="levelBadgeStyle(10, row.stat_critical)">超 {{ row.stat_critical }}</span>
@@ -123,6 +133,9 @@
         <template #default="{ row }">
           <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
+      </el-table-column>
+      <el-table-column label="工单提起" width="100">
+        <template #default="{ row }">{{ row.ticket_time || '-' }}</template>
       </el-table-column>
       <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
         <template #default="{ row }">{{ row.receive_time || '-' }}</template>
@@ -179,8 +192,19 @@
   <el-dialog v-model="dialogVisible" :title="form.id ? '编辑测试计划' : '新增测试计划'" width="680px">
     <el-form :model="form" label-width="100px">
       <div class="grid grid-cols-2 gap-x-4">
+        <el-form-item label="计划名称">
+          <el-input v-model="form.plan_name" placeholder="与测试系统区分的测试计划名称" />
+        </el-form-item>
         <el-form-item label="测试系统" required>
-          <el-input v-model="form.system_name" />
+          <el-input v-model="form.system_name" placeholder="影响报告首页名称" />
+        </el-form-item>
+        <el-form-item label="工单ID">
+          <div class="w-full">
+            <el-input v-model="form.ticket_id_manual" placeholder="留空则按需求接收日期自动生成（如 20260727-1）"
+                      clearable />
+            <div v-if="form.id && !form.ticket_id_manual && form.ticket_id"
+                 class="text-xs text-gray-400 mt-1">当前自动生成：{{ form.ticket_id }}，留空保存即保持该值</div>
+          </div>
         </el-form-item>
         <el-form-item label="测试类型">
           <el-select v-model="form.test_type" filterable clearable placeholder="请选择测试类型" class="w-full">
@@ -206,6 +230,9 @@
           <el-select v-model="form.status" class="w-full" :disabled="!statusEditable">
             <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)" />
           </el-select>
+        </el-form-item>
+        <el-form-item label="工单提起">
+          <el-date-picker v-model="form.ticket_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
         <el-form-item label="需求接收">
           <el-date-picker v-model="form.receive_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
@@ -244,6 +271,18 @@
       <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
         认领该计划后才可修改测试状态
       </div>
+      <el-form-item label="关联资产">
+        <div class="w-full flex gap-2">
+          <el-select v-model="form.asset_ids" multiple filterable remote clearable
+                     :remote-method="searchAssets" :loading="assetLoading"
+                     placeholder="输入资产名称搜索并选择，漏洞录入时将自动带入" class="flex-1">
+            <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
+          </el-select>
+          <el-button v-if="!form.id" @click="openCreateAsset">
+            <el-icon class="mr-1"><Plus /></el-icon>新增资产
+          </el-button>
+        </div>
+      </el-form-item>
       <el-form-item label="漏洞简述">
         <el-input v-model="form.brief" type="textarea" :rows="2" placeholder="漏洞情况简述" />
       </el-form-item>
@@ -258,6 +297,8 @@
   </el-dialog>
 
   <PlanWorkflowDrawer v-model:visible="workflowVisible" :plan-id="workflowPlanId" @changed="onWorkflowChanged" />
+
+  <AssetFormDialog v-model:visible="assetDialogVisible" :asset="assetPrefill" @saved="onAssetCreated" />
 </template>
 
 <script setup lang="ts">
@@ -270,6 +311,7 @@ import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
+import AssetFormDialog from '../components/AssetFormDialog.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -281,6 +323,8 @@ const statusFilter = ref<number | null>(null)
 const typeFilter = ref<string>('')
 const deptFilter = ref<string>('')
 const dateRange = ref<[string, string] | null>(null)
+const myTests = ref(false)
+const unclaimed = ref(false)
 const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -359,14 +403,18 @@ const statsAuto = computed(() => (dialogRow.value?.vuls?.length ?? 0) > 0)
 
 const emptyForm = () => ({
   id: null as number | null,
+  plan_name: '',
   system_name: '',
   test_type: '',
   department: '',
   receive_time: '',
+  ticket_time: '',
+  ticket_id_manual: '',
   first_test_done_time: '',
   retest_notice_time: '',
   retest_done_time: '',
   status: 10,
+  asset_ids: [] as number[],
   stat_critical: 0,
   stat_high: 0,
   stat_medium: 0,
@@ -387,6 +435,8 @@ function filterParams(): Record<string, any> {
     params.receive_from = dateRange.value[0]
     params.receive_to = dateRange.value[1]
   }
+  if (myTests.value) params.my_tests = true
+  if (unclaimed.value) params.unclaimed = true
   if (sort.prop) {
     params.sort = sort.prop
     params.order = sort.order
@@ -492,7 +542,71 @@ async function doImport(options: any) {
 function openDialog(row?: any) {
   dialogRow.value = row ?? null
   form.value = row ? { ...emptyForm(), ...row } : emptyForm()
+  form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
+  assetOptions.value = []
+  if (form.value.asset_ids.length) loadAssetLabels()
   dialogVisible.value = true
+}
+
+// ---------- 关联资产 ----------
+const assetOptions = ref<any[]>([])
+const assetLoading = ref(false)
+let assetSearchTimer: ReturnType<typeof setTimeout> | null = null
+const assetDialogVisible = ref(false)
+const assetPrefill = ref<any>(null)
+let lastAssetKeyword = ''
+
+async function searchAssets(keyword: string) {
+  lastAssetKeyword = keyword
+  assetLoading.value = true
+  try {
+    const { data } = await client.get('/assets', {
+      params: { search: keyword, page: 1, size: 50 },
+    })
+    assetOptions.value = data.items.map((a: any) => ({
+      id: a.id,
+      label: a.name + (a.sub_system ? `（${a.sub_system}）` : ''),
+    }))
+  } finally {
+    assetLoading.value = false
+  }
+}
+
+// 新增测试计划时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
+function openCreateAsset() {
+  assetPrefill.value = lastAssetKeyword ? { name: lastAssetKeyword } : null
+  assetDialogVisible.value = true
+}
+
+function onAssetCreated(asset: any) {
+  if (!asset?.id) return
+  const label = asset.name + (asset.sub_system ? `（${asset.sub_system}）` : '')
+  if (!assetOptions.value.some((o: any) => o.id === asset.id)) {
+    assetOptions.value.push({ id: asset.id, label })
+  }
+  if (!form.value.asset_ids.includes(asset.id)) {
+    form.value.asset_ids.push(asset.id)
+  }
+  // 自动填充测试系统与所属部门（资产信息），用户仍可手动修改/覆盖
+  form.value.system_name = label
+  form.value.department = asset.department || ''
+}
+
+async function loadAssetLabels() {
+  const ids = [...form.value.asset_ids]
+  if (!ids.length) return
+  const rows = await Promise.all(
+    ids.map((id: number) => client.get(`/assets/${id}`).catch(() => null)),
+  )
+  for (const r of rows) {
+    const a = r?.data
+    if (a && !assetOptions.value.some((o: any) => o.id === a.id)) {
+      assetOptions.value.push({
+        id: a.id,
+        label: a.name + (a.sub_system ? `（${a.sub_system}）` : ''),
+      })
+    }
+  }
 }
 
 async function save() {
@@ -502,6 +616,8 @@ async function save() {
   delete (body as any).reports
   delete (body as any).retest_rounds
   delete (body as any).retest_round_count
+  delete (body as any).ticket_id
+  delete (body as any).ticket_seq
   if (form.value.id) {
     await client.put(`/testing-plans/${form.value.id}`, body)
   } else {

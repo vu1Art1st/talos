@@ -63,6 +63,12 @@
           <div class="w-full flex items-center gap-2">
             <el-select v-model="vul.vul_type" filterable class="flex-1">
               <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+              <template #footer>
+                <el-button v-if="auth.hasPerm('vuln:manage')" size="small" type="primary" link
+                           @click="addVulnType(vul)">
+                  <el-icon class="mr-1"><Plus /></el-icon>新增漏洞类型
+                </el-button>
+              </template>
             </el-select>
             <el-tooltip content="从漏洞知识库套用该类型的标准描述与修复建议" placement="top">
               <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
@@ -124,6 +130,26 @@
   </div>
 
   <AssetFormDialog v-model:visible="assetDialogVisible" :asset="assetPrefill" @saved="onAssetCreated" />
+
+  <!-- 知识库模板选择弹窗 -->
+  <el-dialog v-model="templateVisible" title="选择知识库模板" width="620px">
+    <div v-if="!templateList.length" class="py-8 text-center text-gray-400">该漏洞类型暂无知识库模板</div>
+    <div v-else class="flex flex-col gap-2 max-h-96 overflow-auto">
+      <div v-for="(t, i) in templateList" :key="t.id"
+           class="rounded-lg border border-gray-200 hover:border-blue-400 cursor-pointer p-3 transition"
+           @click="applyEntry(t)">
+        <div class="flex items-center gap-2">
+          <el-tag size="small" :type="levelTag(t.severity_level)">{{ levelName(t.severity_level) }}</el-tag>
+          <span class="font-medium">{{ t.vulnerability_name }}</span>
+          <span v-if="t.tags?.length" class="text-xs text-gray-400">{{ t.tags.join('、') }}</span>
+        </div>
+        <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ plainSummary(t) }}</p>
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="templateVisible = false">取消</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -220,14 +246,50 @@ function addVuln() {
   vulns.value.push(block)
 }
 
-// 从知识库按漏洞类型套用标准描述 / 修复建议（危害说明附加在描述后）
+// ---------- 知识库模板套用 ----------
+const templateVisible = ref(false)
+const templateList = ref<any[]>([])
+let templateTarget: any = null
+
+const levelName = (lv: number) =>
+  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
+const levelTag = (lv: number) =>
+  ({ 10: 'danger', 20: 'warning', 30: 'primary', 40: 'info', 50: 'success' } as Record<number, string>)[lv] ?? 'info'
+
+const plainSummary = (t: any) => {
+  const html = t.description_html || ''
+  return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').slice(0, 80) || '（无描述）'
+}
+
 async function applyTemplate(vul: any) {
-  let entry: any
+  templateTarget = vul
   try {
-    ;({ data: entry } = await client.get(`/knowledge/by-type/${vul.vul_type}`))
+    const { data } = await client.get(`/knowledge/by-type/${vul.vul_type}`)
+    if (!data.length) return ElMessage.info('该漏洞类型暂无知识库模板')
+    if (data.length === 1) return applyEntry(data[0])
+    templateList.value = data
+    templateVisible.value = true
   } catch {
     return // 404 提示由拦截器统一处理
   }
+}
+
+// 在漏洞类型下拉中直接新增类型（同步到全局 meta，无需跳转知识库）
+async function addVulnType(vul: any) {
+  const { value } = await ElMessageBox.prompt('请输入新的漏洞类型名称', '新增漏洞类型', {
+    confirmButtonText: '保存', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
+  }).catch(() => ({ value: '' }))
+  if (!value?.trim()) return
+  const { data } = await client.post('/vuln-types', { name: value.trim() })
+  if (meta.value?.vul_type) meta.value.vul_type[data.code] = data.name
+  if (auth.meta?.vul_type) auth.meta.vul_type[data.code] = data.name
+  ElMessage.success('漏洞类型已新增')
+  vul.vul_type = data.code
+}
+
+async function applyEntry(entry: any) {
+  const vul = templateTarget
+  if (!vul) return
   if ((vul.description_html || '').trim() || (vul.solution_html || '').trim()) {
     try {
       await ElMessageBox.confirm('当前已填写漏洞描述或修复建议，套用模板将覆盖这些内容，是否继续？', '套用模板', { type: 'warning' })
@@ -241,7 +303,8 @@ async function applyTemplate(vul: any) {
   vul.description_json = entry.harm_html ? null : entry.description_json
   vul.solution_html = entry.solution_html || ''
   vul.solution_json = entry.solution_json
-  ElMessage.success('已套用知识库模板')
+  templateVisible.value = false
+  ElMessage.success(`已套用模板「${entry.vulnerability_name}」`)
 }
 
 async function save() {
@@ -276,6 +339,19 @@ async function save() {
   }
 }
 
+// 按资产ID加载并回显资产（供计划关联资产预填与编辑回显复用）
+async function loadAssetsByIds(ids: number[]) {
+  if (!ids.length) return
+  const rows = await Promise.all(ids.map((id: number) => client.get(`/assets/${id}`).catch(() => null)))
+  for (const r of rows) {
+    const a = r?.data
+    if (a && !assetCache.value[a.id]) {
+      assetCache.value[a.id] = a
+      assetOptions.value.push(a)
+    }
+  }
+}
+
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   await searchAssets()
@@ -283,11 +359,15 @@ onMounted(async () => {
     const { data: vul } = await client.get(`/vulns/${editId}`)
     vulns.value = [{ ...emptyVul(), ...vul, affected_urls: splitUrls(vul.affected_url) }]
     assetIds.value = vul.asset_ids ?? []
-    for (const a of vul.assets ?? []) {
-      if (!assetCache.value[a.id]) {
-        assetCache.value[a.id] = a
-        assetOptions.value.push(a)
-      }
+    await loadAssetsByIds(assetIds.value)
+  } else if (planId) {
+    // 计划编制时已前置录入的关联资产，录入漏洞时自动带入（仍可调整）
+    const { data: plan } = await client.get(`/testing-plans/${planId}`)
+    const ids = plan.asset_ids ?? []
+    if (ids.length) {
+      assetIds.value = ids
+      await loadAssetsByIds(ids)
+      onAssetChange()
     }
   }
 })

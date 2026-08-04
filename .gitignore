@@ -38,3 +38,5 @@ frontend/*.png
 
 # 本地 IDE / 工具配置（repowiki 知识库等）
 .qoder/
+.codebuddy/
+.workbuddy/
