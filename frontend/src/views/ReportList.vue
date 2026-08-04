@@ -6,6 +6,9 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
+      <el-button :disabled="!selected.length" :loading="batchDownloading" @click="batchDownload">
+        <el-icon class="mr-1"><Download /></el-icon>批量下载（{{ selected.length }}）
+      </el-button>
       <el-button v-if="auth.hasPerm('import:manage')" @click="router.push('/reports/imports')">
         <el-icon class="mr-1"><Upload /></el-icon>Word 导入
       </el-button>
@@ -17,7 +20,9 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
+              @selection-change="onSelectionChange">
+      <el-table-column type="selection" width="50" />
       <el-table-column prop="id" label="ID" width="70" sortable="custom" />
       <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip sortable="custom" />
@@ -99,6 +104,60 @@ const genVulIds = ref<number[]>([])
 const genPlanId = ref<number | null>(null)
 const vulns = ref<any[]>([])
 const plans = ref<any[]>([])
+const selected = ref<any[]>([])
+const batchDownloading = ref(false)
+
+function onSelectionChange(rows: any[]) {
+  selected.value = rows
+}
+
+async function fetchJobStatus(jobIds: string) {
+  const { data } = await client.get('/reports/export-jobs/status', { params: { job_ids: jobIds } })
+  return data
+}
+
+async function downloadZip(jobIds: string) {
+  const resp = await client.get('/reports/batch-download', {
+    params: { job_ids: jobIds }, responseType: 'blob',
+  })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = '测试报告批量下载.zip'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+async function batchDownload() {
+  const ids = selected.value.map((r) => r.id)
+  if (!ids.length) return
+  batchDownloading.value = true
+  try {
+    const { data } = await client.post('/reports/batch-export', { report_ids: ids, fmt: 'docx' })
+    if (!data.length) {
+      ElMessage.warning('未找到可导出的报告')
+      return
+    }
+    const jobIds = data.map((j: any) => j.job_id).join(',')
+    for (let i = 0; i < 120; i++) {
+      const all: any[] = await fetchJobStatus(jobIds)
+      if (all.some((j: any) => j.status === 'pending' || j.status === 'running')) {
+        await new Promise((r) => setTimeout(r, 1500))
+        continue
+      }
+      const done = all.filter((j: any) => j.status === 'done')
+      if (done.length < all.length) {
+        ElMessage.warning(`部分报告导出失败（${all.length - done.length} 份），已跳过失败项`)
+      }
+      if (done.length) await downloadZip(jobIds)
+      else ElMessage.error('所选报告均导出失败，请检查后重试')
+      return
+    }
+    ElMessage.error('导出超时，请稍后重试')
+  } finally {
+    batchDownloading.value = false
+  }
+}
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 

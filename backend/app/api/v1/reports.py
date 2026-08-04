@@ -1,11 +1,13 @@
 import html as html_mod
 import logging
 from datetime import date
+from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
+from zipfile import ZipFile
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -175,6 +177,102 @@ async def create_report_from_vulns(
     await session.commit()
     await session.refresh(report)
     return report
+
+
+class BatchExportIn(BaseModel):
+    report_ids: list[int]
+    fmt: str = "docx"
+
+
+@router.post("/batch-export")
+async def batch_export(
+    body: BatchExportIn,
+    request: Request,
+    user: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量导出：复用最近一次成功导出的文件，否则创建导出任务并排队生成。
+
+    返回 [{report_id, job_id, status, title}]，前端据此轮询批量状态后打包下载。"""
+    fmt = body.fmt if body.fmt in ("docx", "pdf") else "docx"
+    jobs: list[dict] = []
+    pending: list[ExportJob] = []
+    for rid in body.report_ids:
+        report = await session.get(Report, rid)
+        if report is None:
+            continue
+        done = (
+            await session.execute(
+                select(ExportJob)
+                .where(ExportJob.report_id == rid, ExportJob.fmt == fmt, ExportJob.status == "done")
+                .order_by(ExportJob.id.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+        if done is not None and done.file_path and Path(done.file_path).exists():
+            jobs.append({"report_id": rid, "job_id": done.id, "status": "done", "title": report.title})
+            continue
+        job = ExportJob(report_id=rid, title=report.title, fmt=fmt, creator_id=user.id)
+        session.add(job)
+        await session.flush()
+        jobs.append({"report_id": rid, "job_id": job.id, "status": job.status, "title": report.title})
+        pending.append(job)
+    await session.commit()
+    for job in pending:
+        await dispatch(request.app, "export_report_task", job.id)
+    return jobs
+
+
+@router.get("/export-jobs/status")
+async def export_jobs_status(
+    job_ids: str = "",
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量轮询导出任务状态（job_ids 逗号分隔）。"""
+    ids = [int(x) for x in job_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        return []
+    rows = (
+        await session.execute(select(ExportJob).where(ExportJob.id.in_(ids)))
+    ).scalars().all()
+    return [
+        {"job_id": j.id, "report_id": j.report_id, "status": j.status,
+         "error": j.error, "title": j.title}
+        for j in rows
+    ]
+
+
+@router.get("/batch-download")
+async def batch_download(
+    job_ids: str = "",
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """将勾选报告已完成的导出文件打包为 zip 下载。"""
+    ids = [int(x) for x in job_ids.split(",") if x.strip().isdigit()]
+    if not ids:
+        raise HTTPException(400, "未选择导出任务")
+    rows = (
+        await session.execute(
+            select(ExportJob).where(ExportJob.id.in_(ids), ExportJob.status == "done")
+        )
+    ).scalars().all()
+    files = [(Path(j.file_path), j) for j in rows if j.file_path and Path(j.file_path).exists()]
+    if not files:
+        raise HTTPException(404, "暂无可下载的导出文件，请等待导出完成后再试")
+    buf = BytesIO()
+    with ZipFile(buf, "w") as zf:
+        for path, job in files:
+            report = await session.get(Report, job.report_id)
+            name = f"{job.title or (report.title if report else 'report')}.{job.fmt}"
+            zf.write(path, name)
+    buf.seek(0)
+    filename = quote("测试报告批量下载.zip")
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
 
 
 @router.get("/{report_id}", response_model=ReportOut)

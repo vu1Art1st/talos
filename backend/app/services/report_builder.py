@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import RGBColor
+from docx.shared import Cm, RGBColor
 from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
@@ -26,9 +26,6 @@ _HEADING_OPEN = re.compile(r"<h[1-6][^>]*>", re.IGNORECASE)
 _HEADING_CLOSE = re.compile(r"</h[1-6]>", re.IGNORECASE)
 # 章节快照中「测试状态：」后的初测/复测标记，导出时按漏洞最新 is_retest 重写
 _TEST_STATE = re.compile(r"(测试状态：</strong>)\s*(?:初测|复测)")
-
-# 漏洞详情中需要 1.5 倍行距的字段段落前缀
-_SPACED_FIELD_PREFIXES = ("测试状态：", "漏洞等级：")
 
 # 汇总表「问题等级」字体颜色，与模板统计段落（超危/高危/中危/低危漏洞N个）保持一致
 _LEVEL_COLORS = {
@@ -122,19 +119,74 @@ def _fill_cover(doc: Document, meta: dict, now: datetime) -> None:
             break
 
 
+def _fill_applicability(doc: Document, meta: dict) -> None:
+    """适用性声明（模板表2）：将系统名称占位符「xxxxx系统」替换为实际系统名称。
+
+    模板中占位符为独立 run，直接替换即可保留其余文字与格式；若占位符跨 run
+    （模板结构变化），则整段合并重写并保留首 run 格式。"""
+    system_name = meta.get("project_name") or meta.get("title") or ""
+    if not system_name:
+        return
+    para = doc.tables[2].rows[1].cells[0].paragraphs[0]
+    for run in para.runs:
+        if "xxxxx系统" in run.text:
+            run.text = run.text.replace("xxxxx系统", system_name)
+            return
+    # 跨 run 兜底：拼接整段替换后重写
+    full = "".join(r.text for r in para.runs)
+    if "xxxxx系统" in full:
+        _set_para_text(para, full.replace("xxxxx系统", system_name))
+
+
+def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]:
+    """按测试阶段生成版本变更记录序列：
+    初测 = V1.0「初测创建」；第一轮复测 = V2.0「复测创建」；
+    第二轮起：修改人与上一轮相同则次版本 +1（V2.1），变更则升级主版本（V3.0）。"""
+    records = [{
+        "date": meta.get("report_create_date") or now.strftime("%Y-%m-%d"),
+        "version": "V1.0",
+        "note": "初测创建",
+        "author": meta.get("author", ""),
+    }]
+    rounds = meta.get("retest_rounds") or []
+    if not rounds and any(v.get("is_retest") for v in vulns):
+        # 无计划轮次数据但存在复测漏洞时，V1.0 标记为复测更新（兼容旧行为）
+        records[0]["note"] = "复测更新"
+    major, minor = 1, 0
+    prev_creator = ""
+    for idx, r in enumerate(rounds, start=1):
+        creator = (r.get("creator_name") or "").strip()
+        if idx == 1:
+            major, minor = 2, 0
+            note = "复测创建"
+        else:
+            if creator and creator == prev_creator:
+                minor += 1
+            else:
+                major, minor = major + 1, 0
+            note = "复测更新"
+        records.append({
+            "date": r.get("date") or now.strftime("%Y-%m-%d"),
+            "version": f"V{major}.{minor}",
+            "note": note,
+            "author": creator or meta.get("author", ""),
+        })
+        prev_creator = creator
+    return records
+
+
 def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datetime) -> None:
     table = doc.tables[1]
-    is_retest = any(v.get("is_retest") for v in vulns)
-    row = table.rows[2]
-    values = [
-        now.strftime("%Y-%m-%d"),
-        "V1.0",
-        "复测更新" if is_retest else "初测创建",
-        "内部使用",
-        meta.get("author", ""),
-    ]
-    for cell, value in zip(row.cells, values):
-        _set_cell_text(cell, value)
+    records = _version_records(meta, now, vulns)
+    sample = table.rows[2]
+    for i, rev in enumerate(records):
+        if i < len(table.rows) - 2:
+            row = table.rows[2 + i]
+        else:
+            row = _clone_row(table, sample)
+        values = [rev["date"], rev["version"], rev["note"], "内部使用", rev["author"]]
+        for cell, value in zip(row.cells, values):
+            _set_cell_text(cell, value)
 
 
 def _fill_target_table(doc: Document, meta: dict, assets: list[dict]) -> None:
@@ -160,8 +212,39 @@ def _fill_schedule_table(doc: Document, meta: dict) -> None:
     table = doc.tables[5]
     _set_cell_text(table.rows[1].cells[1], meta.get("test_start", ""))
     _set_cell_text(table.rows[1].cells[3], meta.get("test_end", ""))
-    if meta.get("author"):
-        _set_cell_text(table.rows[4].cells[0], meta["author"])
+    # 参测人员：一人独立占一个单元格（模板 row4 起为 总负责人/执行测试 行）
+    testers = meta.get("testers") or []
+    if not testers and meta.get("author"):
+        testers = [meta["author"]]
+    if not testers:
+        return
+    sample = table.rows[5]
+    rows = list(table.rows[4:])
+    for i, name in enumerate(testers):
+        if i >= len(rows):
+            rows.append(_clone_row(table, sample))
+        _set_cell_text(rows[i].cells[0], name)
+    # 清空多余模板行的参测人员名，避免残留
+    for row in rows[len(testers):]:
+        _set_cell_text(row.cells[0], "")
+
+
+def _set_summary_first_para(para: Paragraph, company: str, system_name: str) -> None:
+    """2.1 风险问题汇总首段：「经本次测试，{company}{system_name}共发现：」
+    仅系统名称加粗，其余文字保持模板原格式。
+
+    模板中系统名（xxx系统）为独立 run，找到后仅替换其文本并设置加粗；
+    若 run 结构不符合预期（未找到系统名 run），兜底整段重写（不保证加粗）。"""
+    if not para.runs:
+        para.add_run(f"经本次测试，{company}{system_name}共发现：")
+        return
+    para.runs[0].text = f"经本次测试，{company}"
+    for run in para.runs[1:]:
+        if "系统" in run.text:
+            run.text = system_name
+            run.bold = True
+            return
+    _set_para_text(para, f"经本次测试，{company}{system_name}共发现：")
 
 
 def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
@@ -181,7 +264,7 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
     for para in doc.paragraphs:
         text = para.text.strip()
         if text.startswith("经本次测试"):
-            _set_para_text(para, f"经本次测试，{company}{system_name}共发现：")
+            _set_summary_first_para(para, company, system_name)
         else:
             for i, (label, num) in enumerate(lines):
                 if text.startswith(f"{label}漏洞"):
@@ -237,9 +320,13 @@ def _remove_sample_details(doc: Document) -> None:
 
 
 def _apply_field_spacing(doc: Document, start: int) -> None:
-    """漏洞详情中状态/等级字段段落统一 1.5 倍行距。"""
+    """风险问题详情章节正文段落统一 1.5 倍行距（章节标题除外）。
+
+    覆盖漏洞描述/证明/修复建议/复测详情等具体内容段落，保证阅读舒适。"""
     for para in doc.paragraphs[start:]:
-        if para.text.strip().startswith(_SPACED_FIELD_PREFIXES):
+        if para.style.name.startswith("Heading"):
+            continue
+        if para.text.strip():
             para.paragraph_format.line_spacing = 1.5
 
 
@@ -297,6 +384,19 @@ def _enable_update_fields(doc: Document) -> None:
         element.append(update)
 
 
+def _fit_images(doc: Document, max_width_cm: float = 15.0) -> None:
+    """将超过版心宽度的内联图片等比缩小，确保 Word 打开后完整显示。
+
+    仅调整过宽的图片，小图尺寸保持不变；比例按宽度同比缩放，避免变形。"""
+    max_width = Cm(max_width_cm)
+    for shape in doc.inline_shapes:
+        w, h = shape.width, shape.height
+        if w and w > max_width:
+            shape.width = max_width
+            if h:
+                shape.height = int(h * (max_width / w))
+
+
 def build_report_docx(
     meta: dict,
     vulns: list[dict],
@@ -317,12 +417,14 @@ def build_report_docx(
     now = datetime.now()
 
     _fill_cover(doc, meta, now)
+    _fill_applicability(doc, meta)
     _fill_version_table(doc, meta, vulns, now)
     _fill_target_table(doc, meta, assets or [])
     _fill_schedule_table(doc, meta)
     _fill_summary(doc, meta, vulns)
     _remove_sample_details(doc)
     _append_details(doc, vulns, sections)
+    _fit_images(doc)
     _enable_update_fields(doc)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)

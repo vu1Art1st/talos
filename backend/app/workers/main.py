@@ -15,7 +15,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.timeutil import utcnow
 from app.db import async_session_maker
-from app.models import ImportBatch, ImportRecord, ExportJob, Report, Vul
+from app.models import ImportBatch, ImportRecord, ExportJob, Report, TestingPlan, User, Vul
 from app.services.docx_parser import parse_any_docx
 from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
@@ -98,6 +98,32 @@ async def export_report_task(ctx, job_id: int) -> None:
                 "target_ip": report.target_ip,
                 "status": report.status,
             }
+            # 关联测试计划：参测人员列表 + 复测轮次（供版本变更记录/人员表格使用）
+            plan = None
+            if report.testing_plan_id is not None:
+                plan = await session.get(TestingPlan, report.testing_plan_id)
+            testers: list[str] = []
+            rounds: list[dict] = []
+            if plan is not None:
+                for u in plan.testers:
+                    name = (u.realname or u.username or "").strip()
+                    if name and name not in testers:
+                        testers.append(name)
+                for r in sorted(plan.retest_rounds, key=lambda x: x.round_no):
+                    creator_name = ""
+                    if r.creator_id is not None:
+                        cu = await session.get(User, r.creator_id)
+                        if cu is not None:
+                            creator_name = cu.realname or cu.username or ""
+                    rounds.append({
+                        "date": (r.start_time or datetime.now()).strftime("%Y-%m-%d"),
+                        "creator_name": creator_name,
+                    })
+            meta["testers"] = testers
+            meta["retest_rounds"] = rounds
+            meta["report_create_date"] = (
+                report.create_time.strftime("%Y-%m-%d") if report.create_time else ""
+            )
             sections = [
                 {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
                 for s in report.sections
