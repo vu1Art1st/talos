@@ -44,8 +44,8 @@
             </template>
           </el-popconfirm>
         </div>
-        <div v-if="!canOperate" class="text-xs text-gray-400 mt-2">
-          认领该计划（或管理员）后才可执行录入漏洞、生成报告、发起复测等流程操作
+        <div v-if="!isTester" class="text-xs text-gray-400 mt-2">
+          仅已认领该计划的账号可录入/编辑/流转漏洞；认领后可执行生成报告、发起复测等流程操作
         </div>
       </el-card>
 
@@ -55,7 +55,11 @@
           <div class="flex items-center">
             <span class="font-medium">漏洞（{{ vulns.length }}）</span>
             <div class="flex-1" />
-            <el-button v-if="canOperate" size="small" type="warning" plain
+            <el-button v-if="canManageVulns" size="small" type="primary" plain class="!mr-2"
+                       @click="openVulnPicker">
+              <el-icon class="mr-1"><FolderOpened /></el-icon>从漏洞库选择
+            </el-button>
+            <el-button v-if="canManageVulns" size="small" type="warning" plain
                        @click="vulnFormVisible = !vulnFormVisible">
               <el-icon class="mr-1"><Plus /></el-icon>{{ vulnFormVisible ? '收起录入' : '录入漏洞' }}
             </el-button>
@@ -70,7 +74,7 @@
           </VulnFormPanel>
         </div>
 
-        <el-empty v-if="!vulns.length" description="暂无漏洞，点击右上角「录入漏洞」开始" :image-size="60" />
+        <el-empty v-if="!vulns.length" description="暂无漏洞，点击右上角「录入漏洞」或「从漏洞库选择」开始" :image-size="60" />
         <el-table v-else :data="vulns" size="small" row-key="id">
           <el-table-column type="expand">
             <template #default="{ row }">
@@ -87,7 +91,7 @@
           <el-table-column label="漏洞标题" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
               <el-button type="primary" link class="!p-0" @click="router.push(`/vulns/${row.id}`)">
-                #{{ row.id }} {{ row.title }}
+                {{ row.title }}
               </el-button>
             </template>
           </el-table-column>
@@ -100,7 +104,7 @@
           </el-table-column>
           <el-table-column label="操作" width="170">
             <template #default="{ row }">
-              <el-dropdown v-if="canOperate" trigger="click"
+              <el-dropdown v-if="canManageVulns" trigger="click"
                            @visible-change="(v: boolean) => v && loadTransitions(row)"
                            @command="(s: number) => transition(row, s)">
                 <el-button size="small" type="primary" link>
@@ -117,7 +121,8 @@
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
-              <el-button size="small" type="warning" link @click="router.push(`/vulns/${row.id}/edit`)">
+              <el-button v-if="canManageVulns" size="small" type="warning" link
+                         @click="router.push(`/vulns/${row.id}/edit`)">
                 编辑
               </el-button>
             </template>
@@ -127,6 +132,50 @@
           点击行首箭头展开复测记录；「流转」按状态机推进漏洞状态，闭环后报告与计划状态自动联动
         </div>
       </el-card>
+
+      <!-- 从漏洞库选择漏洞 -->
+      <el-dialog v-model="vulnPickerVisible" title="从漏洞库选择" width="720px" append-to-body
+                 @closed="pickerSelection = []">
+        <div class="mb-3 flex items-center gap-3">
+          <el-input v-model="pickerSearch" placeholder="搜索漏洞标题 / 等级 / 状态" clearable class="flex-1"
+                    @input="loadPickerVulns" />
+          <el-select v-model="pickerLevel" placeholder="按等级筛选" clearable class="w-32"
+                     @change="loadPickerVulns">
+            <el-option v-for="lv in [10, 20, 30, 40]" :key="lv" :value="lv"
+                       :label="levelName(lv)" />
+          </el-select>
+        </div>
+        <el-table v-loading="pickerLoading" :data="pickerVulns" size="small" row-key="id"
+                  max-height="380" @selection-change="(rows: any[]) => pickerSelection = rows">
+          <el-table-column type="selection" :selectable="(r: any) => !pickerLinkedIds.includes(r.id)" width="40" />
+          <el-table-column label="等级" width="70">
+            <template #default="{ row }">
+              <span class="tl-tag" :style="levelSoftStyle(row.level)">{{ levelName(row.level) }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="漏洞标题" min-width="260" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span>{{ row.title }}</span>
+              <el-tag v-if="pickerLinkedIds.includes(row.id)" size="small" type="info" class="ml-2">已在本计划</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="90">
+            <template #default="{ row }">
+              <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
+                {{ statusLabel(row.status, row.is_retest, vulStatusMap) }}
+              </span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div class="text-xs text-gray-400 mt-2">
+          勾选漏洞后点击「添加」，将关联到当前测试计划；已在本计划中的漏洞不可重复勾选
+        </div>
+        <template #footer>
+          <el-button @click="vulnPickerVisible = false">取消</el-button>
+          <el-button type="primary" :loading="pickerAttaching" :disabled="!pickerSelection.length"
+                     @click="attachPickerVulns">添加（{{ pickerSelection.length }}）</el-button>
+        </template>
+      </el-dialog>
 
       <!-- 报告区 -->
       <el-card shadow="never" class="!rounded-lg">
@@ -148,7 +197,7 @@
             </el-form-item>
             <el-form-item label="包含漏洞" required>
               <el-select v-model="genVulIds" multiple class="w-full" placeholder="选择纳入报告的漏洞">
-                <el-option v-for="v in vulns" :key="v.id" :value="v.id" :label="`#${v.id} ${v.title}`" />
+                <el-option v-for="v in vulns" :key="v.id" :value="v.id" :label="v.title" />
               </el-select>
             </el-form-item>
             <el-form-item>
@@ -165,7 +214,7 @@
             <el-tag size="small" :type="r.status === 'completed' ? 'success' : 'info'">
               {{ reportStatusName(r.status) }}
             </el-tag>
-            <span class="text-sm font-medium">#{{ r.id }} {{ r.title }}</span>
+            <span class="text-sm font-medium">{{ r.title }}</span>
             <div class="flex-1" />
             <el-popconfirm v-if="canOperate && r.status !== 'completed'"
                            title="发起复测将通知整改并使漏洞进入复测中，确认？" width="260"
@@ -217,7 +266,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, ArrowDown, Document, WarningFilled } from '@element-plus/icons-vue'
+import { Plus, ArrowDown, Document, FolderOpened, WarningFilled } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, statusSoftStyleEx, statusLabel } from '../utils/colors'
@@ -254,6 +303,16 @@ const genTitle = ref('')
 const genVulIds = ref<number[]>([])
 const generating = ref(false)
 
+const vulnPickerVisible = ref(false)
+const pickerLoading = ref(false)
+const pickerSearch = ref('')
+const pickerLevel = ref<number | ''>('')
+const pickerVulns = ref<any[]>([])
+const pickerSelection = ref<any[]>([])
+const pickerAttaching = ref(false)
+// 已关联当前计划的漏洞 ID，用于选择器禁用与标记
+const pickerLinkedIds = computed(() => vulns.value.map((v: any) => v.id))
+
 const exportJobs = ref<Record<number, any[]>>({})
 const exporting = ref<Record<number, string>>({})
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
@@ -270,6 +329,9 @@ const reportStatusName = (s: string) =>
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
 const isTester = computed(() => plan.value?.testers?.some((u: any) => u.id === auth.user?.id) ?? false)
+// 需求：录入漏洞阶段仅认领该计划的账号可录入/编辑/流转漏洞；管理员未认领也不放行
+const canManageVulns = computed(() => isTester.value)
+// 计划级操作（生成报告、发起复测等）：认领者或管理员
 const canOperate = computed(() => isAdmin.value || isTester.value)
 
 // 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60→全部完成
@@ -288,12 +350,56 @@ async function refresh() {
   try {
     const [planResp, vulResp] = await Promise.all([
       client.get(`/testing-plans/${props.planId}`),
-      client.get('/vulns', { params: { testing_plan_id: props.planId, size: 100 } }),
+      // 需求5：漏洞默认按危害等级降序（level 升序）展示
+      client.get('/vulns', { params: { testing_plan_id: props.planId, size: 100, sort: 'level', order: 'asc' } }),
     ])
     plan.value = planResp.data
-    vulns.value = vulResp.data.items
+    vulns.value = sortVulns(vulResp.data.items)
   } finally {
     loading.value = false
+  }
+}
+
+// 需求5：按危害等级降序（level 小=超危/高危）排序，保持后端兜底
+function sortVulns(items: any[]) {
+  return [...items].sort((a, b) => (a.level ?? 99) - (b.level ?? 99))
+}
+
+// ---------- 从漏洞库选择 ----------
+async function openVulnPicker() {
+  vulnPickerVisible.value = true
+  pickerSearch.value = ''
+  pickerLevel.value = ''
+  await loadPickerVulns()
+}
+
+async function loadPickerVulns() {
+  if (!vulnPickerVisible.value) return
+  pickerLoading.value = true
+  try {
+    // 注意：后端 /vulns 的 size 上限为 100，超出会返回 422
+    const params: Record<string, any> = { size: 100, sort: 'level', order: 'asc' }
+    if (pickerSearch.value.trim()) params.search = pickerSearch.value.trim()
+    if (pickerLevel.value) params.level = pickerLevel.value
+    const { data } = await client.get('/vulns', { params })
+    pickerVulns.value = sortVulns(data.items)
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+async function attachPickerVulns() {
+  pickerAttaching.value = true
+  try {
+    await client.post(`/testing-plans/${props.planId}/attach-vulns`, {
+      vul_ids: pickerSelection.value.map((v: any) => v.id),
+    })
+    ElMessage.success(`已添加 ${pickerSelection.value.length} 个漏洞到当前计划`)
+    vulnPickerVisible.value = false
+    dirty.value = true
+    await refresh()
+  } finally {
+    pickerAttaching.value = false
   }
 }
 

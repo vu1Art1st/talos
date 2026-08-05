@@ -2,7 +2,7 @@
   <div class="max-w-5xl">
     <div v-if="planId" class="mb-3">
       <el-tag type="warning" effect="plain">
-        本次录入将关联测试计划 #{{ planId }}{{ planName ? `（${planName}）` : '' }}
+        本次录入将关联测试计划{{ planName ? `「${planName}」` : '' }}
       </el-tag>
     </div>
     <VulnFormPanel :plan-id="planId" :edit-id="editId" class="pb-6" @saved="onSaved">

@@ -10,7 +10,8 @@
         </div>
       </template>
       <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
-        <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+        <el-table-column type="index" label="序号" width="70"
+                         :index="(i: number) => (page - 1) * 20 + i + 1" />
         <el-table-column prop="username" label="用户名" width="140" sortable="custom" />
         <el-table-column prop="realname" label="姓名" width="120" sortable="custom" />
         <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip sortable="custom" />

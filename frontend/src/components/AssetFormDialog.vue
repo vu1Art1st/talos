@@ -19,6 +19,11 @@
           <el-select v-model="form.system_type" filterable allow-create default-first-option clearable
                      placeholder="选择或输入新类型" class="w-full">
             <el-option v-for="name in (meta?.system_type ?? [])" :key="name" :label="name" :value="name" />
+            <template #footer>
+              <el-button size="small" type="primary" link @click="addSystemType">
+                <el-icon class="mr-1"><Plus /></el-icon>新增系统类型
+              </el-button>
+            </template>
           </el-select>
         </el-form-item>
       </div>
@@ -148,12 +153,17 @@ const saving = ref(false)
 const groups = ref<any[]>([])
 const members = ref<any[]>([])
 
-// 组织成员（含所属组织名），供资产系统负责人下拉选择快速添加
-const memberOptions = computed(() =>
-  members.value.map((m) => ({
+// 组织成员（含所属组织名），供资产系统负责人下拉选择快速添加。
+// 需求9：已选择部门时仅展示该部门下的负责人，未选择时展示全部便于快速录入
+const memberOptions = computed(() => {
+  const dep = (form.department ?? '').trim()
+  const depGroup = dep ? groups.value.find((g) => g.name === dep) : null
+  const scoped = depGroup ? members.value.filter((m) => m.group_id === depGroup.id) : members.value
+  return scoped.map((m) => ({
     name: m.name, phone: m.phone ?? '', email: m.email ?? '',
     group: groups.value.find((g) => g.id === m.group_id)?.name ?? '',
-  })))
+  }))
+})
 
 const emptyForm = () => ({
   id: null, name: '', sub_system: '', department: '', system_type: '',
@@ -198,6 +208,21 @@ async function persistSystemType() {
   } catch {
     /* 权限不足时静默，资产仍保存该类型 */
   }
+}
+
+// 需求8：系统类型下拉支持显式新增（输入后回车即新增）
+async function addSystemType() {
+  const name = (form.system_type ?? '').trim()
+  if (!name) return ElMessage.warning('请先输入系统类型名称')
+  if ((meta.value?.system_type ?? []).includes(name)) {
+    return ElMessage.info('该系统类型已存在')
+  }
+  await persistSystemType()
+  if (auth.meta?.system_type) {
+    // 刷新本地 meta 引用，确保下拉即时显示新选项
+    auth.meta.system_type = [...(auth.meta.system_type ?? []), name]
+  }
+  ElMessage.success(`已新增系统类型「${name}」`)
 }
 
 async function save() {

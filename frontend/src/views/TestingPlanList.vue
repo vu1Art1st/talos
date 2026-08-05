@@ -56,7 +56,8 @@
     </el-collapse>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column prop="id" label="ID" width="60" sortable="custom" />
+      <el-table-column type="index" label="序号" width="60"
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column label="工单ID" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="font-mono">{{ row.ticket_id || '-' }}</span>
@@ -103,7 +104,7 @@
                   {{ levelName(v.level) }}
                 </span>
                 <el-button size="small" type="primary" link class="!p-0"
-                           @click="router.push(`/vulns/${v.id}`)">#{{ v.id }} {{ v.title }}</el-button>
+                           @click="router.push(`/vulns/${v.id}`)">{{ v.title }}</el-button>
               </div>
             </div>
           </el-popover>
@@ -122,7 +123,7 @@
                   {{ reportStatusName(r.status) }}
                 </el-tag>
                 <el-button size="small" type="primary" link class="!p-0"
-                           @click="router.push(`/reports/${r.id}`)">#{{ r.id }} {{ r.title }}</el-button>
+                           @click="router.push(`/reports/${r.id}`)">{{ r.title }}</el-button>
               </div>
             </div>
           </el-popover>

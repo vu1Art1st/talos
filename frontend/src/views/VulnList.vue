@@ -28,7 +28,7 @@
               class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
               @sort-change="onSortChange">
       <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="42" />
-      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column type="index" label="序号" width="70" :index="(i: number) => (query.page - 1) * query.size + i + 1" />
       <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="level" label="等级" width="90" sortable="custom">
         <template #default="{ row }">

@@ -12,7 +12,8 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column type="index" label="序号" width="70"
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="test_time" label="检测时间" width="120" sortable="custom">
@@ -30,7 +31,7 @@
         <template #default="{ row }">
           <el-button v-if="row.appeal_report_id" size="small" type="primary" link
                      @click="router.push(`/reports/${row.appeal_report_id}`)">
-            报告 #{{ row.appeal_report_id }}
+            查看报告
           </el-button>
           <span v-else class="text-gray-400">-</span>
         </template>
@@ -72,7 +73,7 @@
       </el-form-item>
       <el-form-item label="申诉报告">
         <el-select v-model="form.appeal_report_id" filterable clearable placeholder="对应申诉报告（可选）" class="w-full">
-          <el-option v-for="r in reports" :key="r.id" :label="`#${r.id} ${r.title}`" :value="r.id" />
+          <el-option v-for="r in reports" :key="r.id" :label="r.title" :value="r.id" />
         </el-select>
       </el-form-item>
     </el-form>

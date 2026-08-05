@@ -23,7 +23,8 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column type="index" label="序号" width="70"
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="name" label="系统命名" min-width="150" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="sub_system" label="子系统" min-width="110" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="部门" min-width="110" show-overflow-tooltip sortable="custom" />

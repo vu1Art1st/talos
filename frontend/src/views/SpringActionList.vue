@@ -12,7 +12,8 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column type="index" label="序号" width="70"
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="system_name" label="对应系统" min-width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="year" label="年度" width="90" sortable="custom">
@@ -33,7 +34,7 @@
                   {{ levelName(v.level) }}
                 </span>
                 <el-button size="small" type="primary" link class="!p-0"
-                           @click="router.push(`/vulns/${v.id}`)">#{{ v.id }} {{ v.title }}</el-button>
+                           @click="router.push(`/vulns/${v.id}`)">{{ v.title }}</el-button>
               </div>
             </div>
           </el-popover>
@@ -87,7 +88,7 @@
       </div>
       <el-form-item label="涉及漏洞">
         <el-select v-model="form.vul_ids" multiple filterable class="w-full" placeholder="可多选">
-          <el-option v-for="v in vulns" :key="v.id" :label="`#${v.id} ${v.title}`" :value="v.id" />
+          <el-option v-for="v in vulns" :key="v.id" :label="v.title" :value="v.id" />
         </el-select>
       </el-form-item>
       <el-form-item label="申诉成功">

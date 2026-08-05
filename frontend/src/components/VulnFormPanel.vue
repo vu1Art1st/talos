@@ -36,6 +36,19 @@
           </div>
         </div>
       </el-form-item>
+      <el-form-item label="关联测试计划">
+        <el-select v-model="selectedPlanId" clearable filterable class="w-full"
+                   :placeholder="editId ? '可选：调整关联的测试计划' : '可选：关联到测试计划'"
+                   :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
+          <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
+                     :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">
+            <div class="flex justify-between">
+              <span class="truncate">{{ p.system_name }}{{ p.plan_name ? ' · ' + p.plan_name : '' }}</span>
+              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ p.status_name || '' }}</span>
+            </div>
+          </el-option>
+        </el-select>
+      </el-form-item>
     </el-form>
   </el-card>
 
@@ -133,9 +146,15 @@
 
   <!-- 知识库模板选择弹窗 -->
   <el-dialog v-model="templateVisible" title="选择知识库模板" width="620px">
+    <el-input v-model="templateSearch" placeholder="搜索模板名称 / 标签 / 描述" clearable class="mb-3">
+      <template #prefix><el-icon><Search /></el-icon></template>
+    </el-input>
     <div v-if="!templateList.length" class="py-8 text-center text-gray-400">该漏洞类型暂无知识库模板</div>
+    <div v-else-if="!filteredTemplateList.length" class="py-8 text-center text-gray-400">
+      未找到匹配「{{ templateSearch }}」的模板
+    </div>
     <div v-else class="flex flex-col gap-2 max-h-96 overflow-auto">
-      <div v-for="(t, i) in templateList" :key="t.id"
+      <div v-for="(t, i) in filteredTemplateList" :key="t.id"
            class="rounded-lg border border-gray-200 hover:border-blue-400 cursor-pointer p-3 transition"
            @click="applyEntry(t)">
         <div class="flex items-center gap-2">
@@ -147,6 +166,7 @@
       </div>
     </div>
     <template #footer>
+      <span class="text-xs text-gray-400 mr-auto">共 {{ filteredTemplateList.length }} / {{ templateList.length }} 条</span>
       <el-button @click="templateVisible = false">取消</el-button>
     </template>
   </el-dialog>
@@ -155,7 +175,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus, Delete, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import AssetFormDialog from './AssetFormDialog.vue'
@@ -174,6 +194,31 @@ const meta = ref<any>(null)
 const saving = ref(false)
 const editId = props.editId ?? null
 const planId = props.planId ?? null
+
+// ---------- 关联测试计划 ----------
+const selectedPlanId = ref<number | null>(planId)
+const planOptions = ref<any[]>([])
+const planLoading = ref(false)
+let plansLoaded = false
+const statusMap = ref<Record<number, string>>({})
+
+async function loadPlans() {
+  if (plansLoaded) return
+  plansLoaded = true
+  planLoading.value = true
+  try {
+    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => null)
+    if (data) {
+      planOptions.value = data.items
+      statusMap.value = (await auth.fetchMeta()).testing_plan_status ?? {}
+      planOptions.value.forEach((p: any) => {
+        p.status_name = statusMap.value[p.status] ?? ''
+      })
+    }
+  } finally {
+    planLoading.value = false
+  }
+}
 
 // ---------- 资产选择 ----------
 const assetIds = ref<number[]>([])
@@ -249,7 +294,18 @@ function addVuln() {
 // ---------- 知识库模板套用 ----------
 const templateVisible = ref(false)
 const templateList = ref<any[]>([])
+const templateSearch = ref('')
 let templateTarget: any = null
+
+const filteredTemplateList = computed(() => {
+  const kw = templateSearch.value.trim().toLowerCase()
+  if (!kw) return templateList.value
+  return templateList.value.filter((t) =>
+    (t.vulnerability_name || '').toLowerCase().includes(kw)
+    || (t.tags ?? []).some((tag: string) => tag.toLowerCase().includes(kw))
+    || plainSummary(t).toLowerCase().includes(kw),
+  )
+})
 
 const levelName = (lv: number) =>
   ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
@@ -320,7 +376,11 @@ async function save() {
       return { ...rest, affected_url: joinUrls(affected_urls) }
     }
     if (editId) {
-      const { data } = await client.put(`/vulns/${editId}`, { ...toPayload(vulns.value[0]), asset_ids: assetIds.value })
+      const { data } = await client.put(`/vulns/${editId}`, {
+        ...toPayload(vulns.value[0]),
+        asset_ids: assetIds.value,
+        testing_plan_id: selectedPlanId.value,
+      })
       ElMessage.success('保存成功')
       emit('saved', [data])
     } else {
@@ -328,7 +388,8 @@ async function save() {
         asset_ids: assetIds.value,
         vulns: vulns.value.map((v) => {
           const payload = toPayload(v)
-          return planId ? { ...payload, testing_plan_id: planId } : payload
+          const plan = selectedPlanId.value ?? planId
+          return plan ? { ...payload, testing_plan_id: plan } : payload
         }),
       })
       ElMessage.success(`成功提交 ${data.length} 个漏洞`)
@@ -355,10 +416,12 @@ async function loadAssetsByIds(ids: number[]) {
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   await searchAssets()
+  await loadPlans()
   if (editId) {
     const { data: vul } = await client.get(`/vulns/${editId}`)
     vulns.value = [{ ...emptyVul(), ...vul, affected_urls: splitUrls(vul.affected_url) }]
     assetIds.value = vul.asset_ids ?? []
+    selectedPlanId.value = vul.testing_plan_id ?? null
     await loadAssetsByIds(assetIds.value)
   } else if (planId) {
     // 计划编制时已前置录入的关联资产，录入漏洞时自动带入（仍可调整）

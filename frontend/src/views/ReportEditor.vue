@@ -1,6 +1,7 @@
 <template>
-  <div v-if="report" class="grid grid-cols-1 xl:grid-cols-[1fr_300px] gap-4">
-    <div class="space-y-4">
+  <!-- 需求4：小屏内容滚动与页面滚动分离 —— 页面整体不滚动，内容区/侧栏各自滚动 -->
+  <div v-if="report" class="flex h-full min-h-0 flex-col xl:flex-row gap-4">
+    <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
       <el-card shadow="never" class="!rounded-lg">
         <template #header>
           <div class="flex items-center justify-between">
@@ -45,7 +46,7 @@
           <div class="flex items-center gap-2">
             <span class="text-gray-400">{{ i + 1 }}.</span>
             <el-input v-model="sec.title" placeholder="章节标题" class="!w-80" size="small" @input="markDirty" />
-            <el-tag v-if="sec.vul_id" size="small" type="info" effect="plain">关联漏洞 #{{ sec.vul_id }}</el-tag>
+            <el-tag v-if="sec.vul_id" size="small" type="info" effect="plain">关联漏洞</el-tag>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
             <el-button size="small" :disabled="i === report.sections.length - 1" @click="move(i, 1)">下移</el-button>
@@ -127,7 +128,8 @@
       </div>
     </div>
 
-    <div class="space-y-4 xl:sticky xl:top-4 self-start">
+    <!-- 侧栏：小屏时置于底部且独立滚动，大屏固定右侧随内容区独立滚动 -->
+    <div class="xl:w-[300px] xl:shrink-0 space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
       <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
       <el-card shadow="never" class="!rounded-lg">
         <template #header>章节导航</template>
@@ -197,8 +199,13 @@
   </div>
 
   <el-dialog v-model="insertVulnVisible" title="插入漏洞章节" width="600px">
-    <el-select v-model="insertVulIds" multiple filterable class="w-full" placeholder="选择漏洞记录">
-      <el-option v-for="v in vulns" :key="v.id" :label="`#${v.id} ${v.title}`" :value="v.id" />
+    <el-select v-model="insertVulIds" multiple filterable class="w-full" placeholder="选择漏洞记录（按危害等级降序）">
+      <el-option v-for="v in vulns" :key="v.id" :label="`${v.title}`" :value="v.id">
+        <div class="flex items-center gap-2">
+          <span class="tl-tag shrink-0" :style="levelSoftStyle(v.level)">{{ levelName(v.level) }}</span>
+          <span class="truncate">{{ v.title }}</span>
+        </div>
+      </el-option>
     </el-select>
     <template #footer>
       <el-button @click="insertVulnVisible = false">取消</el-button>
@@ -217,13 +224,15 @@ import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import { useAuthStore } from '../stores/auth'
-import { statusSoftStyle } from '../utils/colors'
+import { levelSoftStyle, statusSoftStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 
 const STATUS_NAMES: Record<number, string> = {
   10: '未修复', 20: '已忽略', 35: '暂不处理', 50: '修复中', 55: '复测中', 60: '已修复',
 }
 const statusName = (s: number) => STATUS_NAMES[s] ?? String(s)
+const levelName = (lv: number) =>
+  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
@@ -289,7 +298,7 @@ const FIELD_META_KEYS: Record<string, string> = { level: 'vul_level', vul_type: 
 async function changeVulnField(vulId: number, field: string, value: number) {
   await client.patch(`/vulns/${vulId}/fields`, { [field]: value })
   const label = field === 'status' ? statusName(value) : (meta.value?.[FIELD_META_KEYS[field]]?.[value] ?? value)
-  ElMessage.success(`漏洞 #${vulId} ${FIELD_LABELS[field]}已更新为「${label}」`)
+  ElMessage.success(`${FIELD_LABELS[field]}已更新为「${label}」`)
   await loadVulnStates()
 }
 
@@ -387,7 +396,7 @@ async function submitRetest(vulId: number) {
       retest_html: state.retest_html || '',
       retest_json: state.retest_json ?? null,
     })
-    ElMessage.success(`漏洞 #${vulId} 复测结论已提交`)
+    ElMessage.success('复测结论已提交')
     await loadVulnStates()
   } finally {
     retestSubmitting.value = null
@@ -428,13 +437,23 @@ function download(job: any) {
     a.download = `${job.title || report.value.title}.${job.fmt}`
     a.click()
     URL.revokeObjectURL(url)
+    // 服务器未部署 LibreOffice 时目录域未自动更新，提示用户手动刷新
+    if (job.fmt === 'docx' && !job.toc_auto_updated) {
+      ElMessageBox.alert(
+        '当前服务器未部署 LibreOffice，该报告目录未自动更新。\n\n打开 Word/WPS 后请右键目录 →「更新域」→「更新整个目录」' +
+        '（或全选后按 F9），即可生成带页码的完整目录。',
+        '目录需手动更新',
+        { confirmButtonText: '知道了', type: 'warning' },
+      )
+    }
   })
 }
 
 watch(insertVulnVisible, async (v) => {
   if (v && !vulns.value.length) {
-    const { data } = await client.get('/vulns', { params: { size: 100 } })
-    vulns.value = data.items
+    // 需求5：漏洞默认按危害等级降序（level 升序）展示
+    const { data } = await client.get('/vulns', { params: { size: 100, sort: 'level', order: 'asc' } })
+    vulns.value = [...data.items].sort((a: any, b: any) => (a.level ?? 99) - (b.level ?? 99))
   }
 })
 

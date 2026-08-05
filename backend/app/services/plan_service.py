@@ -1,5 +1,5 @@
 """测试计划辅助服务：认领权限判定、关联漏洞统计重算与复测轮次记录。"""
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 
 from fastapi import HTTPException
 from sqlalchemy import func, select
@@ -10,9 +10,18 @@ from app.models import TestingPlan, TestingPlanRetestRound, User, Vul
 
 
 def can_operate(user: User, plan: TestingPlan) -> bool:
-    """认领者或管理员（权限含 *）才可修改测试状态、录入漏洞。"""
+    """认领者或管理员（权限含 *）才可修改测试状态、生成报告等计划级操作。"""
     if "*" in user_permissions(user):
         return True
+    return any(u.id == user.id for u in plan.testers)
+
+
+def is_plan_claimant(user: User, plan: TestingPlan) -> bool:
+    """严格认领判定：仅已认领该计划的账号具备录入/编辑漏洞的权限。
+
+    与 can_operate 的区别：不因角色权限含 *（管理员）而放行。需求为
+    「录入漏洞阶段仅认领该计划的账号可修改和录入漏洞，其他账号无权限」，
+    即使管理员未认领该计划也不能录入/编辑其漏洞（可先认领后再操作）。"""
     return any(u.id == user.id for u in plan.testers)
 
 
@@ -60,7 +69,7 @@ def start_retest_round(
         if not force:
             return
         for r in unfinished:
-            r.done_time = utcnow()
+            r.done_time = now()
     next_no = max((r.round_no for r in plan.retest_rounds), default=0) + 1
     session.add(TestingPlanRetestRound(
         plan_id=plan.id, round_no=next_no, source=source, creator_id=user_id,
@@ -71,7 +80,7 @@ def finish_retest_round(plan: TestingPlan) -> None:
     """复测完成时为当前进行中的轮次打完成点。"""
     for r in plan.retest_rounds:
         if r.done_time is None:
-            r.done_time = utcnow()
+            r.done_time = now()
 
 
 def reopen_retest_round(plan: TestingPlan) -> None:

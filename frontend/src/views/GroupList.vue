@@ -9,7 +9,7 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column prop="id" label="ID" width="80" sortable />
+      <el-table-column type="index" label="序号" width="80" />
       <el-table-column prop="name" label="组织名称" min-width="160" sortable />
       <el-table-column label="成员数" width="100">
         <template #default="{ row }">{{ row.member_count ?? '-' }}</template>
@@ -57,7 +57,7 @@
       </el-button>
     </div>
     <el-table v-loading="membersLoading" :data="members" stripe size="small">
-      <el-table-column prop="id" label="ID" width="70" />
+      <el-table-column type="index" label="序号" width="70" />
       <el-table-column prop="name" label="姓名" min-width="120" />
       <el-table-column prop="phone" label="电话" min-width="140" show-overflow-tooltip>
         <template #default="{ row }">{{ row.phone || '-' }}</template>

@@ -13,7 +13,8 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column prop="id" label="批次" width="80" sortable="custom" />
+      <el-table-column type="index" label="序号" width="80"
+                       :index="(i: number) => (query.page - 1) * query.size + i + 1" />
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="status" label="状态" width="120" sortable="custom">
         <template #default="{ row }">

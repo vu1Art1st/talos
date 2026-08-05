@@ -20,7 +20,12 @@
             <el-tooltip v-if="auth.hasPerm('vuln:manage')" content="将本漏洞的描述与修复建议存入知识库，作为该类型的标准模板" placement="top">
               <el-button plain @click="saveAsTemplate">存为模板</el-button>
             </el-tooltip>
-            <el-button @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
+            <el-tooltip v-if="!canEdit" content="仅已认领该测试计划的账号可编辑该漏洞" placement="top">
+              <span>
+                <el-button :disabled="true" @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
+              </span>
+            </el-tooltip>
+            <el-button v-else @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
           </div>
         </div>
         <el-descriptions :column="2" border class="mt-4" size="small">
@@ -35,7 +40,7 @@
           </el-descriptions-item>
           <el-descriptions-item label="测试计划">
             <el-link v-if="vul.testing_plan_id" type="primary"
-                     @click="router.push('/testing-plans')">计划 #{{ vul.testing_plan_id }}</el-link>
+                     @click="router.push('/testing-plans')">已关联计划</el-link>
             <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="风险评分">{{ vul.risk_score }}</el-descriptions-item>
@@ -112,6 +117,18 @@ function transitionLabel(t: { status: number; name: string }) {
   return t.name
 }
 
+// 编辑权限：已关联测试计划的漏洞仅已认领该计划的账号可编辑；未关联计划由提交人或漏洞管理员编辑
+const planTesters = ref<any[]>([])
+const canEdit = computed(() => {
+  const v = vul.value
+  if (!v) return false
+  if (v.testing_plan_id) {
+    return planTesters.value.some((u: any) => u.id === auth.user?.id)
+  }
+  const me = auth.user
+  return auth.hasPerm('vuln:manage') || v.submitter_id === me?.id
+})
+
 const richSections = computed(() =>
   [
     { title: '漏洞描述', html: vul.value?.description_html },
@@ -131,6 +148,17 @@ async function load() {
   vul.value = v.data
   logs.value = l.data
   transitions.value = t.data
+  // 已关联计划时加载计划认领者，用于判定编辑权限
+  if (vul.value?.testing_plan_id) {
+    try {
+      const planResp = await client.get(`/testing-plans/${vul.value.testing_plan_id}`)
+      planTesters.value = planResp.data?.testers ?? []
+    } catch {
+      planTesters.value = []
+    }
+  } else {
+    planTesters.value = []
+  }
 }
 
 async function doTransition(status: number) {

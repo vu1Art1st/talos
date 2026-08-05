@@ -10,10 +10,10 @@ from sqlalchemy import and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
-from app.core.deps import require_perm
+from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
-from app.core.timeutil import utcnow
+from app.core.timeutil import now as tznow
 from app.db import get_session
 from app.models import (
     RemoteTesting,
@@ -250,7 +250,7 @@ async def _compute_plan_stats(
     # 按月漏洞数：筛选后计划关联漏洞按提交月份聚合（数据库无关：应用层聚合）
     months = _month_range(receive_from, receive_to) if receive_from and receive_to else []
     if not months:
-        now = utcnow()
+        now = tznow()
         months = sorted(
             {(now.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m") for i in range(12)}
         )
@@ -295,7 +295,7 @@ async def list_testing_plans(
     order: str = "desc",
     page: int = Query(1, ge=1),
     size: int = Query(20, ge=1, le=100),
-    user: User = Depends(require_perm("special:manage")),
+    user: User = Depends(require_any_perm("special:manage", "vuln:submit")),
     session: AsyncSession = Depends(get_session),
 ):
     """测试计划列表。my_tests 显示当前可测试系统，unclaimed 显示无人认领的测试。"""
@@ -648,6 +648,33 @@ async def quit_testing_plan(
     """退出认领：当前用户移出测试人员列表。"""
     row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
     row.testers = [u for u in row.testers if u.id != user.id]
+    await session.commit()
+    await session.refresh(row)
+    return row
+
+
+@router.post("/testing-plans/{row_id}/attach-vulns", response_model=TestingPlanOut)
+async def attach_vulns_to_plan(
+    row_id: int,
+    body: dict,
+    user: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """从漏洞库批量关联漏洞到当前测试计划（需求1）。
+
+    属录入漏洞阶段：仅已认领该计划的账号可操作（管理员未认领不放行）；
+    已关联其他计划的漏洞会被转移至当前计划。
+    """
+    row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    if not plan_service.is_plan_claimant(user, row):
+        raise HTTPException(403, "仅已认领该测试计划的账号可关联漏洞")
+    vul_ids = [int(i) for i in (body.get("vul_ids") or [])]
+    if not vul_ids:
+        raise HTTPException(400, "请选择要关联的漏洞")
+    vulns = await _load_vulns(session, vul_ids)
+    for v in vulns:
+        v.testing_plan_id = row_id
+    await plan_service.refresh_stats(session, row_id)
     await session.commit()
     await session.refresh(row)
     return row
