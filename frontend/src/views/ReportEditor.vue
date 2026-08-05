@@ -224,6 +224,7 @@ import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import { useAuthStore } from '../stores/auth'
+import { showTocNotice } from '../utils/tocNotice'
 import { levelSoftStyle, statusSoftStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 
@@ -437,14 +438,9 @@ function download(job: any) {
     a.download = `${job.title || report.value.title}.${job.fmt}`
     a.click()
     URL.revokeObjectURL(url)
-    // 服务器未部署 LibreOffice 时目录域未自动更新，提示用户手动刷新
+    // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
     if (job.fmt === 'docx' && !job.toc_auto_updated) {
-      ElMessageBox.alert(
-        '当前服务器未部署 LibreOffice，该报告目录未自动更新。\n\n打开 Word/WPS 后请右键目录 →「更新域」→「更新整个目录」' +
-        '（或全选后按 F9），即可生成带页码的完整目录。',
-        '目录需手动更新',
-        { confirmButtonText: '知道了', type: 'warning' },
-      )
+      showTocNotice()
     }
   })
 }

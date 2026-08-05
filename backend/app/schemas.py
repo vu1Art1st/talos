@@ -490,7 +490,7 @@ class ExportJobOut(BaseModel):
     fmt: str
     status: str
     error: str = ""
-    toc_auto_updated: bool = False  # 目录是否已由 LibreOffice 自动更新
+    toc_auto_updated: bool = False  # 目录域是否已自动更新（当前恒为 False，前端据此提示手动更新域）
     create_time: datetime | None = None
     finish_time: datetime | None = None
 

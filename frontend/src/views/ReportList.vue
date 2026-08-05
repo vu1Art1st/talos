@@ -89,6 +89,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { showTocNotice } from '../utils/tocNotice'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -152,14 +153,9 @@ async function batchDownload() {
       }
       if (done.length) {
         await downloadZip(jobIds)
-        // 服务器未部署 LibreOffice 时目录域未自动更新，提示用户手动刷新
+        // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
         if (done.some((j: any) => j.fmt === 'docx' && !j.toc_auto_updated)) {
-          ElMessageBox.alert(
-            '当前服务器未部署 LibreOffice，部分 Word 报告的目录未自动更新。\n\n' +
-            '打开 Word/WPS 后请右键目录 →「更新域」→「更新整个目录」（或全选后按 F9）刷新目录。',
-            '目录需手动更新',
-            { confirmButtonText: '知道了', type: 'warning' },
-          )
+          showTocNotice()
         }
       } else ElMessage.error('所选报告均导出失败，请检查后重试')
       return

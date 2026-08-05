@@ -60,7 +60,7 @@ class ExportJob(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/running/done/failed
     file_path: Mapped[str] = mapped_column(String(512), default="")
     error: Mapped[str] = mapped_column(Text, default="")
-    # 导出时是否已用 LibreOffice 自动更新目录域；False 时前端提示用户手动更新
+    # 目录域是否已自动更新（当前未启用自动更新，恒为 False，前端据此提示手动更新域）
     toc_auto_updated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)

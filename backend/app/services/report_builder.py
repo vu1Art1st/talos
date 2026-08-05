@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.core.timeutil import now as tznow  # 系统本地时间（UTC+8）；别名避免遮蔽模块内局部变量 now
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
+_IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc="([^"]+)"', re.IGNORECASE)
 _HEADING_OPEN = re.compile(r"<h[1-6][^>]*>", re.IGNORECASE)
 _HEADING_CLOSE = re.compile(r"</h[1-6]>", re.IGNORECASE)
 # 章节快照中「测试状态：」后的初测/复测标记，导出时按漏洞最新 is_retest 重写
@@ -74,6 +75,60 @@ def _localize_images(html: str) -> str:
         return f'src="{candidate.as_posix()}"'
 
     return _STORAGE_SRC.sub(repl, html or "")
+
+
+def _compress_image_file(src: Path) -> str:
+    """用 Pillow 压缩单张图片，从源头减小 docx 体积：
+    - 最长边超过 REPORT_IMAGE_MAX_PX 时等比重采样（仅降不升，小图不放大）；
+    - 含透明通道 → 保存 PNG optimize（仅优化编码，保留透明）；
+    - 无透明通道 → 转 RGB 存 JPEG（quality=REPORT_IMAGE_QUALITY, optimize）。
+    产物写入系统临时目录（随机文件名），不污染 storage；docx 内嵌后即可丢弃。"""
+    import tempfile
+    import uuid
+
+    from PIL import Image
+
+    max_px = settings.REPORT_IMAGE_MAX_PX
+    with Image.open(src) as img:
+        w, h = img.size
+        longest = max(w, h)
+        if longest > max_px:
+            ratio = max_px / longest
+            img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        has_alpha = img.mode in ("RGBA", "LA") or (
+            img.mode == "P" and "transparency" in img.info
+        )
+        tmp = Path(tempfile.gettempdir()) / f"talos_img_{uuid.uuid4().hex}"
+        if has_alpha:
+            out = tmp.with_suffix(".png")
+            img.save(out, "PNG", optimize=True)
+            return str(out)
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        out = tmp.with_suffix(".jpg")
+        img.save(out, "JPEG", quality=settings.REPORT_IMAGE_QUALITY, optimize=True, progressive=True)
+        return str(out)
+
+
+def _compress_images(html: str) -> str:
+    """压缩 HTML 中 <img src="本地文件"> 指向的图片，替换 src 为压缩后文件。
+
+    仅处理本地存在的文件（http 等远程 / 越界路径保持原样）；
+    Pillow 不可用或压缩失败时保持原图，不中断导出。"""
+    def repl(m: re.Match) -> str:
+        tag = m.group(0)
+        src = m.group(1)
+        if not src or not Path(src).exists():
+            return tag
+        try:
+            new_src = _compress_image_file(Path(src))
+        except Exception:
+            return tag
+        if new_src == src:
+            return tag
+        return tag.replace(f'src="{src}"', f'src="{new_src}"')
+
+    return _IMG_SRC_RE.sub(repl, html or "")
 
 
 def _demote_headings(html: str) -> str:
@@ -328,7 +383,9 @@ def _number_vuln_urls(html: str) -> str:
 
 
 def _add_html(doc: Document, html: str) -> None:
-    html = _localize_images(_demote_headings(html or ""))
+    # 图片统一宽度在 docx 层面由 _normalize_image_width 处理（htmldocx 忽略 HTML width）；
+    # 这里先压缩图像数据（重采样+JPEG），从源头减小 docx 体积
+    html = _compress_images(_localize_images(_demote_headings(html or "")))
     for kind, content, lang in _split_blocks(html):
         if kind == "code":
             try:
@@ -693,17 +750,31 @@ def _enable_update_fields(doc: Document) -> None:
         element.append(update)
 
 
-def _fit_images(doc: Document, max_width_cm: float = 15.0) -> None:
-    """将超过版心宽度的内联图片等比缩小，确保 Word 打开后完整显示。
+def _shape_in_table(shape) -> bool:
+    """判断内联图片是否位于表格内（封面 logo / 装饰图所在位置）。"""
+    node = shape._inline
+    while node is not None:
+        if node.tag == qn("w:tbl"):
+            return True
+        node = node.getparent()
+    return False
 
-    仅调整过宽的图片，小图尺寸保持不变；比例按宽度同比缩放，避免变形。"""
-    max_width = Cm(max_width_cm)
+
+def _normalize_image_width(doc: Document, width_cm: float | None = None) -> None:
+    """把正文内联图片宽度统一为 settings.REPORT_IMAGE_WIDTH_CM（默认 14cm）。
+
+    - 正文图片全部等比缩放到统一宽度，保证版式一致（高分辨率截图冗余像素较多）；
+    - 跳过模板封面表格内的小图（logo / 装饰图），避免放大失真；
+    - 跳过宽度 < 5cm 的其它小图，作为兜底保护；
+    - 恰好为目标宽度的图片跳过，避免无谓改动。"""
+    target = Cm(width_cm or settings.REPORT_IMAGE_WIDTH_CM)
     for shape in doc.inline_shapes:
         w, h = shape.width, shape.height
-        if w and w > max_width:
-            shape.width = max_width
-            if h:
-                shape.height = int(h * (max_width / w))
+        if not w or w < Cm(5) or w == target or _shape_in_table(shape):
+            continue
+        shape.width = target
+        if h:
+            shape.height = int(h * (int(target) / w))
 
 
 def build_report_docx(
@@ -734,7 +805,7 @@ def build_report_docx(
     _remove_sample_details(doc)
     _append_details(doc, vulns, sections)
     _build_toc_field(doc)
-    _fit_images(doc)
+    _normalize_image_width(doc)
     _enable_update_fields(doc)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)

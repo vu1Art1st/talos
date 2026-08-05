@@ -17,7 +17,6 @@ from app.db import async_session_maker
 from app.models import ImportBatch, ImportRecord, ExportJob, Report, TestingPlan, User, Vul
 from app.services.docx_parser import parse_any_docx
 from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
-from app.services.libreoffice_toc import update_toc_in_docx
 from app.services.report_builder import build_report_docx
 
 
@@ -160,13 +159,6 @@ async def export_report_task(ctx, job_id: int) -> None:
             stamp = now().strftime("%Y%m%d%H%M%S")
             docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
             await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets)
-
-            # 用 LibreOffice 宏自动刷新 TOC 域（失败不中断导出，仅记录）；
-            # 环境未安装 LibreOffice 或关闭开关时为 False，前端据此提示手动更新目录
-            if settings.UPDATE_TOC_WITH_LIBREOFFICE:
-                job.toc_auto_updated = await asyncio.to_thread(
-                    update_toc_in_docx, docx_path, settings.LIBREOFFICE_TIMEOUT
-                )
 
             if job.fmt == "pdf":
                 pdf_path = docx_path.replace(".docx", ".pdf")

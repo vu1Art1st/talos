@@ -61,8 +61,6 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
-        # 设为 1 时在 worker 镜像内最小化安装 LibreOffice，导出报告后自动更新目录域
-        ENABLE_LIBREOFFICE: ${ENABLE_LIBREOFFICE:-0}
     restart: unless-stopped
     command: ["arq", "app.workers.main.WorkerSettings"]
     environment: *backend_env

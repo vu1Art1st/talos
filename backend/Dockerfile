@@ -8,18 +8,6 @@ FROM python:3.12-slim
 ARG PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 RUN printf '[global]\nindex-url = %s\n' "${PIP_INDEX_URL}" > /etc/pip.conf
 
-# LibreOffice：仅当 ENABLE_LIBREOFFICE=1 时安装（报告目录域自动更新）。
-# 使用 Debian 的 -nogui 最小包（无图形界面 / 无 Java 集成），配合中文字体与
-# 等宽替代字体，2 核 2G 服务器可按需冷启动、用后即退，不常驻内存。
-ARG ENABLE_LIBREOFFICE=0
-RUN if [ "${ENABLE_LIBREOFFICE}" = "1" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends \
-            libreoffice-writer-nogui \
-            fonts-noto-cjk \
-            fonts-liberation \
-        && rm -rf /var/lib/apt/lists/*; \
-    fi
-
 WORKDIR /app
 
 COPY requirements.txt .

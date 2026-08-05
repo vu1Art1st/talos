@@ -131,83 +131,34 @@ bash scripts/migrate.sh
 
 ---
 
-## 四、LibreOffice 目录自动更新部署（可选）
+## 四、Docker 镜像加速（腾讯云，可选但推荐）
 
-报告导出的 Word 使用 **TOC 域**承载目录：纯代码只能插入域，页码需由排版引擎
-（Word / WPS / LibreOffice）计算。Talos 的策略是——
+默认 Docker 从 docker.io 官方源拉取镜像，在国内通常较慢。用腾讯云镜像加速：
 
-- 若运行环境检测到 **LibreOffice**：worker 在导出 docx 后自动调用 soffice + Basic
-  宏刷新目录，用户下载即拿到带完整页码的目录；
-- 若**未检测到** LibreOffice：导出记录标记 `toc_auto_updated=false`，前端在下载后
-  弹窗提示用户「打开 Word/WPS 后右键目录 → 更新域，或全选按 F9」手动刷新。
-
-### 4.1 部署方式对比（2 核 2G 小服务器）
-
-| 方案 | 磁盘 | 常驻内存 | 冷启动内存 | 说明 |
-| --- | --- | --- | --- | --- |
-| **worker 容器内装 `libreoffice-writer-nogui`（推荐）** | ~400MB | 0（用完即退） | 峰值 ~300-450MB，持续数秒 | 与 worker 同生共死，按需冷启动；镜像构建变慢约 2-5 分钟 |
-| 宿主机 `apt` 装 LibreOffice（非容器部署） | ~600MB | 0 | 同上 | 仅适用于不使用 Docker / 或容器可直调宿主机命令的部署 |
-| 独立 LibreOffice 常驻服务（unoserver / `--accept=socket`） | ~400MB | **~200-400MB** | — | 2G 内存机器上会与 Postgres/Redis/Gotenberg 抢内存，**不推荐** |
-
-> 结论：**2 核 2G 最省资源的做法是「容器内最小化安装 + 按需冷启动、用后即退」**，
-> 不常驻 soffice。当前 2G 机器已运行 Postgres + Redis + Gotenberg + API + Worker，
-> 再常驻一个 soffice 会显著提高 OOM 风险。
-
-### 4.2 启用步骤
-
-1. 在 `.env` 加入（Docker Compose 部署）：
+1. **一键配置**（仓库已提供脚本，合并保留 `daemon.json` 已有配置）：
 
    ```bash
-   ENABLE_LIBREOFFICE=1
+   sudo bash scripts/setup-docker-mirror.sh
    ```
 
-   该变量会让 worker 镜像构建时执行最小化安装（见 `backend/Dockerfile`：
-   `libreoffice-writer-nogui` + `fonts-noto-cjk` + `fonts-liberation`）。
+   - 默认公网加速地址 `https://mirror.ccs.tencent.com`；
+   - 腾讯云 CVM 内网更快（免公网流量）：
+     `sudo DOCKER_MIRROR=https://mirror.ccs.tencentyun.com bash scripts/setup-docker-mirror.sh`
 
-2. 重建并重启 worker（仅 worker 需要，api 无需）：
+2. **重启 Docker 生效**：
 
    ```bash
-   docker compose build worker
-   docker compose up -d worker
+   sudo systemctl restart docker
    ```
 
-3. 验证环境检测：
+3. **验证**：
 
    ```bash
-   docker compose exec worker soffice --version
+   docker info | grep -A3 'Registry Mirrors'
    ```
 
-   之后导出任意报告的 docx，其 `toc_auto_updated` 即为 `true`（可在报告编辑页
-   「导出记录」中确认，或看 worker 日志 `LibreOffice 目录更新完成`）。
-
-### 4.3 资源调优建议
-
-- **并发**：本模块已用进程内线程锁 + 跨进程文件锁将 soffice 调用串行化，
-  避免同 profile 锁冲突与内存峰值叠加；2 核机器上并发导出时目录更新排队执行。
-- **超时**：单次更新默认 180s（`VP_LIBREOFFICE_TIMEOUT`）。首次运行 LibreOffice
-  需初始化 user profile（隔离目录位于系统临时目录 `talos_lo_profile/`，后续复用，
-  无需每次重建）。
-- **隔离 profile**：代码通过 `-env:UserInstallation` 使用独立 profile，与
-  Gotenberg 内部 LibreOffice 互不干扰，也不会污染用户主目录。
-- **字体**：已随镜像安装 `fonts-noto-cjk`（中文）与 `fonts-liberation`
-  （等宽替代），保证报告在服务端排版时中英文不出现豆腐块。
-- **关闭开关**：临时不想用（如内存紧张）可设 `VP_UPDATE_TOC_WITH_LIBREOFFICE=false`，
-  前端会回到「提示手动更新」模式，无需改代码。
-
-### 4.4 非容器（宿主机）部署
-
-Ubuntu 22.04 不提供 `-nogui` 变体包，用 `--no-install-recommends` 避免拉入
-Java / GNOME 集成等推荐依赖：
-
-```bash
-sudo apt-get update
-sudo apt-get install -y --no-install-recommends \
-  libreoffice-writer fonts-noto-cjk fonts-liberation
-```
-
-安装后 `soffice` 在 PATH 中即可被 worker 的 `update_toc_in_docx` 自动发现
-（`backend/app/services/libreoffice_toc.py` 支持 `soffice` / `libreoffice`
-可执行名与 Windows 常见安装路径）。
+   之后 `docker compose build` / `docker pull` 均走腾讯云加速，构建 `worker`
+   镜像时拉取 `python:3.12-slim-bookworm` 等基础镜像明显提速。
 
 ---
 
@@ -230,7 +181,7 @@ bash scripts/backup.sh
 
 ---
 
-## 五、更换 VPS：平滑迁移不丢数据
+## 六、更换 VPS：平滑迁移不丢数据
 
 需要迁移的只有三样：**数据库**、**上传文件**、**`.env`**。步骤：
 

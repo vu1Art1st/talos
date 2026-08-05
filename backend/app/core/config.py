@@ -38,11 +38,11 @@ class Settings(BaseSettings):
 
     GOTENBERG_URL: str = "http://localhost:3000"
 
-    # LibreOffice 目录自动更新：为 True 时导出 docx 后尝试用 soffice 宏刷新 TOC 域；
-    # 环境未安装 LibreOffice 或关闭开关时，由前端提示用户打开 Word 手动更新（F9）
-    UPDATE_TOC_WITH_LIBREOFFICE: bool = True
-    # 单次 soffice 宏更新的超时秒数（小服务器首次初始化 profile 较慢）
-    LIBREOFFICE_TIMEOUT: int = 180
+    # 报告图片压缩：重采样分辨率上限（最长边像素）、JPEG 质量、正文图片统一宽度（cm）
+    # 用于解决高分辨率截图（2-3MB/张）导致报告 docx 体积过大（>20MB）的问题
+    REPORT_IMAGE_MAX_PX: int = 1600
+    REPORT_IMAGE_QUALITY: int = 85
+    REPORT_IMAGE_WIDTH_CM: float = 14.0
 
     # 报告导出 Word 基底模板，默认使用包内模板，可用环境变量指向定制文件
     REPORT_TEMPLATE: str = str(Path(__file__).resolve().parent.parent / "templates" / "report_template.docx")
