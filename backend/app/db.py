@@ -65,6 +65,10 @@ async def _migrate_lightweight() -> None:
         export_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(export_jobs)"))).fetchall()}
         if export_cols and "title" not in export_cols:
             await conn.execute(text("ALTER TABLE export_jobs ADD COLUMN title VARCHAR(255) NOT NULL DEFAULT ''"))
+        if export_cols and "toc_auto_updated" not in export_cols:
+            await conn.execute(
+                text("ALTER TABLE export_jobs ADD COLUMN toc_auto_updated BOOLEAN NOT NULL DEFAULT 0")
+            )
         spring_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(spring_actions)"))).fetchall()}
         if spring_cols and "year" not in spring_cols:
             await conn.execute(text("ALTER TABLE spring_actions ADD COLUMN year VARCHAR(8) NOT NULL DEFAULT ''"))

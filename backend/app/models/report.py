@@ -1,9 +1,9 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.db import Base
 
 
@@ -25,8 +25,8 @@ class Report(Base):
     revision: Mapped[int] = mapped_column(Integer, default=0)  # 编辑乐观锁：每次保存 +1
     testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
     sections: Mapped[list["ReportSection"]] = relationship(
         back_populates="report",
@@ -60,6 +60,8 @@ class ExportJob(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/running/done/failed
     file_path: Mapped[str] = mapped_column(String(512), default="")
     error: Mapped[str] = mapped_column(Text, default="")
+    # 导出时是否已用 LibreOffice 自动更新目录域；False 时前端提示用户手动更新
+    toc_auto_updated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

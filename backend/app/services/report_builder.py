@@ -5,6 +5,7 @@
 表4 测试目标 | 表5 时间与人员 | 表6 风险问题汇总
 """
 import copy
+import html as _html_mod
 import re
 from datetime import datetime
 from pathlib import Path
@@ -13,19 +14,34 @@ from urllib.parse import urlparse
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, RGBColor
+from docx.shared import Cm, Pt, RGBColor
 from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
+from pygments import lex
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.lexers.special import TextLexer
+from pygments.token import Token
 
 from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
+from app.core.timeutil import now as tznow  # 系统本地时间（UTC+8）；别名避免遮蔽模块内局部变量 now
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
 _HEADING_OPEN = re.compile(r"<h[1-6][^>]*>", re.IGNORECASE)
 _HEADING_CLOSE = re.compile(r"</h[1-6]>", re.IGNORECASE)
 # 章节快照中「测试状态：」后的初测/复测标记，导出时按漏洞最新 is_retest 重写
 _TEST_STATE = re.compile(r"(测试状态：</strong>)\s*(?:初测|复测)")
+# 代码块：<pre>/<code> 中的换行转 <br/>、缩进空格转 &nbsp;，保证 Word 中保留格式。
+# 同时匹配已转义的 &lt;code&gt;/&lt;pre&gt;（富文本粘贴/Word 导入等场景会把标签存成实体），
+# 避免 Word 中直接显示 `<code>21</code>` 原始标签。
+_REAL_PRE_BLOCK = re.compile(r"<pre[^>]*>(.*?)</pre>", re.DOTALL | re.IGNORECASE)
+_REAL_CODE_BLOCK = re.compile(r"<code[^>]*>(.*?)</code>", re.DOTALL | re.IGNORECASE)
+_ESC_PRE_BLOCK = re.compile(r"&lt;pre[^&]*&gt;(.*?)&lt;/pre&gt;", re.DOTALL | re.IGNORECASE)
+_ESC_CODE_BLOCK = re.compile(r"&lt;code[^&]*&gt;(.*?)&lt;/code&gt;", re.DOTALL | re.IGNORECASE)
+# 超链接标签剥离：仅保留链接文字（需求13：URL 以普通文本展示）
+_LINK_OPEN = re.compile(r"<a\s+[^>]*>", re.IGNORECASE)
+_LINK_CLOSE = re.compile(r"</a>", re.IGNORECASE)
 
 # 汇总表「问题等级」字体颜色，与模板统计段落（超危/高危/中危/低危漏洞N个）保持一致
 _LEVEL_COLORS = {
@@ -67,17 +83,270 @@ def _demote_headings(html: str) -> str:
     return _HEADING_CLOSE.sub("</strong></p>", html)
 
 
-def _add_html(doc: Document, html: str) -> None:
-    html = _localize_images(_demote_headings(html))
-    if not html.strip():
-        return
-    parser = HtmlToDocx()
+# ---------- 代码块：pygments 语法高亮 + 等宽样式（导出到 Word 保持格式） ----------
+
+# 代码块等宽字体；eastAsia 用于代码中的中文注释，避免中文字符走默认字体
+_CODE_FONT = "Consolas"
+_CODE_EAST_FONT = "Microsoft YaHei"
+# 代码块底纹与边框（GitHub 风格浅灰）
+_CODE_BG = "F6F8FA"
+_CODE_BORDER = "D0D7DE"
+# 高亮配色（GitHub 风格）：(父 token 类型, 十六进制颜色, 是否斜体)
+_CODE_TOKEN_STYLE = [
+    (Token.Comment, "6A737D", True),          # 注释：灰 + 斜体
+    (Token.Literal.String, "032F62", False),  # 字符串：深蓝
+    (Token.Literal.Number, "005CC5", False),  # 数字：蓝
+    (Token.Keyword, "D73A49", False),         # 关键字：红
+    (Token.Name.Function, "6F42C1", False),   # 函数名：紫
+    (Token.Name.Class, "6F42C1", False),      # 类名：紫
+    (Token.Name.Builtin, "005CC5", False),    # 内置名：蓝
+    (Token.Name.Namespace, "6F42C1", False),
+    (Token.Name.Constant, "005CC5", False),
+    (Token.Name.Decorator, "D73A49", False),  # 装饰器：红
+    (Token.Operator, "D73A49", False),        # 运算符：红
+    (Token.Generic, "24292E", False),
+]
+_CODE_DEFAULT_COLOR = "24292E"
+
+_LANG_CLASS = re.compile(
+    r'class\s*=\s*["\']?(?:language|lang|brush)[:-]\s*([A-Za-z0-9_+#-]+)', re.IGNORECASE
+)
+
+
+def _extract_lang(tag: str) -> str:
+    """从 <pre>/<code> 标签 class 中提取语言名，如 language-python → python。"""
+    m = _LANG_CLASS.search(tag)
+    return m.group(1).lower() if m else ""
+
+
+def _token_style(ttype) -> tuple[str, bool]:
+    """按 pygments token 类型返回 (颜色, 是否斜体)，未匹配则用默认黑色。"""
+    for parent, color, italic in _CODE_TOKEN_STYLE:
+        if ttype in parent:
+            return color, italic
+    return _CODE_DEFAULT_COLOR, False
+
+
+def _resolve_lexer(code: str, lang: str):
+    """解析代码块语言：
+    - 显式语言标记优先；否则代码足够长（>60 字符）时用 guess_lexer 猜测，
+      避免把 `' or 1=1--` 之类的短片段误判；均失败时退回纯文本 lexer。
+    """
+    if lang:
+        try:
+            return get_lexer_by_name(lang, stripnl=False)
+        except Exception:
+            pass
+    if len(code.strip()) > 60:
+        try:
+            return guess_lexer(code, stripnl=False)
+        except Exception:
+            pass
+    return TextLexer(stripnl=False)
+
+
+def _split_token_lines(tokens: list[tuple]) -> list[list[tuple]]:
+    """把 pygments token 流按换行拆分为多行。"""
+    lines: list[list[tuple]] = [[]]
+    for ttype, value in tokens:
+        while True:
+            idx = value.find("\n")
+            if idx < 0:
+                if value:
+                    lines[-1].append((ttype, value))
+                break
+            head, value = value[:idx], value[idx + 1:]
+            if head:
+                lines[-1].append((ttype, head))
+            lines.append([])
+    return lines
+
+
+def _style_code_run(run, ttype) -> None:
+    """代码 run：等宽字体 + 按 token 类型着色。"""
+    color, italic = _token_style(ttype)
+    run.font.name = _CODE_FONT
+    rpr = run._element.get_or_add_rPr()
+    rfonts = rpr.get_or_add_rFonts()
+    rfonts.set(qn("w:eastAsia"), _CODE_EAST_FONT)
+    run.font.size = Pt(9)
+    run.font.color.rgb = RGBColor.from_string(color)
+    run.italic = italic
+
+
+def _style_code_para(p: Paragraph) -> None:
+    """代码块段落：浅灰底纹 + 单线边框 + 紧凑行距，整体呈代码块外观。"""
+    pf = p.paragraph_format
+    pf.left_indent = Cm(0.4)
+    pf.right_indent = Cm(0.2)
+    pf.space_before = Pt(3)
+    pf.space_after = Pt(3)
+    pf.line_spacing = 1.0
+    pPr = p._p.get_or_add_pPr()
+    pBdr = OxmlElement("w:pBdr")
+    for side in ("top", "left", "bottom", "right"):
+        b = OxmlElement(f"w:{side}")
+        b.set(qn("w:val"), "single")
+        b.set(qn("w:sz"), "4")
+        b.set(qn("w:space"), "3")
+        b.set(qn("w:color"), _CODE_BORDER)
+        pBdr.append(b)
+    pPr.append(pBdr)
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), _CODE_BG)
+    pPr.append(shd)
+
+
+def _add_code_block(doc: Document, code: str, lang: str) -> None:
+    """把代码渲染为一个带边框底纹的段落：行内换行用 w:br，token 逐个着色。"""
+    lexer = _resolve_lexer(code, lang)
     try:
-        parser.add_html_to_document(html, doc)
+        tokens = list(lex(code, lexer))
     except Exception:
-        # 富文本转换失败时降级为纯文本，避免导出整体失败
-        text = re.sub(r"<[^>]+>", "", html)
-        doc.add_paragraph(text)
+        tokens = [(Token.Text, code)]
+    lines = _split_token_lines(tokens)
+    p = doc.add_paragraph()
+    _style_code_para(p)
+    first = True
+    for line in lines:
+        if not first:
+            p.add_run().add_break()
+        first = False
+        for ttype, value in line:
+            run = p.add_run(value)
+            _style_code_run(run, ttype)
+
+
+def _esc_code_to_real(m: re.Match) -> str:
+    """转义实体 &lt;code&gt;：多行还原为 <pre> 代码块，单行还原为真 <code> 标签。"""
+    content = m.group(1)
+    if "\n" in content or "<br" in content.lower():
+        return f"<pre>{content}</pre>"
+    return f"<code>{content}</code>"
+
+
+def _strip_code_wrap(inner: str) -> str:
+    """去掉 <pre> 内容外层可能存在的 <code> 包裹标签。"""
+    inner = re.sub(r"^\s*<code[^>]*>", "", inner, count=1)
+    inner = re.sub(r"</code>\s*$", "", inner, count=1)
+    return inner.strip()
+
+
+def _split_inline_codes(fragment: str) -> list[tuple[str, str, str]]:
+    """把 <pre> 之外的片段按多行 <code> 再分割（提升为代码块）。
+
+    单行行内 <code> 不分割、保留在 html 片段中（htmldocx 以等宽字体渲染），
+    避免 tiptap/Word 常见 `<pre><code>...</code></pre>` 结构被二次处理。"""
+    parts: list[tuple[str, str, str]] = []
+    last = 0
+    for m in _REAL_CODE_BLOCK.finditer(fragment):
+        content = m.group(1)
+        if "\n" not in content and "<br" not in content.lower():
+            continue  # 单行 code 留在 html 段
+        if m.start() > last:
+            parts.append(("html", fragment[last:m.start()], ""))
+        parts.append(("code", _html_mod.unescape(content), _extract_lang(m.group(0))))
+        last = m.end()
+    if not parts:
+        return [("html", fragment, "")]
+    if last < len(fragment):
+        parts.append(("html", fragment[last:], ""))
+    return parts
+
+
+def _split_blocks(html: str) -> list[tuple[str, str, str]]:
+    """把富文本 HTML 分割为交替的 html / code 片段。
+
+    返回 [(kind, content, lang)]，kind ∈ {"html", "code"}：
+    - 真标签 <pre>、多行 <code> 以及转义实体 &lt;pre&gt;/&lt;code&gt;（多行）识别为代码块；
+    - 单行行内 <code> 保留在 html 片段中，由 htmldocx 以等宽字体渲染。
+    """
+    html = html or ""
+    # 1) 转义实体还原（富文本粘贴 / Word 导入会把标签存成 &lt;...&gt;）
+    html = _ESC_PRE_BLOCK.sub(lambda m: f"<pre>{m.group(1)}</pre>", html)
+    html = _ESC_CODE_BLOCK.sub(_esc_code_to_real, html)
+    # 2) 按 <pre> 分割（<pre> 内部的 <code> 在提取时剥掉，避免嵌套 pre）
+    parts: list[tuple[str, str, str]] = []
+    pos = 0
+    for m in _REAL_PRE_BLOCK.finditer(html):
+        if m.start() > pos:
+            parts.extend(_split_inline_codes(html[pos:m.start()]))
+        parts.append((
+            "code",
+            _html_mod.unescape(_strip_code_wrap(m.group(1))),
+            _extract_lang(m.group(0)),
+        ))
+        pos = m.end()
+    if pos < len(html):
+        parts.extend(_split_inline_codes(html[pos:]))
+    return parts or [("html", html, "")]
+
+
+def _strip_links(html: str) -> str:
+    """剥离 <a href> 超链接标签，仅保留链接文字（需求13：URL 以普通文本展示）。"""
+    return _LINK_CLOSE.sub("", _LINK_OPEN.sub("", html or ""))
+
+
+def _color_vuln_levels(html: str) -> str:
+    """漏洞章节中的「漏洞等级：」文字着色，颜色与风险汇总一致（需求14）。
+
+    使用 htmldocx 支持的 <span style="color: #rrggbb"> 内联样式（其 color 处理
+    支持 #hex 形式），将「漏洞等级：高危」等文字染上与风险汇总一致的颜色。"""
+    for label, color in _LEVEL_COLORS.items():
+        # 仅处理「漏洞等级：」后紧跟该等级文字的片段，避免误伤正文
+        html = re.sub(
+            rf"(<strong>漏洞等级：</strong>)\s*{label}",
+            rf'\g<1><span style="color: #{color}">{label}</span>',
+            html,
+        )
+    return html
+
+
+def _number_vuln_urls(html: str) -> str:
+    """漏洞章节「漏洞链接：」内容排版（需求14/需求3）。
+
+    - 链接一律另起一行展示（不在「漏洞链接：」标签后紧跟）；
+    - 单个链接直接换行展示；多个链接自动编号并按行排列。"""
+    def _repl(m: re.Match) -> str:
+        urls = [u.strip() for u in re.split(r"<br\s*/?>", m.group(2)) if u.strip()]
+        if not urls:
+            return m.group(0)
+        if len(urls) == 1:
+            # 单个链接：另起一行，不带编号
+            return f"{m.group(1)}<br/>{urls[0]}"
+        numbered = "<br/>".join(f"{i}. {u}" for i, u in enumerate(urls, 1))
+        return f"{m.group(1)}<br/>{numbered}"
+
+    return re.sub(
+        r"(<strong>漏洞链接：</strong>)(.*?)(</p>)",
+        _repl,
+        html or "",
+        flags=re.DOTALL,
+    )
+
+
+def _add_html(doc: Document, html: str) -> None:
+    html = _localize_images(_demote_headings(html or ""))
+    for kind, content, lang in _split_blocks(html):
+        if kind == "code":
+            try:
+                _add_code_block(doc, content, lang)
+            except Exception:
+                # 高亮失败时降级为无高亮的等宽纯文本代码块
+                _add_code_block(doc, content, "")
+            continue
+        text = _strip_links(content)
+        if not text.strip():
+            continue
+        parser = HtmlToDocx()
+        try:
+            parser.add_html_to_document(text, doc)
+        except Exception:
+            # 富文本转换失败时降级为纯文本，避免导出整体失败
+            plain = re.sub(r"<[^>]+>", "", text)
+            doc.add_paragraph(plain)
 
 
 def _set_para_text(para: Paragraph, text: str) -> None:
@@ -343,6 +612,9 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
             # 测试状态：按漏洞最新 is_retest 重写快照（复测未通过也属于复测）
             state = "复测" if vul.get("is_retest") else "初测"
             content_html = _TEST_STATE.sub(rf"\g<1>{state}", content_html)
+            # 漏洞等级颜色与风险汇总一致、漏洞链接逐条编号另起一行（需求14）
+            content_html = _color_vuln_levels(content_html)
+            content_html = _number_vuln_urls(content_html)
             # 修复中且经历过复测 = 复测未通过打回，展示层区分（状态码不变）
             status_name = VUL_STATUS.get(vul.get("status"), "-")
             if vul.get("status") == VulStatus.FIXING and vul.get("is_retest"):
@@ -356,6 +628,43 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
         if retest and "复测详情" not in (content_html or ""):
             _add_html(doc, f"<p><strong>复测详情：</strong></p>{retest}")
         _apply_field_spacing(doc, body_start)
+
+
+def _build_toc_field(doc: Document) -> None:
+    """恢复模板表3中的 TOC 域（回退方案：目录由 Word/WPS/LibreOffice 打开时刷新）。
+
+    模板表3 结构：row0 =「目录」标题，row1 = TOC 域单元格。这里清空 row1 中
+    缓存的旧目录条目，重建一个干净的 TOC 域（w:fldChar begin/instrText/separate/end）：
+    - 域指令 `TOC \\o "1-3" \\h \\z \\u`：收录 1-3 级内置标题、条目带超链接、
+      隐藏制表符前导符、按大纲级别收集；
+    - separate 后保留一段提示占位文本，打开文档更新域后会被真实目录替换；
+    - 配合 _enable_update_fields（w:updateFields=true）让 Word/WPS 打开时自动刷新。
+    """
+    table = doc.tables[3]
+    if len(table.rows) < 2:
+        return
+    toc_cell = table.rows[1].cells[0]
+    # 清空原 TOC 域所在单元格的全部段落（含缓存的目录条目）
+    for p in list(toc_cell.paragraphs):
+        p._element.getparent().remove(p._element)
+    para = toc_cell.add_paragraph()
+    run = para.add_run()
+    r_el = run._r
+    begin = OxmlElement("w:fldChar")
+    begin.set(qn("w:fldCharType"), "begin")
+    instr = OxmlElement("w:instrText")
+    instr.set(qn("xml:space"), "preserve")
+    instr.text = ' TOC \\o "1-3" \\h \\z \\u '
+    separate = OxmlElement("w:fldChar")
+    separate.set(qn("w:fldCharType"), "separate")
+    # 未更新域前的占位提示；打开文档按 F9 / 右键目录「更新域」即替换为真实目录
+    placeholder = OxmlElement("w:t")
+    placeholder.set(qn("xml:space"), "preserve")
+    placeholder.text = "（目录占位：打开文档后右键目录 → 更新域，或按 F9 刷新生成完整目录）"
+    end = OxmlElement("w:fldChar")
+    end.set(qn("w:fldCharType"), "end")
+    for el in (begin, instr, separate, placeholder, end):
+        r_el.append(el)
 
 
 def _enable_update_fields(doc: Document) -> None:
@@ -414,7 +723,7 @@ def build_report_docx(
         raise FileNotFoundError(f"报告模板不存在: {template}")
 
     doc = Document(str(template))
-    now = datetime.now()
+    now = tznow()
 
     _fill_cover(doc, meta, now)
     _fill_applicability(doc, meta)
@@ -424,6 +733,7 @@ def build_report_docx(
     _fill_summary(doc, meta, vulns)
     _remove_sample_details(doc)
     _append_details(doc, vulns, sections)
+    _build_toc_field(doc)
     _fit_images(doc)
     _enable_update_fields(doc)
 

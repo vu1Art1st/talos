@@ -23,7 +23,8 @@
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange">
       <el-table-column type="selection" width="50" />
-      <el-table-column prop="id" label="ID" width="70" sortable="custom" />
+      <el-table-column type="index" label="序号" width="70"
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="author" label="作者" width="120" sortable="custom" />
@@ -62,7 +63,7 @@
       <el-form-item label="关联测试计划">
         <el-select v-model="genPlanId" clearable filterable class="w-full"
                    placeholder="可选，关联后联动计划状态" @change="onPlanChange">
-          <el-option v-for="p in plans" :key="p.id" :label="`#${p.id} ${p.system_name}`" :value="p.id" />
+          <el-option v-for="p in plans" :key="p.id" :label="p.system_name" :value="p.id" />
         </el-select>
       </el-form-item>
       <el-form-item label="报告标题">
@@ -70,7 +71,7 @@
       </el-form-item>
       <el-form-item label="选择漏洞">
         <el-select v-model="genVulIds" multiple filterable class="w-full" placeholder="可多选">
-          <el-option v-for="v in vulns" :key="v.id" :label="`#${v.id} ${v.title}`" :value="v.id" />
+          <el-option v-for="v in vulns" :key="v.id" :label="v.title" :value="v.id" />
         </el-select>
       </el-form-item>
     </el-form>
@@ -84,7 +85,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -149,8 +150,18 @@ async function batchDownload() {
       if (done.length < all.length) {
         ElMessage.warning(`部分报告导出失败（${all.length - done.length} 份），已跳过失败项`)
       }
-      if (done.length) await downloadZip(jobIds)
-      else ElMessage.error('所选报告均导出失败，请检查后重试')
+      if (done.length) {
+        await downloadZip(jobIds)
+        // 服务器未部署 LibreOffice 时目录域未自动更新，提示用户手动刷新
+        if (done.some((j: any) => j.fmt === 'docx' && !j.toc_auto_updated)) {
+          ElMessageBox.alert(
+            '当前服务器未部署 LibreOffice，部分 Word 报告的目录未自动更新。\n\n' +
+            '打开 Word/WPS 后请右键目录 →「更新域」→「更新整个目录」（或全选后按 F9）刷新目录。',
+            '目录需手动更新',
+            { confirmButtonText: '知道了', type: 'warning' },
+          )
+        }
+      } else ElMessage.error('所选报告均导出失败，请检查后重试')
       return
     }
     ElMessage.error('导出超时，请稍后重试')

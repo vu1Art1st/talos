@@ -9,7 +9,7 @@ Talos（塔罗斯）取名自希腊神话中守卫克里特岛的青铜巨人—
 - **漏洞全生命周期管理**：待审核 → 确认 → 修复中 → 复测 → 完成 的状态机流转，全程操作日志审计
 - **Word 文档导入**：按固定模板上传 Word 报告，后台自动解析生成漏洞记录（含图片提取），预览确认后批量入库
 - **在线报告编辑**：TipTap 富文本编辑器，支持表格/图片/代码块，自动保存 + 乐观锁防冲突，可一键插入已有漏洞章节
-- **报告导出**：一键导出 Word（docx）与 PDF（Gotenberg / LibreOffice 引擎），版式一致
+- **报告导出**：一键导出 Word（docx）与 PDF（Gotenberg / LibreOffice 引擎），版式一致；目录以 TOC 域承载，检测到 LibreOffice 时自动刷新，否则提示用户打开文档后更新域
 - **安全态势 Dashboard**：漏洞趋势、等级/状态/类型分布、修复率等 ECharts 可视化
 - **RBAC 权限**：JWT（access/refresh）认证，角色-权限点模型，前端菜单/按钮级控制
 - **应用与资产管理**：应用、资产台账与漏洞关联
@@ -21,7 +21,7 @@ Talos（塔罗斯）取名自希腊神话中守卫克里特岛的青铜巨人—
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
 | 数据库/队列 | PostgreSQL 16 · Redis · arq 异步任务队列 |
 | 前端 | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
-| 文档处理 | python-docx（解析）· htmldocx（导出）· Gotenberg（PDF 转换） |
+| 文档处理 | python-docx（解析）· htmldocx + pygments（导出）· LibreOffice 宏（目录更新）· Gotenberg（PDF 转换） |
 | 部署 | Docker Compose（api / worker / frontend / postgres / redis / gotenberg） |
 
 ## 目录结构

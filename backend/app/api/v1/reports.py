@@ -1,6 +1,5 @@
 import html as html_mod
 import logging
-from datetime import date
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -14,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LEVEL_EXPORT
 from app.core.deps import require_perm
+from app.core.timeutil import now
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
@@ -173,7 +173,7 @@ async def create_report_from_vulns(
         if plan.status in (10, 20):
             plan.status = 30
         if not plan.first_test_done_time:
-            plan.first_test_done_time = date.today().isoformat()
+            plan.first_test_done_time = now().date().isoformat()
     await session.commit()
     await session.refresh(report)
     return report
@@ -209,12 +209,18 @@ async def batch_export(
             )
         ).scalar_one_or_none()
         if done is not None and done.file_path and Path(done.file_path).exists():
-            jobs.append({"report_id": rid, "job_id": done.id, "status": "done", "title": report.title})
+            jobs.append({
+                "report_id": rid, "job_id": done.id, "status": "done", "title": report.title,
+                "toc_auto_updated": done.toc_auto_updated,
+            })
             continue
         job = ExportJob(report_id=rid, title=report.title, fmt=fmt, creator_id=user.id)
         session.add(job)
         await session.flush()
-        jobs.append({"report_id": rid, "job_id": job.id, "status": job.status, "title": report.title})
+        jobs.append({
+            "report_id": rid, "job_id": job.id, "status": job.status, "title": report.title,
+            "toc_auto_updated": job.toc_auto_updated,
+        })
         pending.append(job)
     await session.commit()
     for job in pending:
@@ -237,7 +243,7 @@ async def export_jobs_status(
     ).scalars().all()
     return [
         {"job_id": j.id, "report_id": j.report_id, "status": j.status,
-         "error": j.error, "title": j.title}
+         "error": j.error, "title": j.title, "toc_auto_updated": j.toc_auto_updated}
         for j in rows
     ]
 
@@ -416,7 +422,7 @@ async def export_report(
             if earliest is not None:
                 report.test_start = earliest.date().isoformat()
         if not report.test_end:
-            report.test_end = date.today().isoformat()
+            report.test_end = now().date().isoformat()
     job = ExportJob(report_id=report_id, title=report.title, fmt=body.fmt, creator_id=user.id)
     session.add(job)
     await session.commit()
