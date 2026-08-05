@@ -13,6 +13,7 @@ test_vp.db
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.bak*
 
 # 本地存储与备份产物（含业务数据，勿入库）
 /storage/
@@ -35,6 +36,12 @@ dist/
 frontend/*.png
 *.log
 /2026*.docx
+
+# 调试临时产物（时区/环境排查记录等，勿入库）
+/_db.txt
+/_proc*.txt
+/_venv.txt
+/backend/_tz.txt
 
 # 本地 IDE / 工具配置（repowiki 知识库等）
 .qoder/

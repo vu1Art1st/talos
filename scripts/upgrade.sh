@@ -39,13 +39,17 @@ command -v docker >/dev/null || {
 OLD_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "========== Talos 升级开始（当前版本 ${OLD_COMMIT}）=========="
 
-# [1/5] 升级前备份（仅当数据库容器在运行时）
+# [1/5] 升级前备份（仅当 postgres 与 api 容器都在运行时）
+# backup.sh 同时需要 postgres（导出数据）与 api（打包 storage 卷），缺一不可；
+# 两者未同时运行就跳过备份，避免备份半途失败反而中断升级。
 if [ "${DO_BACKUP}" -eq 1 ]; then
-  if [ -n "$(docker compose ps -q postgres 2>/dev/null)" ]; then
+  if [ -n "$(sudo docker compose ps -q postgres 2>/dev/null)" ] \
+    && [ -n "$(sudo docker compose ps -q api 2>/dev/null)" ]; then
     echo "[1/5] 升级前备份"
     bash scripts/backup.sh
   else
-    echo "[1/5] 未检测到运行中的数据库，跳过备份（首次部署无需备份）"
+    echo "[1/5] postgres 或 api 容器未运行，跳过升级前备份（首次部署无需备份）"
+    echo "     如需强制备份，请先执行: sudo docker compose up -d 再重试"
   fi
 else
   echo "[1/5] 按参数跳过备份"
