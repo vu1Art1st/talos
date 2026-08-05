@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sqlalchemy import select  # noqa: E402
 
 from app.core.security import hash_password  # noqa: E402
+from app.core.timeutil import now  # noqa: E402
 from app.db import async_session_maker, init_db  # noqa: E402
 from app.models import App, Asset, Group, Role, User, Vul, VulLog  # noqa: E402
 
@@ -148,7 +149,7 @@ async def migrate(args) -> None:
                 delay_reason=ov.get("delay_reason") or "",
                 app_id=app_map.get(ov.get("app_id")),
                 submitter_id=user_map.get(ov.get("user_id")),
-                submit_time=ts(ov.get("submit_time")) or datetime.utcnow(),
+                submit_time=ts(ov.get("submit_time")) or now(),
                 audit_time=ts(ov.get("audit_time")),
                 notice_time=ts(ov.get("notice_time")),
                 fix_time=ts(ov.get("fix_time")),
@@ -171,7 +172,7 @@ async def migrate(args) -> None:
                 username=ol.get("username") or "",
                 action=ol.get("action") or "",
                 content=ol.get("content") or "",
-                create_time=ts(ol.get("create_time")) or datetime.utcnow(),
+                create_time=ts(ol.get("create_time")) or now(),
             ))
             migrated_logs += 1
         print(f"漏洞日志迁移完成: {migrated_logs}")

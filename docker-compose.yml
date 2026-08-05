@@ -6,6 +6,8 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-vulnplatform}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: ${POSTGRES_DB:-vulnplatform}
+      # 全容器统一系统时区：UTC+8 北京时间
+      TZ: Asia/Shanghai
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,6 +19,8 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,6 +30,8 @@ services:
   gotenberg:
     image: gotenberg/gotenberg:8
     restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
     command: ["gotenberg", "--api-timeout=120s"]
 
   api:
@@ -35,6 +41,8 @@ services:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
     restart: unless-stopped
     environment: &backend_env
+      TZ: Asia/Shanghai
+      VP_TIMEZONE: ${VP_TIMEZONE:-Asia/Shanghai}
       VP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vulnplatform}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vulnplatform}
       VP_REDIS_URL: redis://redis:6379/0
       VP_GOTENBERG_URL: http://gotenberg:3000
@@ -53,6 +61,8 @@ services:
       context: ./backend
       args:
         PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        # 设为 1 时在 worker 镜像内最小化安装 LibreOffice，导出报告后自动更新目录域
+        ENABLE_LIBREOFFICE: ${ENABLE_LIBREOFFICE:-0}
     restart: unless-stopped
     command: ["arq", "app.workers.main.WorkerSettings"]
     environment: *backend_env

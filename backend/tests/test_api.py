@@ -497,12 +497,12 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     assert resp.content[:2] == b"PK"  # docx 是 zip 容器
 
     # 导出成功后导出版本 +1；测试周期在字段为空时自动预填（开始=最早提交日期，结束=当天）
-    from datetime import date as _date
+    from app.core.timeutil import now as _tnow
 
     after = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
     assert after["version"] == saved["version"] + 1
     assert after["test_start"]
-    assert after["test_end"] == _date.today().isoformat()
+    assert after["test_end"] == _tnow().date().isoformat()
 
     # 产物基于渗透测试报告模板：验证封面系统名称、测试目标 IP、汇总表与详情标题
     from io import BytesIO

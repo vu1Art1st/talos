@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     APP_VERSION: str = "0.9.1"
     DEBUG: bool = False
+    # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
+    TIMEZONE: str = "Asia/Shanghai"
 
     SECRET_KEY: str = "please-change-me-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
@@ -35,6 +37,12 @@ class Settings(BaseSettings):
     DISABLE_QUEUE: bool = False
 
     GOTENBERG_URL: str = "http://localhost:3000"
+
+    # LibreOffice 目录自动更新：为 True 时导出 docx 后尝试用 soffice 宏刷新 TOC 域；
+    # 环境未安装 LibreOffice 或关闭开关时，由前端提示用户打开 Word 手动更新（F9）
+    UPDATE_TOC_WITH_LIBREOFFICE: bool = True
+    # 单次 soffice 宏更新的超时秒数（小服务器首次初始化 profile 较慢）
+    LIBREOFFICE_TIMEOUT: int = 180
 
     # 报告导出 Word 基底模板，默认使用包内模板，可用环境变量指向定制文件
     REPORT_TEMPLATE: str = str(Path(__file__).resolve().parent.parent / "templates" / "report_template.docx")

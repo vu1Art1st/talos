@@ -6,7 +6,7 @@ from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL
 from app.core.deps import get_current_user, require_perm, user_permissions
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
-from app.models import Asset, User, Vul, VulLog, VulRetestRecord
+from app.models import Asset, TestingPlan, User, Vul, VulLog, VulRetestRecord
 from app.schemas import (
     Page,
     VulBatchDeleteIn,
@@ -35,12 +35,30 @@ def build_vul_out(vul: Vul) -> VulOut:
 
 
 async def _check_plan_access(session: AsyncSession, plan_id: int | None, user: User) -> None:
-    """漏洞关联测试计划时：计划必须存在，且操作者为认领者或管理员。"""
+    """漏洞关联测试计划时：计划必须存在，且操作者为该计划的认领者。
+
+    录入漏洞阶段严格要求认领关系（管理员未认领也不放行），
+    避免非认领账号把漏洞挂到其他测试计划下。"""
     if plan_id is None:
         return
     plan = await plan_service.get_plan_or_400(session, plan_id)
-    if not plan_service.can_operate(user, plan):
-        raise HTTPException(403, "请先认领该测试计划后再录入漏洞")
+    if not plan_service.is_plan_claimant(user, plan):
+        raise HTTPException(403, "仅已认领该测试计划的账号可录入漏洞，请先认领该计划")
+
+
+async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) -> None:
+    """漏洞修改权限（录入漏洞阶段仅认领该计划的账号可修改）。
+
+    - 已关联测试计划：仅认领该计划的账号（管理员未认领也不放行）可编辑；
+    - 未关联计划：提交人或漏洞管理员（含 *）可编辑。"""
+    if vul.testing_plan_id is not None:
+        plan = await session.get(TestingPlan, vul.testing_plan_id)
+        if plan is not None and not plan_service.is_plan_claimant(user, plan):
+            raise HTTPException(403, "该漏洞已关联测试计划，仅已认领该计划的账号可修改")
+        return
+    perms = user_permissions(user)
+    if "*" not in perms and "vuln:manage" not in perms and vul.submitter_id != user.id:
+        raise HTTPException(403, "只有提交人或漏洞管理员可以编辑")
 
 
 async def _fetch_assets(session: AsyncSession, asset_ids: list[int]) -> list[Asset]:
@@ -163,9 +181,7 @@ async def update_vuln(
     session: AsyncSession = Depends(get_session),
 ):
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
-    perms = user_permissions(user)
-    if "*" not in perms and "vuln:manage" not in perms and vul.submitter_id != user.id:
-        raise HTTPException(403, "只有提交人或漏洞管理员可以编辑")
+    await _check_vul_edit_access(session, vul, user)
     data = body.model_dump()
     asset_ids = data.pop("asset_ids", [])
     new_status = data.pop("status", None)

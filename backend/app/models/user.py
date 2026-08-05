@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.timeutil import utcnow as _utcnow
+from app.core.timeutil import now as _now
 from app.db import Base
 
 
@@ -14,7 +14,7 @@ class Role(Base):
     name: Mapped[str] = mapped_column(String(64), unique=True)
     permissions: Mapped[list] = mapped_column(JSON, default=list)
     remark: Mapped[str] = mapped_column(String(255), default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     users: Mapped[list["User"]] = relationship(back_populates="role")
 
@@ -35,7 +35,7 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(default=0)
     role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id"), nullable=True)
     remark: Mapped[str] = mapped_column(Text, default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     role: Mapped[Role | None] = relationship(back_populates="users", lazy="selectin")
@@ -51,7 +51,7 @@ class Group(Base):
     owner_phone: Mapped[str] = mapped_column(String(32), default="")
     owner_email: Mapped[str] = mapped_column(String(128), default="")
     remark: Mapped[str] = mapped_column(String(255), default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
 
 class GroupUser(Base):
@@ -78,4 +78,4 @@ class GroupMember(Base):
     name: Mapped[str] = mapped_column(String(64))
     phone: Mapped[str] = mapped_column(String(32), default="")
     email: Mapped[str] = mapped_column(String(128), default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)

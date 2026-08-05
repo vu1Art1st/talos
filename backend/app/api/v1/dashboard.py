@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
 from app.core.deps import require_perm
-from app.core.timeutil import utcnow
+from app.core.timeutil import now as tznow
 from app.db import get_session
 from app.models import Asset, TestingPlan, User, Vul
 
@@ -87,14 +87,14 @@ async def stats(
     ]
 
     # 近12个月提交趋势（数据库无关：取一年内数据在应用层聚合），叠加筛选条件
-    since = utcnow() - timedelta(days=365)
+    since = tznow() - timedelta(days=365)
     rows = (
         await session.execute(
             select(Vul.submit_time, Vul.status).where(Vul.submit_time >= since, *vul_cond)
         )
     ).all()
     trend: dict[str, dict[str, int]] = {}
-    now = utcnow()
+    now = tznow()
     for i in range(11, -1, -1):
         month = (now.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m")
         trend.setdefault(month, {"submitted": 0, "fixed": 0})

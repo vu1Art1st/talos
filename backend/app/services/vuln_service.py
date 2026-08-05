@@ -1,5 +1,5 @@
 """漏洞生命周期状态机（简化版：未修复 → 修复中 → 复测中 → 已修复/已忽略/暂不处理）。"""
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -33,7 +33,7 @@ async def transition(
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)
     if ts_field:
-        setattr(vul, ts_field, utcnow())
+        setattr(vul, ts_field, now())
     if target == VulStatus.RETESTING:
         vul.is_retest = True
 
@@ -77,7 +77,7 @@ def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, com
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)
     if ts_field:
-        setattr(vul, ts_field, utcnow())
+        setattr(vul, ts_field, now())
     if target == VulStatus.RETESTING:
         vul.is_retest = True
     add_log(session, vul, operator, f"{VUL_STATUS[old_status]} → {VUL_STATUS[target]}", comment)
@@ -110,8 +110,6 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
     - 某报告关联的全部漏洞均为「已修复/已忽略」时，报告自动标记 completed，关联计划进入「复测完成」；
     - 反向：已 completed 的报告出现未闭环漏洞（如已修复改回未修复）时，报告回退 draft，
       关联计划由「复测完成」回退「复测中」并重开最近一轮复测。"""
-    from datetime import date
-
     from app.models import Report, ReportSection, TestingPlan
     from app.services import plan_service
 
@@ -145,7 +143,7 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
                 if plan is not None:
                     plan.status = PlanStatus.RETEST_DONE  # 复测完成
                     if not plan.retest_done_time:
-                        plan.retest_done_time = date.today().isoformat()
+                        plan.retest_done_time = now().date().isoformat()
                     # 当前复测轮次闭环，打完成点
                     plan_service.finish_retest_round(plan)
         elif not all_closed and report.status == "completed":

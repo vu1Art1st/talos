@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.db import Base
 
 
@@ -19,7 +19,7 @@ class DictOption(Base):
     category: Mapped[str] = mapped_column(String(32), index=True)
     name: Mapped[str] = mapped_column(String(64))
     sort: Mapped[int] = mapped_column(Integer, default=0)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
 
 
 class VulnType(Base):
@@ -37,4 +37,4 @@ class VulnType(Base):
     name: Mapped[str] = mapped_column(String(64))
     sort: Mapped[int] = mapped_column(Integer, default=0)
     is_builtin: Mapped[bool] = mapped_column(Boolean, default=False)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)

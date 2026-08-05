@@ -13,7 +13,7 @@ from app.core.security import (
     hash_password,
     verify_password,
 )
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.db import get_session
 from app.models import User
 from app.schemas import PasswordIn, RefreshIn, TokenOut, UserOut
@@ -49,7 +49,7 @@ async def login(
     if not user.is_active:
         raise HTTPException(403, "账号已禁用")
     await clear_failures(fail_key)
-    user.last_login = utcnow()
+    user.last_login = now()
     await session.commit()
     return TokenOut(
         access_token=create_access_token(user.id, user.token_version),

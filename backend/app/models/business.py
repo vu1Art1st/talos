@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.db import Base
 
 # 漏洞-资产多对多关联表
@@ -51,8 +51,8 @@ class Asset(Base):
     status: Mapped[int] = mapped_column(Integer, default=10)
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
     remark: Mapped[str] = mapped_column(Text, default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
 class Vul(Base):
@@ -92,11 +92,11 @@ class Vul(Base):
 
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
-    submit_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    submit_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     audit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notice_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fix_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
     assets: Mapped[list[Asset]] = relationship(secondary=vuln_assets, lazy="selectin")
     logs: Mapped[list["VulLog"]] = relationship(back_populates="vul", cascade="all, delete-orphan")
@@ -113,8 +113,8 @@ class VulRetestRecord(Base):
     content_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     username: Mapped[str] = mapped_column(String(64), default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
 
 class VulLog(Base):
@@ -126,7 +126,7 @@ class VulLog(Base):
     username: Mapped[str] = mapped_column(String(64), default="")
     action: Mapped[str] = mapped_column(String(64), default="")
     content: Mapped[str] = mapped_column(Text, default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
 
     vul: Mapped[Vul] = relationship(back_populates="logs")
 
@@ -140,4 +140,4 @@ class Message(Base):
     title: Mapped[str] = mapped_column(String(255), default="")
     content: Mapped[str] = mapped_column(Text, default="")
     is_read: Mapped[bool] = mapped_column(default=False)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)

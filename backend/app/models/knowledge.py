@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.db import Base
 
 
@@ -33,5 +33,5 @@ class KnowledgeEntry(Base):
     references: Mapped[list | None] = mapped_column(JSON, default=list)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     username: Mapped[str] = mapped_column(String(64), default="")
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

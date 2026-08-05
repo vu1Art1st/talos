@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from app.constants import DOCX_MIME
 from app.core.config import settings
 from app.core.query import get_or_404, paginate, apply_sort
-from app.core.timeutil import utcnow
+from app.core.timeutil import now
 from app.core.deps import require_perm
 from app.db import get_session
 from app.models import Asset, ImportBatch, ImportRecord, KnowledgeEntry, Report, ReportSection, TestingPlan, User, Vul, VulLog
@@ -320,7 +320,7 @@ async def confirm_batch(
             vul.retest_html = rec.retest_html
             if rec.fixed:
                 vul.status = 60  # 报告中标记已修复
-                vul.fix_time = utcnow()
+                vul.fix_time = now()
             elif is_retest:
                 vul.status = 55  # 复测报告中仍未修复：进入复测中，可在报告编辑页填写复测结论
         if asset is not None:
