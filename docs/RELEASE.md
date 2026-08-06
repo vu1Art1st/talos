@@ -23,6 +23,29 @@
 
 ---
 
+## [0.10.0] - 2026-08-07
+
+报告列表显示生成时间、测试计划聚合筛选、报告导出历史管理与重复导出 / 重复生成检测、复测记录状态联动，以及对应数据库结构迁移。
+
+### 新增
+
+- **报告列表「生成时间」列**（`frontend/src/views/ReportList.vue` / `backend/app/api/v1/reports.py`）：报告列表新增可排序的「生成时间」列（`create_time`），流程抽屉报告项同步展示「生成于 …」，报告概要 schema 补充 `create_time` 字段
+- **报告导出历史管理 + 重复导出检测**（`ReportList.vue` / `PlanWorkflowDrawer.vue` / `reports.py` / `report.py` / `worker/main.py`）：报告列表与流程抽屉改为一键展开查看导出历史版本，支持单条下载 / 预览 / 删除；导出任务记录报告内容指纹（`report_snapshot`：编辑版本 + 更新时间 + 关联漏洞编辑快照），导出前 `POST /reports/{id}/export-check` 检测同格式重复导出，前端弹窗确认「继续导出 / 取消」
+- **报告生成高度相似性检查**（`reports.py` / `ReportList.vue`）：生成 / 保存报告时采集关联漏洞最后编辑时间快照（`reports.vul_edit_snapshot`），再次生成前 `POST /reports/similarity-check` 对比历史报告，高度相似时前端弹窗确认；存量报告首次对比时自动回填快照（幂等）
+- **测试计划聚合筛选**（`frontend/src/components/FilterBuilder.vue` 新组件 / `TestingPlanList.vue` / `special.py`）：列表筛选升级为弹窗式聚合筛选构建器（多条件「且 / 或」连接、单条件「非」取反、文本 / 枚举 / 数值 / 日期区间操作符），后端 `filters` JSON 按字段白名单动态过滤；新增「显示待办流程」快捷筛选（未测试 / 初测中 / 复测中）
+- **复测记录状态联动**（`vulns.py` / `VulnRetestPanel.vue` / `vuln_service.py`）：创建复测记录时可一并调整漏洞状态（复测未修复回修复中 / 已修复），状态流转统一校验复测结论完整性
+- **工单序号复用**（`special.py`）：需求接收日期内分配最小未占用序号，删除 / 释放的工单 ID 可被后续记录重新使用
+
+### 变更
+
+- 测试计划列表筛选栏重排：原状态 / 类型 / 部门 / 日期范围下拉收敛进「筛选」弹窗，保留「当前可测试系统」「无人认领」并新增「待办流程」快捷勾选
+
+### 数据库
+
+- `reports` 新增 `vul_edit_snapshot`（JSON）、`export_jobs` 新增 `report_snapshot`（JSON）：SQLite 走 `_migrate_lightweight` 幂等加列，PostgreSQL 走 Alembic 迁移 `c3d4e5f6a7b8` / `d4e5f6a7b8c9`
+
+---
+
 ## [0.9.2] - 2026-08-06
 
 报告导出管线改造（回退 LibreOffice 目录自动更新、改用 Pillow 图片压缩）、全系统业务时间统一为 UTC+8 北京时区、测试计划认领与关联资产增强，以及多项部署 / 运维与文档优化。
