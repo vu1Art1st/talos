@@ -134,18 +134,35 @@
       <el-card shadow="never" class="!rounded-lg">
         <template #header>章节导航</template>
         <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="50" />
-        <div v-else class="max-h-72 overflow-y-auto -mx-1">
-          <div v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`"
-               class="flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer text-sm hover:bg-gray-100"
-               :class="activeSection === i ? 'bg-blue-50 text-blue-600' : 'text-gray-600'"
-               @click="scrollToSection(i)">
-            <span class="text-gray-400 shrink-0">{{ i + 1 }}.</span>
-            <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
-            <span v-if="sec.vul_id && vulnStates[sec.vul_id]" class="tl-tag shrink-0"
-                  :style="statusSoftStyle(vulnStates[sec.vul_id].status)">
-              {{ statusName(vulnStates[sec.vul_id].status) }}
-            </span>
-          </div>
+        <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
+          <template v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`">
+            <!-- 拖拽指示线：标记目标插入位置 -->
+            <div v-if="dropLineIndex === i" class="mx-2 h-0.5 rounded-full bg-blue-500"></div>
+            <div class="flex items-center gap-2 px-2 py-1.5 rounded text-sm select-none"
+                 :class="{
+                   'bg-blue-50 text-blue-600': activeSection === i && dragIndex !== i,
+                   'text-gray-600': activeSection !== i || dragIndex === i,
+                   'cursor-pointer': dragIndex !== i,
+                   'cursor-grabbing opacity-40': dragIndex === i,
+                   'bg-gray-100': overIndex === i && dragIndex !== i && dragIndex !== null,
+                 }"
+                 :draggable="dragIndex === null || dragIndex === i"
+                 @click="scrollToSection(i)"
+                 @dragstart="onDragStart(i, $event)"
+                 @dragover.prevent="onDragOver(i, $event)"
+                 @dragenter="onDragEnter(i)"
+                 @dragleave="onDragLeave(i, $event)"
+                 @drop.prevent="onDrop(i)">
+              <span class="shrink-0" :class="dragIndex !== null ? 'text-gray-300' : 'text-gray-400'">{{ i + 1 }}.</span>
+              <el-icon v-if="dragIndex !== null" class="shrink-0 text-gray-300" :size="12"><Rank /></el-icon>
+              <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
+              <span v-if="sec.vul_id && vulnStates[sec.vul_id]" class="tl-tag shrink-0"
+                    :style="statusSoftStyle(vulnStates[sec.vul_id].status)">
+                {{ statusName(vulnStates[sec.vul_id].status) }}
+              </span>
+            </div>
+          </template>
+          <div v-if="dropLineIndex === report.sections.length" class="mx-2 h-0.5 rounded-full bg-blue-500"></div>
         </div>
       </el-card>
 
@@ -305,9 +322,91 @@ async function changeVulnField(vulId: number, field: string, value: number) {
 
 // 章节导航：点击跳转到对应章节编辑区域
 const activeSection = ref<number | null>(null)
+// 拖拽排序状态：当前拖拽项索引 / 悬停目标项索引 / 指示线插入位置 / 拖拽结束抑制一次点击
+const dragIndex = ref<number | null>(null)
+const overIndex = ref<number | null>(null)
+const dropLineIndex = ref<number | null>(null)
+const navScrollRef = ref<HTMLElement | null>(null)
+let suppressClick = false
+
 function scrollToSection(i: number) {
+  // 拖拽结束瞬间浏览器可能补发 click，丢弃以免误跳转
+  if (suppressClick) { suppressClick = false; return }
   activeSection.value = i
   document.getElementById(`section-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+function onDragStart(i: number, e: DragEvent) {
+  dragIndex.value = i
+  overIndex.value = null
+  dropLineIndex.value = null
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move'
+    e.dataTransfer.setData('text/plain', String(i))
+  }
+}
+
+function onDragOver(i: number, e: DragEvent) {
+  if (dragIndex.value === null || dragIndex.value === i) return
+  const el = e.currentTarget as HTMLElement
+  const rect = el.getBoundingClientRect()
+  // 落在目标项上半则插到其前，否则插到其后；并换算为移除拖拽项后的数组位置
+  let line = e.clientY < rect.top + rect.height / 2 ? i : i + 1
+  if (dragIndex.value < line) line -= 1
+  dropLineIndex.value = line
+  // 靠近导航列表上下边缘时自动滚动，便于把章节拖到列表两端之外的位置
+  const sc = navScrollRef.value
+  if (sc) {
+    const scRect = sc.getBoundingClientRect()
+    if (e.clientY < scRect.top + 24) sc.scrollTop -= 8
+    else if (e.clientY > scRect.bottom - 24) sc.scrollTop += 8
+  }
+}
+
+function onDragEnter(i: number) {
+  if (dragIndex.value === null || dragIndex.value === i) return
+  overIndex.value = i
+}
+
+function onDragLeave(i: number, e: DragEvent) {
+  // dragleave 在子元素间移动会频繁触发，仅当真正离开当前项时清除高亮
+  const to = e.relatedTarget as Node | null
+  if (!to || !(e.currentTarget as HTMLElement).contains(to)) {
+    if (overIndex.value === i) overIndex.value = null
+  }
+}
+
+function onDrop() {
+  const from = dragIndex.value
+  const line = dropLineIndex.value
+  if (from !== null && line !== null && line !== from) {
+    const arr = report.value.sections
+    const [item] = arr.splice(from, 1)
+    // 插入到 line 处（deleteCount=0），仅移动不删除任何其他章节
+    arr.splice(line, 0, item)
+    // 同步修正章节导航高亮索引，使其仍指向原章节
+    const a = activeSection.value
+    if (a !== null) {
+      if (a === from) {
+        activeSection.value = line
+      } else {
+        let na = a
+        if (from < na) na -= 1
+        if (line <= na) na += 1
+        activeSection.value = na
+      }
+    }
+    markDirty()
+  }
+  onDragEnd()
+}
+
+function onDragEnd() {
+  dragIndex.value = null
+  overIndex.value = null
+  dropLineIndex.value = null
+  suppressClick = true
+  window.setTimeout(() => { suppressClick = false }, 0)
 }
 
 function syncAuthorNames() {
@@ -377,12 +476,20 @@ function addSection() {
 
 function removeSection(i: number) {
   report.value.sections.splice(i, 1)
+  // 同步修正导航高亮索引，保持与拖拽排序共用同一套索引
+  const a = activeSection.value
+  if (a === i) activeSection.value = null
+  else if (a !== null && a > i) activeSection.value = a - 1
   markDirty()
 }
 
 function move(i: number, dir: number) {
   const arr = report.value.sections
   ;[arr[i], arr[i + dir]] = [arr[i + dir], arr[i]]
+  // 同步修正导航高亮索引
+  const a = activeSection.value
+  if (a === i) activeSection.value = i + dir
+  else if (a === i + dir) activeSection.value = i
   markDirty()
 }
 
