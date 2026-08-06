@@ -275,10 +275,15 @@ class VulFieldsIn(BaseModel):
 
 
 class VulRetestRecordIn(BaseModel):
-    """复测处理页的单条复测记录（漏洞修复富文本）。"""
+    """复测处理页的单条复测记录（漏洞修复富文本）。
+
+    status 可选：创建复测记录时一并调整漏洞状态（复测未修复=50 / 已修复=60），
+    选择结论时强制要求 content_html 非空。
+    """
 
     content_html: str = ""
     content_json: dict | None = None
+    status: int | None = None
 
     @field_validator("content_html", mode="after")
     @classmethod
@@ -478,6 +483,7 @@ class ReportListOut(ReportMetaIn):
     version: int = 1
     revision: int = 0
     testing_plan_id: int | None = None
+    create_time: datetime | None = None
     update_time: datetime | None = None
 
 
@@ -493,6 +499,31 @@ class ExportJobOut(BaseModel):
     toc_auto_updated: bool = False  # 目录域是否已自动更新（当前恒为 False，前端据此提示手动更新域）
     create_time: datetime | None = None
     finish_time: datetime | None = None
+
+
+class ExportCheckIn(BaseModel):
+    """导出前重复判断请求：指定导出格式。"""
+
+    fmt: str = "docx"
+
+
+class ExportCheckOut(BaseModel):
+    """导出前重复判断结果：报告内容与最近一次成功导出完全一致则 duplicate=True。
+
+    提示信息附带重复导出的具体内容（报告标题/格式/版本）与已存在记录的时间、状态，
+    供前端展示「继续导出 / 取消」确认。
+    """
+
+    duplicate: bool = False
+    report_id: int | None = None
+    report_title: str = ""
+    fmt: str = ""
+    last_job_id: int | None = None
+    last_time: datetime | None = None
+    last_status: str = ""
+    last_version: int | None = None
+    last_file_name: str = ""
+    last_file_size: int | None = None
 
 
 class ReportVulnStateOut(BaseModel):
@@ -551,6 +582,22 @@ class ReportBrief(BaseModel):
     id: int
     title: str
     status: str = "draft"
+    create_time: datetime | None = None
+
+
+class ReportSimilarityIn(BaseModel):
+    """再次生成报告前的高度相似性检查请求。"""
+
+    title: str = Field(min_length=1, max_length=255)
+    vul_ids: list[int] = []
+    testing_plan_id: int | None = None
+
+
+class ReportSimilarityOut(BaseModel):
+    """相似性检查结果：与历史报告在「基础信息 + 所选漏洞最后编辑时间」上完全一致即高度相似。"""
+
+    similar: bool = False
+    matched_reports: list[ReportBrief] = []
 
 
 class RetestRoundOut(BaseModel):

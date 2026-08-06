@@ -8,7 +8,12 @@
 - _affected_urls_html / _vuln_section_html 多 URL 渲染
 """
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
+from docx.shared import Cm
+from docx.text.paragraph import Paragraph
+
+from PIL import Image
 
 from app.api.v1.reports import _affected_urls_html, _vuln_section_html
 from app.constants import VulStatus
@@ -20,6 +25,24 @@ def _build(tmp_path, meta=None, vulns=None, sections=None):
     out = str(tmp_path / "out.docx")
     build_report_docx(meta, vulns or [], sections or [], out)
     return Document(out)
+
+
+def _code_block_paras(doc: Document):
+    """带 pBdr 边框的代码块段落。"""
+    return [
+        p for p in doc.paragraphs
+        if (pPr := p._p.find(qn("w:pPr"))) is not None
+        and pPr.find(qn("w:pBdr")) is not None
+    ]
+
+
+def _shape_in_table(shape) -> bool:
+    node = shape._inline
+    while node is not None:
+        if node.tag == qn("w:tbl"):
+            return True
+        node = node.getparent()
+    return False
 
 
 def _cell_run_colors(cell):
@@ -106,3 +129,62 @@ def test_update_fields_precedes_compat_anchor(tmp_path):
     anchors = [i for i, c in enumerate(children) if c.tag in anchor_tags]
     if anchors:
         assert children.index(update) < min(anchors)
+
+
+def test_code_block_width_14cm_and_left_aligned(tmp_path):
+    # 代码块显示宽度统一 14cm（左右缩进均分、块体居中），内容保持左对齐
+    sections = [{
+        "title": "代码块章节",
+        "vul_id": None,
+        "content_html": "<pre><code>print('hello')\nfor i in range(3):\n    print(i)</code></pre>",
+    }]
+    doc = _build(tmp_path, sections=sections)
+    paras = _code_block_paras(doc)
+    assert paras, "导出文档中未找到代码块段落"
+    section = doc.sections[-1]
+    content_w = int(section.page_width) - int(section.left_margin) - int(section.right_margin)
+    target = int(Cm(14))
+    for para in paras:
+        left = int(para.paragraph_format.left_indent)
+        right = int(para.paragraph_format.right_indent)
+        # 左右缩进对称（水平居中）
+        assert abs(left - right) <= 635, f"左右缩进不对称 {left}/{right} EMU"
+        width = content_w - left - right
+        # docx 缩进按 twip（1twip=635EMU）存储，允许 2 twip 舍入误差
+        assert abs(width - target) <= 1270, f"代码块宽度 {width} EMU，目标 {target} EMU"
+        # 块体居中靠对称缩进实现，内容不居中（保持左对齐）
+        assert para.alignment != WD_ALIGN_PARAGRAPH.CENTER
+
+
+def test_code_block_line_spacing_kept(tmp_path):
+    # 章节行距统一 1.5 时跳过代码块，保持紧凑 1.0 行距
+    sections = [{
+        "title": "代码",
+        "vul_id": None,
+        "content_html": "<pre>line1\nline2</pre>",
+    }]
+    doc = _build(tmp_path, sections=sections)
+    paras = _code_block_paras(doc)
+    assert paras
+    for para in paras:
+        assert para.paragraph_format.line_spacing == 1.0
+
+
+def test_body_image_centered_and_width_14cm(tmp_path):
+    # 正文图片统一 14cm 宽且所在段落水平居中（跳过封面表格内图片）
+    img = tmp_path / "shot.png"
+    Image.new("RGB", (800, 600), "white").save(img)
+    sections = [{
+        "title": "图片章节",
+        "vul_id": None,
+        "content_html": f'<p><img src="{img}"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    body_shapes = [s for s in doc.inline_shapes if not _shape_in_table(s)]
+    assert body_shapes, "未找到正文图片"
+    for shape in body_shapes:
+        node = shape._inline
+        while node is not None and node.tag != qn("w:p"):
+            node = node.getparent()
+        assert Paragraph(node, doc).alignment == WD_ALIGN_PARAGRAPH.CENTER
+        assert abs(int(shape.width) - int(Cm(14))) <= 1, f"图片宽度 {shape.width} EMU，目标 {int(Cm(14))} EMU"

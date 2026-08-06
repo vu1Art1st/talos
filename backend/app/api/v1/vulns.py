@@ -412,6 +412,11 @@ async def create_retest_record(
     vuln_service.add_log(session, vul, user, "新增复测记录")
     await session.flush()
     await _sync_vul_retest_html(session, vul)
+    # 创建复测记录时可一并调整漏洞状态（复测未修复回修复中 / 已修复）：
+    # 先聚合复测内容再流转，确保复测结论校验（必须填写复测详情）能够通过。
+    if body.status is not None and body.status != vul.status:
+        await vuln_service.transition(session, vul, body.status, user, "新增复测记录调整状态")
+        await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
     await session.refresh(record)
     return record

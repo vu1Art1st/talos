@@ -237,6 +237,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import dayjs from 'dayjs'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
@@ -497,6 +498,11 @@ function move(i: number, dir: number) {
 async function submitRetest(vulId: number) {
   const state = vulnStates.value[vulId]
   if (!state?.next_status) return
+  // 复测结论（已修复/复测未通过）必须已填写复测详情，后端同步强制校验
+  if ((state.next_status === 60 || state.next_status === 50) && !(state.retest_html || '').trim()) {
+    ElMessage.warning('请先填写复测详情，再提交复测结论')
+    return
+  }
   retestSubmitting.value = vulId
   try {
     await client.post(`/vulns/${vulId}/transition`, {
@@ -531,6 +537,31 @@ async function insertVulns() {
 
 async function doExport(fmt: string) {
   if (saveState.value !== '已保存') await save(true)
+  // 重复导出检测：报告内容与最近一次同格式导出完全一致时，确认后仍可继续
+  try {
+    const { data } = await client.post(`/reports/${route.params.id}/export-check`, { fmt })
+    if (data.duplicate) {
+      const statusName = data.last_status === 'done' ? '已完成' : data.last_status || ''
+      const sizeText = data.last_file_size != null ? `（${(data.last_file_size / 1024).toFixed(1)} KB）` : ''
+      const message =
+        `检测到该报告已有相同的导出记录：\n` +
+        `· 报告：《${data.report_title || report.value.title}》\n` +
+        `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
+        `· 导出版本：v${data.last_version ?? ''}\n` +
+        `· 已存在记录：${data.last_time ? dayjs(data.last_time).format('YYYY-MM-DD HH:mm') : '-'}（${statusName}）\n` +
+        `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
+        `是否仍要继续导出？`
+      const ok = await ElMessageBox.confirm(message, '检测到重复导出', {
+        confirmButtonText: '继续导出',
+        cancelButtonText: '取消',
+        type: 'warning',
+        width: 460,
+      }).then(() => true).catch(() => false)
+      if (!ok) return
+    }
+  } catch {
+    // 检查接口异常时不阻断导出
+  }
   await client.post(`/reports/${route.params.id}/export`, { fmt })
   ElMessage.success('导出任务已提交，请稍候在导出记录中下载')
   await loadJobs()

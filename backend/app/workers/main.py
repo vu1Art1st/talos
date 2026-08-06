@@ -170,6 +170,11 @@ async def export_report_task(ctx, job_id: int) -> None:
             job.status = "done"
             # 导出成功后报告导出版本 +1（编辑保存不影响该版本号）
             report.version += 1
+            # 版本号 +1 与 update_time 刷新（onupdate）会改变报告指纹，
+            # 需 flush+refresh 后以最终状态更新导出任务指纹，供下次导出前重复判断
+            await session.flush()
+            await session.refresh(report)
+            job.report_snapshot = report.fingerprint()
         except Exception as exc:
             # 先回滚失败事务：PostgreSQL 事务报错后进入 aborted 状态，
             # 不 rollback 直接 commit 会抛 InFailedSQLTransactionError，任务将永远卡在 running。

@@ -18,11 +18,15 @@ from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
+    ExportCheckIn,
+    ExportCheckOut,
     ExportJobOut,
     Page,
     ReportListOut,
     ReportOut,
     ReportSaveIn,
+    ReportSimilarityIn,
+    ReportSimilarityOut,
     ReportVulnStateOut,
 )
 from app.services import plan_service, vuln_service
@@ -82,6 +86,21 @@ async def _infer_plan_id(session: AsyncSession, vul_ids: list[int]) -> int | Non
     return plan_ids[0] if len(plan_ids) == 1 else None
 
 
+async def _snapshot_vul_edits(session: AsyncSession, vul_ids: list[int]) -> dict:
+    """对所选漏洞生成 {vul_id: update_time} 最后编辑时间快照（key 为字符串）。
+
+    供报告相似性判定使用：生成/保存报告时写入快照，再次生成时对比所选漏洞
+    当前的最后编辑时间，全部一致才视为「漏洞内容未变化」。
+    """
+    ids = [vid for vid in vul_ids if vid]
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(select(Vul.id, Vul.update_time).where(Vul.id.in_(ids)))
+    ).all()
+    return {str(vid): t.isoformat() if t else "" for vid, t in rows}
+
+
 @router.get("", response_model=Page[ReportListOut])
 async def list_reports(
     search: str = "",
@@ -124,6 +143,8 @@ async def create_report(
     if report.testing_plan_id is None:
         report.testing_plan_id = await _infer_plan_id(session, linked_ids)
     await _auto_mark_fixing(session, linked_ids, user, report.title)
+    # 漏洞流转（自动进入修复中）会刷新其最后编辑时间，故快照需在流转后采集
+    report.vul_edit_snapshot = await _snapshot_vul_edits(session, linked_ids)
     await session.commit()
     await session.refresh(report)
     return report
@@ -168,6 +189,8 @@ async def create_report_from_vulns(
     session.add(report)
     await session.flush()
     await _auto_mark_fixing(session, [v.id for v in vulns], user, report.title)
+    # 漏洞流转（自动进入修复中）会刷新其最后编辑时间，故快照需在流转后采集
+    report.vul_edit_snapshot = await _snapshot_vul_edits(session, [v.id for v in vulns])
     if plan is not None:
         # 报告已生成，计划进入等待复测阶段
         if plan.status in (10, 20):
@@ -177,6 +200,53 @@ async def create_report_from_vulns(
     await session.commit()
     await session.refresh(report)
     return report
+
+
+@router.post("/similarity-check", response_model=ReportSimilarityOut)
+async def check_report_similarity(
+    body: ReportSimilarityIn,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """再次生成报告前的高度相似性检查。
+
+    对比历史报告的基础信息（标题 + 归属测试计划 + 所选漏洞集合）以及所选漏洞的
+    最后编辑时间（生成时的快照），两者完全一致则判定为高度相似，供前端弹窗确认
+    是否仍要继续生成。
+    """
+    vul_ids = sorted({v for v in body.vul_ids if v})
+    if not vul_ids:
+        return ReportSimilarityOut()
+    plan_id = body.testing_plan_id
+    if plan_id is None:
+        plan_id = await _infer_plan_id(session, vul_ids)
+    candidates = (
+        await session.execute(
+            select(Report)
+            .where(Report.title == body.title, Report.testing_plan_id == plan_id)
+            .order_by(Report.id.desc())
+            .limit(20)
+        )
+    ).scalars().all()
+    current = await _snapshot_vul_edits(session, vul_ids)
+    vul_set = set(vul_ids)
+    matched: list[Report] = []
+    for r in candidates:
+        if r.vul_edit_snapshot is not None:
+            if r.vul_edit_snapshot == current:
+                matched.append(r)
+            continue
+        # 历史报告（快照缺失，如早于相似性功能上线的存量报告）：
+        # 校验关联漏洞集合与当前一致后，回填当前编辑时间快照并判定相似（幂等）。
+        # 漏洞的最后编辑时间是绝对值，若生成后未再编辑则回填值即生成时值。
+        linked = {s.vul_id for s in r.sections if s.vul_id}
+        if linked != vul_set:
+            continue
+        r.vul_edit_snapshot = current
+        matched.append(r)
+    if matched:
+        await session.commit()
+    return ReportSimilarityOut(similar=bool(matched), matched_reports=matched)
 
 
 class BatchExportIn(BaseModel):
@@ -210,15 +280,18 @@ async def batch_export(
         ).scalar_one_or_none()
         if done is not None and done.file_path and Path(done.file_path).exists():
             jobs.append({
-                "report_id": rid, "job_id": done.id, "status": "done", "title": report.title,
+                "report_id": rid, "job_id": done.id, "status": "done", "fmt": done.fmt, "title": report.title,
                 "toc_auto_updated": done.toc_auto_updated,
             })
             continue
-        job = ExportJob(report_id=rid, title=report.title, fmt=fmt, creator_id=user.id)
+        job = ExportJob(
+            report_id=rid, title=report.title, fmt=fmt,
+            creator_id=user.id, report_snapshot=report.fingerprint(),
+        )
         session.add(job)
         await session.flush()
         jobs.append({
-            "report_id": rid, "job_id": job.id, "status": job.status, "title": report.title,
+            "report_id": rid, "job_id": job.id, "status": job.status, "fmt": job.fmt, "title": report.title,
             "toc_auto_updated": job.toc_auto_updated,
         })
         pending.append(job)
@@ -243,7 +316,7 @@ async def export_jobs_status(
     ).scalars().all()
     return [
         {"job_id": j.id, "report_id": j.report_id, "status": j.status,
-         "error": j.error, "title": j.title, "toc_auto_updated": j.toc_auto_updated}
+         "fmt": j.fmt, "error": j.error, "title": j.title, "toc_auto_updated": j.toc_auto_updated}
         for j in rows
     ]
 
@@ -316,6 +389,10 @@ async def save_report(
     # 编辑中新关联进来的漏洞同样自动进入修复中
     new_linked = [s.vul_id for s in body.sections if s.vul_id and s.vul_id not in old_linked]
     await _auto_mark_fixing(session, new_linked, user, report.title)
+    # 快照反映最终状态（新关联漏洞流转会刷新其最后编辑时间），在流转后采集
+    report.vul_edit_snapshot = await _snapshot_vul_edits(
+        session, [s.vul_id for s in body.sections if s.vul_id]
+    )
     # 报告尚未关联计划时，若章节漏洞归属唯一计划则自动回写（不覆盖已有值）
     if report.testing_plan_id is None:
         report.testing_plan_id = await _infer_plan_id(
@@ -398,6 +475,54 @@ class ExportIn(BaseModel):
     fmt: str = "docx"
 
 
+@router.post("/{report_id}/export-check", response_model=ExportCheckOut)
+async def check_export_duplicate(
+    report_id: int,
+    body: ExportCheckIn,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """导出前重复判断：报告内容指纹与最近一次同格式成功导出完全一致则判定重复。
+
+    指纹包含报告编辑版本、报告更新时间与关联漏洞编辑时间快照，任一变化即视为内容有变。
+    """
+    fmt = body.fmt if body.fmt in ("docx", "pdf") else "docx"
+    report = await _get_report(session, report_id)
+    last = (
+        await session.execute(
+            select(ExportJob)
+            .where(ExportJob.report_id == report_id, ExportJob.fmt == fmt, ExportJob.status == "done")
+            .order_by(ExportJob.id.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    base = ExportCheckOut(report_id=report_id, report_title=report.title, fmt=fmt)
+    if last is None or last.report_snapshot is None:
+        return base
+    if last.report_snapshot == report.fingerprint():
+        file_size: int | None = None
+        file_name = ""
+        if last.file_path:
+            p = Path(last.file_path)
+            file_name = p.name
+            try:
+                file_size = p.stat().st_size
+            except OSError:
+                file_size = None
+        return ExportCheckOut(
+            duplicate=True,
+            report_id=report_id,
+            report_title=report.title,
+            fmt=last.fmt,
+            last_job_id=last.id,
+            last_time=last.finish_time or last.create_time,
+            last_status=last.status,
+            last_version=report.version,
+            last_file_name=file_name,
+            last_file_size=file_size,
+        )
+    return base
+
+
 @router.post("/{report_id}/export", response_model=ExportJobOut)
 async def export_report(
     report_id: int,
@@ -423,7 +548,14 @@ async def export_report(
                 report.test_start = earliest.date().isoformat()
         if not report.test_end:
             report.test_end = now().date().isoformat()
-    job = ExportJob(report_id=report_id, title=report.title, fmt=body.fmt, creator_id=user.id)
+    # 预填测试周期会触发报告 update_time（onupdate）刷新，且该值不会回写对象属性，
+    # 需 flush + refresh 后采集指纹，确保与最终落库状态一致
+    await session.flush()
+    await session.refresh(report)
+    job = ExportJob(
+        report_id=report_id, title=report.title, fmt=body.fmt,
+        creator_id=user.id, report_snapshot=report.fingerprint(),
+    )
     session.add(job)
     await session.commit()
     await session.refresh(job)

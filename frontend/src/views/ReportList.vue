@@ -21,8 +21,41 @@
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
-              @selection-change="onSelectionChange">
-      <el-table-column type="selection" width="50" />
+              @selection-change="onSelectionChange" @expand-change="onExpandChange"
+              row-key="id">
+      <el-table-column type="expand">
+        <template #default="{ row }">
+          <div class="px-6 py-2">
+            <div v-if="exportJobs[row.id]?.length" class="flex flex-col gap-1">
+              <div v-for="job in exportJobs[row.id]" :key="job.id" class="flex items-center gap-2 text-xs">
+                <span class="uppercase font-mono text-gray-400">{{ job.fmt }}</span>
+                <el-tag size="small"
+                        :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
+                  {{ job.status === 'done' ? '已完成' : job.status === 'failed' ? '失败' : '生成中' }}
+                </el-tag>
+                <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
+                  <el-icon color="#F56C6C"><WarningFilled /></el-icon>
+                </el-tooltip>
+                <span class="text-gray-500 truncate">{{ job.title || row.title }}</span>
+                <span class="text-gray-400">{{ fmt(job.create_time) }}</span>
+                <div class="flex-1" />
+                <el-button v-if="job.status === 'done'" size="small" type="primary" link
+                           @click="downloadJob(job)">下载</el-button>
+                <el-popconfirm v-if="job.status !== 'pending' && job.status !== 'running'"
+                               title="确认删除该导出记录？文件将一并移除" width="240"
+                               @confirm="removeExportJob(row, job)">
+                  <template #reference>
+                    <el-button size="small" type="danger" link>删除</el-button>
+                  </template>
+                </el-popconfirm>
+              </div>
+            </div>
+            <div v-else class="text-xs text-gray-400">
+              {{ exportLoading[row.id] ? '加载中…' : '暂无导出记录' }}
+            </div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column type="index" label="序号" width="70"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip sortable="custom" />
@@ -34,6 +67,9 @@
         </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="70" sortable="custom" />
+      <el-table-column prop="create_time" label="生成时间" width="170" sortable="custom">
+        <template #default="{ row }">{{ fmt(row.create_time) }}</template>
+      </el-table-column>
       <el-table-column prop="update_time" label="更新时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmt(row.update_time) }}</template>
       </el-table-column>
@@ -108,9 +144,48 @@ const vulns = ref<any[]>([])
 const plans = ref<any[]>([])
 const selected = ref<any[]>([])
 const batchDownloading = ref(false)
+// 报告导出版本历史（展开行懒加载）：{reportId: ExportJob[]}
+const exportJobs = ref<Record<number, any[]>>({})
+const exportLoading = ref<Record<number, boolean>>({})
 
 function onSelectionChange(rows: any[]) {
   selected.value = rows
+}
+
+// 懒加载该报告的导出历史版本列表（展开行时调用，已有缓存则跳过）
+async function loadExportJobs(reportId: number) {
+  if (exportJobs.value[reportId]?.length) return
+  exportLoading.value[reportId] = true
+  try {
+    const { data } = await client.get(`/reports/${reportId}/exports`)
+    exportJobs.value[reportId] = data
+  } finally {
+    exportLoading.value[reportId] = false
+  }
+}
+
+async function onExpandChange(row: any, expandedRows: any[]) {
+  if (expandedRows.some((r) => r.id === row.id)) await loadExportJobs(row.id)
+}
+
+async function removeExportJob(row: any, job: any) {
+  await client.delete(`/reports/exports/${job.id}`)
+  ElMessage.success('导出记录已删除')
+  exportJobs.value[row.id] = (exportJobs.value[row.id] || []).filter((j: any) => j.id !== job.id)
+}
+
+async function downloadJob(job: any) {
+  const resp = await client.get(`/reports/exports/${job.id}/download`, { responseType: 'blob' })
+  const url = URL.createObjectURL(resp.data)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${job.title || 'report'}.${job.fmt}`
+  a.click()
+  URL.revokeObjectURL(url)
+  // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
+  if (job.fmt === 'docx' && !job.toc_auto_updated) {
+    showTocNotice()
+  }
 }
 
 async function fetchJobStatus(jobIds: string) {
@@ -203,14 +278,32 @@ async function createBlank() {
 }
 
 async function generate() {
-  const { data } = await client.post('/reports/from-vulns', {
+  // 相似性检查：基础信息与所选漏洞最后编辑时间与历史报告完全一致时，需用户确认继续
+  try {
+    const { data } = await client.post('/reports/similarity-check', {
+      title: genTitle.value,
+      vul_ids: genVulIds.value,
+      testing_plan_id: genPlanId.value,
+    })
+    if (data.similar) {
+      const ok = await ElMessageBox.confirm(
+        `检测到与历史报告《${genTitle.value}》高度相似（标题、所选漏洞及漏洞最后编辑时间均未变化），是否仍要继续生成？`,
+        '生成高度相似报告',
+        { confirmButtonText: '仍要生成', cancelButtonText: '取消', type: 'warning' },
+      ).then(() => true).catch(() => false)
+      if (!ok) return
+    }
+  } catch {
+    // 检查接口异常时不阻断生成流程
+  }
+  const resp = await client.post('/reports/from-vulns', {
     title: genTitle.value,
     vul_ids: genVulIds.value,
     testing_plan_id: genPlanId.value,
   })
   ElMessage.success('报告已生成')
   fromVulnsVisible.value = false
-  router.push(`/reports/${data.id}`)
+  router.push(`/reports/${resp.data.id}`)
 }
 
 async function remove(id: number) {

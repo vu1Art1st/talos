@@ -12,9 +12,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Cm, Pt, RGBColor
+from docx.shared import Cm, Length, Pt, RGBColor
 from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
 from htmldocx import HtmlToDocx
@@ -229,11 +230,32 @@ def _style_code_run(run, ttype) -> None:
     run.italic = italic
 
 
-def _style_code_para(p: Paragraph) -> None:
-    """代码块段落：浅灰底纹 + 单线边框 + 紧凑行距，整体呈代码块外观。"""
+def _code_block_indents(doc: Document) -> tuple[Length, Length]:
+    """计算代码块左右缩进，使代码块显示宽度统一为 REPORT_IMAGE_WIDTH_CM（默认 14cm）且水平居中。
+
+    以正文所在 section 的内容区宽度为基准：内容区宽于目标宽度时左右缩进均分，
+    宽度不足时退化为占满内容区（缩进 0）。全程以整数 EMU 计算避免舍入误差。"""
+    section = doc.sections[-1]
+    content_w = (
+        int(section.page_width or 0)
+        - int(section.left_margin or 0)
+        - int(section.right_margin or 0)
+    )
+    target = int(Cm(settings.REPORT_IMAGE_WIDTH_CM))
+    if content_w <= target:
+        return Cm(0), Cm(0)
+    each = (content_w - target) // 2  # EMU 整数
+    return Length(each), Length(each)
+
+
+def _style_code_para(p: Paragraph, left: Length, right: Length) -> None:
+    """代码块段落：浅灰底纹 + 单线边框 + 紧凑行距，宽度固定（默认 14cm）。
+
+    块体水平居中靠对称缩进实现（左右缩进均分），段落保持默认左对齐，
+    代码内容文本不随块体居中。"""
     pf = p.paragraph_format
-    pf.left_indent = Cm(0.4)
-    pf.right_indent = Cm(0.2)
+    pf.left_indent = left
+    pf.right_indent = right
     pf.space_before = Pt(3)
     pf.space_after = Pt(3)
     pf.line_spacing = 1.0
@@ -262,8 +284,9 @@ def _add_code_block(doc: Document, code: str, lang: str) -> None:
     except Exception:
         tokens = [(Token.Text, code)]
     lines = _split_token_lines(tokens)
+    left, right = _code_block_indents(doc)
     p = doc.add_paragraph()
-    _style_code_para(p)
+    _style_code_para(p, left, right)
     first = True
     for line in lines:
         if not first:
@@ -646,11 +669,16 @@ def _remove_sample_details(doc: Document) -> None:
 
 
 def _apply_field_spacing(doc: Document, start: int) -> None:
-    """风险问题详情章节正文段落统一 1.5 倍行距（章节标题除外）。
+    """风险问题详情章节正文段落统一 1.5 倍行距（章节标题、代码块除外）。
 
-    覆盖漏洞描述/证明/修复建议/复测详情等具体内容段落，保证阅读舒适。"""
+    覆盖漏洞描述/证明/修复建议/复测详情等具体内容段落，保证阅读舒适；
+    代码块带边框底纹，保持自身紧凑行距不被覆盖。"""
     for para in doc.paragraphs[start:]:
         if para.style.name.startswith("Heading"):
+            continue
+        # 代码块段落（带 pBdr 边框）跳过，保持 1.0 紧凑行距
+        pPr = para._p.find(qn("w:pPr"))
+        if pPr is not None and pPr.find(qn("w:pBdr")) is not None:
             continue
         if para.text.strip():
             para.paragraph_format.line_spacing = 1.5
@@ -777,6 +805,23 @@ def _normalize_image_width(doc: Document, width_cm: float | None = None) -> None
             shape.height = int(h * (int(target) / w))
 
 
+def _center_body_images(doc: Document) -> None:
+    """将正文内联图片所在段落设为水平居中（跳过模板封面表格内的 logo / 装饰图）。
+
+    与 _normalize_image_width 配合：图片统一 14cm 宽度后再整段居中，
+    保证图片在报告中水平居中对齐。"""
+    for shape in doc.inline_shapes:
+        if _shape_in_table(shape):
+            continue
+        # 沿 inline 节点向上找所属段落 <w:p>
+        node = shape._inline
+        while node is not None and node.tag != qn("w:p"):
+            node = node.getparent()
+        if node is None:
+            continue
+        Paragraph(node, doc).alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+
 def build_report_docx(
     meta: dict,
     vulns: list[dict],
@@ -806,6 +851,7 @@ def build_report_docx(
     _append_details(doc, vulns, sections)
     _build_toc_field(doc)
     _normalize_image_width(doc)
+    _center_body_images(doc)
     _enable_update_fields(doc)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)

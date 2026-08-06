@@ -23,7 +23,21 @@ class Report(Base):
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final / completed
     version: Mapped[int] = mapped_column(Integer, default=1)  # 导出版本：每次导出成功 +1
     revision: Mapped[int] = mapped_column(Integer, default=0)  # 编辑乐观锁：每次保存 +1
+    # 生成/保存报告时对关联漏洞 {vul_id: update_time} 的快照，用于再次生成时的相似性判定
+    vul_edit_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
+
+    def fingerprint(self) -> dict:
+        """报告内容指纹：编辑锁版本 + 报告更新时间 + 关联漏洞编辑时间快照。
+
+        任一维度变化（编辑报告/编辑关联漏洞/导出后版本+1）都会使指纹变化，
+        供导出前重复判断与导出任务记录对比。
+        """
+        return {
+            "revision": self.revision,
+            "update_time": self.update_time.isoformat() if self.update_time else "",
+            "vul_edit_snapshot": self.vul_edit_snapshot,
+        }
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
@@ -62,6 +76,8 @@ class ExportJob(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     # 目录域是否已自动更新（当前未启用自动更新，恒为 False，前端据此提示手动更新域）
     toc_auto_updated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # 导出时的报告内容指纹 {revision, update_time, vul_edit_snapshot}，用于导出前重复判断
+    report_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

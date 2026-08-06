@@ -1,5 +1,6 @@
 """API 集成测试：认证 → 业务 CRUD → 状态机 → Word 导入 → 报告与导出全链路。"""
 import asyncio
+import json
 from io import BytesIO
 
 import pytest
@@ -109,7 +110,7 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 400
 
-    # 50 -> 55 复测中 -> 60 已修复（终态）
+    # 50 -> 55 复测中 -> 60 已修复（终态，须携带复测内容）
     resp = await client.post(
         f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 55},
     )
@@ -117,7 +118,7 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
     assert resp.json()["is_retest"] is True
     resp = await client.post(
         f"/api/v1/vulns/{vul_id}/transition", headers=auth,
-        json={"status": 60, "comment": "复测通过"},
+        json={"status": 60, "comment": "复测通过", "retest_html": "<p>复测通过</p>"},
     )
     assert resp.status_code == 200
     assert resp.json()["fix_time"] is not None
@@ -578,6 +579,198 @@ async def test_report_from_vulns_infer_plan_id(client: AsyncClient, auth: dict):
     assert resp.json()["testing_plan_id"] is None
 
 
+async def test_report_similarity_check(client: AsyncClient, auth: dict):
+    """相似性检查：基础信息（标题+归属计划+漏洞集合）与所选漏洞最后编辑时间完全一致才判相似。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "相似系统", "test_type": "渗透测试"},
+    )
+    plan_id = resp.json()["id"]
+    # 录入漏洞需先认领计划（严格认领校验，管理员未认领也不放行）
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "相似资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_id], "vulns": [
+            {"title": "相似漏洞A", "level": 20, "testing_plan_id": plan_id},
+            {"title": "相似漏洞B", "level": 30, "testing_plan_id": plan_id},
+        ]},
+    )
+    vul_a, vul_b = [v["id"] for v in resp.json()]
+
+    # 生成报告后，同配置再次检查 → 高度相似
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "相似性检查报告", "vul_ids": [vul_a, vul_b], "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    report_id = resp.json()["id"]
+
+    async def check(**overrides):
+        payload = {
+            "title": "相似性检查报告",
+            "vul_ids": [vul_a, vul_b],
+            "testing_plan_id": plan_id,
+            **overrides,
+        }
+        return (await client.post("/api/v1/reports/similarity-check", headers=auth, json=payload)).json()
+
+    data = await check()
+    assert data["similar"] is True
+    assert [r["id"] for r in data["matched_reports"]] == [report_id]
+
+    # 漏洞顺序无关（集合比较）
+    assert (await check(vul_ids=[vul_b, vul_a]))["similar"] is True
+
+    # 未显式传计划时，由漏洞归属唯一计划推导 → 同样命中
+    payload = {"title": "相似性检查报告", "vul_ids": [vul_a, vul_b]}
+    resp = await client.post("/api/v1/reports/similarity-check", headers=auth, json=payload)
+    assert resp.json()["similar"] is True
+
+    # 所选漏洞最后编辑时间变化（编辑漏洞）→ 不再相似
+    resp = await client.put(f"/api/v1/vulns/{vul_a}", headers=auth, json={"title": "相似漏洞A-已修订"})
+    assert resp.status_code == 200, resp.text
+    assert (await check())["similar"] is False
+
+    # 标题不同 / 漏洞集合不同 / 空集合 → 不相似
+    assert (await check(title="完全不同标题"))["similar"] is False
+    assert (await check(vul_ids=[vul_a]))["similar"] is False
+    assert (await check(vul_ids=[]))["similar"] is False
+
+
+async def test_report_similarity_check_legacy_no_snapshot(client: AsyncClient, auth: dict):
+    """存量报告（无 vul_edit_snapshot）再次生成时：漏洞集合一致则回填快照并判相似。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "存量系统", "test_type": "渗透测试"},
+    )
+    plan_id = resp.json()["id"]
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "存量资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_id], "vulns": [
+            {"title": "存量漏洞A", "level": 20, "testing_plan_id": plan_id},
+            {"title": "存量漏洞B", "level": 30, "testing_plan_id": plan_id},
+        ]},
+    )
+    vul_a, vul_b = [v["id"] for v in resp.json()]
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "存量相似报告", "vul_ids": [vul_a, vul_b], "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    report_id = resp.json()["id"]
+
+    # 模拟存量数据：清空快照
+    from sqlalchemy import select as sa_select
+
+    from app.db import async_session_maker
+    from app.models import Report
+
+    async with async_session_maker() as session:
+        report = (
+            await session.execute(sa_select(Report).where(Report.id == report_id))
+        ).scalar_one()
+        report.vul_edit_snapshot = None
+        await session.commit()
+
+    async def check(**overrides):
+        payload = {
+            "title": "存量相似报告",
+            "vul_ids": [vul_a, vul_b],
+            "testing_plan_id": plan_id,
+            **overrides,
+        }
+        resp = await client.post("/api/v1/reports/similarity-check", headers=auth, json=payload)
+        return resp.json()
+
+    # 无快照但基础信息与漏洞集合一致 → 判相似，且回填快照
+    data = await check()
+    assert data["similar"] is True
+    assert [r["id"] for r in data["matched_reports"]] == [report_id]
+    async with async_session_maker() as session:
+        report = (
+            await session.execute(sa_select(Report).where(Report.id == report_id))
+        ).scalar_one()
+        assert report.vul_edit_snapshot is not None
+
+    # 回填后再次检查仍相似
+    assert (await check())["similar"] is True
+
+    # 漏洞集合不一致时不误匹配
+    assert (await check(vul_ids=[vul_a]))["similar"] is False
+
+    # 漏洞被编辑（快照已回填旧值）→ 不再相似
+    resp = await client.put(f"/api/v1/vulns/{vul_a}", headers=auth, json={"title": "存量漏洞A-已修订"})
+    assert resp.status_code == 200, resp.text
+    assert (await check())["similar"] is False
+
+
+async def test_report_export_duplicate_check(client: AsyncClient, auth: dict):
+    """导出前重复判断：内容指纹与上次成功导出一致则 duplicate，编辑报告后不再重复。"""
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "重复导出资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_id], "vulns": [
+            {"title": "重复导出漏洞A", "level": 20},
+            {"title": "重复导出漏洞B", "level": 30},
+        ]},
+    )
+    vul_ids = [v["id"] for v in resp.json()]
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "重复导出检查报告", "vul_ids": vul_ids},
+    )
+    assert resp.status_code == 200, resp.text
+    report_id = resp.json()["id"]
+
+    async def check_export(fmt: str = "docx"):
+        resp = await client.post(
+            f"/api/v1/reports/{report_id}/export-check", headers=auth, json={"fmt": fmt},
+        )
+        assert resp.status_code == 200, resp.text
+        return resp.json()
+
+    # 尚无成功导出 → 不重复
+    assert (await check_export())["duplicate"] is False
+
+    # 导出 docx 并等待完成
+    resp = await client.post(
+        f"/api/v1/reports/{report_id}/export", headers=auth, json={"fmt": "docx"},
+    )
+    assert resp.status_code == 200, resp.text
+    job = await _wait_job(client, auth, report_id, resp.json()["id"])
+    assert job["status"] == "done", job
+
+    # 内容未变 → 重复（附完整提示信息）；其他格式无历史 → 不重复
+    data = await check_export()
+    assert data["duplicate"] is True
+    assert data["fmt"] == "docx"
+    assert data["report_title"] == "重复导出检查报告"
+    assert data["last_status"] == "done"
+    assert data["last_time"] is not None
+    assert data["last_version"] == 2  # 初始 v1 + 导出成功后版本 +1
+    assert data["last_file_name"].endswith(".docx")
+    assert (await check_export("pdf"))["duplicate"] is False
+
+    # 编辑报告（revision/update_time 变化）→ 不再重复
+    detail = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
+    save_body = {
+        "title": "重复导出检查报告",
+        "revision": detail["revision"],
+        "sections": detail["sections"],
+    }
+    resp = await client.put(f"/api/v1/reports/{report_id}", headers=auth, json=save_body)
+    assert resp.status_code == 200, resp.text
+    assert (await check_export())["duplicate"] is False
+
+
 async def test_report_vuln_state_automation(client: AsyncClient, auth: dict):
     """报告联动状态机：生成报告→修复中，发起复测→复测中，全部已修复/已忽略→报告已完成。"""
     resp = await client.post("/api/v1/assets", headers=auth, json={"name": "联动测试系统"})
@@ -801,6 +994,93 @@ async def _get_plan(client: AsyncClient, auth: dict, plan_id: int) -> dict:
     return next(p for p in resp.json()["items"] if p["id"] == plan_id)
 
 
+async def _list_plan_names(client: AsyncClient, auth: dict, params: dict) -> set[str]:
+    resp = await client.get("/api/v1/testing-plans", headers=auth, params={"size": 100, **params})
+    assert resp.status_code == 200, resp.text
+    return {p["system_name"] for p in resp.json()["items"]}
+
+
+async def test_testing_plan_filters(client: AsyncClient, auth: dict):
+    """聚合筛选：多字段规则 + and/or 连接 + not 取反 + 派生/关联字段 + 非法入参。
+
+    系统名/部门均使用唯一前缀，且断言限定在专属部门范围内，避免共享会话数据库
+    中其他测试残留计划干扰精确集合比较。
+    """
+    DEPT = "筛选专用部门"
+    A = "筛选专用系统-渗透A"
+    B = "筛选专用系统-审计B"
+    C = "筛选专用系统-渗透C"
+    bodies = [
+        {"system_name": A, "test_type": "渗透测试", "department": DEPT,
+         "receive_time": "2026-01-01", "status": 10, "est_mandays": 3},
+        {"system_name": B, "test_type": "代码审计", "department": "筛选专用部门B",
+         "receive_time": "2026-02-01", "status": 20, "est_mandays": 5},
+        {"system_name": C, "test_type": "渗透测试", "department": DEPT,
+         "receive_time": "2026-03-01", "status": 60, "est_mandays": 2},
+    ]
+    plans = []
+    for body in bodies:
+        resp = await client.post("/api/v1/testing-plans", headers=auth, json=body)
+        assert resp.status_code == 200, resp.text
+        plans.append(resp.json())
+    try:
+        def rule(field, op, value=None, *, not_=False, connector="and"):
+            return {"field": field, "op": op, "value": value, "not": not_, "connector": connector}
+
+        def q(*rules):
+            return {"filters": json.dumps({"rules": list(rules)})}
+
+        dept = rule("department", "eq", DEPT)
+
+        # 单条件：部门等于
+        assert await _list_plan_names(client, auth, q(dept)) == {A, C}
+        # 文本包含
+        assert await _list_plan_names(client, auth, q(rule("system_name", "contains", "筛选专用系统-渗透"))) == {A, C}
+        # AND 组合：部门=专属部门 且 状态=10
+        assert await _list_plan_names(client, auth, q(dept, rule("status", "eq", 10))) == {A}
+        # NOT 取反：部门=专属部门 且 状态≠10
+        assert await _list_plan_names(client, auth, q(dept, rule("status", "ne", 10))) == {C}
+        # OR 组合：规则间按顺序左结合（AND 优先），用唯一系统名避免受其他测试数据影响
+        assert await _list_plan_names(
+            client, auth,
+            q(rule("system_name", "eq", A), rule("system_name", "eq", C, connector="or")),
+        ) == {A, C}
+        # 数字比较与区间（限定专属部门）
+        assert await _list_plan_names(client, auth, q(dept, rule("est_mandays", "gte", 3))) == {A}
+        assert await _list_plan_names(client, auth, q(dept, rule("est_mandays", "between", [2, 3]))) == {A, C}
+        # 日期字符串上界（严格小于），空值被排除
+        assert await _list_plan_names(client, auth, q(dept, rule("receive_time", "lt", "2026-02-01"))) == {A}
+        # 空值筛选
+        assert await _list_plan_names(client, auth, q(dept, rule("retest_notice_time", "is_empty"))) == {A, C}
+
+        # 派生字段：自动生成工单ID精确匹配
+        target = next(p for p in plans if p["system_name"] == A)
+        assert target["ticket_id"]
+        assert await _list_plan_names(client, auth, q(rule("ticket_id", "eq", target["ticket_id"]))) == {A}
+
+        # 关联字段：认领后按测试人员筛选（限定专属部门）
+        await client.post(f"/api/v1/testing-plans/{target['id']}/claim", headers=auth)
+        assert await _list_plan_names(client, auth, q(dept, rule("testers", "contains", "admin"))) == {A}
+        assert await _list_plan_names(client, auth, q(dept, rule("testers", "contains", "admin", not_=True))) == {C}
+
+        # 非法字段 / 不匹配操作符返回 400
+        resp = await client.get("/api/v1/testing-plans", headers=auth,
+                                params=q(rule("not_exist", "eq", 1)))
+        assert resp.status_code == 400
+        resp = await client.get("/api/v1/testing-plans", headers=auth,
+                                params=q(rule("system_name", "gt", 1)))
+        assert resp.status_code == 400
+
+        # stats 端点应用同一套筛选条件
+        resp = await client.get("/api/v1/testing-plans/stats", headers=auth,
+                                params=q(dept))
+        assert resp.status_code == 200
+        assert resp.json()["total_plans"] == 2
+    finally:
+        for p in plans:
+            await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+
 async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     """测试计划工作台：认领/退出、录入漏洞统计重算、报告关联三方状态联动。"""
     resp = await client.post(
@@ -870,7 +1150,8 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
 
     # 部分处理完：报告与计划均未完成
     resp = await client.post(
-        f"/api/v1/vulns/{vul_a}/transition", headers=auth, json={"status": 60},
+        f"/api/v1/vulns/{vul_a}/transition", headers=auth,
+        json={"status": 60, "retest_html": "<p>复测通过</p>"},
     )
     assert resp.status_code == 200
     plan = await _get_plan(client, auth, plan_id)
@@ -1133,7 +1414,10 @@ async def test_retest_round_tracking(client: AsyncClient, auth: dict):
     assert plan["retest_round_count"] == 2
 
     # 全部闭环：计划复测完成，当前轮打完成点
-    await client.post(f"/api/v1/vulns/{vul_a}/transition", headers=auth, json={"status": 60})
+    await client.post(
+        f"/api/v1/vulns/{vul_a}/transition", headers=auth,
+        json={"status": 60, "retest_html": "<p>复测通过</p>"},
+    )
     await client.post(f"/api/v1/vulns/{vul_b}/transition", headers=auth, json={"status": 20})
     plan = await _get_plan(client, auth, plan_id)
     assert plan["status"] == 60
@@ -1211,6 +1495,29 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     assert status_counts == {10: 1, 20: 1, 60: 1}
     assert isinstance(stats["vulns_by_month"], list)
 
+    # pending 待办流程筛选：仅 未测试(10)/初测中(20)/复测中(50)，复测完成(60) 被排除
+    resp = await client.get(
+        "/api/v1/testing-plans", headers=auth,
+        params={"department": tag, "pending": True},
+    )
+    names = {i["system_name"] for i in resp.json()["items"]}
+    assert names == {"过滤系统A", "过滤系统C"}
+    assert all(i["status"] in (10, 20, 50) for i in resp.json()["items"])
+
+    # pending 与单状态筛选同时传参时按 AND 处理：无交集则空结果
+    resp = await client.get(
+        "/api/v1/testing-plans", headers=auth,
+        params={"department": tag, "pending": True, "status": 60},
+    )
+    assert resp.json()["total"] == 0
+
+    # pending 统计口径与列表一致：本部门待办 2 条
+    pending_stats = (await client.get(
+        "/api/v1/testing-plans/stats", headers=auth, params={"department": tag, "pending": True},
+    )).json()
+    assert pending_stats["total_plans"] == 2
+    assert pending_stats["retest_done_plans"] == 0
+
     # 空结果集：全 0，不报错
     empty = (await client.get(
         "/api/v1/testing-plans/stats", headers=auth, params={"department": "不存在的部门XYZ"},
@@ -1227,7 +1534,18 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     assert "统计汇总" in wb.sheetnames
     detail_rows = list(wb["测试计划"].iter_rows(values_only=True))
     assert len(detail_rows) == 4  # 表头 + 3 行
-    assert detail_rows[0][1] == "测试系统"
+    assert detail_rows[0][1] == "测试计划名称"  # 表头第二列与 PLAN_EXCEL_HEADERS 一致
+
+    # 导出同样支持 pending 筛选：仅 2 条待办计划
+    resp = await client.get(
+        "/api/v1/testing-plans/export", headers=auth,
+        params={"department": tag, "pending": True},
+    )
+    assert resp.status_code == 200
+    wb2 = load_workbook(BytesIO(resp.content))
+    pending_rows = list(wb2["测试计划"].iter_rows(values_only=True))
+    assert len(pending_rows) == 3  # 表头 + 2 行
+    assert "统计汇总" in wb2.sheetnames
 
 
 async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict):
@@ -1483,15 +1801,122 @@ async def test_retest_failed_back_to_fixing(client: AsyncClient, auth: dict):
     )
     vul_id = resp.json()["id"]
 
-    for status in (50, 55, 50):
+    for status in (50, 55):
         resp = await client.post(
             f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": status},
         )
         assert resp.status_code == 200, resp.text
+    # 复测未通过回修复中：必须填写复测详情
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/transition", headers=auth,
+        json={"status": 50, "retest_html": "<p>复测发现仍可利用</p>"},
+    )
+    assert resp.status_code == 200, resp.text
 
     vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
     assert vul["status"] == 50
     assert vul["is_retest"] is True
+
+
+async def test_vuln_status_retest_guard(client: AsyncClient, auth: dict):
+    """复测结论校验：修复中不可直接变已修复；复测中→已修复/复测未通过必须填写复测内容。"""
+    resp = await client.post("/api/v1/vulns", headers=auth, json={"title": "复测守卫漏洞", "level": 20})
+    vul_id = resp.json()["id"]
+    # 进入修复中
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 50})
+    assert resp.status_code == 200
+
+    # 报告编辑页下拉（fields 接口）从修复中直接改已修复 → 拒绝（必须经过复测中）
+    resp = await client.patch(f"/api/v1/vulns/{vul_id}/fields", headers=auth, json={"status": 60})
+    assert resp.status_code == 400
+
+    # 进入复测中
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 55})
+    assert resp.status_code == 200
+
+    # 复测中→已修复但未填写复测内容 → 拒绝
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 60})
+    assert resp.status_code == 400
+
+    # 复测中→复测未通过（回修复中）但未填写复测详情 → 拒绝
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 50})
+    assert resp.status_code == 400
+
+    # 填写复测内容后可正常闭环
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/transition", headers=auth,
+        json={"status": 60, "retest_html": "<p>复测已修复</p>"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == 60
+
+
+async def test_ticket_seq_reuse(client: AsyncClient, auth: dict):
+    """工单ID动态分配：删除/释放的序号可被后续记录复用（取最小未占用序号）。"""
+    body = {"department": "复用部门", "receive_time": "2026-01-01"}
+
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统A"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_a = resp.json()
+    assert plan_a["ticket_id"] == "20260101-1"
+
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统B"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260101-2"
+
+    # 删除占用 20260101-1 的计划后，新建记录应复用该序号（而非顺延到 3）
+    resp = await client.delete(f"/api/v1/testing-plans/{plan_a['id']}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统C"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260101-1"
+
+
+async def test_create_retest_record_with_status(client: AsyncClient, auth: dict):
+    """新增复测记录可同时调整漏洞状态：选结论须填复测内容，已修复/复测未通过均生效。"""
+    # 准备：漏洞进入复测中
+    resp = await client.post("/api/v1/vulns", headers=auth, json={"title": "复测状态联动漏洞", "level": 20})
+    vul_id = resp.json()["id"]
+    for status in (50, 55):
+        resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": status})
+        assert resp.status_code == 200, resp.text
+
+    # 新增复测记录时选「已修复」但未填写内容 → 拒绝
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "", "status": 60},
+    )
+    assert resp.status_code == 400
+
+    # 新增复测记录时选「已修复」并填写内容 → 成功且状态流转为已修复
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>本次复测通过</p>", "content_json": None, "status": 60},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["status"] == 60
+
+    # 新漏洞复测未通过：新增复测记录时选「复测未修复」回修复中
+    resp = await client.post("/api/v1/vulns", headers=auth, json={"title": "复测未通过联动漏洞", "level": 20})
+    vul2 = resp.json()["id"]
+    for status in (50, 55):
+        resp = await client.post(f"/api/v1/vulns/{vul2}/transition", headers=auth, json={"status": status})
+        assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/vulns/{vul2}/retests", headers=auth,
+        json={"content_html": "<p>复测仍存在</p>", "status": 50},
+    )
+    assert resp.status_code == 200, resp.text
+    vul2_detail = (await client.get(f"/api/v1/vulns/{vul2}", headers=auth)).json()
+    assert vul2_detail["status"] == 50
+    assert vul2_detail["is_retest"] is True
 
 
 async def test_report_section_contains_retest(client: AsyncClient, auth: dict):

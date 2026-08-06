@@ -13,6 +13,28 @@ def can_transition(current: int, target: int) -> bool:
     return target in VUL_TRANSITIONS.get(current, set())
 
 
+def ensure_retest_conclusion(vul: Vul, target: int) -> None:
+    """复测结论校验（漏洞状态机补充规则）：
+
+    - 变更为「已修复」：必须先经过「复测中」，且必须已填写复测内容，
+      不允许从「修复中」等状态直接跳过复测闭环；
+    - 复测未通过（复测中 → 修复中）：同样强制要求填写复测详情。
+    """
+    if target == VulStatus.FIXED:
+        if vul.status != VulStatus.RETESTING:
+            raise HTTPException(
+                400,
+                f"不允许从「{VUL_STATUS.get(vul.status, vul.status)}」直接变更为「已修复」，"
+                "必须先经过「复测中」并填写复测结论",
+            )
+        if not (vul.retest_html or "").strip():
+            raise HTTPException(400, "变更为「已修复」前必须填写复测内容")
+    elif target == VulStatus.FIXING and vul.status == VulStatus.RETESTING:
+        # 复测未通过，回修复中重新整改
+        if not (vul.retest_html or "").strip():
+            raise HTTPException(400, "复测未通过必须填写复测详情")
+
+
 async def transition(
     session: AsyncSession,
     vul: Vul,
@@ -28,6 +50,7 @@ async def transition(
             400,
             f"不允许从「{VUL_STATUS.get(vul.status, vul.status)}」流转到「{VUL_STATUS[target]}」",
         )
+    ensure_retest_conclusion(vul, target)
 
     old_status = vul.status
     vul.status = target
@@ -73,6 +96,7 @@ def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, com
         raise HTTPException(400, f"非法状态: {target}")
     if target == vul.status:
         return vul
+    ensure_retest_conclusion(vul, target)
     old_status = vul.status
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)

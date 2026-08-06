@@ -5,19 +5,30 @@
                 @keyup.enter="reload" @clear="reload">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
-      <el-select v-model="statusFilter" clearable placeholder="全部状态" class="!w-32" @change="reload">
-        <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)" />
-      </el-select>
-      <el-select v-model="typeFilter" filterable clearable placeholder="全部类型" class="!w-32" @change="reload">
-        <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
-      </el-select>
-      <el-select v-model="deptFilter" filterable clearable placeholder="全部部门" class="!w-32" @change="reload">
-        <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
-      </el-select>
-      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-64"
-                      start-placeholder="接收起" end-placeholder="接收止" @change="reload" />
+      <el-popover
+        ref="popoverRef"
+        :visible="filterVisible"
+        trigger="manual"
+        placement="bottom-start"
+        :width="880"
+      >
+        <template #reference>
+          <el-button ref="filterButtonRef" :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
+            <el-icon class="mr-1"><Filter /></el-icon>筛选
+            <span v-if="filterCount" class="filter-count">{{ filterCount }}</span>
+          </el-button>
+        </template>
+        <div class="filter-panel">
+          <div class="mb-2 text-sm font-medium">聚合筛选</div>
+          <FilterBuilder v-model="rules" :fields="filterFields" @change="onFiltersChange" />
+          <div class="mt-2 text-xs text-gray-400">
+            多条件之间用「且 / 或」连接；点「非」对单个条件取反（排除满足该条件的记录）
+          </div>
+        </div>
+      </el-popover>
       <el-checkbox v-model="myTests" @change="reload">显示当前可测试系统</el-checkbox>
       <el-checkbox v-model="unclaimed" @change="reload">显示无人认领的测试</el-checkbox>
+      <el-checkbox v-model="pending" @change="reload">显示待办流程</el-checkbox>
       <div class="flex-1" />
       <el-button @click="downloadTemplate">
         <el-icon class="mr-1"><Download /></el-icon>导入模板下载
@@ -56,6 +67,12 @@
     </el-collapse>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+      <template #empty>
+        <el-empty :image-size="90"
+                  :description="pending
+                    ? '暂无待办流程，所有测试计划均已进入终态'
+                    : '暂无符合条件的测试计划，请调整筛选条件'" />
+      </template>
       <el-table-column type="index" label="序号" width="60"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column label="工单ID" min-width="130" show-overflow-tooltip>
@@ -69,9 +86,31 @@
       <el-table-column prop="system_name" label="测试系统" min-width="140" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip sortable="custom" />
+      <el-table-column label="工单提起" width="100">
+        <template #default="{ row }">{{ row.ticket_time || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
+        <template #default="{ row }">{{ row.receive_time || '-' }}</template>
+      </el-table-column>
       <el-table-column prop="status" label="状态" width="85" sortable="custom">
         <template #default="{ row }">
           <el-tag :type="statusTag(row.status)" size="small">{{ statusMap[row.status] ?? row.status }}</el-tag>
+        </template>
+      </el-table-column>
+      <el-table-column prop="first_test_done_time" label="初测完成" width="100" sortable="custom">
+        <template #default="{ row }">{{ row.first_test_done_time || '-' }}</template>
+      </el-table-column>
+      <el-table-column prop="retest_done_time" label="复测完成" width="100" sortable="custom">
+        <template #default="{ row }">{{ row.retest_done_time || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="漏洞统计" min-width="230">
+        <template #default="{ row }">
+          <span class="inline-flex gap-1">
+            <span class="tl-tag" :style="levelBadgeStyle(10, row.stat_critical)">超 {{ row.stat_critical }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(20, row.stat_high)">高 {{ row.stat_high }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(30, row.stat_medium)">中 {{ row.stat_medium }}</span>
+            <span class="tl-tag" :style="levelBadgeStyle(40, row.stat_low)">低 {{ row.stat_low }}</span>
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="测试人员" width="120" show-overflow-tooltip>
@@ -82,14 +121,9 @@
           <span v-else class="text-gray-400">未认领</span>
         </template>
       </el-table-column>
-      <el-table-column label="漏洞统计" min-width="230">
+      <el-table-column label="预估/实际人天" width="105">
         <template #default="{ row }">
-          <span class="inline-flex gap-1">
-            <span class="tl-tag" :style="levelBadgeStyle(10, row.stat_critical)">超 {{ row.stat_critical }}</span>
-            <span class="tl-tag" :style="levelBadgeStyle(20, row.stat_high)">高 {{ row.stat_high }}</span>
-            <span class="tl-tag" :style="levelBadgeStyle(30, row.stat_medium)">中 {{ row.stat_medium }}</span>
-            <span class="tl-tag" :style="levelBadgeStyle(40, row.stat_low)">低 {{ row.stat_low }}</span>
-          </span>
+          <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
       </el-table-column>
       <el-table-column label="关联漏洞" width="78">
@@ -129,20 +163,6 @@
           </el-popover>
           <span v-else class="text-gray-400">-</span>
         </template>
-      </el-table-column>
-      <el-table-column label="预估/实际人天" width="105">
-        <template #default="{ row }">
-          <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column label="工单提起" width="100">
-        <template #default="{ row }">{{ row.ticket_time || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.receive_time || '-' }}</template>
-      </el-table-column>
-      <el-table-column prop="retest_done_time" label="复测完成" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.retest_done_time || '-' }}</template>
       </el-table-column>
       <el-table-column label="复测轮数" width="78">
         <template #default="{ row }">
@@ -307,13 +327,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Download, Upload } from '@element-plus/icons-vue'
+import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
+import FilterBuilder from '../components/FilterBuilder.vue'
+import type { FilterFieldDef, FilterRule } from '../components/FilterBuilder.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -321,12 +343,9 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
-const statusFilter = ref<number | null>(null)
-const typeFilter = ref<string>('')
-const deptFilter = ref<string>('')
-const dateRange = ref<[string, string] | null>(null)
 const myTests = ref(false)
 const unclaimed = ref(false)
+const pending = ref(false)
 const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -334,6 +353,72 @@ const statusMap = ref<Record<number, string>>({})
 const dialogRow = ref<any>(null)
 const testTypes = ref<string[]>([])
 const departments = ref<string[]>([])
+
+// ---------- 聚合筛选 ----------
+const filterVisible = ref(false)
+const popoverRef = ref()
+const filterButtonRef = ref()
+const RULES_KEY = 'testing_plan_filters'
+
+// 聚合筛选可选字段（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
+const FILTER_FIELDS = new Set([
+  'system_name', 'test_type', 'department', 'receive_time',
+  'status', 'first_test_done_time', 'retest_done_time', 'testers',
+])
+
+function loadFilterRules(): FilterRule[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RULES_KEY) || 'null')
+    if (Array.isArray(saved)) {
+      return saved
+        .filter((r: any) => r && typeof r.field === 'string' && r.field
+          && FILTER_FIELDS.has(r.field) && typeof r.op === 'string')
+        .map((r: any) => ({
+          field: r.field,
+          op: r.op,
+          value: r.value ?? '',
+          not: !!r.not,
+          connector: r.connector === 'or' ? ('or' as const) : ('and' as const),
+        }))
+    }
+  } catch { /* ignore */ }
+  return []
+}
+
+const rules = ref<FilterRule[]>(loadFilterRules())
+function isRuleComplete(r: FilterRule): boolean {
+  if (r.op === 'is_empty' || r.op === 'is_not_empty') return true
+  if (r.op === 'between') {
+    if (!Array.isArray(r.value) || r.value.length !== 2) return false
+    const [lo, hi] = r.value as (string | number | null)[]
+    return lo !== null && lo !== '' && hi !== null && hi !== ''
+  }
+  return r.value !== null && r.value !== ''
+}
+const filterCount = computed(() => rules.value.filter(isRuleComplete).length)
+let filterTimer: ReturnType<typeof setTimeout> | null = null
+
+// 规则变化：持久化 + 防抖刷新列表与统计
+function onFiltersChange() {
+  localStorage.setItem(RULES_KEY, JSON.stringify(rules.value))
+  if (filterTimer) clearTimeout(filterTimer)
+  filterTimer = setTimeout(() => reload(), 250)
+}
+
+// 支持聚合筛选的列字段定义（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
+const filterFields = computed<FilterFieldDef[]>(() => [
+  { key: 'system_name', label: '测试系统', type: 'text' },
+  { key: 'test_type', label: '测试类型', type: 'text', options: testTypes.value.map((t) => ({ label: t, value: t })) },
+  { key: 'department', label: '所属部门', type: 'text', options: departments.value.map((d) => ({ label: d, value: d })) },
+  { key: 'receive_time', label: '需求接收', type: 'date' },
+  {
+    key: 'status', label: '状态', type: 'enum',
+    options: Object.entries(statusMap.value).map(([k, v]) => ({ label: v, value: Number(k) })),
+  },
+  { key: 'first_test_done_time', label: '初测完成', type: 'date' },
+  { key: 'retest_done_time', label: '复测完成', type: 'date' },
+  { key: 'testers', label: '测试人员', type: 'text' },
+])
 
 // ---------- 统计面板 ----------
 const DIMENSIONS = [
@@ -430,15 +515,17 @@ const form = ref(emptyForm())
 
 function filterParams(): Record<string, any> {
   const params: Record<string, any> = { search: search.value }
-  if (statusFilter.value !== null && statusFilter.value !== ('' as any)) params.status = statusFilter.value
-  if (typeFilter.value) params.test_type = typeFilter.value
-  if (deptFilter.value) params.department = deptFilter.value
-  if (dateRange.value?.length === 2) {
-    params.receive_from = dateRange.value[0]
-    params.receive_to = dateRange.value[1]
+  const validRules = rules.value.filter(isRuleComplete)
+  if (validRules.length) {
+    params.filters = JSON.stringify({
+      rules: validRules.map(({ field, op, value, not, connector }) => ({
+        field, op, value, not, connector,
+      })),
+    })
   }
   if (myTests.value) params.my_tests = true
   if (unclaimed.value) params.unclaimed = true
+  if (pending.value) params.pending = true
   if (sort.prop) {
     params.sort = sort.prop
     params.order = sort.order
@@ -717,6 +804,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  if (filterTimer) clearTimeout(filterTimer)
+  document.removeEventListener('mousedown', onPopoverDocMouseDown)
   window.removeEventListener('resize', onResize)
   monthChart?.dispose()
   monthChart = null
@@ -733,5 +822,19 @@ onBeforeUnmount(() => {
 }
 :deep(.op-col .el-button) {
   margin-left: 0;
+}
+/* 筛选按钮上的条件数徽标 */
+.filter-count {
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
 }
 </style>

@@ -1,4 +1,5 @@
 """专项管理 API：远程检测 / 测试计划 / 春耕行动，统一 special:manage 权限。"""
+import json
 import re
 from datetime import timedelta
 from io import BytesIO
@@ -6,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import and_, exists, func, or_, select, update
+from sqlalchemy import String, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
@@ -126,12 +127,14 @@ def _plan_conditions(
     receive_to: str = "",
     tester_id: int | None = None,
     unclaimed: bool = False,
+    pending: bool = False,
 ) -> list:
     """测试计划筛选条件，供列表/统计/导出共用。receive_time 为 YYYY-MM-DD 字符串，直接比较。
 
     tester_id 非空时过滤「当前可测试系统」：当前用户为测试人且状态为初测中/复测申请/复测中。
     unclaimed 为真时过滤「无人认领的测试」：测试人员列表为空。
-    两者同时启用时按并集处理：满足任一条件的记录均展示。
+    pending 为真时过滤「待办流程」：状态为未测试/初测中/复测中。
+    两个快捷模式同时启用时按并集处理：满足任一条件的记录均展示。
     """
     cond = []
     if search:
@@ -142,6 +145,13 @@ def _plan_conditions(
         )
     if status is not None:
         cond.append(TestingPlan.status == status)
+    if pending:
+        # 待办流程：未测试 / 初测中 / 复测中
+        cond.append(
+            TestingPlan.status.in_([
+                PlanStatus.UNTESTED, PlanStatus.TESTING, PlanStatus.RETESTING,
+            ])
+        )
     if test_type:
         cond.append(TestingPlan.test_type == test_type)
     if department:
@@ -185,6 +195,272 @@ def _plan_conditions(
             ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
         )
     return cond
+
+
+# ---------- 聚合筛选（filters JSON 参数） ----------
+# 可筛选字段白名单：(列名, 字段类型, 是否为 DateTime 列)。日期字符串字段默认 "" 表示空，
+# DateTime 列默认 NULL，数字字段默认 0。ticket_id / testers / *_count 为派生/关联字段，单独处理。
+_PLAN_FILTER_FIELDS: dict[str, tuple[str, str, bool]] = {
+    "id": ("id", "number", False),
+    "plan_name": ("plan_name", "text", False),
+    "system_name": ("system_name", "text", False),
+    "test_type": ("test_type", "text", False),
+    "department": ("department", "text", False),
+    "status": ("status", "enum", False),
+    "ticket_id": ("ticket_id", "text", False),  # 派生字段：手动指定或 receive_time+ticket_seq 生成
+    "ticket_time": ("ticket_time", "date", False),
+    "receive_time": ("receive_time", "date", False),
+    "first_test_done_time": ("first_test_done_time", "date", False),
+    "retest_notice_time": ("retest_notice_time", "date", False),
+    "retest_done_time": ("retest_done_time", "date", False),
+    "est_mandays": ("est_mandays", "number", False),
+    "actual_mandays": ("actual_mandays", "number", False),
+    "stat_critical": ("stat_critical", "number", False),
+    "stat_high": ("stat_high", "number", False),
+    "stat_medium": ("stat_medium", "number", False),
+    "stat_low": ("stat_low", "number", False),
+    "testers": ("testers", "text", False),  # 测试人员：多对多姓名/用户名匹配
+    "vul_count": ("vul_count", "number", False),  # 关联漏洞计数
+    "report_count": ("report_count", "number", False),  # 关联报告计数
+    "retest_round_count": ("retest_round_count", "number", False),  # 复测轮数
+    "create_time": ("create_time", "date", True),
+    "update_time": ("update_time", "date", True),
+}
+
+_ALLOWED_FILTER_OPS = {
+    "eq", "ne", "contains", "not_contains", "starts_with", "ends_with",
+    "gt", "gte", "lt", "lte", "between", "is_empty", "is_not_empty",
+}
+
+
+def _split_range(value) -> tuple:
+    """between 操作符取值：优先 [lo, hi] 数组，兼容 'lo,hi' 字符串。"""
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        return value[0], value[1]
+    if isinstance(value, str) and "," in value:
+        a, b = value.split(",", 1)
+        return a, b
+    raise HTTPException(400, "between 操作符需要两个值（如 [起始值, 结束值]）")
+
+
+def _plan_filter_expr(col, ftype: str, is_datetime: bool, op: str, value) -> object:
+    """按字段类型构造单字段筛选条件（不含 NOT 取反）。"""
+    if op in ("is_empty", "is_not_empty"):
+        if ftype == "number":
+            empty = col.is_(None) | (col == 0)
+        elif is_datetime:
+            empty = col.is_(None)
+        else:
+            empty = col.is_(None) | (col == "")
+        return empty if op == "is_empty" else ~empty
+    if is_datetime:
+        # DateTime 列统一转日期字符串比较，保证跨数据库行为一致
+        col = func.date(col)
+    if ftype in ("text", "enum"):
+        if op == "contains":
+            return col.ilike(f"%{value}%")
+        if op == "not_contains":
+            return ~col.ilike(f"%{value}%")
+        if op == "starts_with":
+            return col.ilike(f"{value}%")
+        if op == "ends_with":
+            return col.ilike(f"%{value}")
+        if op == "eq":
+            return col == value
+        if op == "ne":
+            return col != value
+        raise HTTPException(400, f"文本字段不支持操作符：{op}")
+    # number / date
+    if op == "eq":
+        return col == value
+    if op == "ne":
+        return col != value
+    if op == "between":
+        lo, hi = _split_range(value)
+        if lo in (None, "") or hi in (None, ""):
+            raise HTTPException(400, "区间筛选需要填写完整的起止值")
+        if ftype == "number":
+            return and_(col >= _to_float(lo), col <= _to_float(hi))
+        # 日期字符串比较：排除空值
+        return and_(col.is_not(None), col != "", col >= lo, col <= hi)
+    if ftype == "number":
+        v = _to_float(value) if not isinstance(value, (int, float)) else float(value)
+        if op == "gt":
+            return col > v
+        if op == "gte":
+            return col >= v
+        if op == "lt":
+            return col < v
+        if op == "lte":
+            return col <= v
+        raise HTTPException(400, f"数字字段不支持操作符：{op}")
+    # 日期字符串（YYYY-MM-DD 字典序即时间序）：上界比较需排除空值，下界比较天然排除空串
+    if op in ("lt", "lte"):
+        cond = col < value if op == "lt" else col <= value
+        return and_(col.is_not(None), col != "", cond)
+    if op == "gt":
+        return col > value
+    if op == "gte":
+        return col >= value
+    raise HTTPException(400, f"字段不支持操作符：{op}")
+
+
+def _ticket_id_filter_expr(op: str, value) -> object:
+    """工单ID为派生字段：手动指定值优先，否则由 receive_time(YYYY-MM-DD) + ticket_seq 生成 YYYYMMDD-N。"""
+    sv = str(value) if value is not None else ""
+    m = re.fullmatch(r"(\d{8})-(\d+)", sv)
+    date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%" if m else None
+
+    def _eq():
+        conds = [TestingPlan.ticket_id_manual == sv]
+        if date_like:
+            conds.append(and_(
+                TestingPlan.receive_time.like(date_like),
+                TestingPlan.ticket_seq == int(m.group(2)),
+            ))
+        return or_(*conds)
+
+    if op == "eq":
+        return _eq()
+    if op == "ne":
+        return ~_eq()
+    if op in ("contains", "not_contains"):
+        expr = or_(
+            TestingPlan.ticket_id_manual.ilike(f"%{sv}%"),
+            TestingPlan.receive_time.ilike(f"%{sv}%"),
+            func.replace(TestingPlan.receive_time, "-", "").ilike(f"%{sv}%"),
+            func.cast(TestingPlan.ticket_seq, String).ilike(f"%{sv}%"),
+        )
+        return expr if op == "contains" else ~expr
+    if op == "starts_with":
+        if len(sv) >= 8 and sv[:8].isdigit():
+            d = f"{sv[:4]}-{sv[4:6]}-{sv[6:8]}"
+            return or_(
+                TestingPlan.ticket_id_manual.ilike(f"{sv}%"),
+                TestingPlan.receive_time.like(f"{d}%"),
+            )
+        return or_(
+            TestingPlan.ticket_id_manual.ilike(f"{sv}%"),
+            TestingPlan.receive_time.like(f"{sv}%"),
+        )
+    if op == "ends_with":
+        return or_(
+            TestingPlan.ticket_id_manual.ilike(f"%{sv}"),
+            func.cast(TestingPlan.ticket_seq, String).ilike(f"%{sv}"),
+        )
+    if op in ("is_empty", "is_not_empty"):
+        empty = (TestingPlan.ticket_id_manual == "") & (TestingPlan.receive_time == "")
+        return empty if op == "is_empty" else ~empty
+    raise HTTPException(400, f"工单ID字段不支持操作符：{op}")
+
+
+def _testers_filter_expr(op: str, value) -> object:
+    """测试人员筛选：多对多关联 users 表，按姓名/用户名模糊匹配。"""
+    if op in ("is_empty", "is_not_empty"):
+        sub = exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
+        return ~sub if op == "is_empty" else sub
+    sv = str(value) if value is not None else ""
+    pat = f"%{sv}%"
+    if op == "starts_with":
+        pat = f"{sv}%"
+    elif op == "ends_with":
+        pat = f"%{sv}"
+    sub = exists().where(
+        testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+        testing_plan_testers.c.user_id == User.id,
+        or_(User.realname.ilike(pat), User.username.ilike(pat)),
+    )
+    if op in ("eq", "contains", "starts_with", "ends_with"):
+        return sub
+    if op in ("ne", "not_contains"):
+        return ~sub
+    raise HTTPException(400, f"测试人员字段不支持操作符：{op}")
+
+
+def _plan_count_expr(field: str, op: str, value) -> object:
+    """关联计数筛选：关联漏洞数 / 关联报告数 / 复测轮数，通过相关子查询比较。"""
+    if field == "vul_count":
+        sub = select(func.count(Vul.id)).where(Vul.testing_plan_id == TestingPlan.id).scalar_subquery()
+    elif field == "report_count":
+        sub = select(func.count(Report.id)).where(Report.testing_plan_id == TestingPlan.id).scalar_subquery()
+    else:
+        sub = select(func.count(TestingPlanRetestRound.id)).where(
+            TestingPlanRetestRound.plan_id == TestingPlan.id
+        ).scalar_subquery()
+    if op in ("is_empty", "is_not_empty"):
+        empty = sub == 0
+        return empty if op == "is_empty" else ~empty
+    v = _to_float(value) if not isinstance(value, (int, float)) else float(value)
+    if op == "eq":
+        return sub == v
+    if op == "ne":
+        return sub != v
+    if op == "gt":
+        return sub > v
+    if op == "gte":
+        return sub >= v
+    if op == "lt":
+        return sub < v
+    if op == "lte":
+        return sub <= v
+    if op == "between":
+        lo, hi = _split_range(value)
+        if lo in (None, "") or hi in (None, ""):
+            raise HTTPException(400, "区间筛选需要填写完整的起止值")
+        return and_(sub >= _to_float(lo), sub <= _to_float(hi))
+    raise HTTPException(400, f"计数字段不支持操作符：{op}")
+
+
+def _plan_filters_condition(filters: str) -> list:
+    """解析聚合筛选 JSON（rules + 规则间 and/or 连接 + 单规则 not 取反），返回与现有条件 AND 的条件列表。
+
+    请求格式示例：
+        {"rules": [
+            {"field": "status", "op": "eq", "value": 20, "not": false, "connector": "and"},
+            {"field": "system_name", "op": "contains", "value": "商城", "not": true, "connector": "or"},
+        ]}
+    rules 按顺序组合：首条规则的 connector 忽略，其余规则的 connector 表示其与上一条之间的逻辑。
+    """
+    if not filters:
+        return []
+    try:
+        payload = json.loads(filters)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "filters 参数格式错误，需为 JSON 字符串")
+    rules = payload.get("rules") if isinstance(payload, dict) else None
+    if not isinstance(rules, list) or not rules:
+        return []
+    expr = None
+    for r in rules:
+        if not isinstance(r, dict):
+            continue
+        field = str(r.get("field", ""))
+        op = str(r.get("op", ""))
+        if op not in _ALLOWED_FILTER_OPS:
+            raise HTTPException(400, f"不支持的操作符：{op}")
+        if field not in _PLAN_FILTER_FIELDS:
+            raise HTTPException(400, f"不支持的筛选字段：{field}")
+        _, ftype, is_datetime = _PLAN_FILTER_FIELDS[field]
+        if field == "ticket_id":
+            cond = _ticket_id_filter_expr(op, r.get("value"))
+        elif field == "testers":
+            cond = _testers_filter_expr(op, r.get("value"))
+        elif field in ("vul_count", "report_count", "retest_round_count"):
+            cond = _plan_count_expr(field, op, r.get("value"))
+        else:
+            cond = _plan_filter_expr(
+                getattr(TestingPlan, _PLAN_FILTER_FIELDS[field][0]), ftype, is_datetime, op, r.get("value")
+            )
+        if r.get("not"):
+            cond = ~cond
+        connector = str(r.get("connector") or "and").lower()
+        if expr is None:
+            expr = cond
+        elif connector == "or":
+            expr = expr | cond
+        else:
+            expr = expr & cond
+    return [expr] if expr is not None else []
 
 
 def _month_range(start: str, end: str) -> list[str]:
@@ -289,8 +565,10 @@ async def list_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    filters: str = "",
     my_tests: bool = False,
     unclaimed: bool = False,
+    pending: bool = False,
     sort: str = "",
     order: str = "desc",
     page: int = Query(1, ge=1),
@@ -298,17 +576,22 @@ async def list_testing_plans(
     user: User = Depends(require_any_perm("special:manage", "vuln:submit")),
     session: AsyncSession = Depends(get_session),
 ):
-    """测试计划列表。my_tests 显示当前可测试系统，unclaimed 显示无人认领的测试。"""
+    """测试计划列表。my_tests 显示当前可测试系统，unclaimed 显示无人认领的测试，pending 显示待办流程。
+
+    filters 为聚合筛选 JSON（详见 _plan_filters_condition），与上述固定参数按 AND 组合。
+    """
     cond = _plan_conditions(
         search, status, test_type, department, receive_from, receive_to,
         tester_id=user.id if my_tests else None,
         unclaimed=unclaimed,
+        pending=pending,
     )
+    cond += _plan_filters_condition(filters)
     stmt = select(TestingPlan).where(*cond)
     stmt = apply_sort(
         stmt, TestingPlan, sort, order,
         {"id", "system_name", "plan_name", "test_type", "department", "status", "est_mandays",
-         "actual_mandays", "receive_time", "retest_done_time", "create_time"},
+         "actual_mandays", "receive_time", "first_test_done_time", "retest_done_time", "create_time"},
         TestingPlan.id.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
@@ -323,11 +606,14 @@ async def testing_plan_stats(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    filters: str = "",
+    pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """测试计划多维度统计：总数/复测完成数/初测次数/复测次数/总测试次数/状态分布/按月漏洞数。"""
-    cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to)
+    cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to, pending=pending)
+    cond += _plan_filters_condition(filters)
     return await _compute_plan_stats(session, cond, receive_from, receive_to)
 
 
@@ -348,13 +634,16 @@ async def export_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    filters: str = "",
+    pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """导出筛选后的测试计划明细与统计汇总（双 sheet Excel）。"""
     from openpyxl import Workbook
 
-    cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to)
+    cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to, pending=pending)
+    cond += _plan_filters_condition(filters)
     plans = (
         await session.execute(select(TestingPlan).where(*cond).order_by(TestingPlan.id))
     ).scalars().all()
@@ -409,10 +698,10 @@ async def export_testing_plans(
 PLAN_STATUS_REVERSE = {v: k for k, v in TESTING_PLAN_STATUS.items()}
 
 
-def _to_float(text: str) -> float:
+def _to_float(text) -> float:
     try:
         return float(text) if text else 0.0
-    except ValueError:
+    except (TypeError, ValueError):
         return 0.0
 
 
@@ -557,8 +846,10 @@ async def get_testing_plan(
 
 
 async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
-    """按需求接收日期生成当日录入次序（ticket_seq），无日期时不生成。
+    """按需求接收日期分配当日最小未占用序号（ticket_seq），无日期时不生成。
 
+    - 动态检测占用：取从 1 开始的最小未占用正整数，删除/释放的工单ID可被
+      后续记录重新使用（如 20260101-2 仍存在时，释放的 20260101-1 可再次分配）。
     - 新对象 ticket_seq 为 None（SQLAlchemy default 在构造时不生效），
       需用 falsy 判断（None/0 均视为未分配）。
     - 仅当对象已持久化（更新场景）时才排除自身，避免新对象 id 为 None 时
@@ -568,13 +859,16 @@ async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
     if not row.receive_time or row.ticket_seq or row.ticket_id_manual:
         return
     date_like = f"{row.receive_time[:10]}%"
-    stmt = select(func.max(TestingPlan.ticket_seq)).where(
+    stmt = select(TestingPlan.ticket_seq).where(
         TestingPlan.receive_time.like(date_like)
     )
     if row.id is not None:
         stmt = stmt.where(TestingPlan.id != row.id)
-    max_seq = (await session.execute(stmt)).scalar_one()
-    row.ticket_seq = (max_seq or 0) + 1
+    used = set((await session.execute(stmt)).scalars().all())
+    seq = 1
+    while seq in used:
+        seq += 1
+    row.ticket_seq = seq
 
 
 async def _check_ticket_id_unique(

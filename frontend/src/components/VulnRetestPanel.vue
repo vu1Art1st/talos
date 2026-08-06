@@ -23,15 +23,35 @@
   </el-card>
 
   <div class="flex items-center gap-2">
-    <el-button type="primary" plain :loading="adding" @click="addRecord">
+    <el-button type="primary" plain @click="addVisible = true">
       <el-icon class="mr-1"><Plus /></el-icon>新增复测记录
     </el-button>
     <slot name="actions" />
   </div>
+
+  <el-dialog v-model="addVisible" title="新增复测记录" width="640px">
+    <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复详情</div>
+    <RichEditor v-model="addForm.content_html"
+                @update:json="(j: any) => (addForm.content_json = j)" />
+    <div class="mt-3">
+      <div class="text-sm font-medium text-gray-600 mb-2">复测结论</div>
+      <el-select v-model="addForm.status" clearable placeholder="可选：不调整漏洞状态" class="w-full">
+        <el-option label="复测未修复" :value="50" />
+        <el-option label="已修复" :value="60" />
+      </el-select>
+      <div class="text-xs text-gray-400 mt-1">
+        选择结论将同步调整漏洞状态（须处于复测中，且必须先填写复测详情）
+      </div>
+    </div>
+    <template #footer>
+      <el-button @click="addVisible = false">取消</el-button>
+      <el-button type="primary" :loading="adding" @click="submitAdd">确定新增</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -39,12 +59,19 @@ import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 
 // 复测记录增删改面板：供独立复测页（VulnRetest）与测试计划流程抽屉复用。
+// 新增复测记录时可一并选择复测结论（复测未修复/已修复），保存时同步调整漏洞状态。
 const props = defineProps<{ vulId: number }>()
 const emit = defineEmits<{ (e: 'changed', count: number): void }>()
 
 const records = ref<any[]>([])
 const adding = ref(false)
 const savingId = ref<number | null>(null)
+const addVisible = ref(false)
+const addForm = reactive<{ content_html: string; content_json: any; status: number | null }>({
+  content_html: '',
+  content_json: null,
+  status: null,
+})
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
@@ -53,13 +80,26 @@ async function load() {
   records.value = data
 }
 
-// 新增复测记录：后端创建空记录后追加到列表，生成新的富文本编辑框
-async function addRecord() {
+// 新增复测记录：填写复测详情并可选择复测结论，一并调整漏洞状态
+async function submitAdd() {
+  // 复测结论（复测未修复/已修复）强制要求先填写复测详情
+  if (addForm.status !== null && !(addForm.content_html || '').trim()) {
+    ElMessage.warning('选择复测结论前请先填写复测详情')
+    return
+  }
   adding.value = true
   try {
-    const { data } = await client.post(`/vulns/${props.vulId}/retests`, { content_html: '', content_json: null })
+    const { data } = await client.post(`/vulns/${props.vulId}/retests`, {
+      content_html: addForm.content_html || '',
+      content_json: addForm.content_json ?? null,
+      status: addForm.status,
+    })
     records.value.push(data)
-    ElMessage.success('已新增复测记录，请填写漏洞修复内容')
+    addVisible.value = false
+    addForm.content_html = ''
+    addForm.content_json = null
+    addForm.status = null
+    ElMessage.success('复测记录已新增')
     emit('changed', records.value.length)
   } finally {
     adding.value = false

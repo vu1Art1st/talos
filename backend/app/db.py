@@ -44,6 +44,8 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN target_ip VARCHAR(255) NOT NULL DEFAULT ''"))
         if report_cols and "revision" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"))
+        if report_cols and "vul_edit_snapshot" not in report_cols:
+            await conn.execute(text("ALTER TABLE reports ADD COLUMN vul_edit_snapshot JSON"))
         plan_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(testing_plans)"))).fetchall()}
         if plan_cols and "est_mandays" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))
@@ -69,6 +71,8 @@ async def _migrate_lightweight() -> None:
             await conn.execute(
                 text("ALTER TABLE export_jobs ADD COLUMN toc_auto_updated BOOLEAN NOT NULL DEFAULT 0")
             )
+        if export_cols and "report_snapshot" not in export_cols:
+            await conn.execute(text("ALTER TABLE export_jobs ADD COLUMN report_snapshot JSON"))
         spring_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(spring_actions)"))).fetchall()}
         if spring_cols and "year" not in spring_cols:
             await conn.execute(text("ALTER TABLE spring_actions ADD COLUMN year VARCHAR(8) NOT NULL DEFAULT ''"))
