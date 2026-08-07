@@ -269,7 +269,7 @@ async def confirm_batch(
                     target_ip=(batch_meta.get("target_ip") or ""),
                     testing_plan_id=plan.id,
                     creator_id=user.id,
-                    status="completed" if all_fixed else "draft",
+                    status="draft",  # 需求6：新生成报告一律为草稿，定稿由导出 Word 驱动
                 )
                 session.add(report)
                 await session.flush()

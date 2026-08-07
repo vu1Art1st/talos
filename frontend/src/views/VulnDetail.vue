@@ -43,9 +43,7 @@
                      @click="router.push('/testing-plans')">已关联计划</el-link>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="风险评分">{{ vul.risk_score }}</el-descriptions-item>
           <el-descriptions-item label="提交时间">{{ fmt(vul.submit_time) }}</el-descriptions-item>
-          <el-descriptions-item label="审核时间">{{ fmt(vul.audit_time) }}</el-descriptions-item>
           <el-descriptions-item label="通知时间">{{ fmt(vul.notice_time) }}</el-descriptions-item>
           <el-descriptions-item label="闭环时间">{{ fmt(vul.fix_time) }}</el-descriptions-item>
         </el-descriptions>

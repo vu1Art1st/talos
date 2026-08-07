@@ -1,5 +1,7 @@
 import html as html_mod
 import logging
+import re
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -11,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VUL_LEVEL_EXPORT
+from app.constants import ReportStatus, VUL_LEVEL_EXPORT, VulStatus
 from app.core.deps import require_perm
 from app.core.timeutil import now
 from app.core.query import get_or_404, paginate, apply_sort
@@ -101,6 +103,123 @@ async def _snapshot_vul_edits(session: AsyncSession, vul_ids: list[int]) -> dict
     return {str(vid): t.isoformat() if t else "" for vid, t in rows}
 
 
+def _calc_mandays(test_start: str, test_end: str) -> float:
+    """实际人天：报告测试结束日期 - 开始日期 + 1（含首尾，最小 1 天）。
+
+    测试周期为 YYYY-MM-DD 字符串；任一缺失、非法或结束早于开始时视为 0。
+    报告创建/保存/导出时均自动重算，用户手动修改测试周期后以修改后的时间为准。
+    """
+    try:
+        start = datetime.strptime(test_start, "%Y-%m-%d")
+        end = datetime.strptime(test_end, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return 0.0
+    if end < start:
+        return 0.0
+    return float((end - start).days + 1)
+
+
+def _vul_status_snapshot(vulns: list[Vul]) -> dict:
+    """关联漏洞状态快照 {vul_id: {status, retest_html, retest_json}}，供复测更新判断。"""
+    return {
+        str(v.id): {
+            "status": v.status,
+            "retest_html": v.retest_html or "",
+            "retest_json": v.retest_json,
+        }
+        for v in vulns
+    }
+
+
+def _same_vul_status(prev: dict, current: dict) -> bool:
+    """两次复测间漏洞状态与内容是否完全一致（并集比较，任一漏洞新增/移除/状态或内容变化均视为有更新）。"""
+    return all(prev.get(k) == v for k, v in current.items()) and all(k in current for k in prev)
+
+
+async def _report_title_exists(session: AsyncSession, title: str, plan_id: int | None) -> bool:
+    """同计划范围内报告标题查重（无计划时按无归属计划口径查重）。"""
+    cond = Report.title == title
+    if plan_id is not None:
+        cond = cond & (Report.testing_plan_id == plan_id)
+    else:
+        cond = cond & (Report.testing_plan_id.is_(None))
+    return (
+        await session.execute(select(Report.id).where(cond).limit(1))
+    ).scalar_one_or_none() is not None
+
+
+async def _find_last_retest_report(session: AsyncSession, src: Report) -> Report | None:
+    """定位「上一次复测」的报告：源报告自身为复测报告且有快照时优先；
+    否则取同计划下最近生成的有状态快照的复测报告（用于判断本次是否重复发起复测）。"""
+    if plan_service.is_retest_report_title(src.title) and src.retest_vul_snapshot is not None:
+        return src
+    if src.testing_plan_id is None:
+        return None
+    stmt = (
+        select(Report)
+        .where(
+            Report.testing_plan_id == src.testing_plan_id,
+            Report.id != src.id,
+            Report.retest_vul_snapshot.is_not(None),
+        )
+        .order_by(Report.id.desc())
+        .limit(20)
+    )
+    for r in (await session.execute(stmt)).scalars().all():
+        if plan_service.is_retest_report_title(r.title):
+            return r
+    return None
+
+
+async def _create_retest_report(
+    session: AsyncSession, src: Report, user: User,
+    vul_snapshot: dict | None = None,
+) -> Report:
+    """基于原报告自动生成复测报告草稿。
+
+    - 标题：当前发起复测日期（YYYYMMDD）为标题前八位，尾部将原「渗透测试报告」替换为「渗透测试复测报告」；
+      同一天对同一来源重复发起复测导致标题重复时，自动追加「-1」「-2」后缀规避重名（不再复用旧报告）；
+    - 测试周期：开始时间 = 发起复测当天，结束时间 = 生成当天（导出日期默认值，用户可手动修改）；
+    - 章节复制原报告（保留漏洞关联），供复测编辑面板逐条处理；
+    - 实际人天自动计算 = 结束日期 - 开始日期；
+    - retest_vul_snapshot：记录本次发起复测后关联漏洞的状态快照，供下次发起复测时判断是否更新。
+    """
+    today = now().date()
+    # 需求9：先清除原标题开头的旧日期（YYYYMMDD）再拼接当前日期，避免「yyyymmddyyyymmdd+系统名」重复
+    base = re.sub(r"^\d{8}", "", src.title).replace("渗透测试报告", "渗透测试复测报告")
+    title = f"{today.strftime('%Y%m%d')}{base}"
+    suffix = 0
+    candidate = title
+    while await _report_title_exists(session, candidate, src.testing_plan_id):
+        suffix += 1
+        candidate = f"{title}-{suffix}"
+    report = Report(
+        title=candidate,
+        project_name=src.project_name,
+        customer=src.customer,
+        author=user.realname or user.username,
+        target_ip=src.target_ip,
+        test_start=today.isoformat(),
+        test_end=today.isoformat(),
+        status="draft",
+        testing_plan_id=src.testing_plan_id,
+        creator_id=user.id,
+        retest_vul_snapshot=vul_snapshot,
+    )
+    for s in src.sections:
+        report.sections.append(ReportSection(
+            order=s.order, title=s.title,
+            content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
+        ))
+    session.add(report)
+    await session.flush()
+    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.vul_edit_snapshot = await _snapshot_vul_edits(
+        session, [s.vul_id for s in report.sections if s.vul_id]
+    )
+    return report
+
+
 @router.get("", response_model=Page[ReportListOut])
 async def list_reports(
     search: str = "",
@@ -145,6 +264,10 @@ async def create_report(
     await _auto_mark_fixing(session, linked_ids, user, report.title)
     # 漏洞流转（自动进入修复中）会刷新其最后编辑时间，故快照需在流转后采集
     report.vul_edit_snapshot = await _snapshot_vul_edits(session, linked_ids)
+    # 实际人天自动计算：测试结束日期 - 开始日期 + 1
+    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
+    await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
     await session.refresh(report)
     return report
@@ -154,6 +277,7 @@ class FromVulnsIn(BaseModel):
     title: str
     vul_ids: list[int]
     testing_plan_id: int | None = None  # 关联测试计划，联动其状态
+    project_name: str = ""  # 系统名称：未显式指定时由关联计划自动填充（导出模板封面第二行）
 
 
 @router.post("/from-vulns", response_model=ReportOut)
@@ -172,8 +296,15 @@ async def create_report_from_vulns(
         plan = await plan_service.get_plan_or_400(session, plan_id)
     vulns = (await session.execute(select(Vul).where(Vul.id.in_(body.vul_ids)))).scalars().all()
     by_id = {v.id: v for v in vulns}
+    # 需求8：标题为空时自动生成「yyyymmdd+测试系统名称+渗透测试报告」；
+    # 系统名称未显式指定时取关联计划的测试系统名称（导出模板封面第二行展示）
+    title = body.title.strip()
+    if not title:
+        sys_name = plan.system_name if plan is not None else ""
+        title = f"{now().date().strftime('%Y%m%d')}{sys_name}渗透测试报告"
     report = Report(
-        title=body.title, author=user.realname or user.username,
+        title=title, author=user.realname or user.username,
+        project_name=body.project_name.strip() or (plan.system_name if plan is not None else ""),
         testing_plan_id=plan_id, creator_id=user.id,
     )
     order = 0
@@ -193,10 +324,14 @@ async def create_report_from_vulns(
     report.vul_edit_snapshot = await _snapshot_vul_edits(session, [v.id for v in vulns])
     if plan is not None:
         # 报告已生成，计划进入等待复测阶段
-        if plan.status in (10, 20):
+        if vuln_service.can_plan_transition(plan.status, 30):
             plan.status = 30
         if not plan.first_test_done_time:
             plan.first_test_done_time = now().date().isoformat()
+    # 实际人天自动计算：测试结束日期 - 开始日期 + 1
+    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
+    await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
     await session.refresh(report)
     return report
@@ -363,6 +498,25 @@ async def get_report(
     return await _get_report(session, report_id)
 
 
+def _report_content_changed(report: Report, body: ReportSaveIn) -> bool:
+    """报告内容是否发生变更（元信息 + 章节，按 order 排序比较）。
+
+    用于需求6的已定稿报告内容变更检测：内容变化即视为脱离定稿态。
+    """
+    for k in ("title", "project_name", "customer", "author", "test_start", "test_end", "target_ip"):
+        if getattr(report, k) != getattr(body, k):
+            return True
+    old_sections = [
+        (s.title, s.content_html, s.content_json, s.vul_id)
+        for s in sorted(report.sections, key=lambda s: s.order)
+    ]
+    new_sections = [
+        (s.title, s.content_html, s.content_json, s.vul_id)
+        for s in sorted(body.sections, key=lambda s: s.order)
+    ]
+    return old_sections != new_sections
+
+
 @router.put("/{report_id}", response_model=ReportOut)
 async def save_report(
     report_id: int,
@@ -370,11 +524,17 @@ async def save_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。"""
+    """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。
+
+    需求6：已定稿(final)报告内容发生变更时，保存后自动回退草稿，需重新导出定稿。
+    """
     report = await _get_report(session, report_id)
     if body.revision != report.revision:
         raise HTTPException(409, "报告已被他人修改，请刷新后重试")
 
+    # 需求6：在覆盖前基于旧值判定内容是否变化（纯状态切换不误判）
+    content_changed = _report_content_changed(report, body)
+    old_plan_id = report.testing_plan_id  # 保存后可能换计划，需分别刷新新旧计划的人天
     old_linked = {s.vul_id for s in report.sections if s.vul_id}
     for k, v in body.model_dump(exclude={"sections", "revision"}).items():
         setattr(report, k, v)
@@ -386,6 +546,9 @@ async def save_report(
             content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
         ))
     report.revision += 1
+    # 需求6：已定稿报告内容变更后自动回退草稿，需重新导出定稿
+    if content_changed and report.status == ReportStatus.FINAL.to_str():
+        report.status = ReportStatus.DRAFT.to_str()
     # 编辑中新关联进来的漏洞同样自动进入修复中
     new_linked = [s.vul_id for s in body.sections if s.vul_id and s.vul_id not in old_linked]
     await _auto_mark_fixing(session, new_linked, user, report.title)
@@ -398,6 +561,12 @@ async def save_report(
         report.testing_plan_id = await _infer_plan_id(
             session, [s.vul_id for s in body.sections if s.vul_id]
         )
+    # 实际人天自动计算：测试结束日期 - 开始日期 + 1（用户手动修改时间后以修改后的时间为准）
+    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
+    await plan_service.refresh_mandays(session, report.testing_plan_id)
+    if old_plan_id and old_plan_id != report.testing_plan_id:
+        await plan_service.refresh_mandays(session, old_plan_id)
     await session.commit()
     await session.refresh(report)
     return report
@@ -409,27 +578,59 @@ async def retest_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """报告列表点击「复测」：关联漏洞由修复中自动流转为复测中，随后进入复测报告编辑。"""
+    """报告列表/测试计划点击「发起复测」：未修复关联漏洞自动流转为复测中，并自动生成复测报告草稿。
+
+    支持从以下状态进入复测：
+    - 修复中(50) → 复测中(55)：标准链路
+    - 未修复(10) → 复测中(55)：修复状态冗余兜底
+    - 复测中(55) → 复测中(55)：已处于复测中则幂等跳过
+    - 已修复(60) → 保持已修复不变：发起复测仅对未修复漏洞生效，已闭环漏洞不重新进入复测
+
+    防重复发起复测：再次点击发起复测时对比上一次复测的漏洞状态快照，若漏洞状态与复测内容
+    均未变化则阻止生成新报告（返回 400），且不新增复测轮次；有更新才生成新报告进入下一轮。
+
+    复测报告规则：
+    - 标题：当前发起复测日期（YYYYMMDD）为标题前八位，尾部将原「渗透测试报告」替换为「渗透测试复测报告」；
+      同日多次复测标题重复时自动追加「-1」「-2」后缀；
+    - 测试周期：开始时间 = 发起复测时间，结束时间 = 生成当天（导出日期默认值，用户可手动修改）；
+    - 实际人天自动计算 = 结束日期 - 开始日期。
+    """
     report = await _get_report(session, report_id)
     vul_ids = [s.vul_id for s in report.sections if s.vul_id]
     if not vul_ids:
         raise HTTPException(400, "该报告没有关联任何漏洞，无法发起复测")
+    vulns = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
+    # 需求：再次发起复测时对比上一次复测的漏洞状态快照，状态/内容未更新则阻止（不生成新报告、不增加轮次）
+    last_retest = await _find_last_retest_report(session, report)
+    if last_retest is not None and last_retest.retest_vul_snapshot:
+        if _same_vul_status(last_retest.retest_vul_snapshot, _vul_status_snapshot(vulns)):
+            raise HTTPException(400, "复测结果未更新，无需生成新的复测报告")
+    # 需求：发起复测仅对未修复漏洞生效，已修复(60)漏洞保持原状态，不重新进入复测中
+    unfixed_vul_ids = [v.id for v in vulns if v.status != VulStatus.FIXED]
     changed = await vuln_service.auto_transition(
-        session, vul_ids, 55, user, f"报告《{report.title}》发起复测，自动进入复测中",
+        session, unfixed_vul_ids, 55, user, f"报告《{report.title}》发起复测，自动进入复测中",
     )
-    if report.testing_plan_id is not None:
+    # 对于已处于复测中(55)的漏洞，虽未在 changed 中但同样视为复测流程已发起
+    already_retesting = [v for v in vulns if v.status == 55 and v.id not in {c.id for c in changed}]
+    effective_changed = bool(changed) or bool(already_retesting)
+    # 仅当确有漏洞进入复测时才联动测试计划进入复测中，避免全部漏洞已修复时误流转
+    if effective_changed and report.testing_plan_id is not None:
         plan = await session.get(TestingPlan, report.testing_plan_id)
         if plan is not None:
-            if plan.status in (30, 40):
+            if vuln_service.can_plan_transition(plan.status, 50):
                 plan.status = 50  # 等待复测/复测申请 → 复测中
-            # 实际有漏洞进入复测时记一轮复测（重复点击不产生流转则不计数）
-            if changed:
-                plan_service.start_retest_round(
-                    session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
-                )
+            plan_service.start_retest_round(
+                session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
+            )
+    # 自动生成复测报告（记录本次发起复测后漏洞状态快照供下次对比；同日标题重复自动加 -1/-2 后缀）
+    retest = await _create_retest_report(
+        session, report, user, vul_snapshot=_vul_status_snapshot(vulns),
+    )
+    # 同步刷新关联测试计划的实际人天（复测报告标题含「复测」不计入，值保持不变）
+    await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
-    await session.refresh(report)
-    return report
+    await session.refresh(retest)
+    return retest
 
 
 @router.get("/{report_id}/vuln-states", response_model=list[ReportVulnStateOut])
@@ -548,6 +749,10 @@ async def export_report(
                 report.test_start = earliest.date().isoformat()
         if not report.test_end:
             report.test_end = now().date().isoformat()
+    # 实际人天自动计算：测试结束日期 - 开始日期 + 1（导出时预填周期同样会刷新该值）
+    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
+    await plan_service.refresh_mandays(session, report.testing_plan_id)
     # 预填测试周期会触发报告 update_time（onupdate）刷新，且该值不会回写对象属性，
     # 需 flush + refresh 后采集指纹，确保与最终落库状态一致
     await session.flush()

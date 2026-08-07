@@ -211,14 +211,14 @@
         <el-empty v-if="!plan.reports?.length" description="暂无报告，录入漏洞后可生成报告" :image-size="60" />
         <div v-for="r in plan.reports" :key="r.id" class="py-3 border-b border-gray-100 last:border-0">
           <div class="flex items-center gap-2">
-            <el-tag size="small" :type="r.status === 'completed' ? 'success' : 'info'">
+            <el-tag size="small" :type="r.status === 'final' ? 'primary' : 'info'">
               {{ reportStatusName(r.status) }}
             </el-tag>
             <span class="text-sm font-medium">{{ r.title }}</span>
             <span class="text-xs text-gray-400">生成于 {{ fmtTime(r.create_time) }}</span>
             <div class="flex-1" />
-            <el-popconfirm v-if="canOperate && r.status !== 'completed'"
-                           title="发起复测将通知整改并使漏洞进入复测中，确认？" width="260"
+            <el-popconfirm v-if="canOperate"
+                           title="发起复测将通知整改并使漏洞进入复测中，系统将自动生成复测报告，确认？" width="280"
                            @confirm="startRetest(r)">
               <template #reference>
                 <el-button size="small" type="danger" plain>发起复测</el-button>
@@ -357,7 +357,7 @@ const levelName = (lv: number) =>
   ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
 
 const reportStatusName = (s: string) =>
-  ({ draft: '草稿', final: '定稿', completed: '已完成' } as Record<string, string>)[s] ?? s
+  ({ draft: '草稿', final: '已定稿' } as Record<string, string>)[s] ?? s
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
 const isTester = computed(() => plan.value?.testers?.some((u: any) => u.id === auth.user?.id) ?? false)
@@ -395,9 +395,12 @@ async function refresh() {
   }
 }
 
-// 需求5：按危害等级降序（level 小=超危/高危）排序，保持后端兜底
+// 需求5/7：按危害等级降序（level 小=超危/高危）；同等级按录入时间升序（submit_time，id 兜底）
 function sortVulns(items: any[]) {
-  return [...items].sort((a, b) => (a.level ?? 99) - (b.level ?? 99))
+  return [...items].sort((a, b) =>
+    (a.level ?? 99) - (b.level ?? 99) ||
+    new Date(a.submit_time ?? 0).getTime() - new Date(b.submit_time ?? 0).getTime() ||
+    a.id - b.id)
 }
 
 // ---------- 从漏洞库选择 ----------
@@ -507,7 +510,8 @@ async function transition(row: any, status: number) {
 function toggleGenForm() {
   genFormVisible.value = !genFormVisible.value
   if (genFormVisible.value) {
-    genTitle.value = `${plan.value?.system_name ?? ''}渗透测试报告`
+    // 需求8：自动命名「yyyymmdd+测试系统名称+渗透测试报告」
+    genTitle.value = `${dayjs().format('YYYYMMDD')}${plan.value?.system_name ?? ''}渗透测试报告`
     genVulIds.value = vulns.value.map((v) => v.id)
   }
 }
@@ -564,7 +568,7 @@ async function removeExportJob(r: any, job: any) {
 
 async function startRetest(r: any) {
   await client.post(`/reports/${r.id}/retest`)
-  ElMessage.success('已发起复测，漏洞进入复测中')
+  ElMessage.success('已发起复测，漏洞进入复测中，已自动生成复测报告')
   dirty.value = true
   await refresh()
 }

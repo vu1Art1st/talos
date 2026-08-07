@@ -76,7 +76,7 @@
       <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="router.push(`/reports/${row.id}`)">编辑</el-button>
-          <el-button v-if="row.status !== 'completed'" size="small" type="warning" link @click="retest(row.id)">
+          <el-button size="small" type="warning" link @click="retest(row.id)">
             复测
           </el-button>
           <el-popconfirm title="确认删除该报告？" @confirm="remove(row.id)">
@@ -243,15 +243,13 @@ async function batchDownload() {
 
 const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
-const statusName = (s: string) =>
-  s === 'completed' ? '已完成' : s === 'final' ? '已定稿' : '草稿'
-const statusTag = (s: string) =>
-  s === 'completed' ? 'success' : s === 'final' ? 'primary' : 'info'
+const statusName = (s: string) => (s === 'final' ? '已定稿' : '草稿')
+const statusTag = (s: string) => (s === 'final' ? 'primary' : 'info')
 
 async function retest(id: number) {
-  await client.post(`/reports/${id}/retest`)
-  ElMessage.success('已发起复测，关联漏洞进入复测中')
-  router.push(`/reports/${id}`)
+  const { data } = await client.post(`/reports/${id}/retest`)
+  ElMessage.success('已发起复测，已自动生成复测报告')
+  router.push(`/reports/${data.id}`)
 }
 
 async function load(p = page.value) {
@@ -323,7 +321,8 @@ async function onPlanChange(planId: number | null) {
   vulns.value = data.items
   genVulIds.value = data.items.map((v: any) => v.id)
   const plan = plans.value.find((p) => p.id === planId)
-  if (plan && !genTitle.value) genTitle.value = `${plan.system_name}渗透测试报告`
+  // 需求8：自动命名「yyyymmdd+测试系统名称+渗透测试报告」
+  if (plan && !genTitle.value) genTitle.value = `${dayjs().format('YYYYMMDD')}${plan.system_name}渗透测试报告`
 }
 
 watch(fromVulnsVisible, async (v) => {

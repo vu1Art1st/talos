@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now
@@ -20,11 +20,15 @@ class Report(Base):
     test_start: Mapped[str] = mapped_column(String(32), default="")
     test_end: Mapped[str] = mapped_column(String(32), default="")
     target_ip: Mapped[str] = mapped_column(String(255), default="")  # 被测系统 IP，导出模板测试目标表使用
+    actual_mandays: Mapped[float] = mapped_column(Float, default=0)  # 实际人天（自动计算：结束日期 - 开始日期）
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final / completed
     version: Mapped[int] = mapped_column(Integer, default=1)  # 导出版本：每次导出成功 +1
     revision: Mapped[int] = mapped_column(Integer, default=0)  # 编辑乐观锁：每次保存 +1
     # 生成/保存报告时对关联漏洞 {vul_id: update_time} 的快照，用于再次生成时的相似性判定
     vul_edit_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 复测报告生成时关联漏洞状态快照 {vul_id: {status, retest_html, retest_json}}，
+    # 再次发起复测时对比当前漏洞状态，未更新则阻止生成新复测报告
+    retest_vul_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
 
     def fingerprint(self) -> dict:

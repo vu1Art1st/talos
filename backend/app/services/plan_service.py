@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import user_permissions
-from app.models import TestingPlan, TestingPlanRetestRound, User, Vul
+from app.models import Report, TestingPlan, TestingPlanRetestRound, User, Vul
 
 
 def can_operate(user: User, plan: TestingPlan) -> bool:
@@ -53,6 +53,32 @@ async def refresh_stats(session: AsyncSession, plan_id: int | None) -> None:
     plan.stat_high = counts.get(20, 0)
     plan.stat_medium = counts.get(30, 0)
     plan.stat_low = counts.get(40, 0)
+
+
+def is_retest_report_title(title: str) -> bool:
+    """按标题判断是否为复测报告：复测报告标题约定含「复测」字样（如「XX渗透测试复测报告」）。"""
+    return "复测" in (title or "")
+
+
+async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
+    """测试计划实际人天自动计算：仅纳入初测报告（标题不含「复测」）的人天之和。
+
+    与漏洞统计口径一致：有关联初测报告时自动重算并覆盖手填值；
+    无初测报告（含仅有关联复测报告）时保留手填值，复测报告人天不计入统计。
+    """
+    if plan_id is None:
+        return
+    plan = await session.get(TestingPlan, plan_id)
+    if plan is None:
+        return
+    first_test_reports = [
+        r for r in plan.reports if not is_retest_report_title(r.title)
+    ]
+    if not first_test_reports:
+        return
+    plan.actual_mandays = round(
+        float(sum(r.actual_mandays or 0 for r in first_test_reports)), 2
+    )
 
 
 def start_retest_round(

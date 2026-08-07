@@ -15,11 +15,9 @@ export function showTocNotice(): void {
   const content = h('div', { style: 'line-height:1.9;font-size:14px' }, [
     h('p', null, '报告的目录域尚未生成，您可通过以下任一方式更新：'),
     h('p', null, [
-      '1. 使用 WPS/Word 打开报告，在弹出的「是否更新域」提示中选择「是」，即可自动生成目录；',
+      '1. 手动更新：全选（Ctrl+A）后按 F9，或右键目录 →「更新域」→「更新整个目录」。',
     ]),
-    h('p', null, [
-      '2. 或手动更新：全选（Ctrl+A）后按 F9，或右键目录 →「更新域」→「更新整个目录」。',
-    ]),
+    h('p', null, '报告未增加编辑限制，请添加编辑限制。'),
     h('label', {
       style: 'display:flex;align-items:center;gap:6px;margin-top:14px;cursor:pointer;user-select:none',
     }, [
@@ -32,7 +30,7 @@ export function showTocNotice(): void {
     ]),
   ])
   ElMessageBox({
-    title: '目录需手动更新',
+    title: '报告待办',
     message: content as unknown as VNode,
     type: 'warning',
     confirmButtonText: '知道了',

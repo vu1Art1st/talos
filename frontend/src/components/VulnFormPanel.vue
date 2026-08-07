@@ -1,136 +1,168 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg mb-4">
-    <el-form label-width="90px">
-      <el-form-item label="测试目标" required>
-        <div class="w-full flex items-start gap-2">
-        <el-select v-model="assetIds" multiple filterable remote :remote-method="searchAssets"
-                   :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="flex-1"
-                   @change="onAssetChange">
-          <el-option v-for="a in assetOptions" :key="a.id" :value="a.id"
-                     :label="a.sub_system ? `${a.name} / ${a.sub_system}` : a.name">
-            <div class="flex justify-between">
-              <span>{{ a.sub_system ? `${a.name} / ${a.sub_system}` : a.name }}</span>
-              <span class="text-xs text-gray-400">{{ a.department }}</span>
-            </div>
-          </el-option>
-          <template #empty>
-            <div class="p-3 text-center">
-              <p class="text-sm text-gray-400 mb-2">未找到匹配的资产</p>
-              <el-button size="small" type="primary" @click="openCreateAsset">
-                <el-icon class="mr-1"><Plus /></el-icon>新建资产{{ assetKeyword ? `「${assetKeyword}」` : '' }}
+  <!-- 独立编辑页（asideActions）：左侧内容滚动 + 右侧固定操作栏；弹窗/抽屉：保持底部操作栏 -->
+  <div :class="asideActions ? 'flex h-full min-h-0 flex-col xl:flex-row gap-4' : ''">
+    <div :class="asideActions ? 'flex-1 min-h-0 overflow-y-auto space-y-4 pr-1' : ''">
+      <slot name="notice" />
+
+      <el-card shadow="never" class="!rounded-lg" :class="asideActions ? '' : 'mb-4'">
+        <el-form label-width="90px">
+          <el-form-item label="测试目标" required>
+            <div class="w-full flex items-start gap-2">
+              <el-select v-model="assetIds" multiple filterable remote :remote-method="searchAssets"
+                         :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="flex-1"
+                         @change="onAssetChange">
+                <el-option v-for="a in assetOptions" :key="a.id" :value="a.id"
+                           :label="a.sub_system ? `${a.name} / ${a.sub_system}` : a.name">
+                  <div class="flex justify-between">
+                    <span>{{ a.sub_system ? `${a.name} / ${a.sub_system}` : a.name }}</span>
+                    <span class="text-xs text-gray-400">{{ a.department }}</span>
+                  </div>
+                </el-option>
+                <template #empty>
+                  <div class="p-3 text-center">
+                    <p class="text-sm text-gray-400 mb-2">未找到匹配的资产</p>
+                    <el-button size="small" type="primary" @click="openCreateAsset">
+                      <el-icon class="mr-1"><Plus /></el-icon>新建资产{{ assetKeyword ? `「${assetKeyword}」` : '' }}
+                    </el-button>
+                  </div>
+                </template>
+              </el-select>
+              <el-button type="primary" plain @click="openCreateAsset">
+                <el-icon class="mr-1"><Plus /></el-icon>新增资产
               </el-button>
             </div>
-          </template>
-        </el-select>
-        <el-button type="primary" plain @click="openCreateAsset">
-          <el-icon class="mr-1"><Plus /></el-icon>新增资产
-        </el-button>
-        </div>
-      </el-form-item>
-      <el-form-item v-if="selectedAssets.length" label=" ">
-        <div class="text-xs text-gray-500 leading-6">
-          <div v-for="a in selectedAssets" :key="a.id">
-            {{ a.name }}：部门 {{ a.department || '-' }}；
-            负责人 {{ (a.owners ?? []).map((o: any) => o.name).join('、') || '-' }}；
-            URL {{ (a.public_urls ?? [])[0]?.url || (a.internal_urls ?? [])[0] || '-' }}
-          </div>
-        </div>
-      </el-form-item>
-      <el-form-item label="关联测试计划">
-        <el-select v-model="selectedPlanId" clearable filterable class="w-full"
-                   :placeholder="editId ? '可选：调整关联的测试计划' : '可选：关联到测试计划'"
-                   :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
-          <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
-                     :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">
-            <div class="flex justify-between">
-              <span class="truncate">{{ p.system_name }}{{ p.plan_name ? ' · ' + p.plan_name : '' }}</span>
-              <span class="text-xs text-gray-400 shrink-0 ml-2">{{ p.status_name || '' }}</span>
+          </el-form-item>
+          <el-form-item v-if="selectedAssets.length" label=" ">
+            <div class="text-xs text-gray-500 leading-6">
+              <div v-for="a in selectedAssets" :key="a.id">
+                {{ a.name }}：部门 {{ a.department || '-' }}；
+                负责人 {{ (a.owners ?? []).map((o: any) => o.name).join('、') || '-' }}；
+                URL {{ (a.public_urls ?? [])[0]?.url || (a.internal_urls ?? [])[0] || '-' }}
+              </div>
             </div>
-          </el-option>
-        </el-select>
-      </el-form-item>
-    </el-form>
-  </el-card>
-
-  <el-card v-for="(vul, idx) in vulns" :key="idx" shadow="never" class="!rounded-lg mb-4">
-    <template #header>
-      <div class="flex items-center">
-        <span class="font-medium">{{ editId ? '编辑漏洞' : `漏洞 #${idx + 1}` }}</span>
-        <div class="flex-1" />
-        <el-button v-if="!editId && vulns.length > 1" type="danger" link @click="vulns.splice(idx, 1)">
-          删除此漏洞
-        </el-button>
-      </div>
-    </template>
-    <el-form :model="vul" label-width="90px">
-      <el-form-item label="漏洞名称" required>
-        <el-input v-model="vul.title" placeholder="例如：后台登录接口存在SQL注入" />
-      </el-form-item>
-      <div class="grid grid-cols-1 md:grid-cols-2">
-        <el-form-item label="漏洞等级">
-          <el-select v-model="vul.level" class="w-full">
-            <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="漏洞类型">
-          <div class="w-full flex items-center gap-2">
-            <el-select v-model="vul.vul_type" filterable class="flex-1">
-              <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
-              <template #footer>
-                <el-button v-if="auth.hasPerm('vuln:manage')" size="small" type="primary" link
-                           @click="addVulnType(vul)">
-                  <el-icon class="mr-1"><Plus /></el-icon>新增漏洞类型
-                </el-button>
-              </template>
+          </el-form-item>
+          <el-form-item label="关联测试计划">
+            <el-select v-model="selectedPlanId" clearable filterable class="w-full"
+                       :placeholder="editId ? '可选：调整关联的测试计划' : '可选：关联到测试计划'"
+                       :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
+              <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
+                         :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">
+                <div class="flex justify-between">
+                  <span class="truncate">{{ p.system_name }}{{ p.plan_name ? ' · ' + p.plan_name : '' }}</span>
+                  <span class="text-xs text-gray-400 shrink-0 ml-2">{{ p.status_name || '' }}</span>
+                </div>
+              </el-option>
             </el-select>
-            <el-tooltip content="从漏洞知识库套用该类型的标准描述与修复建议" placement="top">
-              <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
-            </el-tooltip>
-          </div>
-        </el-form-item>
-        <el-form-item label="所在层">
-          <el-select v-model="vul.layer" class="w-full">
-            <el-option v-for="(name, code) in meta?.vul_layer" :key="code" :label="name" :value="Number(code)" />
-          </el-select>
-        </el-form-item>
-        <el-form-item v-if="editId" label="漏洞状态">
-          <el-select v-model="vul.status" class="w-full" placeholder="选择漏洞状态">
-            <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="影响URL">
-          <div class="w-full flex flex-col gap-2">
-            <div v-for="(_, uidx) in vul.affected_urls" :key="uidx" class="flex items-center gap-2">
-              <el-input v-model="vul.affected_urls[uidx]" placeholder="https://..." class="flex-1" />
-              <el-button v-if="vul.affected_urls.length > 1" type="danger" link
-                         @click="vul.affected_urls.splice(uidx, 1)">
-                <el-icon><Delete /></el-icon>
-              </el-button>
-            </div>
-            <div>
-              <el-button size="small" plain @click="vul.affected_urls.push('')">
-                <el-icon class="mr-1"><Plus /></el-icon>添加URL
-              </el-button>
-            </div>
-          </div>
-        </el-form-item>
-      </div>
-      <el-form-item label="漏洞描述">
-        <RichEditor v-model="vul.description_html" class="w-full"
-                    @update:json="(j: any) => (vul.description_json = j)" />
-      </el-form-item>
-      <el-form-item label="复现步骤">
-        <RichEditor v-model="vul.reproduce_html" class="w-full"
-                    @update:json="(j: any) => (vul.reproduce_json = j)" />
-      </el-form-item>
-      <el-form-item label="修复建议">
-        <RichEditor v-model="vul.solution_html" class="w-full"
-                    @update:json="(j: any) => (vul.solution_json = j)" />
-      </el-form-item>
-    </el-form>
-  </el-card>
+          </el-form-item>
+        </el-form>
+      </el-card>
 
-  <div class="flex items-center gap-2 mb-2">
+      <el-card v-for="(vul, idx) in vulns" :key="idx" shadow="never" class="!rounded-lg"
+               :class="asideActions ? '' : 'mb-4'">
+        <template #header>
+          <div class="flex items-center">
+            <span class="font-medium">{{ editId ? '编辑漏洞' : `漏洞 #${idx + 1}` }}</span>
+            <div class="flex-1" />
+            <el-button v-if="!editId && vulns.length > 1" type="danger" link @click="vulns.splice(idx, 1)">
+              删除此漏洞
+            </el-button>
+          </div>
+        </template>
+        <el-form :model="vul" label-width="90px">
+          <el-form-item label="漏洞名称" required>
+            <el-input v-model="vul.title" placeholder="例如：后台登录接口存在SQL注入" />
+          </el-form-item>
+          <div class="grid grid-cols-1 md:grid-cols-2">
+            <el-form-item label="漏洞等级">
+              <el-select v-model="vul.level" class="w-full">
+                <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="漏洞类型">
+              <div class="w-full flex items-center gap-2">
+                <el-select v-model="vul.vul_type" filterable class="flex-1">
+                  <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+                  <template #footer>
+                    <el-button v-if="auth.hasPerm('vuln:manage')" size="small" type="primary" link
+                               @click="addVulnType(vul)">
+                      <el-icon class="mr-1"><Plus /></el-icon>新增漏洞类型
+                    </el-button>
+                  </template>
+                </el-select>
+                <el-tooltip content="从漏洞知识库套用该类型的标准描述与修复建议" placement="top">
+                  <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
+                </el-tooltip>
+              </div>
+            </el-form-item>
+            <el-form-item label="所在层">
+              <el-select v-model="vul.layer" class="w-full">
+                <el-option v-for="(name, code) in meta?.vul_layer" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item v-if="editId" label="漏洞状态">
+              <el-select v-model="vul.status" class="w-full" placeholder="选择漏洞状态">
+                <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="漏洞来源">
+              <el-select v-model="vul.source" class="w-full">
+                <el-option v-for="(name, code) in meta?.vul_source" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="影响URL">
+              <div class="w-full flex flex-col gap-2">
+                <div v-for="(_, uidx) in vul.affected_urls" :key="uidx" class="flex items-center gap-2">
+                  <el-input v-model="vul.affected_urls[uidx]" placeholder="https://..." class="flex-1" />
+                  <el-button v-if="vul.affected_urls.length > 1" type="danger" link
+                             @click="vul.affected_urls.splice(uidx, 1)">
+                    <el-icon><Delete /></el-icon>
+                  </el-button>
+                </div>
+                <div>
+                  <el-button size="small" plain @click="vul.affected_urls.push('')">
+                    <el-icon class="mr-1"><Plus /></el-icon>添加URL
+                  </el-button>
+                </div>
+              </div>
+            </el-form-item>
+          </div>
+          <el-form-item label="漏洞描述">
+            <RichEditor v-model="vul.description_html" class="w-full"
+                        @update:json="(j: any) => (vul.description_json = j)" />
+          </el-form-item>
+          <el-form-item label="复现步骤">
+            <RichEditor v-model="vul.reproduce_html" class="w-full"
+                        @update:json="(j: any) => (vul.reproduce_json = j)" />
+          </el-form-item>
+          <el-form-item label="修复建议">
+            <RichEditor v-model="vul.solution_html" class="w-full"
+                        @update:json="(j: any) => (vul.solution_json = j)" />
+          </el-form-item>
+        </el-form>
+      </el-card>
+    </div>
+
+    <!-- 操作栏：独立编辑页渲染为右侧固定卡片（与报告编辑页一致），弹窗/抽屉保持底部横排 -->
+    <div v-if="asideActions" class="xl:w-[300px] xl:shrink-0 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
+      <el-card shadow="never" class="!rounded-lg">
+        <template #header>操作</template>
+        <div class="space-y-2">
+          <el-button type="primary" class="w-full" :loading="saving" @click="save">
+            {{ editId ? '保存' : `提交 ${vulns.length} 个漏洞` }}
+          </el-button>
+          <el-button v-if="!editId" class="w-full !ml-0" @click="addVuln">
+            <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
+          </el-button>
+          <slot name="actions-left" />
+          <el-divider class="!my-3" />
+          <slot name="actions-right" />
+        </div>
+      </el-card>
+    </div>
+  </div>
+
+  <!-- 底部操作栏：弹窗/抽屉（非 asideActions）场景保留横排 -->
+  <div v-if="!asideActions" class="flex items-center gap-2 mb-2">
     <el-button v-if="!editId" @click="addVuln">
       <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
     </el-button>
@@ -186,6 +218,7 @@ import { useAuthStore } from '../stores/auth'
 const props = defineProps<{
   planId?: number | null   // 新建时预关联的测试计划
   editId?: number | null   // 编辑态漏洞 ID
+  asideActions?: boolean   // 独立编辑页：操作按钮渲染为右侧固定栏（与报告编辑页一致）
 }>()
 const emit = defineEmits<{ (e: 'saved', vulns: any[]): void }>()
 
@@ -272,7 +305,7 @@ const emptyVul = () => ({
   description_html: '', description_json: null,
   reproduce_html: '', reproduce_json: null,
   solution_html: '', solution_json: null,
-  source: 10, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
+  source: 70, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
 })
 const vulns = ref<any[]>([emptyVul()])
 

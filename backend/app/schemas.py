@@ -186,7 +186,7 @@ class VulIn(BaseModel):
     title: str
     vul_type: int = 75
     level: int = 30
-    source: int = 10
+    source: int = 70  # 默认「数智化部」
     layer: int = 10
     affected_url: str = ""
     description_html: str = ""
@@ -469,6 +469,7 @@ class ReportOut(ReportMetaIn):
     id: int
     version: int = 1
     revision: int = 0
+    actual_mandays: float = 0  # 实际人天（自动计算：结束日期 - 开始日期）
     testing_plan_id: int | None = None
     creator_id: int | None = None
     create_time: datetime | None = None
@@ -482,6 +483,7 @@ class ReportListOut(ReportMetaIn):
     id: int
     version: int = 1
     revision: int = 0
+    actual_mandays: float = 0  # 实际人天（自动计算：结束日期 - 开始日期）
     testing_plan_id: int | None = None
     create_time: datetime | None = None
     update_time: datetime | None = None

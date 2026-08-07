@@ -5,12 +5,24 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import STATUS_TIMESTAMP, VUL_STATUS, VUL_TRANSITIONS, PlanStatus, VulStatus
+from app.constants import (
+    PLAN_TRANSITIONS,
+    STATUS_TIMESTAMP,
+    VUL_STATUS,
+    VUL_TRANSITIONS,
+    PlanStatus,
+    VulStatus,
+)
 from app.models import Message, User, Vul, VulLog
 
 
 def can_transition(current: int, target: int) -> bool:
     return target in VUL_TRANSITIONS.get(current, set())
+
+
+def can_plan_transition(current: int, target: int) -> bool:
+    """测试计划状态流转校验。"""
+    return target in PLAN_TRANSITIONS.get(current, set())
 
 
 def ensure_retest_conclusion(vul: Vul, target: int) -> None:
@@ -19,6 +31,7 @@ def ensure_retest_conclusion(vul: Vul, target: int) -> None:
     - 变更为「已修复」：必须先经过「复测中」，且必须已填写复测内容，
       不允许从「修复中」等状态直接跳过复测闭环；
     - 复测未通过（复测中 → 修复中）：同样强制要求填写复测详情。
+    - 从「已修复」重新打开为「未修复」：无特殊校验。
     """
     if target == VulStatus.FIXED:
         if vul.status != VulStatus.RETESTING:
@@ -130,10 +143,11 @@ async def auto_transition(
 
 
 async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> None:
-    """漏洞状态变化后双向联动报告与测试计划：
-    - 某报告关联的全部漏洞均为「已修复/已忽略」时，报告自动标记 completed，关联计划进入「复测完成」；
-    - 反向：已 completed 的报告出现未闭环漏洞（如已修复改回未修复）时，报告回退 draft，
-      关联计划由「复测完成」回退「复测中」并重开最近一轮复测。"""
+    """漏洞状态变化后双向联动测试计划（需求6：报告状态不再由漏洞闭环驱动，
+    仅保留计划「复测完成/复测中」联动；报告状态由导出 Word 与内容变更管理）：
+    - 某报告关联的全部漏洞均为「已修复/已忽略」时，关联计划进入「复测完成」；
+    - 反向：已闭环报告出现未闭环漏洞（如已修复改回未修复）时，关联计划由「复测完成」
+      回退「复测中」并重开最近一轮复测。"""
     from app.models import Report, ReportSection, TestingPlan
     from app.services import plan_service
 
@@ -160,22 +174,19 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
         if report is None:
             continue
         all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s in linked_statuses)
-        if all_closed and report.status != "completed":
-            report.status = "completed"
-            if report.testing_plan_id is not None:
-                plan = await session.get(TestingPlan, report.testing_plan_id)
-                if plan is not None:
-                    plan.status = PlanStatus.RETEST_DONE  # 复测完成
-                    if not plan.retest_done_time:
-                        plan.retest_done_time = now().date().isoformat()
-                    # 当前复测轮次闭环，打完成点
-                    plan_service.finish_retest_round(plan)
-        elif not all_closed and report.status == "completed":
-            report.status = "draft"
-            if report.testing_plan_id is not None:
-                plan = await session.get(TestingPlan, report.testing_plan_id)
-                if plan is not None and plan.status == PlanStatus.RETEST_DONE:
-                    plan.status = PlanStatus.RETESTING  # 复测完成 → 复测中
-                    plan.retest_done_time = ""
-                    # 撤销完成点，重开最近一轮复测
-                    plan_service.reopen_retest_round(plan)
+        if report.testing_plan_id is None:
+            continue
+        plan = await session.get(TestingPlan, report.testing_plan_id)
+        if plan is None:
+            continue
+        if all_closed and plan.status != PlanStatus.RETEST_DONE:
+            plan.status = PlanStatus.RETEST_DONE  # 复测完成
+            if not plan.retest_done_time:
+                plan.retest_done_time = now().date().isoformat()
+            # 当前复测轮次闭环，打完成点
+            plan_service.finish_retest_round(plan)
+        elif not all_closed and plan.status == PlanStatus.RETEST_DONE:
+            plan.status = PlanStatus.RETESTING  # 复测完成 → 复测中
+            plan.retest_done_time = ""
+            # 撤销完成点，重开最近一轮复测
+            plan_service.reopen_retest_round(plan)

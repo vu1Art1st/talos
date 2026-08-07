@@ -105,11 +105,16 @@ async def list_vulns(
         cond.append(Vul.submitter_id == user.id)
 
     stmt = select(Vul).where(*cond)
-    stmt = apply_sort(
-        stmt, Vul, sort, order,
-        {"id", "title", "level", "vul_type", "status", "submit_time"},
-        Vul.submit_time.desc(),
-    )
+    if sort == "level":
+        # 需求7：同危害等级按录入时间升序（submit_time 升序，id 兜底），保证列表顺序稳定
+        level_col = Vul.level.desc() if order == "desc" else Vul.level.asc()
+        stmt = stmt.order_by(level_col, Vul.submit_time.asc(), Vul.id.asc())
+    else:
+        stmt = apply_sort(
+            stmt, Vul, sort, order,
+            {"id", "title", "level", "vul_type", "status", "submit_time"},
+            Vul.submit_time.desc(),
+        )
     total, vulns = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_vul_out(v) for v in vulns])
 

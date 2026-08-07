@@ -1,18 +1,21 @@
 <template>
-  <div class="max-w-5xl">
-    <div v-if="planId" class="mb-3">
-      <el-tag type="warning" effect="plain">
-        本次录入将关联测试计划{{ planName ? `「${planName}」` : '' }}
-      </el-tag>
-    </div>
-    <VulnFormPanel :plan-id="planId" :edit-id="editId" class="pb-6" @saved="onSaved">
+  <div class="h-full min-h-0">
+    <VulnFormPanel :plan-id="planId" :edit-id="editId" aside-actions @saved="onSaved">
+      <!-- 计划关联提示：渲染在左侧内容区顶部 -->
+      <template #notice>
+        <div v-if="planId" class="mb-3">
+          <el-tag type="warning" effect="plain">
+            本次录入将关联测试计划{{ planName ? `「${planName}」` : '' }}
+          </el-tag>
+        </div>
+      </template>
       <template #actions-left>
-        <el-button v-if="editId" type="warning" plain @click="router.push(`/vulns/${editId}/retest`)">
+        <el-button v-if="editId" type="warning" plain class="w-full" @click="router.push(`/vulns/${editId}/retest`)">
           复测
         </el-button>
       </template>
       <template #actions-right>
-        <el-button @click="router.back()">取消</el-button>
+        <el-button class="w-full !ml-0" @click="router.back()">取消</el-button>
       </template>
     </VulnFormPanel>
   </div>

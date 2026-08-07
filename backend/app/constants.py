@@ -13,6 +13,8 @@ class VulStatus(IntEnum):
     FIXING = 50    # 修复中
     RETESTING = 55  # 复测中
     FIXED = 60     # 已修复
+    # 关于 DEFERRED=35 的说明：历史遗留值，与洞察2.0保持一致。
+    # 优化建议：若未来可做数据迁移，可改为 DEFERRED=30 以保持10步进。
 
 
 class PlanStatus(IntEnum):
@@ -23,6 +25,29 @@ class PlanStatus(IntEnum):
     RETEST_APPLY = 40  # 复测申请
     RETESTING = 50     # 复测中
     RETEST_DONE = 60   # 复测完成
+
+
+class ReportStatus(IntEnum):
+    """报告状态码。与字符串字段 report.status 双向映射，保持 draft/final/completed 字符串兼容。"""
+    DRAFT = 1      # 草稿
+    FINAL = 2      # 已定稿
+    COMPLETED = 3  # 已完成（全部关联漏洞闭环）
+
+    # 转为数据库存储的字符串值
+    def to_str(self) -> str:
+        return _REPORT_STATUS_TO_STR[self]
+
+    @classmethod
+    def from_str(cls, s: str) -> "ReportStatus":
+        return _REPORT_STATUS_FROM_STR.get(s, cls.DRAFT)
+
+
+_REPORT_STATUS_TO_STR = {
+    ReportStatus.DRAFT: "draft",
+    ReportStatus.FINAL: "final",
+    ReportStatus.COMPLETED: "completed",
+}
+_REPORT_STATUS_FROM_STR = {v: k for k, v in _REPORT_STATUS_TO_STR.items()}
 
 
 VUL_TYPE = {
@@ -57,26 +82,43 @@ VUL_STATUS = {
 }
 
 # 状态机：当前状态 -> 允许流转到的状态（仅测试人员使用的简化流程）
-# 未修复 --关联生成报告(自动)--> 修复中 --点击复测(自动)--> 复测中
+# 未修复 --关联生成报告(自动)--> 修复中 --发起复测(自动)--> 复测中
 # 复测中 --测试人员手动--> 已修复 / 复测未通过(回修复中) / 已忽略 / 暂不处理
+# 注意：UNFIXED→RETESTING 支持报告复测时跨过FIXING直接流转（修复状态的冗余兜底路径）
+# FIXED→RETESTING 支持已闭环漏洞需要重新复测时直接进入复测状态
 VUL_TRANSITIONS = {
-    VulStatus.UNFIXED: {VulStatus.IGNORED, VulStatus.DEFERRED, VulStatus.FIXING},
+    VulStatus.UNFIXED: {VulStatus.IGNORED, VulStatus.DEFERRED, VulStatus.FIXING, VulStatus.RETESTING},
     VulStatus.IGNORED: {VulStatus.UNFIXED},
     VulStatus.DEFERRED: {VulStatus.UNFIXED, VulStatus.FIXING},
     VulStatus.FIXING: {VulStatus.RETESTING},
     VulStatus.RETESTING: {VulStatus.IGNORED, VulStatus.DEFERRED, VulStatus.FIXING, VulStatus.FIXED},
-    VulStatus.FIXED: set(),
+    VulStatus.FIXED: {VulStatus.UNFIXED, VulStatus.RETESTING},  # 已修复可重新打开为未修复，或直接重新复测
 }
 
-# 进入某状态时需要打点的时间字段
+# 测试计划状态机：当前状态 -> 允许流转到的状态
+# 未测试 --开始初测--> 初测中 --初测完成--> 等待复测 --发起复测申请--> 复测申请
+# 复测申请 --确认复测--> 复测中 --全部漏洞闭环--> 复测完成
+# 等待复测/复测申请 --报告发起复测--> 复测中（报告联动）
+# 复测完成 --漏洞重新打开--> 复测中
+PLAN_TRANSITIONS = {
+    PlanStatus.UNTESTED: {PlanStatus.TESTING},
+    PlanStatus.TESTING: {PlanStatus.WAIT_RETEST},
+    PlanStatus.WAIT_RETEST: {PlanStatus.RETEST_APPLY, PlanStatus.RETESTING},  # 复测申请或报告直接发起复测
+    PlanStatus.RETEST_APPLY: {PlanStatus.RETESTING},
+    PlanStatus.RETESTING: {PlanStatus.RETEST_DONE},
+    PlanStatus.RETEST_DONE: {PlanStatus.RETESTING},  # 漏洞回退时重新打开
+}
+
+# 进入某状态时需要打点的时间字段（漏洞状态）
 STATUS_TIMESTAMP = {
     VulStatus.FIXING: "notice_time",
+    VulStatus.RETESTING: "notice_time",  # 复测中也记录通知时间，方便追踪复测周期
     VulStatus.IGNORED: "fix_time",
     VulStatus.DEFERRED: "fix_time",
     VulStatus.FIXED: "fix_time",
 }
 
-VUL_SOURCE = {10: "安全部", 20: "SRC", 30: "众测", 40: "公众平台", 50: "合作伙伴", 60: "Word导入"}
+VUL_SOURCE = {10: "安全部", 20: "SRC", 30: "众测", 40: "公众平台", 50: "合作伙伴", 60: "Word导入", 70: "数智化部"}
 
 VUL_LAYER = {10: "代码", 20: "运维"}
 

@@ -65,7 +65,7 @@ class Vul(Base):
     vul_type: Mapped[int] = mapped_column(Integer, default=75)
     level: Mapped[int] = mapped_column(Integer, default=30)
     status: Mapped[int] = mapped_column(Integer, default=10, index=True)
-    source: Mapped[int] = mapped_column(Integer, default=10)
+    source: Mapped[int] = mapped_column(Integer, default=70)  # 默认「数智化部」
     layer: Mapped[int] = mapped_column(Integer, default=10)
     affected_url: Mapped[str] = mapped_column(String(512), default="")
 

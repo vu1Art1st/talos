@@ -11,6 +11,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import select
 
+from app.constants import ReportStatus
 from app.core.config import settings
 from app.core.timeutil import now
 from app.db import async_session_maker
@@ -170,6 +171,9 @@ async def export_report_task(ctx, job_id: int) -> None:
             job.status = "done"
             # 导出成功后报告导出版本 +1（编辑保存不影响该版本号）
             report.version += 1
+            # 需求6：导出 Word 成功后报告定稿（已定稿/已完成的报告保持不变；PDF 导出不置定稿）
+            if job.fmt == "docx" and report.status == ReportStatus.DRAFT.to_str():
+                report.status = ReportStatus.FINAL.to_str()
             # 版本号 +1 与 update_time 刷新（onupdate）会改变报告指纹，
             # 需 flush+refresh 后以最终状态更新导出任务指纹，供下次导出前重复判断
             await session.flush()

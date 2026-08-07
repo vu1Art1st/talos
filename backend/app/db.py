@@ -46,6 +46,12 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"))
         if report_cols and "vul_edit_snapshot" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN vul_edit_snapshot JSON"))
+        if report_cols and "retest_vul_snapshot" not in report_cols:
+            await conn.execute(text("ALTER TABLE reports ADD COLUMN retest_vul_snapshot JSON"))
+        if report_cols and "actual_mandays" not in report_cols:
+            await conn.execute(text("ALTER TABLE reports ADD COLUMN actual_mandays REAL NOT NULL DEFAULT 0"))
+        # 需求6：报告状态机简化为 草稿/已定稿 两态，存量「已闭环 completed」迁移为已定稿 final（幂等）
+        await conn.execute(text("UPDATE reports SET status = 'final' WHERE status = 'completed'"))
         plan_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(testing_plans)"))).fetchall()}
         if plan_cols and "est_mandays" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))

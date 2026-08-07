@@ -36,7 +36,7 @@ from app.schemas import (
     TestingPlanIn,
     TestingPlanOut,
 )
-from app.services import plan_service
+from app.services import plan_service, vuln_service
 
 router = APIRouter(tags=["专项管理"])
 
@@ -995,6 +995,9 @@ async def update_testing_plan(
     row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
     if body.status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
+    # 校验状态流转合法性（仅当状态有变化时）
+    if body.status != row.status and not vuln_service.can_plan_transition(row.status, body.status):
+        raise HTTPException(400, f"不允许从当前状态流转到目标状态")
     # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
     if body.status == 50 and row.status != 50:
         plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
@@ -1007,6 +1010,8 @@ async def update_testing_plan(
     # 有关联漏洞时统计以自动重算为准，覆盖手填值
     if row.vuls:
         await plan_service.refresh_stats(session, row.id)
+    # 有关联初测报告时实际人天自动计算（仅纳入初测报告，复测报告不计入）
+    await plan_service.refresh_mandays(session, row.id)
     await session.commit()
     await session.refresh(row)
     return row

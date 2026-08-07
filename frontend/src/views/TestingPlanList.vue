@@ -153,7 +153,7 @@
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="r in row.reports" :key="r.id" class="flex items-center gap-2">
-                <el-tag size="small" :type="r.status === 'completed' ? 'success' : 'info'">
+                <el-tag size="small" :type="r.status === 'final' ? 'primary' : 'info'">
                   {{ reportStatusName(r.status) }}
                 </el-tag>
                 <el-button size="small" type="primary" link class="!p-0"
@@ -296,8 +296,12 @@
           <el-input-number v-model="form.est_mandays" :min="0" :precision="1" :step="0.5" class="!w-full" />
         </el-form-item>
         <el-form-item label="实际人天">
-          <el-input-number v-model="form.actual_mandays" :min="0" :precision="1" :step="0.5" class="!w-full" />
+          <el-input-number v-model="form.actual_mandays" :min="0" :precision="1" :step="0.5" class="!w-full"
+                           :disabled="mandaysAuto" />
         </el-form-item>
+      </div>
+      <div v-if="mandaysAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
+        有关联初测报告，实际人天由系统按初测报告测试周期自动计算（复测报告不计入）
       </div>
       <div v-if="statsAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
         已有关联漏洞，统计由系统按漏洞等级自动重算
@@ -466,7 +470,7 @@ const levelName = (lv: number) =>
 const fmtTime = (t: string | null) => (t ? String(t).slice(0, 10) : '-')
 
 const reportStatusName = (s: string) =>
-  ({ draft: '草稿', final: '定稿', completed: '已完成' } as Record<string, string>)[s] ?? s
+  ({ draft: '草稿', final: '已定稿' } as Record<string, string>)[s] ?? s
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
 const testTypeOptions = computed(() =>
@@ -487,6 +491,9 @@ const statusEditable = computed(() =>
   form.value.id ? (dialogRow.value ? canOperate(dialogRow.value) : false) : isAdmin.value)
 // 有关联漏洞时统计自动重算，禁止手填
 const statsAuto = computed(() => (dialogRow.value?.vuls?.length ?? 0) > 0)
+// 有关联初测报告（标题不含「复测」）时实际人天自动计算，禁止手填；复测报告人天不计入统计
+const mandaysAuto = computed(() =>
+  (dialogRow.value?.reports ?? []).some((r: any) => !(r.title || '').includes('复测')))
 
 const emptyForm = () => ({
   id: null as number | null,
@@ -688,13 +695,13 @@ function onAssetCreated(asset: any) {
   if (!form.value.asset_ids.includes(asset.id)) {
     form.value.asset_ids.push(asset.id)
   }
-  // 自动填充测试系统与所属部门（资产信息），用户仍可手动修改/覆盖
-  form.value.system_name = label
+  // 自动填充测试系统与所属部门（资产信息），仅带出纯系统名称（不含系统类型/子系统），用户仍可手动修改/覆盖
+  form.value.system_name = asset.name
   form.value.department = asset.department || ''
   prevAssetIds = [...form.value.asset_ids]
 }
 
-// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仍可手动修改
+// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
 function onAssetsChange(ids: number[]) {
   if (form.value.id) return
   const added = ids.filter((id) => !prevAssetIds.includes(id))
@@ -702,7 +709,7 @@ function onAssetsChange(ids: number[]) {
   if (!added.length) return
   const asset = assetCache.value[added[added.length - 1]]
   if (!asset) return
-  form.value.system_name = assetLabel(asset)
+  form.value.system_name = asset.name
   form.value.department = asset.department || ''
 }
 

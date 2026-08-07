@@ -33,6 +33,9 @@
                               range-separator="至" start-placeholder="开始日期" end-placeholder="结束日期"
                               unlink-panels class="!w-full" />
             </el-form-item>
+            <el-form-item label="实际人天">
+              <span class="text-sm">{{ actualMandays }} 天</span>
+            </el-form-item>
             <el-form-item label="被测系统IP">
               <el-input v-model="report.target_ip" placeholder="导出时填入测试目标表" @input="markDirty" />
             </el-form-item>
@@ -55,29 +58,35 @@
         </template>
         <!-- 关联漏洞字段：与漏洞编辑页一致的固定下拉框，修改即时保存到漏洞记录 -->
         <el-form v-if="sec.vul_id && vulnStates[sec.vul_id]" label-width="90px" class="mb-3">
-          <div class="grid grid-cols-1 md:grid-cols-2">
-            <el-form-item label="漏洞等级">
-              <el-select :model-value="vulnStates[sec.vul_id].level" class="w-full"
-                         @change="(v: number) => changeVulnField(sec.vul_id!, 'level', v)">
-                <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
-              </el-select>
-            </el-form-item>
+          <div class="grid grid-cols-1 md:grid-cols-3">
             <el-form-item label="漏洞类型">
               <el-select :model-value="vulnStates[sec.vul_id].vul_type" filterable class="w-full"
                          @change="(v: number) => changeVulnField(sec.vul_id!, 'vul_type', v)">
                 <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
               </el-select>
             </el-form-item>
-            <el-form-item label="所在层">
-              <el-select :model-value="vulnStates[sec.vul_id].layer" class="w-full"
-                         @change="(v: number) => changeVulnField(sec.vul_id!, 'layer', v)">
-                <el-option v-for="(name, code) in meta?.vul_layer" :key="code" :label="name" :value="Number(code)" />
+            <el-form-item label="漏洞等级">
+              <!-- 需求5：已有漏洞等级时不可修改（漏洞创建默认即有等级，基本恒为只读） -->
+              <el-select :model-value="vulnStates[sec.vul_id].level" class="w-full"
+                         :disabled="vulnStates[sec.vul_id].level != null"
+                         @change="(v: number) => changeVulnField(sec.vul_id!, 'level', v)">
+                <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)">
+                  <span class="flex items-center gap-1.5">
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: levelColor(Number(code)) }" />
+                    <span :style="{ color: levelColor(Number(code)) }">{{ name }}</span>
+                  </span>
+                </el-option>
               </el-select>
             </el-form-item>
             <el-form-item label="漏洞状态">
               <el-select :model-value="vulnStates[sec.vul_id].status" class="w-full" placeholder="选择漏洞状态"
                          @change="(v: number) => changeVulnField(sec.vul_id!, 'status', v)">
-                <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+                <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)">
+                  <span class="flex items-center gap-1.5">
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: statusColor(Number(code)) }" />
+                    <span :style="{ color: statusColor(Number(code)) }">{{ name }}</span>
+                  </span>
+                </el-option>
               </el-select>
             </el-form-item>
           </div>
@@ -118,14 +127,6 @@
         </div>
       </el-card>
 
-      <div class="flex gap-2">
-        <el-button @click="addSection">
-          <el-icon class="mr-1"><Plus /></el-icon>添加章节
-        </el-button>
-        <el-button @click="insertVulnVisible = true">
-          <el-icon class="mr-1"><Link /></el-icon>插入漏洞章节
-        </el-button>
-      </div>
     </div>
 
     <!-- 侧栏：小屏时置于底部且独立滚动，大屏固定右侧随内容区独立滚动 -->
@@ -170,6 +171,7 @@
         <template #header>操作</template>
         <div class="space-y-2">
           <el-button type="primary" class="w-full" :loading="saving" @click="save()">保存报告</el-button>
+          <el-button type="success" class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
           <el-select v-model="report.status" class="w-full" @change="markDirty">
             <el-option label="草稿" value="draft" />
             <el-option label="已定稿" value="final" />
@@ -215,22 +217,11 @@
     </div>
   </div>
 
-  <el-dialog v-model="insertVulnVisible" title="插入漏洞章节" width="600px">
-    <el-select v-model="insertVulIds" multiple filterable class="w-full" placeholder="选择漏洞记录（按危害等级降序）">
-      <el-option v-for="v in vulns" :key="v.id" :label="`${v.title}`" :value="v.id">
-        <div class="flex items-center gap-2">
-          <span class="tl-tag shrink-0" :style="levelSoftStyle(v.level)">{{ levelName(v.level) }}</span>
-          <span class="truncate">{{ v.title }}</span>
-        </div>
-      </el-option>
-    </el-select>
-    <template #footer>
-      <el-button @click="insertVulnVisible = false">取消</el-button>
-      <el-button type="primary" :disabled="!insertVulIds.length" @click="insertVulns">插入</el-button>
-    </template>
-  </el-dialog>
-
   <PdfPreviewDialog ref="previewRef" />
+
+  <el-dialog v-model="vulnFormVisible" title="录入漏洞" width="780px" top="6vh">
+    <VulnFormPanel :plan-id="report?.testing_plan_id ?? null" @saved="onVulnFormSaved" />
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
@@ -241,21 +232,20 @@ import dayjs from 'dayjs'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import VulnFormPanel from '../components/VulnFormPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { showTocNotice } from '../utils/tocNotice'
-import { levelSoftStyle, statusSoftStyle } from '../utils/colors'
+import { levelColor, statusColor, statusSoftStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 
 const STATUS_NAMES: Record<number, string> = {
   10: '未修复', 20: '已忽略', 35: '暂不处理', 50: '修复中', 55: '复测中', 60: '已修复',
 }
 const statusName = (s: number) => STATUS_NAMES[s] ?? String(s)
-const levelName = (lv: number) =>
-  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
-  status: '漏洞状态', level: '漏洞等级', vul_type: '漏洞类型', layer: '所在层',
+  status: '漏洞状态', level: '漏洞等级', vul_type: '漏洞类型',
 }
 
 const auth = useAuthStore()
@@ -265,10 +255,9 @@ const meta = ref<any>(null)
 const jobs = ref<any[]>([])
 const saving = ref(false)
 const saveState = ref('已保存')
-const insertVulnVisible = ref(false)
-const insertVulIds = ref<number[]>([])
-const vulns = ref<any[]>([])
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
+// 报告编辑页「录入漏洞」：与测试流程录入漏洞完全一致（VulnFormPanel），预关联本报告测试计划
+const vulnFormVisible = ref(false)
 // 系统内启用用户选项与已选作者（author 字段以、拼接存储）
 const userOptions = ref<{ id: number; name: string }[]>([])
 const authorNames = ref<string[]>([])
@@ -288,6 +277,15 @@ const testRange = computed<[string, string] | null>({
     report.value.test_end = v?.[1] ?? ''
     markDirty()
   },
+})
+
+// 实际人天：结束日期 - 开始日期 + 1（含首尾；系统自动计算，随用户手动修改的时间联动）
+const actualMandays = computed(() => {
+  const start = report.value?.test_start
+  const end = report.value?.test_end
+  if (!start || !end) return 0
+  const diff = dayjs(end).diff(dayjs(start), 'day')
+  return diff >= 0 ? diff + 1 : 0
 })
 
 function markDirty() {
@@ -313,7 +311,8 @@ async function loadVulnStates() {
 }
 
 // 报告编辑页下拉框直接调整关联漏洞字段（状态/等级/类型/所在层），修改即时保存
-const FIELD_META_KEYS: Record<string, string> = { level: 'vul_level', vul_type: 'vul_type', layer: 'vul_layer' }
+const FIELD_META_KEYS: Record<string, string> = { level: 'vul_level', vul_type: 'vul_type' }
+
 async function changeVulnField(vulId: number, field: string, value: number) {
   await client.patch(`/vulns/${vulId}/fields`, { [field]: value })
   const label = field === 'status' ? statusName(value) : (meta.value?.[FIELD_META_KEYS[field]]?.[value] ?? value)
@@ -470,11 +469,6 @@ async function save(auto = false) {
   }
 }
 
-function addSection() {
-  report.value.sections.push({ order: report.value.sections.length, title: '', content_html: '', content_json: null, vul_id: null })
-  markDirty()
-}
-
 function removeSection(i: number) {
   report.value.sections.splice(i, 1)
   // 同步修正导航高亮索引，保持与拖拽排序共用同一套索引
@@ -517,22 +511,9 @@ async function submitRetest(vulId: number) {
   }
 }
 
-async function insertVulns() {
-  for (const id of insertVulIds.value) {
-    const { data: v } = await client.get(`/vulns/${id}`)
-    const html = [
-      v.description_html && `<h3>漏洞描述</h3>${v.description_html}`,
-      v.reproduce_html && `<h3>复现步骤</h3>${v.reproduce_html}`,
-      v.solution_html && `<h3>修复建议</h3>${v.solution_html}`,
-    ].filter(Boolean).join('')
-    report.value.sections.push({
-      order: report.value.sections.length, title: v.title,
-      content_html: html || '<p></p>', content_json: null, vul_id: v.id,
-    })
-  }
-  insertVulnVisible.value = false
-  insertVulIds.value = []
-  markDirty()
+async function onVulnFormSaved() {
+  vulnFormVisible.value = false
+  ElMessage.success('漏洞已录入')
 }
 
 async function doExport(fmt: string) {
@@ -582,14 +563,6 @@ function download(job: any) {
     }
   })
 }
-
-watch(insertVulnVisible, async (v) => {
-  if (v && !vulns.value.length) {
-    // 需求5：漏洞默认按危害等级降序（level 升序）展示
-    const { data } = await client.get('/vulns', { params: { size: 100, sort: 'level', order: 'asc' } })
-    vulns.value = [...data.items].sort((a: any, b: any) => (a.level ?? 99) - (b.level ?? 99))
-  }
-})
 
 onMounted(async () => {
   await load()
