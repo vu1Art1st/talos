@@ -2372,3 +2372,118 @@ async def test_knowledge_default_sorting(client: AsyncClient, auth: dict):
     keys = [(r["severity_level"], r["vul_type"]) for r in rows]
     assert keys == sorted(keys), keys
 
+
+async def test_plan_complete_no_vuln_flow(client: AsyncClient, auth: dict):
+    """无漏洞闭环：无漏洞完结 → 测试通过 + 无漏洞报告 → 重复确认拒绝 → 补录漏洞自动重开。"""
+    # meta 字典包含新增的「测试通过」状态
+    meta = (await client.get("/api/v1/meta", headers=auth)).json()
+    assert meta["testing_plan_status"]["70"] == "测试通过"
+
+    # 初测中且无漏洞的计划
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "无漏洞闭环系统", "test_type": "渗透测试",
+              "receive_time": "2026-08-01", "status": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+
+    # 确认无漏洞完结：状态流转、初测完成打点、结论记录、无漏洞报告生成
+    resp = await client.post(
+        f"/api/v1/testing-plans/{plan_id}/complete-no-vuln", headers=auth,
+        json={"conclusion": "覆盖 OWASP Top 10 主要攻击面，未发现安全漏洞",
+              "generate_report": True, "title": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    assert plan["status"] == 70
+    assert plan["no_vul_conclusion"] == "覆盖 OWASP Top 10 主要攻击面，未发现安全漏洞"
+    assert plan["first_test_done_time"]
+    assert len(plan["reports"]) == 1
+    report_brief = plan["reports"][0]
+    assert "无漏洞闭环系统" in report_brief["title"]
+    assert "渗透测试报告（无漏洞）" in report_brief["title"]
+    # 无漏洞报告按初测报告口径计入计划实际人天（接收日期至确认当天）
+    assert plan["actual_mandays"] >= 1
+
+    # 报告单章节「测试结论」，无漏洞关联，结论含安全测试通过文案与补充说明
+    resp = await client.get(f"/api/v1/reports/{report_brief['id']}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["testing_plan_id"] == plan_id
+    assert len(detail["sections"]) == 1
+    section = detail["sections"][0]
+    assert section["title"] == "测试结论"
+    assert section["vul_id"] is None
+    assert "未发现" in section["content_html"]
+    assert "安全测试通过" in section["content_html"]
+    assert "OWASP" in section["content_html"]
+
+    # 重复确认被拒绝
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/complete-no-vuln", headers=auth, json={})
+    assert resp.status_code == 400
+
+    # 补录漏洞后计划自动重开为「初测中」（关联需先认领）
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "无漏洞闭环补录漏洞", "level": 30},
+    )
+    assert resp.status_code == 200, resp.text
+    vul_id = resp.json()["id"]
+    resp = await client.post(
+        f"/api/v1/testing-plans/{plan_id}/attach-vulns", headers=auth, json={"vul_ids": [vul_id]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == 20
+    # 重开后不可再确认无漏洞（存在关联漏洞），无漏洞测试结论保留以便追溯
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/complete-no-vuln", headers=auth, json={})
+    assert resp.status_code == 400
+    plan = (await client.get(f"/api/v1/testing-plans/{plan_id}", headers=auth)).json()
+    assert plan["no_vul_conclusion"] == "覆盖 OWASP Top 10 主要攻击面，未发现安全漏洞"
+
+
+async def test_plan_complete_no_vuln_requires_no_vulns(client: AsyncClient, auth: dict):
+    """存在关联漏洞的计划不能确认无漏洞；直接创建漏洞到已通过计划同样触发重开。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "有漏洞系统", "receive_time": "2026-08-01", "status": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    # 录入/关联漏洞需先认领计划
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "有漏洞系统-漏洞1", "level": 40, "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    vid = resp.json()["id"]
+
+    # 有关联漏洞时拒绝无漏洞完结
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/complete-no-vuln", headers=auth, json={})
+    assert resp.status_code == 400
+
+    # 移除漏洞后不生成报告仅流转状态与记录结论
+    resp = await client.delete(f"/api/v1/vulns/{vid}", headers=auth)
+    assert resp.status_code == 200
+    resp = await client.post(
+        f"/api/v1/testing-plans/{plan_id}/complete-no-vuln", headers=auth,
+        json={"conclusion": "仅完结不生成报告", "generate_report": False},
+    )
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    assert plan["status"] == 70
+    assert plan["reports"] == []
+
+    # 直接向已通过计划创建漏洞（不经 attach-vulns）同样自动重开
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "有漏洞系统-漏洞2", "level": 40, "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    plan = (await client.get(f"/api/v1/testing-plans/{plan_id}", headers=auth)).json()
+    assert plan["status"] == 20
+
+

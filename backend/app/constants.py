@@ -25,6 +25,7 @@ class PlanStatus(IntEnum):
     RETEST_APPLY = 40  # 复测申请
     RETESTING = 50     # 复测中
     RETEST_DONE = 60   # 复测完成
+    PASSED = 70        # 测试通过（测试完成且确认未发现安全漏洞，无漏洞闭环终态）
 
 
 class ReportStatus(IntEnum):
@@ -100,13 +101,16 @@ VUL_TRANSITIONS = {
 # 复测申请 --确认复测--> 复测中 --全部漏洞闭环--> 复测完成
 # 等待复测/复测申请 --报告发起复测--> 复测中（报告联动）
 # 复测完成 --漏洞重新打开--> 复测中
+# 初测中 --确认无漏洞--> 测试通过（无漏洞闭环，无需复测）
+# 测试通过 --补录/关联新漏洞--> 初测中（自动重开）
 PLAN_TRANSITIONS = {
-    PlanStatus.UNTESTED: {PlanStatus.TESTING},
-    PlanStatus.TESTING: {PlanStatus.WAIT_RETEST},
+    PlanStatus.UNTESTED: {PlanStatus.TESTING, PlanStatus.PASSED},
+    PlanStatus.TESTING: {PlanStatus.WAIT_RETEST, PlanStatus.PASSED},
     PlanStatus.WAIT_RETEST: {PlanStatus.RETEST_APPLY, PlanStatus.RETESTING},  # 复测申请或报告直接发起复测
     PlanStatus.RETEST_APPLY: {PlanStatus.RETESTING},
     PlanStatus.RETESTING: {PlanStatus.RETEST_DONE},
     PlanStatus.RETEST_DONE: {PlanStatus.RETESTING},  # 漏洞回退时重新打开
+    PlanStatus.PASSED: {PlanStatus.TESTING},  # 无漏洞确认后补录漏洞时重新打开
 }
 
 # 进入某状态时需要打点的时间字段（漏洞状态）
@@ -134,6 +138,7 @@ TESTING_PLAN_STATUS = {
     PlanStatus.RETEST_APPLY: "复测申请",
     PlanStatus.RETESTING: "复测中",
     PlanStatus.RETEST_DONE: "复测完成",
+    PlanStatus.PASSED: "测试通过",
 }
 
 # RBAC 权限点

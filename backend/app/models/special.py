@@ -72,6 +72,8 @@ class TestingPlan(Base):
     asset_ids: Mapped[list | None] = mapped_column(JSON, default=list)  # 关联资产ID数组，前置至计划编制
     brief: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")  # 测试人员、数据来源等
+    # 无漏洞闭环：确认「测试通过（未发现安全漏洞）」时记录的测试结论，重开计划时保留以便追溯
+    no_vul_conclusion: Mapped[str] = mapped_column(Text, default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

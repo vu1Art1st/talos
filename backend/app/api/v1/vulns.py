@@ -133,6 +133,8 @@ async def create_vuln(
     session.add(vul)
     await session.flush()
     vuln_service.add_log(session, vul, user, "创建漏洞")
+    # 无漏洞闭环重开：已确认「测试通过」的计划新增漏洞时自动回到「初测中」
+    await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
     await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
@@ -161,6 +163,7 @@ async def create_vulns_batch(
         vuln_service.add_log(session, vul, user, "创建漏洞", "批量提交")
         vulns.append(vul)
     for plan_id in plan_ids:
+        await plan_service.reopen_passed_plan(session, plan_id)
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     for vul in vulns:
@@ -201,7 +204,8 @@ async def update_vuln(
     if new_status is not None and new_status != vul.status:
         vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
         await vuln_service.sync_report_completion(session, [vul.id])
-    # 等级或关联计划变化后重算涉及计划的统计
+    # 等级或关联计划变化后重算涉及计划的统计；新关联计划若已确认无漏洞则自动重开
+    await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
     for plan_id in {old_plan_id, vul.testing_plan_id}:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()

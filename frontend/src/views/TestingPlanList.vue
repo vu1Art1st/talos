@@ -462,7 +462,7 @@ watch(dims, (v) => {
 })
 
 const statusTag = (s: number) =>
-  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success' } as Record<number, string>)[s] ?? 'info'
+  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success', 70: 'success' } as Record<number, string>)[s] ?? 'info'
 
 const levelName = (lv: number) =>
   ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv

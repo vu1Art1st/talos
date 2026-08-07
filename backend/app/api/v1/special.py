@@ -1,12 +1,14 @@
 """专项管理 API：远程检测 / 测试计划 / 春耕行动，统一 special:manage 权限。"""
+import html as html_mod
 import json
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 from sqlalchemy import String, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,8 +19,10 @@ from app.core.sanitize import excel_safe
 from app.core.timeutil import now as tznow
 from app.db import get_session
 from app.models import (
+    Message,
     RemoteTesting,
     Report,
+    ReportSection,
     SpringAction,
     TestingPlan,
     TestingPlanRetestRound,
@@ -958,6 +962,149 @@ async def quit_testing_plan(
     return row
 
 
+class CompleteNoVulnIn(BaseModel):
+    conclusion: str = ""  # 测试结论：记录到计划并写入无漏洞报告，可留空使用默认结论
+    generate_report: bool = True  # 是否同步生成「未发现安全漏洞」报告草稿
+    title: str = ""  # 报告标题：留空时自动生成「yyyymmdd+测试系统+渗透测试报告（无漏洞）」
+
+
+def _no_vul_section_html(system_name: str, conclusion: str) -> str:
+    """无漏洞报告的「测试结论」章节 HTML（供报告编辑器继续编辑与 Word 导出）。"""
+    parts = [
+        "<p><strong>测试状态：</strong>初测</p>",
+        "<p><strong>测试结论：</strong>经本次安全测试，"
+        f"未发现{html_mod.escape(system_name or '被测系统')}存在安全漏洞，安全测试通过。</p>",
+    ]
+    if conclusion.strip():
+        escaped = "<br/>".join(
+            html_mod.escape(line) for line in conclusion.strip().splitlines()
+        )
+        parts.append(f"<p><strong>补充说明：</strong></p><p>{escaped}</p>")
+    return "".join(parts)
+
+
+def _no_vul_mandays(test_start: str, test_end: str) -> float:
+    """无漏洞报告实际人天：与报告模块口径一致，结束日期 - 开始日期 + 1，非法时 0。"""
+    try:
+        start = datetime.strptime(test_start, "%Y-%m-%d")
+        end = datetime.strptime(test_end, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return 0.0
+    if end < start:
+        return 0.0
+    return float((end - start).days + 1)
+
+
+async def _create_no_vul_report(
+    session: AsyncSession, plan: TestingPlan, user: User, title: str, conclusion: str,
+) -> Report:
+    """为无漏洞计划生成「安全测试通过」报告草稿：单章节测试结论，无漏洞关联。
+
+    标题同计划范围内查重，重复时自动追加「-1」「-2」后缀；测试周期默认取
+    需求接收日期至确认当天（未填接收日期时取当天），实际人天自动计算。
+    标题不含「复测」，按初测报告口径计入计划实际人天。
+    """
+    today = tznow().date().isoformat()
+    candidate = title
+    suffix = 0
+    while (
+        await session.execute(
+            select(Report.id).where(
+                Report.title == candidate, Report.testing_plan_id == plan.id
+            ).limit(1)
+        )
+    ).scalar_one_or_none() is not None:
+        suffix += 1
+        candidate = f"{title}-{suffix}"
+    test_start = plan.receive_time or today
+    report = Report(
+        title=candidate,
+        project_name=plan.system_name,
+        author=user.realname or user.username,
+        test_start=test_start,
+        test_end=today,
+        status="draft",
+        testing_plan_id=plan.id,
+        creator_id=user.id,
+    )
+    report.sections.append(ReportSection(
+        order=0, title="测试结论",
+        content_html=_no_vul_section_html(plan.system_name, conclusion),
+    ))
+    session.add(report)
+    await session.flush()
+    report.actual_mandays = _no_vul_mandays(report.test_start, report.test_end)
+    return report
+
+
+@router.post("/testing-plans/{row_id}/complete-no-vuln", response_model=TestingPlanOut)
+async def complete_plan_no_vuln(
+    row_id: int,
+    body: CompleteNoVulnIn,
+    user: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """无漏洞闭环：测试完成且确认未发现安全漏洞时，计划直接流转为「测试通过」。
+
+    - 前置校验：计划无关联漏洞（有漏洞须走整改/复测链路）、状态允许流转且未重复确认；
+    - 数据记录：状态置为测试通过、初测完成时间打点、记录无漏洞测试结论；
+    - 报告归档：默认同步生成「未发现安全漏洞」报告草稿（可导出 Word/PDF 归档）；
+    - 通知：站内信告知测试人员与计划创建人；
+    - 后续若补录/关联新漏洞，计划自动重开为「初测中」（见 reopen_passed_plan）。
+    """
+    plan = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    if not plan_service.can_operate(user, plan):
+        raise HTTPException(403, "仅认领者或管理员可确认无漏洞完结")
+    if plan.status == PlanStatus.PASSED:
+        raise HTTPException(400, "该计划已确认无漏洞（测试通过），无需重复操作")
+    if not vuln_service.can_plan_transition(plan.status, PlanStatus.PASSED):
+        raise HTTPException(400, "当前状态不允许确认无漏洞完结")
+    vul_count = (
+        await session.execute(
+            select(func.count(Vul.id)).where(Vul.testing_plan_id == row_id)
+        )
+    ).scalar_one()
+    if vul_count:
+        raise HTTPException(400, "该计划存在关联漏洞，不能确认无漏洞，请先处理漏洞后走复测流程")
+
+    # 状态流转与数据记录
+    plan.status = PlanStatus.PASSED
+    plan.no_vul_conclusion = body.conclusion.strip()
+    if not plan.first_test_done_time:
+        plan.first_test_done_time = tznow().date().isoformat()
+
+    # 报告归档：生成无漏洞报告草稿（标题不含「复测」，计入计划实际人天）
+    report: Report | None = None
+    if body.generate_report:
+        title = body.title.strip() or (
+            f"{tznow().date().strftime('%Y%m%d')}{plan.system_name}渗透测试报告（无漏洞）"
+        )
+        report = await _create_no_vul_report(session, plan, user, title, body.conclusion)
+        # 计划的 reports 关系在创建报告前已预加载，需重新加载后再重算实际人天，避免遍历时漏掉新报告
+        await session.refresh(plan, attribute_names=["reports"])
+        await plan_service.refresh_mandays(session, plan.id)
+
+    # 站内信通知：测试人员与计划创建人（去重，排除操作人本人）
+    notice_ids = {u.id for u in plan.testers}
+    if plan.creator_id:
+        notice_ids.add(plan.creator_id)
+    notice_ids.discard(user.id)
+    report_hint = f"，已生成报告《{report.title}》" if report is not None else ""
+    for uid in notice_ids:
+        session.add(Message(
+            user_id=uid,
+            msg_type="plan",
+            title=f"测试计划「{plan.system_name}」已确认无漏洞",
+            content=(
+                f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
+                f"状态流转为「测试通过」{report_hint}"
+            ),
+        ))
+    await session.commit()
+    await session.refresh(plan)
+    return plan
+
+
 @router.post("/testing-plans/{row_id}/attach-vulns", response_model=TestingPlanOut)
 async def attach_vulns_to_plan(
     row_id: int,
@@ -979,6 +1126,8 @@ async def attach_vulns_to_plan(
     vulns = await _load_vulns(session, vul_ids)
     for v in vulns:
         v.testing_plan_id = row_id
+    # 已确认无漏洞（测试通过）的计划重新关联到漏洞时自动重开为「初测中」
+    await plan_service.reopen_passed_plan(session, row_id)
     await plan_service.refresh_stats(session, row_id)
     await session.commit()
     await session.refresh(row)
@@ -998,6 +1147,15 @@ async def update_testing_plan(
     # 校验状态流转合法性（仅当状态有变化时）
     if body.status != row.status and not vuln_service.can_plan_transition(row.status, body.status):
         raise HTTPException(400, f"不允许从当前状态流转到目标状态")
+    # 编辑页直接流转为「测试通过」时，同样要求计划无关联漏洞（与无漏洞完结接口口径一致）
+    if body.status == PlanStatus.PASSED and row.status != PlanStatus.PASSED:
+        vul_count = (
+            await session.execute(
+                select(func.count(Vul.id)).where(Vul.testing_plan_id == row_id)
+            )
+        ).scalar_one()
+        if vul_count:
+            raise HTTPException(400, "该计划存在关联漏洞，不能流转为「测试通过」")
     # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
     if body.status == 50 and row.status != 50:
         plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)

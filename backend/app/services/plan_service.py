@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import PlanStatus
 from app.core.deps import user_permissions
 from app.models import Report, TestingPlan, TestingPlanRetestRound, User, Vul
 
@@ -30,6 +31,21 @@ async def get_plan_or_400(session: AsyncSession, plan_id: int) -> TestingPlan:
     if plan is None:
         raise HTTPException(400, "指定的测试计划不存在")
     return plan
+
+
+async def reopen_passed_plan(session: AsyncSession, plan_id: int | None) -> bool:
+    """已确认「测试通过（无漏洞）」的计划再次关联到漏洞时，自动重开为「初测中」。
+
+    无漏洞闭环与漏洞重开双向联动：新漏洞录入/关联后不再停留在已闭环终态，
+    由测试人员重新走初测流程。无漏洞测试结论保留以便追溯。返回是否发生重开。
+    """
+    if plan_id is None:
+        return False
+    plan = await session.get(TestingPlan, plan_id)
+    if plan is None or plan.status != PlanStatus.PASSED:
+        return False
+    plan.status = PlanStatus.TESTING
+    return True
 
 
 async def refresh_stats(session: AsyncSession, plan_id: int | None) -> None:

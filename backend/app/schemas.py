@@ -632,6 +632,7 @@ class TestingPlanIn(BaseModel):
     actual_mandays: float = 0  # 实际人天
     asset_ids: list[int] = []  # 关联资产ID，编制计划时前置录入
     brief: str = ""
+    no_vul_conclusion: str = ""  # 无漏洞闭环测试结论（确认「测试通过」时记录）
     detail: str = ""
 
 

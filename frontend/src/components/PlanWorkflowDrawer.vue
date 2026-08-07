@@ -23,6 +23,15 @@
         </el-steps>
       </el-card>
 
+      <!-- 无漏洞闭环：已确认「测试通过」时展示结论横幅 -->
+      <el-alert v-if="plan.status === 70" type="success" :closable="false" show-icon
+                title="本计划已确认无漏洞（测试通过），测试流程已闭环">
+        <template #default>
+          <div>{{ plan.no_vul_conclusion || '测试完成且未发现安全漏洞，无漏洞报告见下方报告区，可导出 Word/PDF 归档。' }}</div>
+          <div class="text-xs mt-1">若后续补录/关联新漏洞，计划将自动重开为「初测中」。</div>
+        </template>
+      </el-alert>
+
       <!-- 信息区 + 认领区 -->
       <el-card shadow="never" class="!rounded-lg">
         <div class="flex items-center flex-wrap gap-x-6 gap-y-2 text-sm">
@@ -55,6 +64,10 @@
           <div class="flex items-center">
             <span class="font-medium">漏洞（{{ vulns.length }}）</span>
             <div class="flex-1" />
+            <el-button v-if="canOperate && canCompleteNoVuln && !vulns.length" size="small"
+                       type="success" plain class="!mr-2" @click="openNoVulnDialog">
+              <el-icon class="mr-1"><CircleCheck /></el-icon>完成测试（无漏洞）
+            </el-button>
             <el-button v-if="canManageVulns" size="small" type="primary" plain class="!mr-2"
                        @click="openVulnPicker">
               <el-icon class="mr-1"><FolderOpened /></el-icon>从漏洞库选择
@@ -284,6 +297,30 @@
       </el-card>
     </div>
 
+      <!-- 无漏洞闭环完结：测试完成且未发现漏洞时确认「测试通过」，可选同步生成无漏洞报告 -->
+      <el-dialog v-model="noVulnVisible" title="确认测试完成（无漏洞）" width="520px" append-to-body>
+        <el-form label-width="90px">
+          <el-form-item label="测试结论">
+            <el-input v-model="noVulnConclusion" type="textarea" :rows="3"
+                      placeholder="可填写测试范围与结论说明（选填），将记录到计划并写入无漏洞报告" />
+          </el-form-item>
+          <el-form-item label="生成报告">
+            <el-switch v-model="noVulnGenReport" />
+            <span class="ml-2 text-xs text-gray-400">同步生成「未发现安全漏洞」报告草稿，可导出归档</span>
+          </el-form-item>
+          <el-form-item v-if="noVulnGenReport" label="报告标题">
+            <el-input v-model="noVulnTitle" placeholder="留空则自动生成" />
+          </el-form-item>
+        </el-form>
+        <div class="text-xs text-gray-400">
+          确认后计划状态流转为「测试通过」并记录初测完成时间，站内信通知测试人员；若后续补录漏洞，计划自动重开。
+        </div>
+        <template #footer>
+          <el-button @click="noVulnVisible = false">取消</el-button>
+          <el-button type="primary" :loading="noVulnSubmitting" @click="completeNoVuln">确认完结</el-button>
+        </template>
+      </el-dialog>
+
     <PdfPreviewDialog ref="previewRef" />
   </el-drawer>
 </template>
@@ -293,7 +330,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
-import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled } from '@element-plus/icons-vue'
+import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, statusSoftStyleEx, statusLabel } from '../utils/colors'
@@ -331,6 +368,13 @@ const genTitle = ref('')
 const genVulIds = ref<number[]>([])
 const generating = ref(false)
 
+// 无漏洞闭环完结表单状态
+const noVulnVisible = ref(false)
+const noVulnConclusion = ref('')
+const noVulnGenReport = ref(true)
+const noVulnTitle = ref('')
+const noVulnSubmitting = ref(false)
+
 const vulnPickerVisible = ref(false)
 const pickerLoading = ref(false)
 const pickerSearch = ref('')
@@ -351,7 +395,7 @@ let pollTimer: number | undefined
 const fmtTime = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
 const statusTag = (s: number) =>
-  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success' } as Record<number, string>)[s] ?? 'info'
+  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success', 70: 'success' } as Record<number, string>)[s] ?? 'info'
 
 const levelName = (lv: number) =>
   ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
@@ -365,11 +409,13 @@ const isTester = computed(() => plan.value?.testers?.some((u: any) => u.id === a
 const canManageVulns = computed(() => isTester.value)
 // 计划级操作（生成报告、发起复测等）：认领者或管理员
 const canOperate = computed(() => isAdmin.value || isTester.value)
+// 无漏洞完结仅允许在测试开始前/初测中两个状态发起（后端同步校验无关联漏洞）
+const canCompleteNoVuln = computed(() => [10, 20].includes(plan.value?.status))
 
-// 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60→全部完成
+// 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60/70→全部完成（含无漏洞闭环）
 const stepActive = computed(() => {
   const s = plan.value?.status
-  if (s === 60) return 6
+  if (s === 60 || s === 70) return 6
   if (s === 50) return 4
   if (s === 30 || s === 40) return 3
   if (s === 20) return vulns.value.length ? 2 : 1
@@ -449,6 +495,7 @@ watch(
     dirty.value = false
     vulnFormVisible.value = false
     genFormVisible.value = false
+    noVulnVisible.value = false
     transitionsMap.value = {}
     exportJobs.value = {}
     expandedExportId.value = null
@@ -571,6 +618,32 @@ async function startRetest(r: any) {
   ElMessage.success('已发起复测，漏洞进入复测中，已自动生成复测报告')
   dirty.value = true
   await refresh()
+}
+
+// ---------- 无漏洞闭环 ----------
+function openNoVulnDialog() {
+  noVulnConclusion.value = plan.value?.no_vul_conclusion || ''
+  noVulnGenReport.value = true
+  // 自动命名：yyyymmdd+测试系统名称+渗透测试报告（无漏洞）
+  noVulnTitle.value = `${dayjs().format('YYYYMMDD')}${plan.value?.system_name ?? ''}渗透测试报告（无漏洞）`
+  noVulnVisible.value = true
+}
+
+async function completeNoVuln() {
+  noVulnSubmitting.value = true
+  try {
+    await client.post(`/testing-plans/${props.planId}/complete-no-vuln`, {
+      conclusion: noVulnConclusion.value,
+      generate_report: noVulnGenReport.value,
+      title: noVulnGenReport.value ? noVulnTitle.value.trim() : '',
+    })
+    ElMessage.success('已确认无漏洞，计划流转为「测试通过」')
+    noVulnVisible.value = false
+    dirty.value = true
+    await refresh()
+  } finally {
+    noVulnSubmitting.value = false
+  }
 }
 
 // ---------- 导出（提交后轮询任务列表至完成） ----------
