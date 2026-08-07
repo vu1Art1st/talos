@@ -1851,31 +1851,79 @@ async def test_vuln_status_retest_guard(client: AsyncClient, auth: dict):
     assert resp.json()["status"] == 60
 
 
-async def test_ticket_seq_reuse(client: AsyncClient, auth: dict):
-    """工单ID动态分配：删除/释放的序号可被后续记录复用（取最小未占用序号）。"""
-    body = {"department": "复用部门", "receive_time": "2026-01-01"}
+async def test_ticket_seq_increment_no_reuse(client: AsyncClient, auth: dict):
+    """工单ID自动分配采用「当日最大编号+1」：删除/释放的编号不复用，仅手动可选用。"""
+    body = {"department": "递增部门", "receive_time": "2026-01-01"}
 
     resp = await client.post(
-        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统A"},
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "递增系统A"},
     )
     assert resp.status_code == 200, resp.text
     plan_a = resp.json()
     assert plan_a["ticket_id"] == "20260101-1"
 
     resp = await client.post(
-        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统B"},
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "递增系统B"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["ticket_id"] == "20260101-2"
 
-    # 删除占用 20260101-1 的计划后，新建记录应复用该序号（而非顺延到 3）
+    # 删除占用 20260101-1 的计划后，自动分配不复用空洞，继续递增到 3
     resp = await client.delete(f"/api/v1/testing-plans/{plan_a['id']}", headers=auth)
     assert resp.status_code == 200, resp.text
     resp = await client.post(
-        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "复用系统C"},
+        "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "递增系统C"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260101-3"
+
+    # 被释放的 20260101-1 仍可手动指定给新工单
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={**body, "system_name": "递增系统D", "ticket_id_manual": "20260101-1"},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["ticket_id"] == "20260101-1"
+
+
+async def test_ticket_id_manual_occupancy_and_ghost(client: AsyncClient, auth: dict):
+    """工单编号占用口径统一：自动分配跳过 manual 占用；manual 记录底层 seq 不产生幽灵占用。"""
+    body = {"department": "占用部门", "receive_time": "2026-07-30"}
+
+    # A 手动指定 20260730-2（其 ticket_seq=0，不参与自动分配）
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={**body, "system_name": "占用系统A", "ticket_id_manual": "20260730-2"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 自动工单 B：max(纯自动 seq, manual N)=2 -> 新序号 3，编号 20260730-3（跳过 A 占用的 2）
+    resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统B"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260730-3"
+
+    # 自动工单 C：max(3, 2)+1=4 -> 20260730-4（单调递增）
+    resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统C"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260730-4"
+
+    # 幽灵占用场景：D 自动得到 20260730-5 后手动改为 20260730-88（底层 seq 保留 5）
+    resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统D"})
+    plan_d = resp.json()
+    assert plan_d["ticket_id"] == "20260730-5"
+    resp = await client.put(
+        f"/api/v1/testing-plans/{plan_d['id']}", headers=auth,
+        json={**body, "system_name": "占用系统D", "ticket_id_manual": "20260730-88"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # E 手动指定 20260730-5（D 显示为 20260730-88，无任何工单显示 5）→ 应放行
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={**body, "system_name": "占用系统E", "ticket_id_manual": "20260730-5"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20260730-5"
 
 
 async def test_create_retest_record_with_status(client: AsyncClient, auth: dict):

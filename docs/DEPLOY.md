@@ -211,6 +211,73 @@ bash scripts/backup.sh
 - `VP_SECRET_KEY` 保持一致可避免已登录用户令牌失效（改了不会丢数据，仅需重新登录）。
 - `redis` / `gotenberg` 无状态，不用迁移。
 - 恢复务必对准**空库**（新卷）执行，不要在已有业务数据的库上导入。
+- **恢复完成后先跑一次 `bash scripts/migrate.sh` 再访问页面**（见「七、恢复后页面 500 排查」），
+  否则备份库结构落后于代码版本时，新功能页面会因缺列报 500。
+
+---
+
+## 七、恢复后页面 500 排查（数据库结构不匹配）
+
+### 现象
+
+用 `restore.sh` 从旧备份 / VPS 恢复到新机器后，登录能进，但部分页面（如
+测试计划页、报告中心页）接口返回 **500**。
+
+### 根因
+
+`restore.sh` 只恢复**数据**（`pg_dump` 导入），**不会执行 Alembic 迁移**。
+而备份库的结构只代表备份时的代码版本：
+
+- 备份库 `alembic_version` 停在旧版本（如 `b2c3d4e5f6a7`）；
+- 当前代码已升级（head 如 `d4e5f6a7b8c9`），查询新增列时报：
+
+  ```text
+  sqlalchemy.exc.ProgrammingError: column reports.vul_edit_snapshot does not exist
+  ```
+
+后端的 `create_all` 只会补**缺失的表**，不会给已有表加列；`_migrate_lightweight`
+仅对 SQLite（本地开发库）生效，对 PostgreSQL 无效。因此缺列必须靠 Alembic 补齐。
+
+### 排查步骤
+
+1. 看 api 日志定位具体报错列：
+
+   ```bash
+   docker compose logs api --tail 200 | grep -E "Error|UndefinedColumn|does not exist"
+   ```
+
+2. 对比数据库当前迁移版本与代码所需 head：
+
+   ```bash
+   docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT version_num FROM alembic_version"'
+   docker compose exec api python -m alembic current     # 应与上一条一致
+   ```
+
+   同时核对 `backend/alembic/versions/` 下最新迁移的 `revision` 是否为 head。
+
+### 修复
+
+对恢复后的库执行一次数据库迁移（幂等，可重复执行）：
+
+```bash
+bash scripts/migrate.sh
+# 等价： docker compose run --rm api python -m scripts.migrate
+# 其内部按库状态决策：有 alembic_version → alembic upgrade head
+```
+
+完成后重新验证：
+
+```bash
+docker compose exec api python -m alembic current   # 应显示 head 版本号
+```
+
+回到前端刷新页面即可。
+
+### 预防
+
+- **恢复 / 迁移数据后必须先跑 `migrate.sh`**，再访问页面。
+- VPS 升级走 `bash scripts/upgrade.sh`（内部已含备份 + 迁移），不要只 `git pull` 后直接 `up compose up`。
+- 生产升级与本地恢复库升级使用同一套 Alembic 迁移，两端 head 需保持一致。
 
 ---
 

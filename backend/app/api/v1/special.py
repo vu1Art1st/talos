@@ -846,10 +846,13 @@ async def get_testing_plan(
 
 
 async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
-    """按需求接收日期分配当日最小未占用序号（ticket_seq），无日期时不生成。
+    """按需求接收日期分配当日「最大编号+1」的录入次序（ticket_seq），无日期时不生成。
 
-    - 动态检测占用：取从 1 开始的最小未占用正整数，删除/释放的工单ID可被
-      后续记录重新使用（如 20260101-2 仍存在时，释放的 20260101-1 可再次分配）。
+    - 占用口径与显示编号一致：纯自动记录（ticket_id_manual 为空）的 ticket_seq，
+      以及手动指定编号（YYYYMMDD-N 且日期为当日）解析出的 N，均计入最大编号；
+      新序号 = 最大编号 + 1，保证单调递增且不与任何占用冲突（含手动指定）。
+    - 删除/释放的历史编号不复用（自动分配仅单调递增），如需使用可手动指定，
+      手动编号真实未被占用时由唯一性校验放行。
     - 新对象 ticket_seq 为 None（SQLAlchemy default 在构造时不生效），
       需用 falsy 判断（None/0 均视为未分配）。
     - 仅当对象已持久化（更新场景）时才排除自身，避免新对象 id 为 None 时
@@ -859,31 +862,38 @@ async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
     if not row.receive_time or row.ticket_seq or row.ticket_id_manual:
         return
     date_like = f"{row.receive_time[:10]}%"
-    stmt = select(TestingPlan.ticket_seq).where(
-        TestingPlan.receive_time.like(date_like)
-    )
+    stmt = select(
+        TestingPlan.ticket_seq, TestingPlan.ticket_id_manual
+    ).where(TestingPlan.receive_time.like(date_like))
     if row.id is not None:
         stmt = stmt.where(TestingPlan.id != row.id)
-    used = set((await session.execute(stmt)).scalars().all())
-    seq = 1
-    while seq in used:
-        seq += 1
-    row.ticket_seq = seq
+    rows = (await session.execute(stmt)).all()
+    max_seq = 0
+    for seq, manual in rows:
+        if seq:
+            max_seq = max(max_seq, seq)
+        m = re.fullmatch(r"(\d{8})-(\d+)", manual or "")
+        if m and f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}" == row.receive_time[:10]:
+            max_seq = max(max_seq, int(m.group(2)))
+    row.ticket_seq = max_seq + 1
 
 
 async def _check_ticket_id_unique(
     session: AsyncSession, ticket_id: str, exclude_id: int | None = None
 ) -> None:
-    """校验工单ID唯一性：手动指定值或自动生成值（需求接收日期+序号）均不得与其他记录重复。
+    """校验工单ID唯一性：与「显示编号」口径一致——手动指定值本身，或纯自动记录
+    （ticket_id_manual 为空）由 receive_time+ticket_seq 生成的值，均不得与其他记录重复。
 
     工单ID为派生属性（手动指定优先，否则由 receive_time+ticket_seq 生成），
     无法直接建数据库唯一约束，此处按两种生成方式构造条件做应用层校验。
+    手动指定了编号的记录其底层 ticket_seq 不再视为占用（避免幽灵占用——
+    如先自动生成 20260730-3 后手动改为 20260730-88 时，20260730-3 仍可被手动使用）。
     """
     if not ticket_id:
         return
     # 手动指定值匹配
     conds = [TestingPlan.ticket_id_manual == ticket_id]
-    # 自动生成值匹配：YYYYMMDD-N，对应 receive_time(YYYY-MM-DD) + ticket_seq
+    # 自动生成值匹配：YYYYMMDD-N，仅统计未手动指定编号（纯自动）记录的组合
     m = re.fullmatch(r"(\d{8})-(\d+)", ticket_id)
     if m:
         date_part, seq = m.group(1), int(m.group(2))
@@ -892,6 +902,7 @@ async def _check_ticket_id_unique(
             and_(
                 TestingPlan.receive_time.like(date_like),
                 TestingPlan.ticket_seq == seq,
+                TestingPlan.ticket_id_manual == "",
             )
         )
     stmt = select(TestingPlan.id).where(or_(*conds))
