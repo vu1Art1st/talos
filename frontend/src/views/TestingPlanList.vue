@@ -296,12 +296,21 @@
           <el-input-number v-model="form.est_mandays" :min="0" :precision="1" :step="0.5" class="!w-full" />
         </el-form-item>
         <el-form-item label="实际人天">
-          <el-input-number v-model="form.actual_mandays" :min="0" :precision="1" :step="0.5" class="!w-full"
-                           :disabled="mandaysAuto" />
+          <div class="w-full flex gap-2">
+            <el-input-number v-model="form.actual_mandays" :min="0" :precision="1" :step="0.5" class="flex-1"
+                             :disabled="mandaysAuto && !form.actual_mandays_override" />
+            <el-button v-if="mandaysAuto && !form.actual_mandays_override" @click="onCorrectMandays">修正</el-button>
+            <el-button v-if="mandaysAuto && form.actual_mandays_override" type="warning" plain
+                       @click="onCancelMandays">取消修正</el-button>
+          </div>
         </el-form-item>
       </div>
-      <div v-if="mandaysAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
+      <div v-if="mandaysAuto && !form.actual_mandays_override" class="text-xs text-gray-400 mb-2 pl-[100px]">
         有关联初测报告，实际人天由系统按初测报告测试周期自动计算（复测报告不计入）
+      </div>
+      <div v-else-if="mandaysAuto && form.actual_mandays_override"
+           class="text-xs text-gray-400 mb-2 pl-[100px]">
+        已手动修正实际人天，不再随初测报告自动更新；点击「取消修正」恢复系统自动计算
       </div>
       <div v-if="statsAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
         已有关联漏洞，统计由系统按漏洞等级自动重算
@@ -494,6 +503,20 @@ const statsAuto = computed(() => (dialogRow.value?.vuls?.length ?? 0) > 0)
 // 有关联初测报告（标题不含「复测」）时实际人天自动计算，禁止手填；复测报告人天不计入统计
 const mandaysAuto = computed(() =>
   (dialogRow.value?.reports ?? []).some((r: any) => !(r.title || '').includes('复测')))
+// 自动计算的实际人天：初测报告人天之和（与后端 refresh_mandays 口径一致），取消修正时恢复展示
+const autoMandays = computed(() =>
+  (dialogRow.value?.reports ?? [])
+    .filter((r: any) => !(r.title || '').includes('复测'))
+    .reduce((s: number, r: any) => s + (r.actual_mandays ?? 0), 0))
+// 修正：进入手动输入状态，保存后不再被初测报告自动覆盖
+function onCorrectMandays() {
+  form.value.actual_mandays_override = true
+}
+// 取消修正：恢复为初测报告计算的自动值，保存后由系统重新覆盖
+function onCancelMandays() {
+  form.value.actual_mandays_override = false
+  form.value.actual_mandays = autoMandays.value
+}
 
 const emptyForm = () => ({
   id: null as number | null,
@@ -515,6 +538,7 @@ const emptyForm = () => ({
   stat_low: 0,
   est_mandays: 0,
   actual_mandays: 0,
+  actual_mandays_override: false,
   brief: '',
   detail: '',
 })

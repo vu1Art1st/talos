@@ -81,11 +81,15 @@ async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
 
     与漏洞统计口径一致：有关联初测报告时自动重算并覆盖手填值；
     无初测报告（含仅有关联复测报告）时保留手填值，复测报告人天不计入统计。
+    已手动修正（actual_mandays_override=True）时跳过自动覆盖，保留修正值；
+    取消修正后（标志置 False）再调用本函数即恢复为初测报告计算的人天。
     """
     if plan_id is None:
         return
     plan = await session.get(TestingPlan, plan_id)
     if plan is None:
+        return
+    if plan.actual_mandays_override:
         return
     first_test_reports = [
         r for r in plan.reports if not is_retest_report_title(r.title)

@@ -69,6 +69,8 @@ class TestingPlan(Base):
     stat_low: Mapped[int] = mapped_column(Integer, default=0)
     est_mandays: Mapped[float] = mapped_column(Float, default=0)  # 预估人天
     actual_mandays: Mapped[float] = mapped_column(Float, default=0)  # 实际人天
+    # 实际人天手动修正标志：修正后不再被初测报告自动覆盖；取消修正后恢复自动计算
+    actual_mandays_override: Mapped[bool] = mapped_column(Boolean, default=False)
     asset_ids: Mapped[list | None] = mapped_column(JSON, default=list)  # 关联资产ID数组，前置至计划编制
     brief: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")  # 测试人员、数据来源等

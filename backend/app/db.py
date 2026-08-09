@@ -57,6 +57,11 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN est_mandays REAL NOT NULL DEFAULT 0"))
         if plan_cols and "actual_mandays" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN actual_mandays REAL NOT NULL DEFAULT 0"))
+        # 实际人天手动修正标志：修正后不再被初测报告自动覆盖（Alembic b5c6d7e8f9a0 同步）
+        if plan_cols and "actual_mandays_override" not in plan_cols:
+            await conn.execute(text(
+                "ALTER TABLE testing_plans ADD COLUMN actual_mandays_override BOOLEAN NOT NULL DEFAULT 0"
+            ))
         # 测试计划增强字段：工单时间/工单序号/计划名称/手动工单ID/关联资产
         for col, ddl in (
             ("ticket_time", "VARCHAR(32) NOT NULL DEFAULT ''"),
@@ -68,6 +73,11 @@ async def _migrate_lightweight() -> None:
                 await conn.execute(text(f"ALTER TABLE testing_plans ADD COLUMN {col} {ddl}"))
         if plan_cols and "asset_ids" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN asset_ids JSON"))
+        # 无漏洞闭环测试结论字段（Alembic a3b4c5d6e7f8 只覆盖 PostgreSQL，SQLite 开发库需同步补列）
+        if plan_cols and "no_vul_conclusion" not in plan_cols:
+            await conn.execute(text(
+                "ALTER TABLE testing_plans ADD COLUMN no_vul_conclusion TEXT NOT NULL DEFAULT ''"
+            ))
         # 存量资产关联为空时回填空数组（幂等），避免 NULL 导致 TestingPlanOut 序列化 500
         await conn.execute(text("UPDATE testing_plans SET asset_ids = '[]' WHERE asset_ids IS NULL"))
         export_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(export_jobs)"))).fetchall()}

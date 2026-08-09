@@ -584,6 +584,7 @@ class ReportBrief(BaseModel):
     id: int
     title: str
     status: str = "draft"
+    actual_mandays: float = 0  # 实际人天，供前端计算计划自动人天（取消修正时恢复展示）
     create_time: datetime | None = None
 
 
@@ -630,6 +631,7 @@ class TestingPlanIn(BaseModel):
     stat_low: int = 0
     est_mandays: float = 0  # 预估人天
     actual_mandays: float = 0  # 实际人天
+    actual_mandays_override: bool = False  # 实际人天手动修正标志：修正后不再被初测报告自动覆盖
     asset_ids: list[int] = []  # 关联资产ID，编制计划时前置录入
     brief: str = ""
     no_vul_conclusion: str = ""  # 无漏洞闭环测试结论（确认「测试通过」时记录）

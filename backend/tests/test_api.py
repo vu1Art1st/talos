@@ -1757,6 +1757,76 @@ async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict)
     assert plan["reports"][0]["status"] == "draft"
 
 
+async def test_testing_plan_actual_mandays_override(client: AsyncClient, auth: dict):
+    """实际人天修正：修正后不再被初测报告自动覆盖，取消修正后恢复自动计算。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "修正人天系统", "department": "人天统计专用部门", "est_mandays": 2},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    asset_id = (await client.post(
+        "/api/v1/assets", headers=auth, json={"name": "修正人天资产"},
+    )).json()["id"]
+    vul_id = (await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "修正人天漏洞", "level": 20, "asset_ids": [asset_id],
+              "testing_plan_id": plan_id},
+    )).json()["id"]
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "修正人天报告", "vul_ids": [vul_id], "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    report = resp.json()
+    report_id = report["id"]
+
+    # 给初测报告填写测试周期：3 天 → 计划实际人天自动 = 3
+    save_body = {
+        "title": report["title"], "project_name": report["project_name"],
+        "author": report["author"], "revision": report["revision"],
+        "test_start": "2026-08-01", "test_end": "2026-08-03",
+        "sections": report["sections"],
+    }
+    resp = await client.put(f"/api/v1/reports/{report_id}", headers=auth, json=save_body)
+    assert resp.status_code == 200, resp.text
+    report = resp.json()
+    assert report["actual_mandays"] == 3
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["actual_mandays"] == 3
+    assert plan["actual_mandays_override"] is False
+
+    # 修正：手动输入 9.5，保存后不再被初测报告自动覆盖
+    body = plan
+    for k in ("id", "ticket_seq", "ticket_id", "testers", "vuls", "reports",
+              "retest_rounds", "retest_round_count", "create_time", "update_time"):
+        body.pop(k, None)
+    body["actual_mandays"] = 9.5
+    body["actual_mandays_override"] = True
+    resp = await client.put(f"/api/v1/testing-plans/{plan_id}", headers=auth, json=body)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["actual_mandays"] == 9.5
+    assert resp.json()["actual_mandays_override"] is True
+
+    # 初测报告测试周期变更为 5 天，refresh_mandays 因修正标志跳过，修正值保持不变
+    save_body["revision"] = report["revision"]
+    save_body["test_end"] = "2026-08-05"
+    resp = await client.put(f"/api/v1/reports/{report_id}", headers=auth, json=save_body)
+    assert resp.status_code == 200, resp.text
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["actual_mandays"] == 9.5
+
+    # 取消修正：恢复为初测报告计算的 5 天
+    body["actual_mandays"] = 99  # 该值会被自动计算覆盖
+    body["actual_mandays_override"] = False
+    resp = await client.put(f"/api/v1/testing-plans/{plan_id}", headers=auth, json=body)
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    assert plan["actual_mandays_override"] is False
+    assert plan["actual_mandays"] == 5
+
+
 async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     """测试计划 Excel 导入：模板下载、按 ID 更新、无 ID 新增、非法行报错。"""
     from openpyxl import Workbook

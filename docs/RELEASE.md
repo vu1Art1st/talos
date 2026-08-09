@@ -23,6 +23,18 @@
 
 ---
 
+## [Unreleased]
+
+### 新增
+
+- **实际人天手动修正**（`frontend/src/views/TestingPlanList.vue` / `backend/app/services/plan_service.py` / `special.py`）：测试计划对话框的实际人天字段新增「修正」入口，点击后进入手动输入状态（不再被初测报告时间自动覆盖），按钮切换为「取消修正」；取消修正后由系统按初测报告重新计算覆盖该字段，恢复自动计算值
+
+### 数据库
+
+- `testing_plans` 新增 `actual_mandays_override`（BOOLEAN）：SQLite 走 `_migrate_lightweight` 幂等加列，PostgreSQL 走 Alembic 迁移 `b5c6d7e8f9a0`
+
+---
+
 ## [0.10.0] - 2026-08-07
 
 报告列表显示生成时间、测试计划聚合筛选、报告导出历史管理与重复导出 / 重复生成检测、复测记录状态联动，以及对应数据库结构迁移。
