@@ -1672,11 +1672,11 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     assert resp.status_code == 200
     assert resp.content[:2] == b"PK"
     wb = load_workbook(BytesIO(resp.content))
-    assert "测试计划" in wb.sheetnames
+    assert "渗透测试计划" in wb.sheetnames
     assert "统计汇总" in wb.sheetnames
-    detail_rows = list(wb["测试计划"].iter_rows(values_only=True))
+    detail_rows = list(wb["渗透测试计划"].iter_rows(values_only=True))
     assert len(detail_rows) == 4  # 表头 + 3 行
-    assert detail_rows[0][1] == "测试计划名称"  # 表头第二列与 PLAN_EXCEL_HEADERS 一致
+    assert detail_rows[0][1] == "渗透测试计划名称"  # 表头第二列与 PLAN_EXCEL_HEADERS 一致
 
     # 导出同样支持 pending 筛选：仅 2 条待办计划
     resp = await client.get(
@@ -1685,7 +1685,7 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     )
     assert resp.status_code == 200
     wb2 = load_workbook(BytesIO(resp.content))
-    pending_rows = list(wb2["测试计划"].iter_rows(values_only=True))
+    pending_rows = list(wb2["渗透测试计划"].iter_rows(values_only=True))
     assert len(pending_rows) == 3  # 表头 + 2 行
     assert "统计汇总" in wb2.sheetnames
 
@@ -1722,7 +1722,7 @@ async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict)
     # 导出明细含人天列，汇总含人天指标
     resp = await client.get("/api/v1/testing-plans/export", headers=auth, params={"department": tag})
     wb = load_workbook(BytesIO(resp.content))
-    detail_rows = list(wb["测试计划"].iter_rows(values_only=True))
+    detail_rows = list(wb["渗透测试计划"].iter_rows(values_only=True))
     header = list(detail_rows[0])
     assert "预估人天" in header and "实际人天" in header
     est_col = header.index("预估人天")
@@ -1843,8 +1843,8 @@ async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     )
     exist_id = resp.json()["id"]
 
-    # 表头与模板一致（PLAN_EXCEL_HEADERS 20 列，含「测试计划名称」列）
-    headers_row = ["ID", "测试计划名称", "测试系统", "测试类型", "所属部门", "工单ID",
+    # 表头与模板一致（PLAN_EXCEL_HEADERS 20 列，含「渗透测试计划名称」列）
+    headers_row = ["ID", "渗透测试计划名称", "测试系统", "测试类型", "所属部门", "工单ID",
                    "工单提起时间", "状态", "测试人员", "需求接收", "初测完成", "复测通知",
                    "复测完成", "预估人天", "实际人天", "超危数", "高危数", "中危数",
                    "低危数", "复测轮数"]

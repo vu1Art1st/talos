@@ -29,7 +29,7 @@ def is_plan_claimant(user: User, plan: TestingPlan) -> bool:
 async def get_plan_or_400(session: AsyncSession, plan_id: int) -> TestingPlan:
     plan = await session.get(TestingPlan, plan_id)
     if plan is None:
-        raise HTTPException(400, "指定的测试计划不存在")
+        raise HTTPException(400, "指定的渗透测试计划不存在")
     return plan
 
 

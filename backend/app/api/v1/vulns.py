@@ -6,7 +6,17 @@ from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL
 from app.core.deps import get_current_user, require_perm, user_permissions
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
-from app.models import Asset, TestingPlan, User, Vul, VulLog, VulRetestRecord
+from app.models import (
+    Asset,
+    ImportRecord,
+    ReportSection,
+    TestingPlan,
+    User,
+    Vul,
+    VulLog,
+    VulRetestRecord,
+    spring_action_vulns,
+)
 from app.schemas import (
     Page,
     VulBatchDeleteIn,
@@ -43,7 +53,7 @@ async def _check_plan_access(session: AsyncSession, plan_id: int | None, user: U
         return
     plan = await plan_service.get_plan_or_400(session, plan_id)
     if not plan_service.is_plan_claimant(user, plan):
-        raise HTTPException(403, "仅已认领该测试计划的账号可录入漏洞，请先认领该计划")
+        raise HTTPException(403, "仅已认领该渗透测试计划的账号可录入漏洞，请先认领该计划")
 
 
 async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) -> None:
@@ -54,7 +64,7 @@ async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) ->
     if vul.testing_plan_id is not None:
         plan = await session.get(TestingPlan, vul.testing_plan_id)
         if plan is not None and not plan_service.is_plan_claimant(user, plan):
-            raise HTTPException(403, "该漏洞已关联测试计划，仅已认领该计划的账号可修改")
+            raise HTTPException(403, "该漏洞已关联渗透测试计划，仅已认领该计划的账号可修改")
         return
     perms = user_permissions(user)
     if "*" not in perms and "vuln:manage" not in perms and vul.submitter_id != user.id:
@@ -70,6 +80,28 @@ async def _fetch_assets(session: AsyncSession, asset_ids: list[int]) -> list[Ass
     if len(assets) != len(set(asset_ids)):
         raise HTTPException(400, "存在无效的资产ID")
     return list(assets)
+
+
+async def _clean_vul_references(session: AsyncSession, vul_ids: list[int]) -> None:
+    """删除漏洞前解除外键引用，避免生产库（PostgreSQL 强制外键）删除失败返回 500。
+
+    - report_sections.vul_id / import_records.vul_id：置空，保留报告章节与导入记录；
+    - spring_action_vulns：删除春耕行动-漏洞关联行。"""
+    if not vul_ids:
+        return
+    await session.execute(
+        ReportSection.__table__.update()
+        .where(ReportSection.vul_id.in_(vul_ids))
+        .values(vul_id=None)
+    )
+    await session.execute(
+        ImportRecord.__table__.update()
+        .where(ImportRecord.vul_id.in_(vul_ids))
+        .values(vul_id=None)
+    )
+    await session.execute(
+        spring_action_vulns.delete().where(spring_action_vulns.c.vul_id.in_(vul_ids))
+    )
 
 
 @router.get("", response_model=Page[VulOut])
@@ -222,6 +254,7 @@ async def delete_vuln(
     vul = await session.get(Vul, vul_id)
     if vul:
         plan_id = vul.testing_plan_id
+        await _clean_vul_references(session, [vul_id])
         await session.delete(vul)
         await session.flush()
         await plan_service.refresh_stats(session, plan_id)
@@ -240,6 +273,7 @@ async def delete_vulns_batch(
         await session.execute(select(Vul).where(Vul.id.in_(body.ids)))
     ).scalars().all()
     plan_ids = {v.testing_plan_id for v in vulns}
+    await _clean_vul_references(session, body.ids)
     for v in vulns:
         await session.delete(v)
     await session.flush()

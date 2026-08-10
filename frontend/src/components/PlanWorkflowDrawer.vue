@@ -181,7 +181,7 @@
           </el-table-column>
         </el-table>
         <div class="text-xs text-gray-400 mt-2">
-          勾选漏洞后点击「添加」，将关联到当前测试计划；已在本计划中的漏洞不可重复勾选
+          勾选漏洞后点击「添加」，将关联到当前渗透测试计划；已在本计划中的漏洞不可重复勾选
         </div>
         <template #footer>
           <el-button @click="vulnPickerVisible = false">取消</el-button>

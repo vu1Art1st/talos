@@ -41,9 +41,9 @@
               </div>
             </div>
           </el-form-item>
-          <el-form-item label="关联测试计划">
+          <el-form-item label="关联渗透测试计划">
             <el-select v-model="selectedPlanId" clearable filterable class="w-full"
-                       :placeholder="editId ? '可选：调整关联的测试计划' : '可选：关联到测试计划'"
+                       :placeholder="editId ? '可选：调整关联的渗透测试计划' : '可选：关联到渗透测试计划'"
                        :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
               <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
                          :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">

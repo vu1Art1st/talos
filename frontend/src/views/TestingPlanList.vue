@@ -42,7 +42,7 @@
         <el-icon class="mr-1"><Download /></el-icon>导出Excel
       </el-button>
       <el-button type="primary" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增测试计划
+        <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试计划
       </el-button>
     </div>
 
@@ -70,8 +70,8 @@
       <template #empty>
         <el-empty :image-size="90"
                   :description="pending
-                    ? '暂无待办流程，所有测试计划均已进入终态'
-                    : '暂无符合条件的测试计划，请调整筛选条件'" />
+                    ? '暂无待办流程，所有渗透测试计划均已进入终态'
+                    : '暂无符合条件的渗透测试计划，请调整筛选条件'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
@@ -210,11 +210,11 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑测试计划' : '新增测试计划'" width="680px">
+  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑渗透测试计划' : '新增渗透测试计划'" width="680px">
     <el-form :model="form" label-width="100px">
       <div class="grid grid-cols-2 gap-x-4">
         <el-form-item label="计划名称">
-          <el-input v-model="form.plan_name" placeholder="与测试系统区分的测试计划名称" />
+          <el-input v-model="form.plan_name" placeholder="与测试系统区分的渗透测试计划名称" />
         </el-form-item>
         <el-form-item label="关联资产">
           <div class="w-full flex gap-2">
@@ -318,6 +318,35 @@
       <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
         认领该计划后才可修改测试状态
       </div>
+      <!-- 创建非渗透：勾选后展开测试项；保存时自动同步新增非渗透计划（共享工单ID，分开管理/统计） -->
+      <div class="pl-[100px] mb-4">
+        <div class="tp-create-head" :class="{ on: form.create_nonpen }" @click="toggleCreateNonpen">
+          <div class="tp-create-check">
+            <el-icon v-if="form.create_nonpen" :size="14"><Check /></el-icon>
+          </div>
+          <div>
+            <div class="tp-create-title">
+              创建非渗透
+              <span class="tp-new-tag">新功能</span>
+            </div>
+            <div class="tp-create-desc">
+              {{ form.create_nonpen
+                ? '勾选后展开测试项；保存时自动同步新增非渗透计划，与渗透测试分开管理/统计'
+                : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增非渗透计划' }}
+            </div>
+          </div>
+        </div>
+        <div v-if="form.create_nonpen" class="grid grid-cols-3 gap-3 mt-2">
+          <div v-for="t in NONPEN_ITEMS" :key="t.key" class="test-item-check"
+               :class="{ checked: form.nonpen_test_items.includes(t.key) }" @click="toggleNonpenItem(t.key)">
+            <div class="tick"><el-icon v-if="form.nonpen_test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
+            <div>
+              <div class="ti-name">{{ t.name }}</div>
+              <div class="ti-desc">{{ t.desc }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
       <el-form-item label="漏洞简述">
         <el-input v-model="form.brief" type="textarea" :rows="2" placeholder="漏洞情况简述" />
       </el-form-item>
@@ -345,6 +374,7 @@ import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
+import { NONPEN_ITEMS } from '../constants/nonpen'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
@@ -435,7 +465,7 @@ const filterFields = computed<FilterFieldDef[]>(() => [
 
 // ---------- 统计面板 ----------
 const DIMENSIONS = [
-  { key: 'total_plans', label: '测试计划总数', color: '#409EFF' },
+  { key: 'total_plans', label: '渗透测试计划总数', color: '#409EFF' },
   { key: 'retest_done_plans', label: '复测完成数', color: '#67C23A' },
   { key: 'first_test_count', label: '初测次数', color: '#E6A23C' },
   { key: 'retest_count', label: '复测次数', color: '#F56C6C' },
@@ -539,10 +569,24 @@ const emptyForm = () => ({
   est_mandays: 0,
   actual_mandays: 0,
   actual_mandays_override: false,
+  create_nonpen: false,
+  nonpen_test_items: [] as string[],
   brief: '',
   detail: '',
 })
 const form = ref(emptyForm())
+
+// ---------- 创建非渗透（联动） ----------
+function toggleCreateNonpen() {
+  form.value.create_nonpen = !form.value.create_nonpen
+  if (!form.value.create_nonpen) form.value.nonpen_test_items = []
+}
+
+function toggleNonpenItem(key: string) {
+  const i = form.value.nonpen_test_items.indexOf(key)
+  if (i >= 0) form.value.nonpen_test_items.splice(i, 1)
+  else form.value.nonpen_test_items.push(key)
+}
 
 function filterParams(): Record<string, any> {
   const params: Record<string, any> = { search: search.value }
@@ -622,7 +666,7 @@ async function exportExcel() {
   const url = URL.createObjectURL(data)
   const a = document.createElement('a')
   a.href = url
-  a.download = '测试计划导出.xlsx'
+  a.download = '渗透测试计划导出.xlsx'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -632,7 +676,7 @@ async function downloadTemplate() {
   const url = URL.createObjectURL(data)
   const a = document.createElement('a')
   a.href = url
-  a.download = '测试计划导入模板.xlsx'
+  a.download = '渗透测试计划导入模板.xlsx'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -703,7 +747,7 @@ async function searchAssets(keyword: string) {
   }
 }
 
-// 新增测试计划时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
+// 新增渗透测试计划时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
 function openCreateAsset() {
   assetPrefill.value = lastAssetKeyword ? { name: lastAssetKeyword } : null
   assetDialogVisible.value = true
@@ -753,6 +797,16 @@ async function loadAssetLabels() {
 }
 
 async function save() {
+  // 勾选「创建非渗透」但未选择任何测试项时阻止保存（与后端校验一致）
+  if (!form.value.id && form.value.create_nonpen && !form.value.nonpen_test_items.length) {
+    ElMessage.warning('已勾选「创建非渗透」，请至少选择一个非渗透测试项')
+    return
+  }
+  // 联动创建需共享工单ID：需求接收日期或手动工单ID必须至少填写其一（与后端校验一致）
+  if (!form.value.id && form.value.create_nonpen && !form.value.ticket_id_manual && !form.value.receive_time) {
+    ElMessage.warning('已勾选「创建非渗透」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID')
+    return
+  }
   const body = { ...form.value }
   delete (body as any).testers
   delete (body as any).vuls
@@ -762,6 +816,8 @@ async function save() {
   delete (body as any).ticket_id
   delete (body as any).ticket_seq
   if (form.value.id) {
+    delete (body as any).create_nonpen
+    delete (body as any).nonpen_test_items
     await client.put(`/testing-plans/${form.value.id}`, body)
   } else {
     await client.post('/testing-plans', body)
@@ -868,4 +924,87 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.28);
 }
+
+/* ---------- 创建非渗透（联动） ---------- */
+.tp-create-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--tl-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+.tp-create-head:hover { border-color: var(--el-color-primary); }
+.tp-create-head.on {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.tp-create-check {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1px solid var(--tl-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.tp-create-head.on .tp-create-check {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  color: #fff;
+}
+.tp-create-title { font-size: 13px; font-weight: 500; }
+.tp-new-tag {
+  margin-left: 6px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff;
+  vertical-align: 1px;
+}
+.tp-create-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
+
+/* 测试项勾选卡片（与测试计划/非渗透计划共用样式） */
+.test-item-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--tl-surface);
+}
+.test-item-check:hover { border-color: var(--el-color-primary); }
+.test-item-check.checked {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.test-item-check .tick {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1px solid var(--tl-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.test-item-check.checked .tick {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  color: #fff;
+}
+.ti-name { font-size: 13px; font-weight: 500; }
+.ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
 </style>

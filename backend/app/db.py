@@ -149,6 +149,34 @@ async def _migrate_lightweight() -> None:
                     await conn.execute(text(f"ALTER TABLE reports DROP COLUMN {col}"))
                 except Exception:  # noqa: BLE001  SQLite < 3.35 不支持 DROP COLUMN，忽略残留列
                     pass
+        # 非渗透计划：测试计划新增「创建非渗透」勾选列；新建非渗透计划表（与测试计划共享工单ID序列）
+        if plan_cols and "create_nonpen" not in plan_cols:
+            await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN create_nonpen BOOLEAN NOT NULL DEFAULT 0"))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS nonpen_plans ("
+            " id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            " plan_name VARCHAR(128) NOT NULL DEFAULT '',"
+            " system_name VARCHAR(128) NOT NULL DEFAULT '',"
+            " test_type VARCHAR(64) NOT NULL DEFAULT '',"
+            " department VARCHAR(128) NOT NULL DEFAULT '',"
+            " ticket_time VARCHAR(32) NOT NULL DEFAULT '',"
+            " receive_time VARCHAR(32) NOT NULL DEFAULT '',"
+            " ticket_seq INTEGER NOT NULL DEFAULT 0,"
+            " ticket_id_manual VARCHAR(64) NOT NULL DEFAULT '',"
+            " asset_ids JSON,"
+            " items JSON,"
+            " testing_plan_id INTEGER,"
+            " detail TEXT NOT NULL DEFAULT '',"
+            " creator_id INTEGER,"
+            " create_time DATETIME,"
+            " update_time DATETIME)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_nonpen_plans_system_name ON nonpen_plans (system_name)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_nonpen_plans_testing_plan_id ON nonpen_plans (testing_plan_id)"
+        ))
         if legacy_plan_status:
             # 状态码语义升级（六档），仅对旧库一次性重映射：50 已完成→60 复测完成，40 复测中→50 复测中
             await conn.execute(text("UPDATE testing_plans SET status = 60 WHERE status = 50"))

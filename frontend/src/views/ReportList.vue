@@ -96,7 +96,7 @@
 
   <el-dialog v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
     <el-form label-width="100px">
-      <el-form-item label="关联测试计划">
+      <el-form-item label="关联渗透测试计划">
         <el-select v-model="genPlanId" clearable filterable class="w-full"
                    placeholder="可选，关联后联动计划状态" @change="onPlanChange">
           <el-option v-for="p in plans" :key="p.id" :label="p.system_name" :value="p.id" />

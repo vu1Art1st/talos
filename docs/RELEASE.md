@@ -12,7 +12,7 @@
 | `y` | 次版本号(Minor) | 向下兼容的功能新增或明显的用户可见变化 |
 | `z` | 修订号(Patch) | 向下兼容的问题修复、小优化、文档 / 构建脚本调整 |
 
-当前处于 `0.y.z` 快速迭代阶段:从 `0.1.0` 起步,功能新增递增 `y`、修复递增 `z`;待确认可发布正式版后再进入 `1.0.0`。
+当前已进入正式版 `1.0.0`：进入语义化版本正式阶段，功能新增递增 `y`、修复递增 `z`、重大不兼容变更才递增 `x`。
 
 发布约定:
 
@@ -23,15 +23,36 @@
 
 ---
 
-## [Unreleased]
+## [1.0.0] - 2026-08-10
+
+正式发布版本。新增与「渗透测试计划」平级的「非渗透计划」模块（主机 / Web / 基线扫描独立管理、测试项状态流转与次数统计、与测试计划联动双向同步 / 级联删除），工单ID分配抽取为两表共享当日序号序列的 `ticket_service`；测试计划更名为「渗透测试计划」；实际人天支持手动修正；文档整理（移除 USER_GUIDE.md 与 ID-RENUMBERING-EVALUATION.md，新增《非渗透计划模块需求与设计》）。
 
 ### 新增
 
 - **实际人天手动修正**（`frontend/src/views/TestingPlanList.vue` / `backend/app/services/plan_service.py` / `special.py`）：测试计划对话框的实际人天字段新增「修正」入口，点击后进入手动输入状态（不再被初测报告时间自动覆盖），按钮切换为「取消修正」；取消修正后由系统按初测报告重新计算覆盖该字段，恢复自动计算值
+- **非渗透计划模块**（`frontend/src/views/NonpenPlanList.vue` / `frontend/src/components/NonpenPlanWorkflowDrawer.vue` / `frontend/src/constants/nonpen.ts` / `backend/app/api/v1/nonpen.py` / `backend/app/services/nonpen_service.py` / `backend/app/services/ticket_service.py`）：与「测试计划」平级的新模块，独立管理主机 / Web / 基线三类扫描测试项的状态流转（未开始→初测中→等待复测→复测中→复测完成，任意阶段可忽略，取消忽略恢复未开始且次数清零）、初测 / 复测次数统计与五张统计卡片、工单ID与测试计划**共享当日序号序列**
+- **测试计划「创建非渗透」联动**（`TestingPlanList.vue` / `special.py`）：测试计划新增表单勾选「创建非渗透」（新功能角标），勾选后展开测试项选择；保存时同工单自动生成联动非渗透计划（共享工单ID与接收日期，列表展示「联动」角标）；编辑任一方公共字段**双向同步**，删除任一方**互相级联**；非渗透计划不关联漏洞 / 报告 / 人天（业务独立，复用 `special:manage` 权限）
+
+### 变更
+
+- **「测试计划」更名为「渗透测试计划」**：侧边栏菜单 / 页面标题 / 弹窗 / 按钮 / 空态 / 提示语全部更新为「渗透测试计划」；Excel 导出与导入模板的 sheet 名称、文件名、表头同步更新为「渗透测试计划」；后端错误提示同步更新。路由与 API 路径保持 `/testing-plans` 不变，避免破坏既有链接与权限
+
+### 修复
+
+- **非渗透计划扫描次数统计口径**（`backend/app/services/nonpen_service.py`）：统计卡片「基线 / 主机 / Web 扫描次数」原按「初测次数 + 复测次数」累加，导致同一测试项初测复测被计算两次；改为按「初测次数」统计，初测与复测针对同一测试项合计按一次计（复测多次也不重复计数）
+- **非渗透计划流程抽屉空白**（`frontend/src/components/NonpenPlanWorkflowDrawer.vue`）：组件常驻但仅在首次挂载时 `load()`，打开时 `planId` 已设置却未重新加载导致内容空白；改为 `watch(visible + planId)` 打开时刷新
+- **非渗透计划工单ID未生成**（`backend/app/schemas.py` / `backend/app/api/v1/special.py` / `frontend/src/views/NonpenPlanList.vue` / `frontend/src/views/TestingPlanList.vue`）：工单ID依赖「需求接收日期」或手动指定工单ID，两者皆空时系统静默保存导致工单ID缺失；新增前后端双重校验，未提供工单ID来源时拒绝保存并提示
 
 ### 数据库
 
 - `testing_plans` 新增 `actual_mandays_override`（BOOLEAN）：SQLite 走 `_migrate_lightweight` 幂等加列，PostgreSQL 走 Alembic 迁移 `b5c6d7e8f9a0`
+- 新增 `nonpen_plans` 表（`ticket_seq` / `ticket_id_manual` / `asset_ids` / `items` JSON / `testing_plan_id` 联动外键）；`testing_plans` 新增 `create_nonpen`（BOOLEAN）：SQLite 走 `_migrate_lightweight` 幂等建表加列，PostgreSQL 走 Alembic 迁移 `c9d0e1f2a3b4`
+
+---
+
+## [Unreleased]
+
+（暂无）
 
 ---
 

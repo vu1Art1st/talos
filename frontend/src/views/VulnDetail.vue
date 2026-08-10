@@ -20,7 +20,7 @@
             <el-tooltip v-if="auth.hasPerm('vuln:manage')" content="将本漏洞的描述与修复建议存入知识库，作为该类型的标准模板" placement="top">
               <el-button plain @click="saveAsTemplate">存为模板</el-button>
             </el-tooltip>
-            <el-tooltip v-if="!canEdit" content="仅已认领该测试计划的账号可编辑该漏洞" placement="top">
+            <el-tooltip v-if="!canEdit" content="仅已认领该渗透测试计划的账号可编辑该漏洞" placement="top">
               <span>
                 <el-button :disabled="true" @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
               </span>
@@ -38,7 +38,7 @@
           <el-descriptions-item label="关联资产">
             {{ (vul.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="测试计划">
+          <el-descriptions-item label="渗透测试计划">
             <el-link v-if="vul.testing_plan_id" type="primary"
                      @click="router.push('/testing-plans')">已关联计划</el-link>
             <span v-else>-</span>

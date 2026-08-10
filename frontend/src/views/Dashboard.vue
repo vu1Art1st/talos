@@ -55,7 +55,7 @@
     </div>
 
     <el-card shadow="never" class="!rounded-lg tl-hover">
-      <template #header>各部门安全概况（按测试计划所属部门统计）</template>
+      <template #header>各部门安全概况（按渗透测试计划所属部门统计）</template>
       <template v-if="deptData.length">
         <div ref="deptRef" class="h-80" />
         <el-table :data="deptData" stripe size="small" class="mt-4">

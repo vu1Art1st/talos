@@ -18,7 +18,7 @@
           <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
         </template>
         <div class="flex-1" />
-        <el-select v-model="planId" filterable clearable placeholder="关联测试计划（可选）" class="!w-52">
+        <el-select v-model="planId" filterable clearable placeholder="关联渗透测试计划（可选）" class="!w-52">
           <el-option v-for="p in plans" :key="p.id"
                      :label="p.plan_name ? `${p.plan_name}（${p.system_name}）` : p.system_name" :value="p.id" />
         </el-select>
@@ -33,7 +33,7 @@
         </el-button>
       </div>
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
-        报告格式确认入库时：已选择的测试计划将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
+        报告格式确认入库时：已选择的渗透测试计划将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
       </div>
     </el-card>
 

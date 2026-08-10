@@ -9,7 +9,7 @@
       <el-button @click="downloadTemplate">
         <el-icon class="mr-1"><Download /></el-icon>下载导入模板
       </el-button>
-      <span class="text-gray-400 text-sm">支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成测试计划</span>
+      <span class="text-gray-400 text-sm">支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成渗透测试计划</span>
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">

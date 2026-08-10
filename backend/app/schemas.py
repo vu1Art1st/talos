@@ -2,8 +2,9 @@
 from datetime import datetime
 from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.constants import NONPEN_ITEMS
 from app.core.sanitize import sanitize_html
 
 T = TypeVar("T")
@@ -636,6 +637,8 @@ class TestingPlanIn(BaseModel):
     brief: str = ""
     no_vul_conclusion: str = ""  # 无漏洞闭环测试结论（确认「测试通过」时记录）
     detail: str = ""
+    create_nonpen: bool = False  # 是否勾选「创建非渗透」：同时生成联动非渗透计划（共享工单ID）
+    nonpen_test_items: list[str] = []  # 勾选的非渗透测试项（baseline/host/web），联动创建时使用
 
 
 class TestingPlanOut(TestingPlanIn):
@@ -657,6 +660,73 @@ class TestingPlanOut(TestingPlanIn):
     def _normalize_asset_ids(cls, v):
         """旧库迁移后 asset_ids 可能为 NULL，归一化为空数组避免序列化失败。"""
         return v or []
+
+
+class NonpenPlanIn(BaseModel):
+    """非渗透计划（扫描类测试，与测试计划平级、独立统计）。"""
+    system_name: str = Field(min_length=1, max_length=128)
+    plan_name: str = ""  # 计划名称，与测试系统区分
+    test_type: str = ""
+    department: str = ""
+    receive_time: str = ""
+    ticket_time: str = ""  # 工单提起时间
+    ticket_id_manual: str = ""  # 手动指定工单ID，留空由系统按需求接收日期自动生成（与测试计划共享序列）
+    asset_ids: list[int] = []  # 关联资产ID
+    test_items: list[str] = []  # 勾选的测试项（baseline/host/web），未勾选项置 ignored 不参与统计
+    detail: str = ""
+
+    @field_validator("test_items", mode="after")
+    @classmethod
+    def _check_test_items(cls, v):
+        for k in v:
+            if k not in NONPEN_ITEMS:
+                raise ValueError(f"不支持的测试项：{k}")
+        return list(dict.fromkeys(v))  # 去重保序
+
+    @model_validator(mode="after")
+    def _require_ticket_source(self):
+        """工单ID必须有来源：手动指定工单ID，或填写需求接收日期以便系统自动生成（与测试计划同序列）。"""
+        if not self.ticket_id_manual.strip() and not self.receive_time.strip():
+            raise ValueError("请填写「需求接收日期」（用于自动生成工单ID），或手动指定工单ID")
+        return self
+
+
+class NonpenPlanOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    system_name: str = ""
+    plan_name: str = ""
+    test_type: str = ""
+    department: str = ""
+    receive_time: str = ""
+    ticket_time: str = ""
+    ticket_seq: int = 0
+    ticket_id_manual: str = ""
+    ticket_id: str = ""  # 工单ID：YYYYMMDD-N
+    asset_ids: list[int] = []
+    items: dict = {}  # 测试项状态容器 {key: {status, first_times, retest_times}}
+    testing_plan_id: int | None = None  # 联动来源测试计划ID，非空即「联动」计划
+    linked: bool = False  # 是否由测试计划联动创建
+    actionable: bool = False  # 「可进行」：存在任一非忽略测试项处于可测试状态
+    detail: str = ""
+    create_time: datetime | None = None
+    update_time: datetime | None = None
+
+    @field_validator("asset_ids", mode="before")
+    @classmethod
+    def _normalize_asset_ids(cls, v):
+        return v or []
+
+
+class NonpenItemTransitionIn(BaseModel):
+    """测试项状态流转操作（后端按 NONPEN_ITEM_ACTIONS 白名单校验）。"""
+    action: str = Field(pattern=r"^(start|done|direct_done|start_retest|pass|fail|reset)$")
+
+
+class NonpenItemIgnoreIn(BaseModel):
+    """忽略 / 取消忽略测试项。"""
+    ignored: bool = True
 
 
 class SpringActionIn(BaseModel):

@@ -19,7 +19,10 @@
           <el-icon><DataLine /></el-icon><template #title>安全态势</template>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('special:manage')" index="/testing-plans">
-          <el-icon><Tickets /></el-icon><template #title>测试计划</template>
+          <el-icon><Tickets /></el-icon><template #title>渗透测试计划</template>
+        </el-menu-item>
+        <el-menu-item v-if="auth.hasPerm('special:manage')" index="/nonpen-plans">
+          <el-icon><Aim /></el-icon><template #title>非渗透计划</template>
         </el-menu-item>
         <el-menu-item index="/vulns">
           <el-icon><Warning /></el-icon><template #title>漏洞管理</template>

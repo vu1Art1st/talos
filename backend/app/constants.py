@@ -173,3 +173,54 @@ IMPORT_LABEL_MAP = {
 
 VUL_LEVEL_REVERSE = {v: k for k, v in VUL_LEVEL.items()}
 VUL_TYPE_REVERSE = {v: k for k, v in VUL_TYPE.items()}
+
+
+# 非渗透测试项（key -> (名称, 说明)）：与测试计划平级的扫描类测试
+NONPEN_ITEMS = {
+    "baseline": ("基线扫描", "配置基线 / 安全基线核查"),
+    "host": ("主机漏洞扫描", "服务 / 端口 / 补丁漏洞"),
+    "web": ("Web漏洞扫描", "Web 应用 / 接口漏洞"),
+}
+
+# 非渗透测试项独立流转状态：未开始→初测中→等待复测→复测中→复测完成，任意阶段可忽略
+NONPEN_ITEM_STATUS = {
+    "not_started": "未开始",
+    "testing": "初测中",
+    "wait_retest": "等待复测",
+    "retesting": "复测中",
+    "retest_done": "复测完成",
+    "ignored": "忽略",
+}
+
+# 测试项状态 → 允许的操作（后端流转校验 + 前端按钮渲染共用）
+NONPEN_ITEM_ACTIONS = {
+    "not_started": {"start", "ignore"},                    # 开始初测 / 忽略
+    "testing": {"done", "direct_done", "ignore"},          # 初测完成(→等待复测) / 直接完成(→复测完成) / 忽略
+    "wait_retest": {"start_retest", "ignore"},             # 发起复测 / 忽略
+    "retesting": {"pass", "fail", "ignore"},               # 复测通过 / 复测未通过(退回等待复测) / 忽略
+    "retest_done": {"reset"},                              # 置回未开始
+    "ignored": {"unignore"},                               # 取消忽略（次数清零，回未开始）
+}
+
+# 操作名 -> 中文展示（前端按钮文案与后端错误提示共用）
+NONPEN_ITEM_ACTION_NAMES = {
+    "start": "开始初测",
+    "done": "初测完成",
+    "direct_done": "直接完成",
+    "start_retest": "发起复测",
+    "pass": "复测通过",
+    "fail": "复测未通过",
+    "reset": "置回未开始",
+    "ignore": "忽略",
+    "unignore": "取消忽略",
+}
+
+# 状态 -> 展示色值（明/暗双主题通用；「未开始」正常灰需关注，「忽略」更浅灰弱化）
+NONPEN_ITEM_COLORS = {
+    "not_started": "#909399",
+    "testing": "#409EFF",
+    "wait_retest": "#E6A23C",
+    "retesting": "#E6A23C",
+    "retest_done": "#67C23A",
+    "ignored": "#c0c4cc",
+}

@@ -3,6 +3,7 @@ from app.models.business import Asset, Message, Vul, VulLog, VulRetestRecord, vu
 from app.models.report import ExportJob, Report, ReportSection
 from app.models.imports import ImportBatch, ImportRecord
 from app.models.special import (
+    NonpenPlan,
     RemoteTesting,
     SpringAction,
     TestingPlan,
@@ -18,7 +19,8 @@ __all__ = [
     "Asset", "Vul", "VulLog", "VulRetestRecord", "Message", "vuln_assets",
     "Report", "ReportSection", "ExportJob",
     "ImportBatch", "ImportRecord",
-    "RemoteTesting", "TestingPlan", "TestingPlanRetestRound", "SpringAction", "spring_action_vulns", "testing_plan_testers",
+    "RemoteTesting", "TestingPlan", "TestingPlanRetestRound", "SpringAction",
+    "NonpenPlan", "spring_action_vulns", "testing_plan_testers",
     "DictOption", "VulnType",
     "KnowledgeEntry",
 ]

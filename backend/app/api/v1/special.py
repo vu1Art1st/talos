@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from sqlalchemy import String, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import TESTING_PLAN_STATUS, PlanStatus
+from app.constants import NONPEN_ITEMS, TESTING_PLAN_STATUS, PlanStatus
 from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
@@ -20,6 +20,7 @@ from app.core.timeutil import now as tznow
 from app.db import get_session
 from app.models import (
     Message,
+    NonpenPlan,
     RemoteTesting,
     Report,
     ReportSection,
@@ -40,7 +41,7 @@ from app.schemas import (
     TestingPlanIn,
     TestingPlanOut,
 )
-from app.services import plan_service, vuln_service
+from app.services import nonpen_service, plan_service, ticket_service, vuln_service
 
 router = APIRouter(tags=["专项管理"])
 
@@ -622,7 +623,7 @@ async def testing_plan_stats(
 
 
 PLAN_EXCEL_HEADERS = [
-    "ID", "测试计划名称", "测试系统", "测试类型", "所属部门",
+    "ID", "渗透测试计划名称", "测试系统", "测试类型", "所属部门",
     "工单ID", "工单提起时间", "状态", "测试人员",
     "需求接收", "初测完成", "复测通知", "复测完成",
     "预估人天", "实际人天",
@@ -643,7 +644,7 @@ async def export_testing_plans(
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """导出筛选后的测试计划明细与统计汇总（双 sheet Excel）。"""
+    """导出筛选后的渗透测试计划明细与统计汇总（双 sheet Excel）。"""
     from openpyxl import Workbook
 
     cond = _plan_conditions(search, status, test_type, department, receive_from, receive_to, pending=pending)
@@ -655,7 +656,7 @@ async def export_testing_plans(
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "测试计划"
+    ws.title = "渗透测试计划"
     ws.append(PLAN_EXCEL_HEADERS)
     for p in plans:
         ws.append([excel_safe(v) for v in (
@@ -671,7 +672,7 @@ async def export_testing_plans(
 
     ws2 = wb.create_sheet("统计汇总")
     ws2.append(["指标", "数值"])
-    ws2.append(["测试计划总数", stats["total_plans"]])
+    ws2.append(["渗透测试计划总数", stats["total_plans"]])
     ws2.append(["复测完成计划数", stats["retest_done_plans"]])
     ws2.append(["初测次数", stats["first_test_count"]])
     ws2.append(["复测次数", stats["retest_count"]])
@@ -691,7 +692,7 @@ async def export_testing_plans(
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-    filename = "测试计划导出.xlsx"
+    filename = "渗透测试计划导出.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -723,10 +724,10 @@ async def download_plan_import_template(_: User = Depends(require_perm("special:
 
     wb = Workbook()
     ws = wb.active
-    ws.title = "测试计划"
+    ws.title = "渗透测试计划"
     ws.append(PLAN_EXCEL_HEADERS)
     ws.append([
-        "", "示例测试计划", "示例商城系统", "渗透测试", "电商事业部",
+        "", "示例渗透测试计划", "示例商城系统", "渗透测试", "电商事业部",
         "", "2026-01-01", "未测试", "张三、李四",
         "2026-01-01", "", "", "",
         5, 0,
@@ -735,7 +736,7 @@ async def download_plan_import_template(_: User = Depends(require_perm("special:
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-    filename = "测试计划导入模板.xlsx"
+    filename = "渗透测试计划导入模板.xlsx"
     return StreamingResponse(
         buf,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -846,74 +847,34 @@ async def get_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """单条计划详情（含测试人员/关联漏洞/关联报告/复测轮次），供流程抽屉刷新。"""
-    return await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    return await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
 
 
 async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
-    """按需求接收日期分配当日「最大编号+1」的录入次序（ticket_seq），无日期时不生成。
+    """按需求接收日期分配当日「最大编号+1」的录入次序（ticket_seq）。
 
-    - 占用口径与显示编号一致：纯自动记录（ticket_id_manual 为空）的 ticket_seq，
-      以及手动指定编号（YYYYMMDD-N 且日期为当日）解析出的 N，均计入最大编号；
-      新序号 = 最大编号 + 1，保证单调递增且不与任何占用冲突（含手动指定）。
-    - 删除/释放的历史编号不复用（自动分配仅单调递增），如需使用可手动指定，
-      手动编号真实未被占用时由唯一性校验放行。
-    - 新对象 ticket_seq 为 None（SQLAlchemy default 在构造时不生效），
-      需用 falsy 判断（None/0 均视为未分配）。
-    - 仅当对象已持久化（更新场景）时才排除自身，避免新对象 id 为 None 时
-      生成 `id != NULL` 恒为假的 SQL 条件导致序号始终为 1。
-    - 手动指定了工单ID时不自动分配序号，避免浪费当日序号。
+    委托给 ticket_service.assign_ticket_seq：与测试计划同源的工单ID分配逻辑，
+    现为测试计划 / 非渗透计划两表共享同一当日序号序列（见 services/ticket_service.py）。
     """
-    if not row.receive_time or row.ticket_seq or row.ticket_id_manual:
-        return
-    date_like = f"{row.receive_time[:10]}%"
-    stmt = select(
-        TestingPlan.ticket_seq, TestingPlan.ticket_id_manual
-    ).where(TestingPlan.receive_time.like(date_like))
-    if row.id is not None:
-        stmt = stmt.where(TestingPlan.id != row.id)
-    rows = (await session.execute(stmt)).all()
-    max_seq = 0
-    for seq, manual in rows:
-        if seq:
-            max_seq = max(max_seq, seq)
-        m = re.fullmatch(r"(\d{8})-(\d+)", manual or "")
-        if m and f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}" == row.receive_time[:10]:
-            max_seq = max(max_seq, int(m.group(2)))
-    row.ticket_seq = max_seq + 1
+    await ticket_service.assign_ticket_seq(session, row)
 
 
 async def _check_ticket_id_unique(
-    session: AsyncSession, ticket_id: str, exclude_id: int | None = None
+    session: AsyncSession, ticket_id: str, exclude_id: int | None = None,
+    linked_nonpen_ids: list[int] | None = None,
 ) -> None:
     """校验工单ID唯一性：与「显示编号」口径一致——手动指定值本身，或纯自动记录
     （ticket_id_manual 为空）由 receive_time+ticket_seq 生成的值，均不得与其他记录重复。
 
-    工单ID为派生属性（手动指定优先，否则由 receive_time+ticket_seq 生成），
-    无法直接建数据库唯一约束，此处按两种生成方式构造条件做应用层校验。
-    手动指定了编号的记录其底层 ticket_seq 不再视为占用（避免幽灵占用——
-    如先自动生成 20260730-3 后手动改为 20260730-88 时，20260730-3 仍可被手动使用）。
+    委托给 ticket_service.check_ticket_id_unique：现为测试计划 / 非渗透计划两表全局唯一。
+    排除自身及联动创建的非渗透记录（联动双方共享同一工单ID，须相互排除）。
     """
-    if not ticket_id:
-        return
-    # 手动指定值匹配
-    conds = [TestingPlan.ticket_id_manual == ticket_id]
-    # 自动生成值匹配：YYYYMMDD-N，仅统计未手动指定编号（纯自动）记录的组合
-    m = re.fullmatch(r"(\d{8})-(\d+)", ticket_id)
-    if m:
-        date_part, seq = m.group(1), int(m.group(2))
-        date_like = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:]}%"
-        conds.append(
-            and_(
-                TestingPlan.receive_time.like(date_like),
-                TestingPlan.ticket_seq == seq,
-                TestingPlan.ticket_id_manual == "",
-            )
-        )
-    stmt = select(TestingPlan.id).where(or_(*conds))
-    if exclude_id is not None:
-        stmt = stmt.where(TestingPlan.id != exclude_id)
-    if (await session.execute(stmt)).first() is not None:
-        raise HTTPException(400, f"工单ID「{ticket_id}」已存在，请更换后保存")
+    excludes = [(TestingPlan, exclude_id)] if exclude_id is not None else []
+    for nid in (linked_nonpen_ids or []):
+        excludes.append((NonpenPlan, nid))
+    await ticket_service.check_ticket_id_unique(
+        session, ticket_id, exclude=excludes or None,
+    )
 
 
 @router.post("/testing-plans", response_model=TestingPlanOut)
@@ -922,10 +883,38 @@ async def create_testing_plan(
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    row = TestingPlan(**body.model_dump(), creator_id=user.id)
+    data = body.model_dump()
+    create_nonpen = bool(data.pop("create_nonpen", False))
+    nonpen_test_items = list(data.pop("nonpen_test_items") or [])
+    row = TestingPlan(**data, creator_id=user.id)
     await _assign_ticket_seq(session, row)
     await _check_ticket_id_unique(session, row.ticket_id)
     session.add(row)
+    # 勾选「创建非渗透」：同一工单联动生成非渗透计划（共享工单ID与接收日期）
+    if create_nonpen:
+        if not nonpen_test_items:
+            raise HTTPException(400, "已勾选「创建非渗透」，请至少选择一个非渗透测试项")
+        for k in nonpen_test_items:
+            if k not in NONPEN_ITEMS:
+                raise HTTPException(400, f"不支持的测试项：{k}")
+        if not row.receive_time and not row.ticket_id_manual:
+            raise HTTPException(400, "已勾选「创建非渗透」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID")
+        await session.flush()  # 先持久化测试计划拿到 id，供非渗透记录引用
+        session.add(NonpenPlan(
+            plan_name=row.plan_name,
+            system_name=row.system_name,
+            test_type=row.test_type,
+            department=row.department,
+            ticket_time=row.ticket_time,
+            receive_time=row.receive_time,
+            ticket_seq=row.ticket_seq,  # 混合工单：非渗透复用测试计划的当日序号
+            ticket_id_manual=row.ticket_id_manual,
+            asset_ids=list(row.asset_ids or []),
+            items=nonpen_service.build_items(nonpen_test_items),
+            testing_plan_id=row.id,  # 标记联动来源，用于双向同步与级联删除
+            detail=row.detail,
+            creator_id=user.id,
+        ))
     await session.commit()
     await session.refresh(row)
     return row
@@ -938,7 +927,7 @@ async def claim_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """认领测试计划：当前用户加入测试人员（幂等）；未测试状态自动进入初测中。"""
-    row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    row = await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
     if all(u.id != user.id for u in row.testers):
         row.testers.append(user)
     if row.status == 10:
@@ -955,7 +944,7 @@ async def quit_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """退出认领：当前用户移出测试人员列表。"""
-    row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    row = await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
     row.testers = [u for u in row.testers if u.id != user.id]
     await session.commit()
     await session.refresh(row)
@@ -1052,7 +1041,7 @@ async def complete_plan_no_vuln(
     - 通知：站内信告知测试人员与计划创建人；
     - 后续若补录/关联新漏洞，计划自动重开为「初测中」（见 reopen_passed_plan）。
     """
-    plan = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    plan = await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
     if not plan_service.can_operate(user, plan):
         raise HTTPException(403, "仅认领者或管理员可确认无漏洞完结")
     if plan.status == PlanStatus.PASSED:
@@ -1117,7 +1106,7 @@ async def attach_vulns_to_plan(
     属录入漏洞阶段：仅已认领该计划的账号可操作（管理员未认领不放行）；
     已关联其他计划的漏洞会被转移至当前计划。
     """
-    row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    row = await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
     if not plan_service.is_plan_claimant(user, row):
         raise HTTPException(403, "仅已认领该测试计划的账号可关联漏洞")
     vul_ids = [int(i) for i in (body.get("vul_ids") or [])]
@@ -1141,7 +1130,7 @@ async def update_testing_plan(
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    row = await get_or_404(session, TestingPlan, row_id, "测试计划不存在")
+    row = await get_or_404(session, TestingPlan, row_id, "渗透测试计划不存在")
     if body.status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
     # 校验状态流转合法性（仅当状态有变化时）
@@ -1159,17 +1148,31 @@ async def update_testing_plan(
     # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
     if body.status == 50 and row.status != 50:
         plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
-    for k, v in body.model_dump().items():
+    data = body.model_dump()
+    # 联动相关字段仅创建时生效：编辑不回写 create_nonpen 勾选，也不存在 nonpen_test_items 列
+    data.pop("create_nonpen", None)
+    data.pop("nonpen_test_items", None)
+    for k, v in data.items():
         setattr(row, k, v)
     # 补生成工单ID序号（历史/导入数据无序号时自动补齐）
     await _assign_ticket_seq(session, row)
+    # 联动非渗透计划：编辑测试计划公共字段时双向同步；联动双方共享同一工单ID，唯一性校验需相互排除
+    linked = (await session.execute(
+        select(NonpenPlan).where(NonpenPlan.testing_plan_id == row.id)
+    )).scalars().all()
     # 保存前校验工单ID唯一性（手动指定值或自动生成值均不可重复）
-    await _check_ticket_id_unique(session, row.ticket_id, exclude_id=row.id)
+    await _check_ticket_id_unique(
+        session, row.ticket_id, exclude_id=row.id,
+        linked_nonpen_ids=[np.id for np in linked],
+    )
     # 有关联漏洞时统计以自动重算为准，覆盖手填值
     if row.vuls:
         await plan_service.refresh_stats(session, row.id)
     # 有关联初测报告时实际人天自动计算（仅纳入初测报告，复测报告不计入）
     await plan_service.refresh_mandays(session, row.id)
+    # 联动双向同步：编辑测试计划公共字段时，自动同步更新其联动的非渗透计划
+    for np in linked:
+        nonpen_service.sync_linked_fields(row, np)
     await session.commit()
     await session.refresh(row)
     return row
@@ -1183,6 +1186,12 @@ async def delete_testing_plan(
 ):
     row = await session.get(TestingPlan, row_id)
     if row:
+        # 级联删除联动创建的非渗透计划（联动双向：删除任一方，另一方同步删除）
+        linked = (await session.execute(
+            select(NonpenPlan).where(NonpenPlan.testing_plan_id == row_id)
+        )).scalars().all()
+        for np in linked:
+            await session.delete(np)
         # 解除漏洞与报告的关联，避免悬挂外键
         await session.execute(
             update(Vul).where(Vul.testing_plan_id == row_id).values(testing_plan_id=None)
