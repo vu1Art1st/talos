@@ -25,6 +25,17 @@
 
 ---
 
+## [1.12.2] - 2026-08-13
+
+复测结论校验增强:二轮复测不得误用首轮历史复测记录放行。
+
+### 修复
+
+- **复测结论校验按轮次判定**（`backend/app/services/vuln_service.py` / `backend/app/api/v1/vulns.py`）：`ensure_retest_conclusion` 改为按「本轮是否新增复测记录」或「随流转直接提交的复测内容」判定,不再误用首轮历史 `retest_html` 放行二轮复测流转(已修复/复测未通过)；`set_status`/`transition` 改为 `async`,系统自动流转(报告联动)以 `skip_conclusion=True` 跳过校验,避免「复测中自动回修复中」被误拦
+- **新增二轮复测守卫测试**（`backend/tests/test_api.py`）：`test_second_round_retest_requires_new_record` 覆盖「二轮未新增记录时禁止切换为已修复/复测未通过,新增本轮记录后放行」
+
+---
+
 ## [1.12.1] - 2026-08-13
 
 报告编辑页复测处理复用 VulnRetestPanel 组件(与渗透测试工单流程抽屉一致),并修复若干前端交互细节。

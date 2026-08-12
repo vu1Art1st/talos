@@ -234,7 +234,7 @@ async def update_vuln(
     vuln_service.add_log(session, vul, user, "编辑漏洞")
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
     if new_status is not None and new_status != vul.status:
-        vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
+        await vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
         await vuln_service.sync_report_completion(session, [vul.id])
     # 等级或关联计划变化后重算涉及计划的统计；新关联计划若已确认无漏洞则自动重开
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
@@ -305,7 +305,7 @@ async def set_vuln_status(
 ):
     """直接设置漏洞状态（报告编辑页状态标签点选），不受状态机流转限制。"""
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
-    vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
+    await vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
     # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
     await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
@@ -337,7 +337,7 @@ async def patch_vuln_fields(
         vuln_service.add_log(session, vul, user, "报告编辑页调整字段", "；".join(changed_fields))
     status_changed = body.status is not None and body.status != vul.status
     if status_changed:
-        vuln_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
+        await vuln_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
         await vuln_service.sync_report_completion(session, [vul.id])
     # 等级变化后重算关联计划的漏洞统计
     if any(f.startswith("漏洞等级") for f in changed_fields):
@@ -361,7 +361,10 @@ async def transition_vuln(
         vul.retest_html = body.retest_html
         vul.retest_json = body.retest_json
         comment = comment or "复测详情已更新"
-    await vuln_service.transition(session, vul, body.status, user, comment)
+    await vuln_service.transition(
+        session, vul, body.status, user, comment,
+        retest_submitted=body.retest_html is not None,
+    )
     # 状态流转后双向联动报告/测试计划（全部闭环自动标记完成，回退自动重开）
     await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()

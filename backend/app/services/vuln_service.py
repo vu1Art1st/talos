@@ -13,7 +13,7 @@ from app.constants import (
     PlanStatus,
     VulStatus,
 )
-from app.models import Message, User, Vul, VulLog
+from app.models import Message, User, Vul, VulLog, VulRetestRecord
 
 
 def can_transition(current: int, target: int) -> bool:
@@ -25,27 +25,70 @@ def can_plan_transition(current: int, target: int) -> bool:
     return target in PLAN_TRANSITIONS.get(current, set())
 
 
-def ensure_retest_conclusion(vul: Vul, target: int) -> None:
+async def _has_current_round_retest(session: AsyncSession, vul: Vul) -> bool:
+    """本轮复测（最近一次进入复测中之后）是否新增了复测记录。
+
+    - 基准时间取 vul.notice_time：漏洞处于「复测中」时该字段即最近进入复测中的打点时间，
+      历史轮次的复测记录（create_time 早于该时间）不视为本轮复测结论；
+    - notice_time 为空（历史数据未打点）时退化为检查是否存在任意非空复测记录，兼容旧口径。
+    """
+    stmt = (
+        select(VulRetestRecord.id)
+        .where(
+            VulRetestRecord.vul_id == vul.id,
+            VulRetestRecord.content_html != "",
+        )
+        .limit(1)
+    )
+    if vul.notice_time:
+        stmt = stmt.where(VulRetestRecord.create_time >= vul.notice_time)
+    return (await session.execute(stmt)).scalar_one_or_none() is not None
+
+
+async def ensure_retest_conclusion(
+    session: AsyncSession,
+    vul: Vul,
+    target: int,
+    retest_submitted: bool = False,
+) -> None:
     """复测结论校验（漏洞状态机补充规则）：
 
-    - 变更为「已修复」：必须先经过「复测中」，且必须已填写复测内容，
+    - 变更为「已修复」：必须先经过「复测中」，且本轮复测必须已填写复测结论，
       不允许从「修复中」等状态直接跳过复测闭环；
-    - 复测未通过（复测中 → 修复中）：同样强制要求填写复测详情。
+    - 从「复测中」离开的其余结论方向——复测未通过回「修复中」、复测后回到「未修复」：
+      同样强制要求填写本轮复测结论；
     - 从「已修复」重新打开为「未修复」：无特殊校验。
+
+    复测结论判定口径（防止多轮复测时误用历史记录放行）：
+    - retest_submitted=True：本次流转随请求直接提交了复测内容（报告编辑页直接填写），
+      校验当前 vul.retest_html 非空即可；
+    - 否则：查询是否存在「本轮复测中新增」的复测记录（create_time 不早于最近一次
+      进入复测中的 notice_time），历史轮次记录不视为本轮复测结论。
     """
     if target == VulStatus.FIXED:
         if vul.status != VulStatus.RETESTING:
             raise HTTPException(
                 400,
                 f"不允许从「{VUL_STATUS.get(vul.status, vul.status)}」直接变更为「已修复」，"
-                "必须先经过「复测中」并填写复测结论",
+                "必须先经过「复测中」并填写本轮复测结论",
             )
-        if not (vul.retest_html or "").strip():
-            raise HTTPException(400, "变更为「已修复」前必须填写复测内容")
-    elif target == VulStatus.FIXING and vul.status == VulStatus.RETESTING:
-        # 复测未通过，回修复中重新整改
-        if not (vul.retest_html or "").strip():
-            raise HTTPException(400, "复测未通过必须填写复测详情")
+        if not await _conclusion_filled(session, vul, retest_submitted):
+            raise HTTPException(400, "本轮复测尚未填写复测结论，请先新增复测记录或填写复测内容")
+    elif vul.status == VulStatus.RETESTING and target in (
+        VulStatus.FIXING, VulStatus.UNFIXED,
+    ):
+        # 复测未通过（回修复中重新整改 / 回未修复重新处理）：同样要求本轮复测结论
+        if not await _conclusion_filled(session, vul, retest_submitted):
+            raise HTTPException(400, "本轮复测未通过需填写复测结论，请先新增复测记录或填写复测内容")
+
+
+async def _conclusion_filled(
+    session: AsyncSession, vul: Vul, retest_submitted: bool,
+) -> bool:
+    """复测结论是否已填写：随流转直接提交的复测内容，或本轮复测新增的复测记录。"""
+    if retest_submitted:
+        return bool((vul.retest_html or "").strip())
+    return await _has_current_round_retest(session, vul)
 
 
 async def transition(
@@ -54,8 +97,16 @@ async def transition(
     target: int,
     operator: User,
     comment: str = "",
+    retest_submitted: bool = False,
+    skip_conclusion: bool = False,
 ) -> Vul:
-    """执行状态流转：校验合法性、打时间戳、写日志、通知提交人。"""
+    """执行状态流转：校验合法性、打时间戳、写日志、通知提交人。
+
+    - retest_submitted：本次流转是否已随请求提交复测内容（报告编辑页直接填写 retest_html），
+      用于复测结论校验时跳过「本轮复测新增记录」查询；
+    - skip_conclusion：跳过复测结论校验（报告联动等系统自动流转使用，
+      非人工确认复测结论，不受「本轮复测需填写结论」约束）。
+    """
     if target not in VUL_STATUS:
         raise HTTPException(400, f"非法状态: {target}")
     if not can_transition(vul.status, target):
@@ -63,7 +114,8 @@ async def transition(
             400,
             f"不允许从「{VUL_STATUS.get(vul.status, vul.status)}」流转到「{VUL_STATUS[target]}」",
         )
-    ensure_retest_conclusion(vul, target)
+    if not skip_conclusion:
+        await ensure_retest_conclusion(session, vul, target, retest_submitted)
 
     old_status = vul.status
     vul.status = target
@@ -103,13 +155,13 @@ def add_log(session: AsyncSession, vul: Vul, operator: User, action: str, conten
     ))
 
 
-def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, comment: str = "") -> Vul:
+async def set_status(session: AsyncSession, vul: Vul, target: int, operator: User, comment: str = "") -> Vul:
     """直接设置状态（不受状态机流转限制，供编辑页/报告编辑页点选）：校验字典、打时间戳、写日志。"""
     if target not in VUL_STATUS:
         raise HTTPException(400, f"非法状态: {target}")
     if target == vul.status:
         return vul
-    ensure_retest_conclusion(vul, target)
+    await ensure_retest_conclusion(session, vul, target)
     old_status = vul.status
     vul.status = target
     ts_field = STATUS_TIMESTAMP.get(target)
@@ -137,7 +189,8 @@ async def auto_transition(
     changed = []
     for vul in vulns:
         if can_transition(vul.status, target):
-            await transition(session, vul, target, operator, comment)
+            # 系统自动流转（报告联动）跳过复测结论校验，避免「复测中自动回修复中」被误拦
+            await transition(session, vul, target, operator, comment, skip_conclusion=True)
             changed.append(vul)
     return changed
 

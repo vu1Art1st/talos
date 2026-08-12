@@ -2168,6 +2168,50 @@ async def test_vuln_status_retest_guard(client: AsyncClient, auth: dict):
     assert resp.json()["status"] == 60
 
 
+async def test_second_round_retest_requires_new_record(client: AsyncClient, auth: dict):
+    """二轮复测不得误用首轮历史复测记录放行：本轮无新记录时禁止切换为已修复/复测未通过。"""
+    resp = await client.post("/api/v1/vulns", headers=auth, json={"title": "二轮复测守卫漏洞", "level": 20})
+    vul_id = resp.json()["id"]
+
+    # 首轮：50 → 55 → 新增复测记录并闭环为已修复
+    for status in (50, 55):
+        resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": status})
+        assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>首轮复测通过</p>", "status": 60},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 二轮：已修复重新发起复测（FIXED→RETESTING），未新增任何记录
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 55})
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["status"] == 55
+    assert vul["retest_html"]  # 首轮历史记录仍聚合在 retest_html 中（旧校验会误放行）
+
+    # 本轮无新记录：直接切换为已修复 → 拒绝
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 60})
+    assert resp.status_code == 400
+
+    # 本轮无新记录：复测未通过回修复中 → 拒绝
+    resp = await client.post(f"/api/v1/vulns/{vul_id}/transition", headers=auth, json={"status": 50})
+    assert resp.status_code == 400
+
+    # 本轮无新记录：编辑页直接点选为已修复（set_status 路径）→ 拒绝
+    resp = await client.patch(f"/api/v1/vulns/{vul_id}/fields", headers=auth, json={"status": 60})
+    assert resp.status_code == 400
+
+    # 本轮新增复测记录后再流转 → 放行
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=auth,
+        json={"content_html": "<p>二轮复测通过</p>", "status": 60},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert vul["status"] == 60
+
+
 async def test_ticket_seq_increment_no_reuse(client: AsyncClient, auth: dict):
     """工单ID自动分配采用「当日最大编号+1」：删除/释放的编号不复用，仅手动可选用。"""
     body = {"department": "递增部门", "receive_time": "2026-01-01"}
