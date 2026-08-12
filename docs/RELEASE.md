@@ -21,6 +21,8 @@
 - 变更条目按类型分组:`新增(Added)` / `变更(Changed)` / `修复(Fixed)` / `移除(Removed)` / `安全(Security)`
 - 未发布的改动先记入「Unreleased」,发布时移入对应版本段落
 
+> **Tag 管理说明（2026-08-13）**：版本号体系重构时,旧的 `v0.5.0`~`v1.1.1` 共 11 个标签编号与本文档重算后的版本（`1.0.0`~`1.11.1`）已完全错位,已全部清理（本地 + 远程）。本文档为唯一版本真相源,**历史版本不再追溯打标签**；仅未来新发布时按上述约定打 `vX.Y.Z` 注解标签（从 `1.11.1` 之后继续）。
+
 ---
 
 ## [1.11.1] - 2026-08-13
@@ -355,4 +357,6 @@
 
 ## [Unreleased]
 
-（暂无）
+### 新增
+
+- **复测记录标题手动编辑**（`backend/app/api/v1/vulns.py` / `backend/app/schemas.py` / `backend/app/models/business.py` / `frontend/src/components/VulnRetestPanel.vue`）：`vul_retest_records` 新增 `title` 字段,复测记录卡片标题支持点击行内编辑（回车保存）；新增复测记录对话框可选填复测标题。自定义标题优先于自动生成,可准确对应实际复测时间；清空后回退为按创建日期自动生成的「复测记录yymmdd」（同日多条追加 -1/-2 后缀）。SQLite 走 `_migrate_lightweight` 幂等加列,PostgreSQL 走 Alembic 迁移 `e2f3a4b5c6d7`
