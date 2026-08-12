@@ -189,6 +189,12 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text(
                 "ALTER TABLE testing_plan_retest_rounds ADD COLUMN report_id INTEGER"
             ))
+        # 复测记录自定义标题：为空时聚合按创建日期自动生成（Alembic e2f3a4b5c6d7 同步）
+        rr_cols = {r[1] for r in (
+            await conn.execute(text("PRAGMA table_info(vul_retest_records)"))
+        ).fetchall()}
+        if rr_cols and "title" not in rr_cols:
+            await conn.execute(text("ALTER TABLE vul_retest_records ADD COLUMN title VARCHAR(255)"))
         # 复测轮次表为空时，为已进入复测阶段的存量计划回填第 1 轮记录（幂等）
         round_count = (
             await conn.execute(text("SELECT COUNT(*) FROM testing_plan_retest_rounds"))

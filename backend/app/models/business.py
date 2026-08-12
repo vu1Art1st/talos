@@ -109,6 +109,7 @@ class VulRetestRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     vul_id: Mapped[int] = mapped_column(ForeignKey("vulns.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 用户自定义标题；空则聚合时按创建日期自动生成
     content_html: Mapped[str] = mapped_column(Text, default="")
     content_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

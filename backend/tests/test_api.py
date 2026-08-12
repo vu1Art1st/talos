@@ -2066,6 +2066,26 @@ async def test_retest_record_sync_to_vul(client: AsyncClient, auth: dict):
     assert "第一次复测仍存在" in vul["retest_html"]
     assert "第二次复测已修复" in vul["retest_html"]
 
+    # 自定义标题优先于自动日期标题（手动编辑复测标题对应实际复测时间）
+    resp = await client.put(
+        f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth,
+        json={"title": "复测记录250815", "content_html": "<p>第二次复测已修复</p>", "content_json": None},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert "<strong>复测记录250815：</strong>" in vul["retest_html"]
+    assert "第二次复测已修复" in vul["retest_html"]
+
+    # 清空自定义标题后回退为自动日期标题（同日追加 -1 后缀）
+    resp = await client.put(
+        f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth,
+        json={"title": None, "content_html": "<p>第二次复测已修复</p>", "content_json": None},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert re.search(r"复测记录\d{6}-1：", vul["retest_html"])
+    assert "<strong>复测记录250815：</strong>" not in vul["retest_html"]
+
     # 更新记录：聚合内容跟随变化
     resp = await client.put(
         f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth,

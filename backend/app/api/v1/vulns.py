@@ -410,8 +410,9 @@ async def _get_retest_record(session: AsyncSession, vul_id: int, record_id: int)
 async def _sync_vul_retest_html(session: AsyncSession, vul: Vul) -> None:
     """将该漏洞全部复测记录聚合写入 Vul.retest_html，保持详情页/报告读取口径一致。
 
-    标题格式为「复测记录yymmdd」：同日新增的第一条不带后缀，同一天内新增的多条
-    依次追加 -1、-2 后缀（如复测记录250813、复测记录250813-1）。
+    标题优先取记录自定义 title；为空时按创建日期自动生成「复测记录yymmdd」：
+    同日新增的第一条不带后缀，同一天内新增的多条依次追加 -1、-2 后缀
+    （如复测记录250813、复测记录250813-1）。
     """
     records = (
         await session.execute(
@@ -424,10 +425,13 @@ async def _sync_vul_retest_html(session: AsyncSession, vul: Vul) -> None:
     for r in records:
         if not r.content_html:
             continue
-        date_key = r.create_time.strftime("%y%m%d") if r.create_time else ""
-        n = day_counts.get(date_key, 0)
-        day_counts[date_key] = n + 1
-        title = f"复测记录{date_key}" if n == 0 else f"复测记录{date_key}-{n}"
+        if (r.title or "").strip():
+            title = r.title.strip()
+        else:
+            date_key = r.create_time.strftime("%y%m%d") if r.create_time else ""
+            n = day_counts.get(date_key, 0)
+            day_counts[date_key] = n + 1
+            title = f"复测记录{date_key}" if n == 0 else f"复测记录{date_key}-{n}"
         parts.append(f"<p><strong>{title}：</strong></p>{r.content_html}")
     vul.retest_html = "".join(parts)
     vul.retest_json = None
@@ -459,7 +463,8 @@ async def create_retest_record(
 ):
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     record = VulRetestRecord(
-        vul_id=vul_id, content_html=body.content_html, content_json=body.content_json,
+        vul_id=vul_id, title=body.title,
+        content_html=body.content_html, content_json=body.content_json,
         creator_id=user.id, username=user.username,
     )
     session.add(record)
@@ -485,6 +490,7 @@ async def update_retest_record(
     session: AsyncSession = Depends(get_session),
 ):
     record = await _get_retest_record(session, vul_id, record_id)
+    record.title = body.title
     record.content_html = body.content_html
     record.content_json = body.content_json
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")

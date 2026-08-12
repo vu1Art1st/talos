@@ -278,10 +278,13 @@ class VulFieldsIn(BaseModel):
 class VulRetestRecordIn(BaseModel):
     """复测处理页的单条复测记录（漏洞修复富文本）。
 
+    title 可选：用户自定义复测记录标题，留空时按创建日期自动生成
+    「复测记录yymmdd」（同日多条追加 -1/-2 后缀），便于修改以对应实际复测时间。
     status 可选：创建复测记录时一并调整漏洞状态（复测未修复=50 / 已修复=60），
     选择结论时强制要求 content_html 非空。
     """
 
+    title: str | None = None
     content_html: str = ""
     content_json: dict | None = None
     status: int | None = None
@@ -290,6 +293,14 @@ class VulRetestRecordIn(BaseModel):
     @classmethod
     def _clean_html(cls, v: str) -> str:
         return sanitize_html(v)
+
+    @field_validator("title", mode="after")
+    @classmethod
+    def _clean_title(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
 
 
 class VulRetestRecordOut(VulRetestRecordIn):
