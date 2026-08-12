@@ -57,3 +57,4 @@ frontend/*.png
 /backend/_smoke2.py
 /backend/_verify_stats.py
 /backend/tmp_ver_check.py
+/backend/verify_retest.py

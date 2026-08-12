@@ -76,6 +76,11 @@ sudo docker compose build
 echo "[4/5] 数据库结构迁移"
 bash scripts/migrate.sh
 
+# [4.5/5] 存量复测聚合标题回填（新格式「复测记录yymmdd」；仅重建旧编号标题的漏洞）
+echo "[4.5/5] 复测聚合标题回填"
+sudo docker compose run --rm api python -m scripts.backfill_retest \
+  || echo "（复测标题回填失败，可稍后手动执行：sudo docker compose run --rm api python -m scripts.backfill_retest）"
+
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
 sudo docker compose up -d

@@ -1,6 +1,7 @@
 """API 集成测试：认证 → 业务 CRUD → 状态机 → Word 导入 → 报告与导出全链路。"""
 import asyncio
 import json
+import re
 from io import BytesIO
 
 import pytest
@@ -2042,7 +2043,7 @@ async def test_retest_record_sync_to_vul(client: AsyncClient, auth: dict):
     )
     vul_id = resp.json()["id"]
 
-    # 新增一条记录：retest_html 同步为记录内容
+    # 新增一条记录：retest_html 同步为记录内容（标题格式「复测记录yymmdd」）
     resp = await client.post(
         f"/api/v1/vulns/{vul_id}/retests", headers=auth,
         json={"content_html": "<p>第一次复测仍存在</p>", "content_json": None},
@@ -2050,16 +2051,18 @@ async def test_retest_record_sync_to_vul(client: AsyncClient, auth: dict):
     assert resp.status_code == 200, resp.text
     rec1_id = resp.json()["id"]
     vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
-    assert vul["retest_html"] == "<p>第一次复测仍存在</p>"
+    assert re.search(r"复测记录\d{6}：", vul["retest_html"])
+    assert "第一次复测仍存在" in vul["retest_html"]
 
-    # 第二条记录：聚合并带"复测记录 N"标题
+    # 第二条记录：同日新增，标题追加 -1 后缀
     resp = await client.post(
         f"/api/v1/vulns/{vul_id}/retests", headers=auth,
         json={"content_html": "<p>第二次复测已修复</p>", "content_json": None},
     )
     rec2_id = resp.json()["id"]
     vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
-    assert "复测记录 1" in vul["retest_html"] and "复测记录 2" in vul["retest_html"]
+    assert re.search(r"复测记录\d{6}：", vul["retest_html"])
+    assert re.search(r"复测记录\d{6}-1：", vul["retest_html"])
     assert "第一次复测仍存在" in vul["retest_html"]
     assert "第二次复测已修复" in vul["retest_html"]
 
@@ -2073,11 +2076,13 @@ async def test_retest_record_sync_to_vul(client: AsyncClient, auth: dict):
     assert "第二次复测部分修复" in vul["retest_html"]
     assert "第二次复测已修复" not in vul["retest_html"]
 
-    # 删除一条：回到单条内容（无编号标题）
+    # 删除一条：回到单条内容（标题不带 -N 后缀）
     resp = await client.delete(f"/api/v1/vulns/{vul_id}/retests/{rec2_id}", headers=auth)
     assert resp.status_code == 200
     vul = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
-    assert vul["retest_html"] == "<p>第一次复测仍存在</p>"
+    assert re.search(r"复测记录\d{6}：", vul["retest_html"])
+    assert not re.search(r"复测记录\d{6}-\d：", vul["retest_html"])
+    assert "第一次复测仍存在" in vul["retest_html"]
 
     # 全部删除：retest_html 清空
     resp = await client.delete(f"/api/v1/vulns/{vul_id}/retests/{rec1_id}", headers=auth)
