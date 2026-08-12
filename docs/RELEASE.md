@@ -25,6 +25,16 @@
 
 ---
 
+## [1.12.0] - 2026-08-13
+
+复测记录标题支持手动编辑,可准确对应实际复测时间。
+
+### 新增
+
+- **复测记录标题手动编辑**（`backend/app/api/v1/vulns.py` / `backend/app/schemas.py` / `backend/app/models/business.py` / `frontend/src/components/VulnRetestPanel.vue`）：`vul_retest_records` 新增 `title` 字段,复测记录卡片标题支持点击行内编辑（回车保存）；新增复测记录对话框可选填复测标题。自定义标题优先于自动生成,可准确对应实际复测时间；清空后回退为按创建日期自动生成的「复测记录yymmdd」（同日多条追加 -1/-2 后缀）。SQLite 走 `_migrate_lightweight` 幂等加列,PostgreSQL 走 Alembic 迁移 `e2f3a4b5c6d7`
+
+---
+
 ## [1.11.1] - 2026-08-13
 
 复测记录面板展示修复与复测聚合标题日期化。修复测试流程抽屉多漏洞展开行复用组件实例导致的复测记录不显示 / 串数据,以及仅有报告「复测处理」历史复测内容时面板空白；复测聚合标题由「复测记录 N」改为「复测记录yymmdd（同日 -N 后缀）」,并新增存量回填脚本接入升级流程。
@@ -359,4 +369,5 @@
 
 ### 新增
 
-- **复测记录标题手动编辑**（`backend/app/api/v1/vulns.py` / `backend/app/schemas.py` / `backend/app/models/business.py` / `frontend/src/components/VulnRetestPanel.vue`）：`vul_retest_records` 新增 `title` 字段,复测记录卡片标题支持点击行内编辑（回车保存）；新增复测记录对话框可选填复测标题。自定义标题优先于自动生成,可准确对应实际复测时间；清空后回退为按创建日期自动生成的「复测记录yymmdd」（同日多条追加 -1/-2 后缀）。SQLite 走 `_migrate_lightweight` 幂等加列,PostgreSQL 走 Alembic 迁移 `e2f3a4b5c6d7`
+
+
