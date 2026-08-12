@@ -46,7 +46,7 @@ if [ "${DO_BACKUP}" -eq 1 ]; then
   if [ -n "$(sudo docker compose ps -q postgres 2>/dev/null)" ] \
     && [ -n "$(sudo docker compose ps -q api 2>/dev/null)" ]; then
     echo "[1/5] 升级前备份"
-    bash scripts/backup.sh
+    sudo bash scripts/backup.sh
   else
     echo "[1/5] postgres 或 api 容器未运行，跳过升级前备份（首次部署无需备份）"
     echo "     如需强制备份，请先执行: sudo docker compose up -d 再重试"
@@ -74,7 +74,7 @@ sudo docker compose build
 
 # [4/5] 先迁移数据库结构（api 服务尚未启动，Alembic 先行）
 echo "[4/5] 数据库结构迁移"
-bash scripts/migrate.sh
+sudo bash scripts/migrate.sh
 
 # [4.5/5] 存量复测聚合标题回填（新格式「复测记录yymmdd」；仅重建旧编号标题的漏洞）
 echo "[4.5/5] 复测聚合标题回填"
