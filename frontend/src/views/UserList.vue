@@ -18,9 +18,9 @@
         <el-table-column prop="role_name" label="角色" width="130" />
         <el-table-column prop="is_active" label="状态" width="90" sortable="custom">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
+            <span class="tl-tag" :style="row.is_active ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.red)">
               {{ row.is_active ? '正常' : '禁用' }}
-            </el-tag>
+            </span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="130" fixed="right">
@@ -33,6 +33,9 @@
             </el-popconfirm>
           </template>
         </el-table-column>
+        <template #empty>
+          <el-empty description="暂无用户，点击「新建用户」创建" :image-size="80" />
+        </template>
       </el-table>
       <div class="flex justify-end mt-4">
         <el-pagination background layout="total, prev, pager, next" :total="total"
@@ -49,13 +52,13 @@
           </el-button>
         </div>
       </template>
-      <el-table :data="roles" stripe>
+      <el-table v-loading="rolesLoading" :data="roles" stripe>
         <el-table-column prop="name" label="角色名称" width="160" />
         <el-table-column label="权限">
           <template #default="{ row }">
-            <el-tag v-if="row.permissions.includes('*')" type="danger" size="small">全部权限</el-tag>
-            <el-tag v-for="p in row.permissions.filter((x: string) => x !== '*')" :key="p"
-                    size="small" class="mr-1 mb-1">{{ p }}</el-tag>
+            <span v-if="row.permissions.includes('*')" class="tl-tag mr-1" :style="softStyle(STAT_CARD_COLORS.red)">全部权限</span>
+            <span v-for="p in row.permissions.filter((x: string) => x !== '*')" :key="p"
+                  class="tl-tag mr-1 mb-1" :style="softStyle(STAT_CARD_COLORS.blue)">{{ p }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="remark" label="备注" width="180" show-overflow-tooltip />
@@ -69,12 +72,15 @@
             </el-popconfirm>
           </template>
         </el-table-column>
+        <template #empty>
+          <el-empty description="暂无角色，点击「新建角色」创建" :image-size="80" />
+        </template>
       </el-table>
     </el-card>
   </div>
 
   <el-dialog v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
-    <el-form :model="userForm" label-width="80px">
+    <el-form :model="userForm" label-width="90px">
       <el-form-item label="用户名" required>
         <el-input v-model="userForm.username" :disabled="!!userForm.id" />
       </el-form-item>
@@ -104,7 +110,7 @@
   </el-dialog>
 
   <el-dialog v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="520px">
-    <el-form :model="roleForm" label-width="80px">
+    <el-form :model="roleForm" label-width="90px">
       <el-form-item label="角色名称" required>
         <el-input v-model="roleForm.name" />
       </el-form-item>
@@ -128,6 +134,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
 const users = ref<any[]>([])
 const roles = ref<any[]>([])
@@ -136,6 +143,7 @@ const total = ref(0)
 const page = ref(1)
 const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
+const rolesLoading = ref(false)
 const userDialog = ref(false)
 const roleDialog = ref(false)
 const userForm = reactive<any>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
@@ -160,9 +168,14 @@ function onSortChange({ prop, order }: any) {
 }
 
 async function loadRoles() {
-  const [r, p] = await Promise.all([client.get('/roles'), client.get('/roles/permissions')])
-  roles.value = r.data
-  allPerms.value = p.data
+  rolesLoading.value = true
+  try {
+    const [r, p] = await Promise.all([client.get('/roles'), client.get('/roles/permissions')])
+    roles.value = r.data
+    allPerms.value = p.data
+  } finally {
+    rolesLoading.value = false
+  }
 }
 
 function openUser(row?: any) {

@@ -1,4 +1,4 @@
-"""漏洞知识库预置数据：录入 50 个最常见漏洞的标准信息（幂等，按漏洞名称 upsert）。
+"""漏洞模板库预置数据：录入 50 个最常见漏洞的标准信息（幂等，按漏洞名称 upsert）。
 
 用法（backend 目录下）：
     python -m scripts.seed_knowledge

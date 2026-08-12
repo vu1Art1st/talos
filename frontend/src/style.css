@@ -14,6 +14,15 @@
   --tl-text-2: #4b5563;
   --tl-text-3: #9ca3af;
 
+  /* 功能色令牌（与 utils/colors.ts 对齐，供纯 CSS 场景引用） */
+  --tl-success: #67c23a;
+  --tl-warning: #e6a23c;
+  --tl-danger: #f56c6c;
+  --tl-error: #a61b29;
+  --tl-info: #909399;
+  --tl-blue: #409eff;
+  --tl-primary: #4f46e5;
+
   /* Element Plus 品牌主色覆盖：靛蓝 #4F46E5 */
   --el-color-primary: #4f46e5;
   --el-color-primary-light-1: #6159e8;
@@ -115,6 +124,42 @@ body,
   font-weight: 600;
   line-height: 20px;
   white-space: nowrap;
+}
+
+/* ============ 品牌渐变（Logo/头像底，全站统一，替代散落 inline 渐变） ============ */
+.tl-brand-gradient {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+/* ============ 联动角标（全站统一，替代各视图散落的 .linked-badge 样式） ============ */
+.linked-badge {
+  margin-left: 6px;
+  display: inline-block;
+  padding: 0 6px;
+  font-size: 11px;
+  line-height: 18px;
+  border-radius: 4px;
+  background: #67c23a1f;
+  color: #67c23a;
+  border: 1px solid #67c23a66;
+  vertical-align: 1px;
+}
+
+/* ============ 空状态统一规范 ============ */
+.el-table .el-table__empty-block {
+  min-height: 200px;
+}
+.el-empty__description p {
+  color: var(--tl-text-3);
+  font-size: 13px;
+}
+
+/* ============ 弹窗 footer 统一间距 ============ */
+.el-dialog__footer {
+  padding: 12px 20px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ============ 富文本正文与编辑器统一样式 ============ */

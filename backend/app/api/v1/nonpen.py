@@ -1,4 +1,4 @@
-"""非渗透计划 API：主机/Web/基线扫描类测试的独立管理，与测试计划平级（统一 special:manage 权限）。
+"""漏扫基线工单 API：主机/Web/基线扫描类测试的独立管理，与测试计划平级（统一 special:manage 权限）。
 
 - 工单ID与测试计划共享同一当日序号序列（ticket_service.assign_ticket_seq）；
 - 测试项（baseline/host/web）独立流转，状态与次数存于 items JSON 容器；
@@ -24,7 +24,7 @@ from app.schemas import (
 )
 from app.services import nonpen_service, ticket_service
 
-router = APIRouter(tags=["非渗透计划"])
+router = APIRouter(tags=["漏扫基线工单"])
 
 
 def _search_condition(search: str):
@@ -53,7 +53,7 @@ async def nonpen_plan_stats(
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """非渗透计划统计（五张卡片）：总数 / 复测完成 / 基线扫描次数 / 主机扫描次数 / Web扫描次数。"""
+    """漏扫基线工单统计（五张卡片）：总数 / 复测完成 / 基线扫描次数 / 主机扫描次数 / Web扫描次数。"""
     rows = (await session.execute(select(NonpenPlan))).scalars().all()
     return nonpen_service.compute_plan_stats(list(rows))
 
@@ -77,7 +77,7 @@ async def list_nonpen_plans(
         stmt, NonpenPlan, sort, order,
         {"id", "plan_name", "system_name", "test_type", "department",
          "receive_time", "ticket_time", "ticket_seq", "create_time"},
-        NonpenPlan.id.desc(),
+        (NonpenPlan.receive_time.desc(), NonpenPlan.ticket_seq.desc(), NonpenPlan.id.desc()),
     )
     # 「仅可进行」依赖 items JSON 的派生判定，SQL 层无法直接过滤，取回后应用层过滤再分页
     total, items = await paginate(session, stmt, 1, 10_000)
@@ -111,8 +111,8 @@ async def get_nonpen_plan(
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """单条非渗透计划详情（含测试项状态容器），供流程抽屉刷新。"""
-    return await get_or_404(session, NonpenPlan, row_id, "非渗透计划不存在")
+    """单条漏扫基线工单详情（含测试项状态容器），供流程抽屉刷新。"""
+    return await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
 
 
 @router.put("/nonpen-plans/{row_id}", response_model=NonpenPlanOut)
@@ -122,7 +122,7 @@ async def update_nonpen_plan(
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    row = await get_or_404(session, NonpenPlan, row_id, "非渗透计划不存在")
+    row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
     data = body.model_dump()
     test_items = list(data.pop("test_items") or [])
     for k, v in data.items():
@@ -134,7 +134,7 @@ async def update_nonpen_plan(
     if row.testing_plan_id is not None:
         excludes.append((TestingPlan, row.testing_plan_id))
     await ticket_service.check_ticket_id_unique(session, row.ticket_id, exclude=excludes)
-    # 联动双向同步：编辑联动非渗透计划公共字段时，自动同步更新其来源测试计划
+    # 联动双向同步：编辑联动漏扫基线工单公共字段时，自动同步更新其来源测试计划
     if row.testing_plan_id is not None:
         source = await session.get(TestingPlan, row.testing_plan_id)
         if source is not None:
@@ -152,7 +152,7 @@ async def delete_nonpen_plan(
 ):
     row = await session.get(NonpenPlan, row_id)
     if row:
-        # 联动双向：删除联动的非渗透计划时，级联删除其来源测试计划（含漏洞/报告解除关联）
+        # 联动双向：删除联动的漏扫基线工单时，级联删除其来源测试计划（含漏洞/报告解除关联）
         if row.testing_plan_id is not None:
             tp = await session.get(TestingPlan, row.testing_plan_id)
             if tp is not None:
@@ -178,7 +178,7 @@ async def nonpen_item_transition(
 ):
     """测试项状态流转：start / done / direct_done / start_retest / pass / fail / reset，
     按 NONPEN_ITEM_ACTIONS 白名单校验（含次数统计）。"""
-    row = await get_or_404(session, NonpenPlan, row_id, "非渗透计划不存在")
+    row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
     nonpen_service.apply_item_action(row, item_key, body.action)
     await session.commit()
     await session.refresh(row)
@@ -194,7 +194,7 @@ async def nonpen_item_ignore(
     session: AsyncSession = Depends(get_session),
 ):
     """忽略 / 取消忽略测试项：忽略保留次数不参与统计；取消忽略恢复初始状态（次数清零）。"""
-    row = await get_or_404(session, NonpenPlan, row_id, "非渗透计划不存在")
+    row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
     nonpen_service.apply_item_action(row, item_key, "ignore" if body.ignored else "unignore")
     await session.commit()
     await session.refresh(row)

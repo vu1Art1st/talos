@@ -9,7 +9,7 @@ from email.mime.text import MIMEText
 
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.constants import ReportStatus
 from app.core.config import settings
@@ -97,13 +97,22 @@ async def export_report_task(ctx, job_id: int) -> None:
                 "test_end": report.test_end,
                 "target_ip": report.target_ip,
                 "status": report.status,
+                # 复测判定口径与 plan_service.is_retest_report_title 一致：标题含「复测」
+                "is_retest": "复测" in (report.title or ""),
             }
+            # 发起导出报告的账号：版本变更记录「修改人」列使用（而非报告作者）
+            if job.creator_id is not None:
+                gu = await session.get(User, job.creator_id)
+                if gu is not None:
+                    meta["generator"] = gu.realname or gu.username or ""
             # 关联测试计划：参测人员列表 + 复测轮次（供版本变更记录/人员表格使用）
             plan = None
             if report.testing_plan_id is not None:
                 plan = await session.get(TestingPlan, report.testing_plan_id)
             testers: list[str] = []
             rounds: list[dict] = []
+            # 版本变更记录各版对应报告的历史导出时间（按同计划报告创建顺序对齐）
+            version_dates: list[str] = []
             if plan is not None:
                 for u in plan.testers:
                     name = (u.realname or u.username or "").strip()
@@ -119,11 +128,44 @@ async def export_report_task(ctx, job_id: int) -> None:
                         "date": (r.start_time or now()).strftime("%Y-%m-%d"),
                         "creator_name": creator_name,
                     })
+                # 该计划下的全部报告（初测 1 份 + 每轮复测各 1 份），按创建顺序对齐版本记录
+                plan_reports = (
+                    await session.execute(
+                        select(Report)
+                        .where(Report.testing_plan_id == plan.id)
+                        .order_by(Report.create_time, Report.id)
+                    )
+                ).scalars().all()
+                # 一次查询这些报告最近一次成功导出的时间
+                report_ids = [pr.id for pr in plan_reports]
+                last_done: dict[int, str] = {}
+                if report_ids:
+                    rows = (
+                        await session.execute(
+                            select(ExportJob.report_id, func.max(ExportJob.finish_time))
+                            .where(
+                                ExportJob.report_id.in_(report_ids),
+                                ExportJob.status == "done",
+                            )
+                            .group_by(ExportJob.report_id)
+                        )
+                    ).all()
+                    for rid, ft in rows:
+                        if ft is not None:
+                            last_done[rid] = ft.strftime("%Y-%m-%d")
+                export_date_str = now().strftime("%Y-%m-%d")
+                for pr in plan_reports:
+                    if pr.id == report.id:
+                        version_dates.append(export_date_str)  # 当前报告取本次导出时间
+                    elif pr.id in last_done:
+                        version_dates.append(last_done[pr.id])
+                    elif pr.create_time is not None:
+                        version_dates.append(pr.create_time.strftime("%Y-%m-%d"))
+                    else:
+                        version_dates.append("")
             meta["testers"] = testers
             meta["retest_rounds"] = rounds
-            meta["report_create_date"] = (
-                report.create_time.strftime("%Y-%m-%d") if report.create_time else ""
-            )
+            meta["version_dates"] = version_dates
             sections = [
                 {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
                 for s in report.sections

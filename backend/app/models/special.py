@@ -122,12 +122,18 @@ class TestingPlan(Base):
 
 
 class TestingPlanRetestRound(Base):
-    """测试计划复测轮次记录：每次发起复测新增一轮，全部漏洞闭环后打完成点。"""
+    """测试计划复测轮次记录：每次发起复测新增一轮，全部漏洞闭环后打完成点。
+
+    report_id 记录触发该轮次的复测报告：删除该报告时回退对应轮次，保证复测轮数与报告一致。
+    """
 
     __tablename__ = "testing_plan_retest_rounds"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_id: Mapped[int] = mapped_column(ForeignKey("testing_plans.id", ondelete="CASCADE"), index=True)
+    report_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True,
+    )  # 触发轮次的复测报告ID，删除该报告时回退对应轮次
     round_no: Mapped[int] = mapped_column(Integer, default=1)
     start_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     done_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -138,7 +144,7 @@ class TestingPlanRetestRound(Base):
 
 
 class NonpenPlan(Base):
-    """非渗透计划：主机/Web/基线扫描类测试，与测试计划平级、独立统计。
+    """漏扫基线工单：主机/Web/基线扫描类测试，与测试计划平级、独立统计。
 
     - 工单ID（ticket_id）与测试计划共享当日序号序列：ticket_seq / ticket_id_manual
       语义与 TestingPlan 完全一致（手动指定优先，否则 receive_time 日期 + 当日序号）。

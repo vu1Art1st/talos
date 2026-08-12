@@ -5,7 +5,7 @@
     <template #header>
       <div class="flex items-center gap-2">
         <span class="font-medium">复测记录 #{{ i + 1 }}</span>
-        <span class="text-xs text-gray-400">{{ rec.username }} · {{ fmt(rec.create_time) }}</span>
+        <span class="text-xs text-gray-400">{{ rec.username }} · {{ fmtDateTime(rec.create_time) }}</span>
         <div class="flex-1" />
         <el-button size="small" type="primary" :loading="savingId === rec.id" @click="saveRecord(rec)">
           保存
@@ -45,7 +45,7 @@
     </div>
     <template #footer>
       <el-button @click="addVisible = false">取消</el-button>
-      <el-button type="primary" :loading="adding" @click="submitAdd">确定新增</el-button>
+      <el-button type="primary" :loading="adding" @click="submitAdd">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -54,9 +54,9 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import dayjs from 'dayjs'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
+import { fmtDateTime } from '../utils/format'
 
 // 复测记录增删改面板：供独立复测页（VulnRetest）与测试计划流程抽屉复用。
 // 新增复测记录时可一并选择复测结论（复测未修复/已修复），保存时同步调整漏洞状态。
@@ -72,8 +72,6 @@ const addForm = reactive<{ content_html: string; content_json: any; status: numb
   content_json: null,
   status: null,
 })
-
-const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
 async function load() {
   const { data } = await client.get(`/vulns/${props.vulId}/retests`)

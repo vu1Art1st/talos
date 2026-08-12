@@ -42,7 +42,7 @@
         <el-icon class="mr-1"><Download /></el-icon>导出Excel
       </el-button>
       <el-button type="primary" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试计划
+        <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试工单
       </el-button>
     </div>
 
@@ -66,12 +66,13 @@
       </el-collapse-item>
     </el-collapse>
 
-    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
+              :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
-        <el-empty :image-size="90"
+        <el-empty :image-size="80"
                   :description="pending
-                    ? '暂无待办流程，所有渗透测试计划均已进入终态'
-                    : '暂无符合条件的渗透测试计划，请调整筛选条件'" />
+                    ? '暂无待办流程，所有渗透测试工单均已进入终态'
+                    : '暂无符合条件的渗透测试工单，请调整筛选条件'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
@@ -84,24 +85,25 @@
         <template #default="{ row }">{{ row.plan_name || '-' }}</template>
       </el-table-column>
       <el-table-column prop="system_name" label="测试系统" min-width="140" show-overflow-tooltip sortable="custom" />
-      <el-table-column prop="test_type" label="测试类型" width="100" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="test_type" label="测试类型" width="150" show-overflow-tooltip sortable="custom"
+                       label-class-name="col-test-type" />
       <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip sortable="custom" />
       <el-table-column label="工单提起" width="100">
-        <template #default="{ row }">{{ row.ticket_time || '-' }}</template>
+        <template #default="{ row }">{{ fmtDate(row.ticket_time) }}</template>
       </el-table-column>
-      <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.receive_time || '-' }}</template>
+      <el-table-column prop="receive_time" label="需求接收" width="115" sortable="custom">
+        <template #default="{ row }">{{ fmtDate(row.receive_time) }}</template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="85" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="statusTag(row.status)" size="small">{{ statusMap[row.status] ?? row.status }}</el-tag>
+          <span class="tl-tag" :style="planStatusSoftStyle(row.status)">{{ statusMap[row.status] ?? row.status }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="first_test_done_time" label="初测完成" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.first_test_done_time || '-' }}</template>
+      <el-table-column prop="first_test_done_time" label="初测完成" width="115" sortable="custom">
+        <template #default="{ row }">{{ fmtDate(row.first_test_done_time) }}</template>
       </el-table-column>
-      <el-table-column prop="retest_done_time" label="复测完成" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.retest_done_time || '-' }}</template>
+      <el-table-column prop="retest_done_time" label="复测完成" width="115" sortable="custom">
+        <template #default="{ row }">{{ fmtDate(row.retest_done_time) }}</template>
       </el-table-column>
       <el-table-column label="漏洞统计" min-width="230">
         <template #default="{ row }">
@@ -121,12 +123,12 @@
           <span v-else class="text-gray-400">未认领</span>
         </template>
       </el-table-column>
-      <el-table-column label="预估/实际人天" width="105">
+      <el-table-column label="预估/实际人天" width="135">
         <template #default="{ row }">
           <span>{{ row.est_mandays ?? 0 }} / {{ row.actual_mandays ?? 0 }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="关联漏洞" width="78">
+      <el-table-column label="关联漏洞" width="110">
         <template #default="{ row }">
           <el-popover v-if="row.vuls?.length" placement="right" width="360" trigger="hover">
             <template #reference>
@@ -145,7 +147,7 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="关联报告" width="78">
+      <el-table-column label="关联报告" width="110">
         <template #default="{ row }">
           <el-popover v-if="row.reports?.length" placement="right" width="360" trigger="hover">
             <template #reference>
@@ -153,9 +155,7 @@
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="r in row.reports" :key="r.id" class="flex items-center gap-2">
-                <el-tag size="small" :type="r.status === 'final' ? 'primary' : 'info'">
-                  {{ reportStatusName(r.status) }}
-                </el-tag>
+                <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
                 <el-button size="small" type="primary" link class="!p-0"
                            @click="router.push(`/reports/${r.id}`)">{{ r.title }}</el-button>
               </div>
@@ -164,7 +164,7 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column label="复测轮数" width="78">
+      <el-table-column label="复测轮数" width="110">
         <template #default="{ row }">
           <el-popover v-if="row.retest_round_count" placement="left" width="380" trigger="hover">
             <template #reference>
@@ -175,12 +175,12 @@
                 <template #default="{ row: r }">第 {{ r.round_no }} 轮</template>
               </el-table-column>
               <el-table-column label="开始时间" width="105">
-                <template #default="{ row: r }">{{ fmtTime(r.start_time) }}</template>
+                <template #default="{ row: r }">{{ fmtDateTime(r.start_time) }}</template>
               </el-table-column>
               <el-table-column label="完成时间" width="105">
                 <template #default="{ row: r }">
-                  <el-tag v-if="!r.done_time" size="small" type="warning">进行中</el-tag>
-                  <span v-else>{{ fmtTime(r.done_time) }}</span>
+                  <span v-if="!r.done_time" class="tl-tag" :style="softStyle(STAT_CARD_COLORS.orange)">进行中</span>
+                  <span v-else>{{ fmtDateTime(r.done_time) }}</span>
                 </template>
               </el-table-column>
               <el-table-column label="来源" show-overflow-tooltip>
@@ -210,11 +210,11 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑渗透测试计划' : '新增渗透测试计划'" width="680px">
-    <el-form :model="form" label-width="100px">
-      <div class="grid grid-cols-2 gap-x-4">
+  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="680px">
+    <el-form :model="form" label-width="90px">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
         <el-form-item label="计划名称">
-          <el-input v-model="form.plan_name" placeholder="与测试系统区分的渗透测试计划名称" />
+          <el-input v-model="form.plan_name" placeholder="与测试系统区分的渗透测试工单名称" />
         </el-form-item>
         <el-form-item label="关联资产">
           <div class="w-full flex gap-2">
@@ -318,7 +318,7 @@
       <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
         认领该计划后才可修改测试状态
       </div>
-      <!-- 创建非渗透：勾选后展开测试项；保存时自动同步新增非渗透计划（共享工单ID，分开管理/统计） -->
+      <!-- 创建漏扫基线工单：勾选后展开测试项；保存时自动同步新增漏扫基线工单（共享工单ID，分开管理/统计） -->
       <div class="pl-[100px] mb-4">
         <div class="tp-create-head" :class="{ on: form.create_nonpen }" @click="toggleCreateNonpen">
           <div class="tp-create-check">
@@ -326,17 +326,16 @@
           </div>
           <div>
             <div class="tp-create-title">
-              创建非渗透
-              <span class="tp-new-tag">新功能</span>
+              创建漏扫基线工单
             </div>
             <div class="tp-create-desc">
               {{ form.create_nonpen
-                ? '勾选后展开测试项；保存时自动同步新增非渗透计划，与渗透测试分开管理/统计'
-                : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增非渗透计划' }}
+                ? '勾选后展开测试项；保存时自动同步新增漏扫基线工单，与渗透测试分开管理/统计'
+                : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增漏扫基线工单' }}
             </div>
           </div>
         </div>
-        <div v-if="form.create_nonpen" class="grid grid-cols-3 gap-3 mt-2">
+        <div v-if="form.create_nonpen" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
           <div v-for="t in NONPEN_ITEMS" :key="t.key" class="test-item-check"
                :class="{ checked: form.nonpen_test_items.includes(t.key) }" @click="toggleNonpenItem(t.key)">
             <div class="tick"><el-icon v-if="form.nonpen_test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
@@ -373,7 +372,17 @@ import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, levelBadgeStyle } from '../utils/colors'
+import {
+  levelBadgeStyle,
+  levelName,
+  levelSoftStyle,
+  planStatusSoftStyle,
+  reportStatusName,
+  reportStatusSoftStyle,
+  softStyle,
+  STAT_CARD_COLORS,
+} from '../utils/colors'
+import { fmtDate, fmtDateTime } from '../utils/format'
 import { NONPEN_ITEMS } from '../constants/nonpen'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -389,7 +398,7 @@ const search = ref('')
 const myTests = ref(false)
 const unclaimed = ref(false)
 const pending = ref(false)
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
+const sort = reactive<{ prop: string; order: string }>({ prop: 'receive_time', order: 'desc' })
 const loading = ref(false)
 const dialogVisible = ref(false)
 const statusMap = ref<Record<number, string>>({})
@@ -465,15 +474,15 @@ const filterFields = computed<FilterFieldDef[]>(() => [
 
 // ---------- 统计面板 ----------
 const DIMENSIONS = [
-  { key: 'total_plans', label: '渗透测试计划总数', color: '#409EFF' },
-  { key: 'retest_done_plans', label: '复测完成数', color: '#67C23A' },
-  { key: 'first_test_count', label: '初测次数', color: '#E6A23C' },
-  { key: 'retest_count', label: '复测次数', color: '#F56C6C' },
-  { key: 'total_test_count', label: '总测试次数', color: '#909399' },
-  { key: 'est_mandays_total', label: '预估人天总计', color: '#409EFF' },
-  { key: 'actual_mandays_total', label: '实际人天总计', color: '#67C23A' },
-  { key: 'remaining_est_mandays', label: '剩余预估人天（未测试）', color: '#E6A23C' },
-  { key: 'vulns_by_month', label: '按月漏洞数', color: '#409EFF' },
+  { key: 'total_plans', label: '渗透测试工单总数', color: STAT_CARD_COLORS.blue },
+  { key: 'retest_done_plans', label: '复测完成数', color: STAT_CARD_COLORS.green },
+  { key: 'first_test_count', label: '初测次数', color: STAT_CARD_COLORS.orange },
+  { key: 'retest_count', label: '复测次数', color: STAT_CARD_COLORS.red },
+  { key: 'total_test_count', label: '总测试次数', color: STAT_CARD_COLORS.gray },
+  { key: 'est_mandays_total', label: '预估人天总计', color: STAT_CARD_COLORS.blue },
+  { key: 'actual_mandays_total', label: '实际人天总计', color: STAT_CARD_COLORS.green },
+  { key: 'remaining_est_mandays', label: '剩余预估人天（未测试）', color: STAT_CARD_COLORS.orange },
+  { key: 'vulns_by_month', label: '按月漏洞数', color: STAT_CARD_COLORS.blue },
 ] as const
 const STATS_DIMS_KEY = 'testing_plan_stats_dims'
 const statsPanel = ref<string[]>(['stats'])
@@ -499,17 +508,6 @@ watch(dims, (v) => {
   localStorage.setItem(STATS_DIMS_KEY, JSON.stringify(v))
   if (v.includes('vulns_by_month')) nextTick(renderMonthChart)
 })
-
-const statusTag = (s: number) =>
-  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success', 70: 'success' } as Record<number, string>)[s] ?? 'info'
-
-const levelName = (lv: number) =>
-  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
-
-const fmtTime = (t: string | null) => (t ? String(t).slice(0, 10) : '-')
-
-const reportStatusName = (s: string) =>
-  ({ draft: '草稿', final: '已定稿' } as Record<string, string>)[s] ?? s
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
 const testTypeOptions = computed(() =>
@@ -576,7 +574,7 @@ const emptyForm = () => ({
 })
 const form = ref(emptyForm())
 
-// ---------- 创建非渗透（联动） ----------
+// ---------- 创建漏扫基线工单（联动） ----------
 function toggleCreateNonpen() {
   form.value.create_nonpen = !form.value.create_nonpen
   if (!form.value.create_nonpen) form.value.nonpen_test_items = []
@@ -646,10 +644,10 @@ function renderMonthChart() {
   monthChart.setOption({
     tooltip: { trigger: 'axis' },
     grid: { left: 40, right: 16, top: 30, bottom: 40 },
-    title: { text: '按月漏洞数', textStyle: { fontSize: 13, fontWeight: 'normal', color: '#909399' } },
+    title: { text: '按月漏洞数', textStyle: { fontSize: 13, fontWeight: 'normal', color: STAT_CARD_COLORS.gray } },
     xAxis: { type: 'category', data: rows.map((r: any) => r.month), axisLabel: { rotate: 45 } },
     yAxis: { type: 'value', minInterval: 1 },
-    series: [{ type: 'bar', data: rows.map((r: any) => r.count), itemStyle: { color: '#409EFF' }, barMaxWidth: 32 }],
+    series: [{ type: 'bar', data: rows.map((r: any) => r.count), itemStyle: { color: STAT_CARD_COLORS.blue }, barMaxWidth: 32 }],
   })
   monthChart.resize()
 }
@@ -666,7 +664,7 @@ async function exportExcel() {
   const url = URL.createObjectURL(data)
   const a = document.createElement('a')
   a.href = url
-  a.download = '渗透测试计划导出.xlsx'
+  a.download = '渗透测试工单导出.xlsx'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -676,7 +674,7 @@ async function downloadTemplate() {
   const url = URL.createObjectURL(data)
   const a = document.createElement('a')
   a.href = url
-  a.download = '渗透测试计划导入模板.xlsx'
+  a.download = '渗透测试工单导入模板.xlsx'
   a.click()
   URL.revokeObjectURL(url)
 }
@@ -747,7 +745,7 @@ async function searchAssets(keyword: string) {
   }
 }
 
-// 新增渗透测试计划时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
+// 新增渗透测试工单时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
 function openCreateAsset() {
   assetPrefill.value = lastAssetKeyword ? { name: lastAssetKeyword } : null
   assetDialogVisible.value = true
@@ -797,14 +795,14 @@ async function loadAssetLabels() {
 }
 
 async function save() {
-  // 勾选「创建非渗透」但未选择任何测试项时阻止保存（与后端校验一致）
+  // 勾选「创建漏扫基线工单」但未选择任何测试项时阻止保存（与后端校验一致）
   if (!form.value.id && form.value.create_nonpen && !form.value.nonpen_test_items.length) {
-    ElMessage.warning('已勾选「创建非渗透」，请至少选择一个非渗透测试项')
+    ElMessage.warning('已勾选「创建漏扫基线工单」，请至少选择一个非渗透测试项')
     return
   }
   // 联动创建需共享工单ID：需求接收日期或手动工单ID必须至少填写其一（与后端校验一致）
   if (!form.value.id && form.value.create_nonpen && !form.value.ticket_id_manual && !form.value.receive_time) {
-    ElMessage.warning('已勾选「创建非渗透」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID')
+    ElMessage.warning('已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID')
     return
   }
   const body = { ...form.value }
@@ -910,6 +908,10 @@ onBeforeUnmount(() => {
 :deep(.op-col .el-button) {
   margin-left: 0;
 }
+/* 表头统一单行：文案+排序箭头不换行，保持各列表头整洁对齐 */
+:deep(.el-table th .cell) {
+  white-space: nowrap;
+}
 /* 筛选按钮上的条件数徽标 */
 .filter-count {
   margin-left: 4px;
@@ -925,7 +927,7 @@ onBeforeUnmount(() => {
   background: rgba(255, 255, 255, 0.28);
 }
 
-/* ---------- 创建非渗透（联动） ---------- */
+/* ---------- 创建漏扫基线工单（联动） ---------- */
 .tp-create-head {
   display: flex;
   align-items: flex-start;
@@ -959,19 +961,10 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 .tp-create-title { font-size: 13px; font-weight: 500; }
-.tp-new-tag {
-  margin-left: 6px;
-  padding: 0 5px;
-  font-size: 11px;
-  line-height: 16px;
-  border-radius: 4px;
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
-  color: #fff;
-  vertical-align: 1px;
-}
+/* 渐变注释：品牌视觉渐变统一色源见 style.css .tl-brand-gradient */
 .tp-create-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
 
-/* 测试项勾选卡片（与测试计划/非渗透计划共用样式） */
+/* 测试项勾选卡片（与测试计划/漏扫基线工单共用样式） */
 .test-item-check {
   display: flex;
   align-items: flex-start;

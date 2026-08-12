@@ -149,7 +149,7 @@ async def _migrate_lightweight() -> None:
                     await conn.execute(text(f"ALTER TABLE reports DROP COLUMN {col}"))
                 except Exception:  # noqa: BLE001  SQLite < 3.35 不支持 DROP COLUMN，忽略残留列
                     pass
-        # 非渗透计划：测试计划新增「创建非渗透」勾选列；新建非渗透计划表（与测试计划共享工单ID序列）
+        # 漏扫基线工单：测试计划新增「创建漏扫基线工单」勾选列；新建漏扫基线工单表（与测试计划共享工单ID序列）
         if plan_cols and "create_nonpen" not in plan_cols:
             await conn.execute(text("ALTER TABLE testing_plans ADD COLUMN create_nonpen BOOLEAN NOT NULL DEFAULT 0"))
         await conn.execute(text(
@@ -181,6 +181,14 @@ async def _migrate_lightweight() -> None:
             # 状态码语义升级（六档），仅对旧库一次性重映射：50 已完成→60 复测完成，40 复测中→50 复测中
             await conn.execute(text("UPDATE testing_plans SET status = 60 WHERE status = 50"))
             await conn.execute(text("UPDATE testing_plans SET status = 50 WHERE status = 40"))
+        # 复测轮次记录来源报告ID：删除复测报告时回退对应轮次（Alembic 同步）
+        round_cols = {r[1] for r in (
+            await conn.execute(text("PRAGMA table_info(testing_plan_retest_rounds)"))
+        ).fetchall()}
+        if round_cols and "report_id" not in round_cols:
+            await conn.execute(text(
+                "ALTER TABLE testing_plan_retest_rounds ADD COLUMN report_id INTEGER"
+            ))
         # 复测轮次表为空时，为已进入复测阶段的存量计划回填第 1 轮记录（幂等）
         round_count = (
             await conn.execute(text("SELECT COUNT(*) FROM testing_plan_retest_rounds"))

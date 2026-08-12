@@ -614,18 +614,22 @@ async def retest_report(
     already_retesting = [v for v in vulns if v.status == 55 and v.id not in {c.id for c in changed}]
     effective_changed = bool(changed) or bool(already_retesting)
     # 仅当确有漏洞进入复测时才联动测试计划进入复测中，避免全部漏洞已修复时误流转
+    round_row = None
     if effective_changed and report.testing_plan_id is not None:
         plan = await session.get(TestingPlan, report.testing_plan_id)
         if plan is not None:
             if vuln_service.can_plan_transition(plan.status, 50):
                 plan.status = 50  # 等待复测/复测申请 → 复测中
-            plan_service.start_retest_round(
+            round_row = plan_service.start_retest_round(
                 session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
             )
     # 自动生成复测报告（记录本次发起复测后漏洞状态快照供下次对比；同日标题重复自动加 -1/-2 后缀）
     retest = await _create_retest_report(
         session, report, user, vul_snapshot=_vul_status_snapshot(vulns),
     )
+    # 本轮次关联到本次生成的复测报告：删除该报告时回退对应轮次，保证复测轮数一致
+    if round_row is not None:
+        round_row.report_id = retest.id
     # 同步刷新关联测试计划的实际人天（复测报告标题含「复测」不计入，值保持不变）
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
@@ -664,6 +668,11 @@ async def delete_report(
 ):
     report = await session.get(Report, report_id)
     if report:
+        # 删除由本次发起复测产生的复测报告时，回退对应复测轮次，保持复测轮数与报告一致
+        if report.testing_plan_id is not None:
+            plan = await session.get(TestingPlan, report.testing_plan_id)
+            if plan is not None:
+                await plan_service.rollback_retest_round_by_report(session, plan, report_id)
         await session.execute(
             ExportJob.__table__.delete().where(ExportJob.report_id == report_id)
         )

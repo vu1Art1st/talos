@@ -4,9 +4,9 @@
     <template #header>
       <div class="flex items-center gap-3">
         <span class="text-base font-semibold">测试流程 · {{ plan?.system_name || '' }}</span>
-        <el-tag v-if="plan" :type="statusTag(plan.status)" size="small">
+        <span v-if="plan" class="tl-tag" :style="planStatusSoftStyle(plan.status)">
           {{ statusMap[plan.status] ?? plan.status }}
-        </el-tag>
+        </span>
       </div>
     </template>
 
@@ -87,7 +87,7 @@
           </VulnFormPanel>
         </div>
 
-        <el-empty v-if="!vulns.length" description="暂无漏洞，点击右上角「录入漏洞」或「从漏洞库选择」开始" :image-size="60" />
+        <el-empty v-if="!vulns.length" description="暂无漏洞，点击右上角「录入漏洞」或「从漏洞库选择」开始" :image-size="80" />
         <el-table v-else :data="vulns" size="small" row-key="id">
           <el-table-column type="expand">
             <template #default="{ row }">
@@ -169,7 +169,7 @@
           <el-table-column label="漏洞标题" min-width="260" show-overflow-tooltip>
             <template #default="{ row }">
               <span>{{ row.title }}</span>
-              <el-tag v-if="pickerLinkedIds.includes(row.id)" size="small" type="info" class="ml-2">已在本计划</el-tag>
+              <span v-if="pickerLinkedIds.includes(row.id)" class="tl-tag ml-2" :style="softStyle(STAT_CARD_COLORS.blue)">已在本计划</span>
             </template>
           </el-table-column>
           <el-table-column label="状态" width="90">
@@ -179,9 +179,12 @@
               </span>
             </template>
           </el-table-column>
+          <template #empty>
+            <el-empty description="没有可关联的漏洞，可调整筛选条件后重试" :image-size="80" />
+          </template>
         </el-table>
         <div class="text-xs text-gray-400 mt-2">
-          勾选漏洞后点击「添加」，将关联到当前渗透测试计划；已在本计划中的漏洞不可重复勾选
+          勾选漏洞后点击「添加」，将关联到当前渗透测试工单；已在本计划中的漏洞不可重复勾选
         </div>
         <template #footer>
           <el-button @click="vulnPickerVisible = false">取消</el-button>
@@ -204,7 +207,7 @@
         </template>
 
         <div v-if="genFormVisible" class="mb-4 rounded-lg border border-dashed border-gray-300 p-3 bg-gray-50/50">
-          <el-form label-width="80px">
+          <el-form label-width="90px">
             <el-form-item label="报告标题" required>
               <el-input v-model="genTitle" placeholder="报告标题" />
             </el-form-item>
@@ -221,14 +224,12 @@
           </el-form>
         </div>
 
-        <el-empty v-if="!plan.reports?.length" description="暂无报告，录入漏洞后可生成报告" :image-size="60" />
+        <el-empty v-if="!plan.reports?.length" description="暂无报告，录入漏洞后可生成报告" :image-size="80" />
         <div v-for="r in plan.reports" :key="r.id" class="py-3 border-b border-gray-100 last:border-0">
           <div class="flex items-center gap-2">
-            <el-tag size="small" :type="r.status === 'final' ? 'primary' : 'info'">
-              {{ reportStatusName(r.status) }}
-            </el-tag>
+            <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
             <span class="text-sm font-medium">{{ r.title }}</span>
-            <span class="text-xs text-gray-400">生成于 {{ fmtTime(r.create_time) }}</span>
+            <span class="text-xs text-gray-400">生成于 {{ fmtDateTime(r.create_time) }}</span>
             <div class="flex-1" />
             <el-popconfirm v-if="canOperate"
                            title="发起复测将通知整改并使漏洞进入复测中，系统将自动生成复测报告，确认？" width="280"
@@ -267,15 +268,12 @@
               </div>
               <div v-for="job in exportJobs[r.id]" :key="job.id" class="flex items-center gap-2 text-xs">
                 <span class="uppercase font-mono text-gray-400">{{ job.fmt }}</span>
-                <el-tag size="small"
-                        :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
-                  {{ job.status === 'done' ? '已完成' : job.status === 'failed' ? '失败' : '生成中' }}
-                </el-tag>
+                <span class="tl-tag" :style="exportJobSoftStyle(job.status)">{{ exportJobName(job.status) }}</span>
                 <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
-                  <el-icon color="#F56C6C"><WarningFilled /></el-icon>
+                  <el-icon :color="EXPORT_JOB_META.failed.color"><WarningFilled /></el-icon>
                 </el-tooltip>
                 <span class="text-gray-400 truncate">{{ job.title || r.title }}</span>
-                <span class="text-gray-300">{{ fmtTime(job.create_time) }}</span>
+                <span class="text-gray-300">{{ fmtDateTime(job.create_time) }}</span>
                 <div class="flex-1" />
                 <el-button v-if="job.status === 'done'" size="small" type="primary" link
                            @click="previewRef?.open(`/reports/exports/${job.id}/preview`, job.title || r.title)">
@@ -333,7 +331,21 @@ import dayjs from 'dayjs'
 import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusSoftStyleEx, statusLabel } from '../utils/colors'
+import {
+  EXPORT_JOB_META,
+  exportJobName,
+  exportJobSoftStyle,
+  levelName,
+  levelSoftStyle,
+  planStatusSoftStyle,
+  reportStatusName,
+  reportStatusSoftStyle,
+  softStyle,
+  STAT_CARD_COLORS,
+  statusSoftStyleEx,
+  statusLabel,
+} from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 import { showTocNotice } from '../utils/tocNotice'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
@@ -391,17 +403,6 @@ const exporting = ref<Record<number, string>>({})
 const expandedExportId = ref<number | null>(null)
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 let pollTimer: number | undefined
-
-const fmtTime = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
-
-const statusTag = (s: number) =>
-  ({ 10: 'info', 20: 'warning', 30: 'primary', 40: 'danger', 50: 'warning', 60: 'success', 70: 'success' } as Record<number, string>)[s] ?? 'info'
-
-const levelName = (lv: number) =>
-  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
-
-const reportStatusName = (s: string) =>
-  ({ draft: '草稿', final: '已定稿' } as Record<string, string>)[s] ?? s
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
 const isTester = computed(() => plan.value?.testers?.some((u: any) => u.id === auth.user?.id) ?? false)
@@ -695,7 +696,7 @@ async function doExport(r: any, fmt: string) {
         `· 报告：《${data.report_title || r.title}》\n` +
         `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
         `· 导出版本：v${data.last_version ?? ''}\n` +
-        `· 已存在记录：${fmtTime(data.last_time)}（${statusName}）\n` +
+        `· 已存在记录：${fmtDateTime(data.last_time)}（${statusName}）\n` +
         `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
         `是否仍要继续导出？`
       const ok = await ElMessageBox.confirm(message, '检测到重复导出', {

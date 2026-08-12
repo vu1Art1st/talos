@@ -56,8 +56,11 @@
         <template #default="{ row }">{{ row.department || '-' }}</template>
       </el-table-column>
       <el-table-column prop="submit_time" label="提交时间" width="170" sortable="custom">
-        <template #default="{ row }">{{ fmt(row.submit_time) }}</template>
+        <template #default="{ row }">{{ fmtDateTime(row.submit_time) }}</template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无漏洞记录，点击「提交漏洞」开始录入" :image-size="80" />
+      </template>
     </el-table>
 
     <div class="flex justify-end mt-4">
@@ -71,11 +74,11 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -94,8 +97,6 @@ function onSortChange({ prop, order }: any) {
   query.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
   load(1)
 }
-
-const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
 async function load(page = query.page) {
   query.page = page

@@ -29,7 +29,7 @@ def is_plan_claimant(user: User, plan: TestingPlan) -> bool:
 async def get_plan_or_400(session: AsyncSession, plan_id: int) -> TestingPlan:
     plan = await session.get(TestingPlan, plan_id)
     if plan is None:
-        raise HTTPException(400, "指定的渗透测试计划不存在")
+        raise HTTPException(400, "指定的渗透测试工单不存在")
     return plan
 
 
@@ -103,23 +103,50 @@ async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
 
 def start_retest_round(
     session: AsyncSession, plan: TestingPlan, source: str,
-    user_id: int | None = None, force: bool = False,
-) -> None:
-    """发起复测时记录新一轮。
+    user_id: int | None = None, force: bool = False, report_id: int | None = None,
+) -> TestingPlanRetestRound | None:
+    """发起复测时记录新一轮，返回新轮次（幂等跳过时返回 None）。
 
     - force=False（手动流转）：已有进行中轮次则幂等跳过，防止重复计数；
-    - force=True（报告实际发起复测）：上一轮未闭环即结束（视为复测未通过后再测），并开启新一轮。
+    - force=True（报告实际发起复测）：上一轮未闭环即结束（视为复测未通过后再测），并开启新一轮；
+    - report_id：本轮次关联的复测报告，删除该报告时据此回退轮次，保持复测轮数与报告一致。
     """
     unfinished = [r for r in plan.retest_rounds if r.done_time is None]
     if unfinished:
         if not force:
-            return
+            return None
         for r in unfinished:
             r.done_time = now()
     next_no = max((r.round_no for r in plan.retest_rounds), default=0) + 1
-    session.add(TestingPlanRetestRound(
-        plan_id=plan.id, round_no=next_no, source=source, creator_id=user_id,
-    ))
+    round_row = TestingPlanRetestRound(
+        plan_id=plan.id, round_no=next_no, source=source,
+        creator_id=user_id, report_id=report_id,
+    )
+    session.add(round_row)
+    return round_row
+
+
+async def rollback_retest_round_by_report(
+    session: AsyncSession, plan: TestingPlan, report_id: int,
+) -> None:
+    """删除由某份复测报告发起的复测轮次（删除复测报告时回退复测轮数）。
+
+    - 移除 report_id 匹配的轮次记录（即该次发起复测新增的轮次），复测轮数相应减少；
+    - 该轮次若为 force 发起，其上一轮已被强制打完成点；删除后若计划仍处于「复测中」
+      且无任何进行中轮次，则撤销最近一轮的完成点（与 start_retest_round(force=True) 对称），
+      保证轮次状态与计划状态一致。
+    """
+    removed = [r for r in plan.retest_rounds if r.report_id == report_id]
+    if not removed:
+        return
+    for r in removed:
+        await session.delete(r)
+    await session.flush()
+    remaining = [r for r in plan.retest_rounds if r.report_id != report_id]
+    if plan.status == PlanStatus.RETESTING and not any(r.done_time is None for r in remaining):
+        finished = [r for r in remaining if r.done_time is not None]
+        if finished:
+            finished[-1].done_time = None
 
 
 def finish_retest_round(plan: TestingPlan) -> None:

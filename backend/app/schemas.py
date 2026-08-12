@@ -312,7 +312,7 @@ class VulLogOut(BaseModel):
     create_time: datetime | None = None
 
 
-# ---------- 漏洞知识库 ----------
+# ---------- 漏洞模板库 ----------
 class KnowledgeIn(BaseModel):
     """知识库条目：每个漏洞名称至多一条，同一漏洞类型可含多条。"""
 
@@ -637,7 +637,7 @@ class TestingPlanIn(BaseModel):
     brief: str = ""
     no_vul_conclusion: str = ""  # 无漏洞闭环测试结论（确认「测试通过」时记录）
     detail: str = ""
-    create_nonpen: bool = False  # 是否勾选「创建非渗透」：同时生成联动非渗透计划（共享工单ID）
+    create_nonpen: bool = False  # 是否勾选「创建漏扫基线工单」：同时生成联动漏扫基线工单（共享工单ID）
     nonpen_test_items: list[str] = []  # 勾选的非渗透测试项（baseline/host/web），联动创建时使用
 
 
@@ -663,7 +663,7 @@ class TestingPlanOut(TestingPlanIn):
 
 
 class NonpenPlanIn(BaseModel):
-    """非渗透计划（扫描类测试，与测试计划平级、独立统计）。"""
+    """漏扫基线工单（扫描类测试，与测试计划平级、独立统计）。"""
     system_name: str = Field(min_length=1, max_length=128)
     plan_name: str = ""  # 计划名称，与测试系统区分
     test_type: str = ""

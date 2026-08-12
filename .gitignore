@@ -50,8 +50,10 @@ frontend/*.png
 
 # 前端构建校验产物（dist_check 为验证用构建输出，勿入库）
 /frontend/dist_check/
+/docs/ui-demo/
 
 # 后端调试 / 复现脚本（临时排查用，勿入库）
 /backend/_repro.py
 /backend/_smoke2.py
 /backend/_verify_stats.py
+/backend/tmp_ver_check.py

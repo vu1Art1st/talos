@@ -1566,6 +1566,80 @@ async def test_retest_round_tracking(client: AsyncClient, auth: dict):
     assert plan["retest_rounds"][1]["done_time"] is not None
 
 
+async def test_delete_retest_report_rolls_back_round(client: AsyncClient, auth: dict):
+    """删除新发起的复测记录后复测轮数正确回退：删除复测报告移除对应轮次；
+    若删除的是 force 发起的新轮，上一轮恢复进行中状态，保持轮次状态与计划状态一致。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "轮次回退系统", "department": "轮次回退部门"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "轮次回退资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_id], "vulns": [
+            {"title": "回退漏洞A", "level": 20, "testing_plan_id": plan_id},
+        ]},
+    )
+    vul_a = resp.json()[0]["id"]
+
+    # 生成初测报告 → 漏洞进入修复中，计划进入等待复测
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "轮次回退报告", "vul_ids": [vul_a], "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    src_report = resp.json()["id"]
+
+    # 发起复测 → 生成复测报告 R1、记录第 1 轮
+    resp = await client.post(f"/api/v1/reports/{src_report}/retest", headers=auth)
+    assert resp.status_code == 200, resp.text
+    r1_id = resp.json()["id"]
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 1
+
+    # 删除新发起的复测报告 R1 → 对应轮次回退，复测轮数归零，仅剩初测报告
+    resp = await client.delete(f"/api/v1/reports/{r1_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 0
+    assert len(plan["reports"]) == 1
+
+    # 再次发起复测 → 重新开第 1 轮（进行中）
+    resp = await client.post(f"/api/v1/reports/{src_report}/retest", headers=auth)
+    assert resp.status_code == 200, resp.text
+    r2_id = resp.json()["id"]
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 1
+    assert plan["retest_rounds"][0]["done_time"] is None
+
+    # 再次发起复测（漏洞已处于复测中）→ force 结束第 1 轮并开第 2 轮
+    resp = await client.post(f"/api/v1/reports/{src_report}/retest", headers=auth)
+    assert resp.status_code == 200, resp.text
+    r3_id = resp.json()["id"]
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 2
+    assert plan["retest_rounds"][0]["done_time"] is not None
+    assert plan["retest_rounds"][1]["done_time"] is None
+
+    # 删除最新复测报告 R3 → 轮数回退为 1，且上一轮恢复进行中
+    resp = await client.delete(f"/api/v1/reports/{r3_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 1
+    assert plan["retest_rounds"][0]["done_time"] is None
+
+    # 删除初测报告不影响轮次（非复测报告不关联任何轮次）
+    resp = await client.delete(f"/api/v1/reports/{src_report}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    plan = await _get_plan(client, auth, plan_id)
+    assert plan["retest_round_count"] == 1
+    assert plan["retest_rounds"][0]["done_time"] is None
+
+
 async def test_dashboard_by_department(client: AsyncClient, auth: dict):
     """安全态势部门维度：提测次数 / 发现漏洞（含手填补充） / 修复率。"""
     # 无关联漏洞的计划：发现数取手填统计，修复率为空
@@ -1672,11 +1746,11 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     assert resp.status_code == 200
     assert resp.content[:2] == b"PK"
     wb = load_workbook(BytesIO(resp.content))
-    assert "渗透测试计划" in wb.sheetnames
+    assert "渗透测试工单" in wb.sheetnames
     assert "统计汇总" in wb.sheetnames
-    detail_rows = list(wb["渗透测试计划"].iter_rows(values_only=True))
+    detail_rows = list(wb["渗透测试工单"].iter_rows(values_only=True))
     assert len(detail_rows) == 4  # 表头 + 3 行
-    assert detail_rows[0][1] == "渗透测试计划名称"  # 表头第二列与 PLAN_EXCEL_HEADERS 一致
+    assert detail_rows[0][1] == "渗透测试工单名称"  # 表头第二列与 PLAN_EXCEL_HEADERS 一致
 
     # 导出同样支持 pending 筛选：仅 2 条待办计划
     resp = await client.get(
@@ -1685,7 +1759,7 @@ async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict)
     )
     assert resp.status_code == 200
     wb2 = load_workbook(BytesIO(resp.content))
-    pending_rows = list(wb2["渗透测试计划"].iter_rows(values_only=True))
+    pending_rows = list(wb2["渗透测试工单"].iter_rows(values_only=True))
     assert len(pending_rows) == 3  # 表头 + 2 行
     assert "统计汇总" in wb2.sheetnames
 
@@ -1722,7 +1796,7 @@ async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict)
     # 导出明细含人天列，汇总含人天指标
     resp = await client.get("/api/v1/testing-plans/export", headers=auth, params={"department": tag})
     wb = load_workbook(BytesIO(resp.content))
-    detail_rows = list(wb["渗透测试计划"].iter_rows(values_only=True))
+    detail_rows = list(wb["渗透测试工单"].iter_rows(values_only=True))
     header = list(detail_rows[0])
     assert "预估人天" in header and "实际人天" in header
     est_col = header.index("预估人天")
@@ -1843,8 +1917,8 @@ async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     )
     exist_id = resp.json()["id"]
 
-    # 表头与模板一致（PLAN_EXCEL_HEADERS 20 列，含「渗透测试计划名称」列）
-    headers_row = ["ID", "渗透测试计划名称", "测试系统", "测试类型", "所属部门", "工单ID",
+    # 表头与模板一致（PLAN_EXCEL_HEADERS 20 列，含「渗透测试工单名称」列）
+    headers_row = ["ID", "渗透测试工单名称", "测试系统", "测试类型", "所属部门", "工单ID",
                    "工单提起时间", "状态", "测试人员", "需求接收", "初测完成", "复测通知",
                    "复测完成", "预估人天", "实际人天", "超危数", "高危数", "中危数",
                    "低危数", "复测轮数"]
@@ -2208,7 +2282,7 @@ async def test_report_section_contains_retest(client: AsyncClient, auth: dict):
 
 
 async def test_knowledge_crud_and_from_vul(client: AsyncClient, auth: dict):
-    """漏洞知识库：upsert / 按类型查询 / 存为模板 / 删除。"""
+    """漏洞模板库：upsert / 按类型查询 / 存为模板 / 删除。"""
     # 新建条目（vul_type=10 SQL注入类，以 meta 字典为准）
     resp = await client.post(
         "/api/v1/knowledge", headers=auth,
@@ -2307,7 +2381,7 @@ async def test_knowledge_crud_and_from_vul(client: AsyncClient, auth: dict):
 
 
 async def test_knowledge_batch_import_and_delete(client: AsyncClient, auth: dict):
-    """漏洞知识库：批量导入（按名称 upsert）与批量删除。"""
+    """漏洞模板库：批量导入（按名称 upsert）与批量删除。"""
     items = [
         {"vulnerability_name": "批量-SSRF", "vul_type": 75, "severity_level": 20,
          "description_html": "<p>SSRF描述</p>", "references": ["https://portswigger.net/web-security/ssrf"]},

@@ -17,14 +17,14 @@
       <el-table-column prop="title" label="标题" min-width="200" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="system_name" label="系统名称" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="test_time" label="检测时间" width="120" sortable="custom">
-        <template #default="{ row }">{{ row.test_time || '-' }}</template>
+        <template #default="{ row }">{{ fmtDate(row.test_time) }}</template>
       </el-table-column>
       <el-table-column prop="department" label="所属部门" width="140" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="appeal_success" label="申诉结果" width="100" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="row.appeal_success ? 'success' : 'info'" size="small">
+          <span class="tl-tag" :style="row.appeal_success ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.gray)">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
-          </el-tag>
+          </span>
         </template>
       </el-table-column>
       <el-table-column label="申诉报告" width="110">
@@ -46,6 +46,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无远程检测记录，点击「新增远程检测」创建" :image-size="80" />
+      </template>
     </el-table>
 
     <div class="flex justify-end mt-4">
@@ -55,7 +58,7 @@
   </el-card>
 
   <el-dialog v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'" width="560px">
-    <el-form :model="form" label-width="100px">
+    <el-form :model="form" label-width="90px">
       <el-form-item label="标题" required>
         <el-input v-model="form.title" placeholder="检测任务标题" />
       </el-form-item>
@@ -89,6 +92,8 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import { STAT_CARD_COLORS, softStyle } from '../utils/colors'
+import { fmtDate } from '../utils/format'
 
 const router = useRouter()
 const items = ref<any[]>([])

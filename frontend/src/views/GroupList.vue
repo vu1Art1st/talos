@@ -28,6 +28,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无组织，点击「新建组织」创建" :image-size="80" />
+      </template>
     </el-table>
   </el-card>
 
@@ -43,7 +46,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="save">确定</el-button>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -75,6 +78,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无成员，点击「录入人员」添加" :image-size="80" />
+      </template>
     </el-table>
   </el-dialog>
 
@@ -93,7 +99,7 @@
     </el-form>
     <template #footer>
       <el-button @click="memberFormVisible = false">取消</el-button>
-      <el-button type="primary" :loading="memberSaving" @click="saveMember">确定</el-button>
+      <el-button type="primary" :loading="memberSaving" @click="saveMember">保存</el-button>
     </template>
   </el-dialog>
 </template>

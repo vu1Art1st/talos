@@ -1,4 +1,4 @@
-"""非渗透计划业务逻辑：测试项状态容器构建、状态流转、统计口径、与测试计划的联动同步。"""
+"""漏扫基线工单业务逻辑：测试项状态容器构建、状态流转、统计口径、与测试计划的联动同步。"""
 import copy
 
 from fastapi import HTTPException
@@ -12,7 +12,7 @@ from app.constants import (
 )
 from app.models import NonpenPlan
 
-# 非渗透计划与测试计划共享的公共字段：编辑任一方时向另一方双向同步。
+# 漏扫基线工单与测试计划共享的公共字段：编辑任一方时向另一方双向同步。
 # 测试计划的 status/人天/漏洞统计等专属字段不被覆盖。
 SYNC_FIELDS = (
     "plan_name", "system_name", "test_type", "department",
@@ -124,7 +124,7 @@ def apply_item_action(plan: NonpenPlan, item_key: str, action: str) -> dict:
 def compute_plan_stats(plans: list[NonpenPlan]) -> dict:
     """统计口径（对应需求 2.8 五张卡片）：
 
-    - total：非渗透计划总数；
+    - total：漏扫基线工单总数；
     - retest_done：复测完成数——存在至少一个非忽略测试项，且全部非忽略项均为 retest_done；
       全部测试项被忽略的计划不计入复测完成；
     - baseline_times / host_times / web_times：三类测试的「测试次数」——初测与复测针对
@@ -152,7 +152,7 @@ def compute_plan_stats(plans: list[NonpenPlan]) -> dict:
 def sync_linked_fields(source, target) -> None:
     """联动双向同步：把 source 的公共字段复制到 target（无权限校验，由调用方保证）。
 
-    编辑测试计划 → 同步联动非渗透计划；编辑联动非渗透计划 → 同步来源测试计划。
+    编辑测试计划 → 同步联动漏扫基线工单；编辑联动漏扫基线工单 → 同步来源测试计划。
     """
     for f in SYNC_FIELDS:
         val = getattr(source, f)

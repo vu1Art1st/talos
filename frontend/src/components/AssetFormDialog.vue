@@ -1,7 +1,7 @@
 <template>
   <el-dialog :model-value="visible" :title="form.id ? '编辑资产' : '新建资产'" width="680px"
              @update:model-value="emit('update:visible', $event)" @open="onOpen">
-    <el-form :model="form" label-width="100px">
+    <el-form :model="form" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2">
         <el-form-item label="系统命名" required>
           <el-input v-model="form.name" placeholder="例如：电商交易系统" />

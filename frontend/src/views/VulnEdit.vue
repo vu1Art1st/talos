@@ -5,7 +5,7 @@
       <template #notice>
         <div v-if="planId" class="mb-3">
           <el-tag type="warning" effect="plain">
-            本次录入将关联渗透测试计划{{ planName ? `「${planName}」` : '' }}
+            本次录入将关联渗透测试工单{{ planName ? `「${planName}」` : '' }}
           </el-tag>
         </div>
       </template>

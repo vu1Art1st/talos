@@ -24,7 +24,7 @@
       <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
         <template #default="{ row }">
-          <el-tag size="small">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</el-tag>
+          <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="severity_level" label="危害等级" width="90" sortable>
@@ -47,7 +47,7 @@
         <template #default="{ row }">{{ row.username || '-' }}</template>
       </el-table-column>
       <el-table-column prop="update_time" label="更新时间" width="170" sortable>
-        <template #default="{ row }">{{ (row.update_time ?? '').replace('T', ' ').slice(0, 19) || '-' }}</template>
+        <template #default="{ row }">{{ fmtDateTime(row.update_time) }}</template>
       </el-table-column>
       <el-table-column v-if="auth.hasPerm('vuln:manage')" label="操作" width="140" fixed="right">
         <template #default="{ row }">
@@ -59,6 +59,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无知识库条目，可新建或批量导入" :image-size="80" />
+      </template>
     </el-table>
   </el-card>
 
@@ -132,7 +135,8 @@ import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle } from '../utils/colors'
+import { levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
 const meta = ref<any>(null)

@@ -53,7 +53,7 @@ async def _check_plan_access(session: AsyncSession, plan_id: int | None, user: U
         return
     plan = await plan_service.get_plan_or_400(session, plan_id)
     if not plan_service.is_plan_claimant(user, plan):
-        raise HTTPException(403, "仅已认领该渗透测试计划的账号可录入漏洞，请先认领该计划")
+        raise HTTPException(403, "仅已认领该渗透测试工单的账号可录入漏洞，请先认领该工单")
 
 
 async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) -> None:
@@ -64,7 +64,7 @@ async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) ->
     if vul.testing_plan_id is not None:
         plan = await session.get(TestingPlan, vul.testing_plan_id)
         if plan is not None and not plan_service.is_plan_claimant(user, plan):
-            raise HTTPException(403, "该漏洞已关联渗透测试计划，仅已认领该计划的账号可修改")
+            raise HTTPException(403, "该漏洞已关联渗透测试工单，仅已认领该工单的账号可修改")
         return
     perms = user_permissions(user)
     if "*" not in perms and "vuln:manage" not in perms and vul.submitter_id != user.id:

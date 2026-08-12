@@ -1,4 +1,4 @@
-// 非渗透计划前端常量：与后端 app/constants.py 的 NONPEN_* 保持一致（唯一来源在后端，此处仅镜像）
+// 漏扫基线工单前端常量：与后端 app/constants.py 的 NONPEN_* 保持一致（唯一来源在后端，此处仅镜像）
 
 // 测试项定义（key -> 名称/说明/图标）
 export const NONPEN_ITEMS = [

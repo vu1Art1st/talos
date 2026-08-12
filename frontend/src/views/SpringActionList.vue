@@ -43,9 +43,9 @@
       </el-table-column>
       <el-table-column prop="appeal_success" label="申诉结果" width="100" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="row.appeal_success ? 'success' : 'info'" size="small">
+          <span class="tl-tag" :style="row.appeal_success ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.gray)">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
-          </el-tag>
+          </span>
         </template>
       </el-table-column>
       <el-table-column prop="score_deduction" label="最终扣分" width="100" sortable="custom">
@@ -62,6 +62,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无春耕行动记录，点击「新增春耕行动」创建" :image-size="80" />
+      </template>
     </el-table>
 
     <div class="flex justify-end mt-4">
@@ -71,14 +74,14 @@
   </el-card>
 
   <el-dialog v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'" width="600px">
-    <el-form :model="form" label-width="100px">
+    <el-form :model="form" label-width="90px">
       <el-form-item label="报告编号" required>
         <el-input v-model="form.report_no" placeholder="原始报告编号" />
       </el-form-item>
       <el-form-item label="对应系统">
         <el-input v-model="form.system_name" />
       </el-form-item>
-      <div class="grid grid-cols-2">
+      <div class="grid grid-cols-1 md:grid-cols-2">
         <el-form-item label="年度">
           <el-date-picker v-model="form.year" type="year" value-format="YYYY" placeholder="选择年度" class="!w-full" />
         </el-form-item>
@@ -113,7 +116,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
-import { levelSoftStyle } from '../utils/colors'
+import { levelName, levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
 const router = useRouter()
 const items = ref<any[]>([])
@@ -124,9 +127,6 @@ const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
 const loading = ref(false)
 const dialogVisible = ref(false)
 const vulns = ref<any[]>([])
-
-const levelName = (lv: number) =>
-  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
 
 const emptyForm = () => ({
   id: null as number | null,

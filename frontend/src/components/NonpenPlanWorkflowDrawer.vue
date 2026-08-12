@@ -1,9 +1,9 @@
 <template>
-  <el-drawer :model-value="visible" size="70%" direction="rtl" :destroy-on-close="true"
+  <el-drawer :model-value="visible" size="75%" direction="rtl" :destroy-on-close="true"
              @update:model-value="onVisibleChange">
     <template #header>
       <div class="flex items-center gap-3">
-        <span class="text-base font-semibold">非渗透流程 · {{ plan?.system_name || '' }}</span>
+        <span class="text-base font-semibold">漏扫基线流程 · {{ plan?.system_name || '' }}</span>
         <span v-if="plan" class="font-mono text-sm" style="color: var(--el-color-primary)">
           {{ plan.ticket_id || '-' }}
         </span>
@@ -14,7 +14,7 @@
     <div v-if="plan" v-loading="loading" class="flex flex-col gap-4">
       <!-- 基本信息区 -->
       <el-card shadow="never" class="!rounded-lg">
-        <div class="grid grid-cols-3 gap-x-6 gap-y-2 text-sm">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-2 text-sm">
           <div>
             <div class="text-xs mb-1" style="color: var(--tl-text-3)">计划名称</div>
             <div>{{ plan.plan_name || '-' }}</div>
@@ -128,10 +128,10 @@ const itemOf = (key: string) => plan.value?.items?.[key] ?? { status: 'not_start
 const statusOf = (key: string) => itemOf(key).status || 'not_started'
 const isIgnored = (key: string) => statusOf(key) === 'ignored'
 
-// 忽略项不渲染按钮；「复测完成」仅提供置回未开始
+// 忽略项仅提供「取消忽略」；「复测完成」仅提供置回未开始
 const actionsOf = (key: string) => {
   const st = statusOf(key)
-  if (st === 'ignored') return []
+  if (st === 'ignored') return ['unignore']
   return NONPEN_ITEM_ACTIONS[st] ?? []
 }
 
@@ -201,19 +201,6 @@ watch(
 </script>
 
 <style scoped>
-.linked-badge {
-  margin-left: 4px;
-  display: inline-block;
-  padding: 0 6px;
-  font-size: 11px;
-  line-height: 18px;
-  border-radius: 4px;
-  background: #67c23a1f;
-  color: #67c23a;
-  border: 1px solid #67c23a66;
-  vertical-align: 1px;
-}
-
 /* 忽略项：整行灰度弱化（保留位置） */
 .item-flow-ignored {
   opacity: 0.55;
@@ -246,8 +233,8 @@ watch(
   border: 1px solid var(--tl-border);
 }
 .step.done .dot {
-  background: #67c23a;
-  border-color: #67c23a;
+  background: var(--tl-success);
+  border-color: var(--tl-success);
   color: #fff;
 }
 .step.current .dot {
@@ -272,7 +259,7 @@ watch(
   background: var(--tl-border);
   min-width: 12px;
 }
-.step-line.done { background: #67c23a; }
+.step-line.done { background: var(--tl-success); }
 
 .step-placeholder {
   width: 100%;

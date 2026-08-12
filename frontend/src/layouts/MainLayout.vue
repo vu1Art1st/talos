@@ -3,8 +3,7 @@
     <el-aside :width="collapsed ? '64px' : '220px'" class="tl-aside flex flex-col">
       <div class="flex items-center h-14 flex-none border-b" :class="collapsed ? 'justify-center' : 'gap-2.5 px-4'"
            style="border-color: var(--tl-border)">
-        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-none"
-             style="background: linear-gradient(135deg,#6366f1,#8b5cf6)">
+        <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-none tl-brand-gradient">
           <el-icon :size="18" color="#fff"><Lock /></el-icon>
         </div>
         <span v-if="!collapsed" class="font-bold text-[15px] whitespace-nowrap tl-title">Talos 漏洞管理平台</span>
@@ -19,16 +18,16 @@
           <el-icon><DataLine /></el-icon><template #title>安全态势</template>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('special:manage')" index="/testing-plans">
-          <el-icon><Tickets /></el-icon><template #title>渗透测试计划</template>
+          <el-icon><Tickets /></el-icon><template #title>渗透测试工单</template>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('special:manage')" index="/nonpen-plans">
-          <el-icon><Aim /></el-icon><template #title>非渗透计划</template>
+          <el-icon><Aim /></el-icon><template #title>漏扫基线工单</template>
         </el-menu-item>
         <el-menu-item index="/vulns">
-          <el-icon><Warning /></el-icon><template #title>漏洞管理</template>
+          <el-icon><Warning /></el-icon><template #title>历史漏洞库</template>
         </el-menu-item>
         <el-menu-item index="/knowledge">
-          <el-icon><Collection /></el-icon><template #title>漏洞知识库</template>
+          <el-icon><Collection /></el-icon><template #title>漏洞模板库</template>
         </el-menu-item>
         <el-menu-item v-if="auth.hasPerm('report:manage')" index="/reports">
           <el-icon><Document /></el-icon><template #title>报告中心</template>
@@ -70,7 +69,7 @@
           </el-tooltip>
           <el-dropdown @command="onCommand">
             <span class="flex items-center gap-2 cursor-pointer" style="color: var(--tl-text-1)">
-              <el-avatar :size="30" style="background: linear-gradient(135deg,#6366f1,#8b5cf6)">
+              <el-avatar :size="30" class="tl-brand-gradient">
                 {{ (auth.user?.realname || auth.user?.username || '?').slice(0, 1) }}
               </el-avatar>
               {{ auth.user?.realname || auth.user?.username }}
@@ -103,7 +102,7 @@
              :close-on-click-modal="!forcedChange" :close-on-press-escape="!forcedChange" :show-close="!forcedChange">
     <el-alert v-if="forcedChange" type="warning" :closable="false" show-icon class="mb-3"
               title="首次登录或密码已重置，请先修改密码后再使用系统" />
-    <el-form :model="pwdForm" label-width="80px">
+    <el-form :model="pwdForm" label-width="90px">
       <el-form-item label="原密码">
         <el-input v-model="pwdForm.old_password" type="password" show-password />
       </el-form-item>
@@ -113,7 +112,7 @@
     </el-form>
     <template #footer>
       <el-button v-if="!forcedChange" @click="pwdVisible = false">取消</el-button>
-      <el-button type="primary" @click="changePassword">确定</el-button>
+      <el-button type="primary" @click="changePassword">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -134,6 +133,14 @@ const router = useRouter()
 // 侧边栏折叠状态（持久化）
 const collapsed = ref(localStorage.getItem('sidebar_collapsed') === '1')
 watch(collapsed, (v) => localStorage.setItem('sidebar_collapsed', v ? '1' : '0'))
+
+// 窄屏（<1024px）自动折叠侧边栏，恢复宽屏时还原用户偏好
+onMounted(() => {
+  const mq = window.matchMedia('(max-width: 1023px)')
+  const apply = () => { if (mq.matches) collapsed.value = true }
+  apply()
+  mq.addEventListener('change', apply)
+})
 
 // 二级菜单使用完整路径高亮，其余按一级路径段匹配
 const activeMenu = computed(() =>

@@ -11,7 +11,7 @@
             </span>
           </div>
         </template>
-        <el-form label-width="80px" size="default">
+        <el-form label-width="90px" size="default">
           <el-form-item label="报告标题">
             <el-input v-model="report.title" placeholder="标准名称（邮件、台账）-系统名称（网页）" @input="markDirty" />
           </el-form-item>
@@ -134,7 +134,7 @@
       <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
       <el-card shadow="never" class="!rounded-lg">
         <template #header>章节导航</template>
-        <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="50" />
+        <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="80" />
         <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
           <template v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`">
             <!-- 拖拽指示线：标记目标插入位置 -->
@@ -188,18 +188,16 @@
 
       <el-card shadow="never" class="!rounded-lg">
         <template #header>导出记录</template>
-        <el-empty v-if="!jobs.length" description="暂无导出" :image-size="50" />
+        <el-empty v-if="!jobs.length" description="暂无导出" :image-size="80" />
         <div v-for="job in jobs" :key="job.id" class="py-2 text-sm border-b border-gray-100 last:border-0">
           <div class="truncate text-gray-700" :title="job.title || report.title">
             {{ job.title || report.title }}
           </div>
           <div class="flex items-center gap-2 mt-1">
             <span class="uppercase font-mono text-xs text-gray-400">{{ job.fmt }}</span>
-            <el-tag size="small" :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
-              {{ { pending: '排队中', running: '生成中', done: '完成', failed: '失败' }[job.status as string] ?? job.status }}
-            </el-tag>
+            <span class="tl-tag" :style="exportJobSoftStyle(job.status)">{{ exportJobName(job.status) }}</span>
             <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
-              <el-icon color="#F56C6C"><WarningFilled /></el-icon>
+              <el-icon :color="EXPORT_JOB_META.failed.color"><WarningFilled /></el-icon>
             </el-tooltip>
             <div class="flex-1" />
             <el-button v-if="job.status === 'done'" size="small" type="primary" link
@@ -235,13 +233,17 @@ import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { showTocNotice } from '../utils/tocNotice'
-import { levelColor, statusColor, statusSoftStyle } from '../utils/colors'
+import {
+  EXPORT_JOB_META,
+  exportJobName,
+  exportJobSoftStyle,
+  levelColor,
+  statusColor,
+  statusName,
+  statusSoftStyle,
+} from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
-
-const STATUS_NAMES: Record<number, string> = {
-  10: '未修复', 20: '已忽略', 35: '暂不处理', 50: '修复中', 55: '复测中', 60: '已修复',
-}
-const statusName = (s: number) => STATUS_NAMES[s] ?? String(s)
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
@@ -522,14 +524,14 @@ async function doExport(fmt: string) {
   try {
     const { data } = await client.post(`/reports/${route.params.id}/export-check`, { fmt })
     if (data.duplicate) {
-      const statusName = data.last_status === 'done' ? '已完成' : data.last_status || ''
+      const lastStatusName = data.last_status === 'done' ? '已完成' : data.last_status || ''
       const sizeText = data.last_file_size != null ? `（${(data.last_file_size / 1024).toFixed(1)} KB）` : ''
       const message =
         `检测到该报告已有相同的导出记录：\n` +
         `· 报告：《${data.report_title || report.value.title}》\n` +
         `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
         `· 导出版本：v${data.last_version ?? ''}\n` +
-        `· 已存在记录：${data.last_time ? dayjs(data.last_time).format('YYYY-MM-DD HH:mm') : '-'}（${statusName}）\n` +
+        `· 已存在记录：${fmtDateTime(data.last_time)}（${lastStatusName}）\n` +
         `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
         `是否仍要继续导出？`
       const ok = await ElMessageBox.confirm(message, '检测到重复导出', {

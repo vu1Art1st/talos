@@ -17,6 +17,7 @@ from PIL import Image
 
 from app.api.v1.reports import _affected_urls_html, _vuln_section_html
 from app.constants import VulStatus
+from app.core.timeutil import now as tznow
 from app.services.report_builder import FIXED_STATUS_COLOR, build_report_docx
 
 
@@ -188,3 +189,136 @@ def test_body_image_centered_and_width_14cm(tmp_path):
             node = node.getparent()
         assert Paragraph(node, doc).alignment == WD_ALIGN_PARAGRAPH.CENTER
         assert abs(int(shape.width) - int(Cm(14))) <= 1, f"图片宽度 {shape.width} EMU，目标 {int(Cm(14))} EMU"
+
+
+# ---------- 复测封面标题 ----------
+def test_cover_retest_title(tmp_path):
+    # 复测报告：首页第三行标题自动变更为「渗透测试复测报告」
+    doc = _build(tmp_path, meta={"project_name": "统一门户系统", "is_retest": True})
+    texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    assert "渗透测试复测报告" in texts
+    assert "渗透测试报告" not in texts
+
+
+def test_cover_retest_title_with_customer(tmp_path):
+    # 设置了客户时不得提前中断封面遍历：复测标题与系统名均须替换（回归：曾因 break 跳过后续占位）
+    doc = _build(tmp_path, meta={
+        "project_name": "统一门户系统", "customer": "测试客户", "is_retest": True,
+    })
+    texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    assert "测试客户" in texts
+    assert "统一门户系统" in texts
+    assert "渗透测试复测报告" in texts
+    assert "标准名称（邮件、台账）-系统名称（网页）" not in texts
+
+
+def test_cover_normal_title_unchanged(tmp_path):
+    # 初测报告：封面标题保持「渗透测试报告」
+    doc = _build(tmp_path, meta={"project_name": "统一门户系统"})
+    texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    assert "渗透测试报告" in texts
+    assert "渗透测试复测报告" not in texts
+
+
+# ---------- 版本变更记录：时间=导出时间、修改人=发起导出账号 ----------
+def test_version_records_use_export_time_and_generator(tmp_path):
+    meta = {
+        "project_name": "统一门户系统",
+        "author": "报告作者甲",
+        "generator": "导出账号乙",
+        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
+    }
+    doc = _build(tmp_path, meta=meta)
+    table = doc.tables[1]
+    rows = table.rows[2:4]  # 表头 r0/r1，数据行 V1.0 + V2.0
+    dates = [r.cells[0].text.strip() for r in rows]
+    modifiers = [r.cells[4].text.strip() for r in rows]
+    today = tznow().strftime("%Y-%m-%d")
+    assert all(d == today for d in dates), dates
+    assert all(m == "导出账号乙" for m in modifiers), modifiers
+
+
+def test_version_records_each_version_own_export_date(tmp_path):
+    # 各版记录时间取各自对应报告的导出时间，不得被最后一次导出时间覆盖
+    meta = {
+        "project_name": "统一门户系统",
+        "author": "报告作者甲",
+        "generator": "导出账号乙",
+        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
+        "version_dates": ["2026-08-01", "2026-08-07"],
+    }
+    doc = _build(tmp_path, meta=meta)
+    table = doc.tables[1]
+    rows = table.rows[2:4]  # V1.0 + V2.0
+    dates = [r.cells[0].text.strip() for r in rows]
+    versions = [r.cells[1].text.strip() for r in rows]
+    assert dates == ["2026-08-01", "2026-08-07"], dates
+    assert versions == ["V1.0", "V2.0"], versions
+
+
+def test_version_records_fallback_when_dates_short(tmp_path):
+    # version_dates 长度不足：越界记录回退当前导出时间（today）
+    meta = {
+        "project_name": "统一门户系统",
+        "author": "报告作者甲",
+        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
+        "version_dates": ["2026-08-01"],
+    }
+    doc = _build(tmp_path, meta=meta)
+    table = doc.tables[1]
+    rows = table.rows[2:4]
+    dates = [r.cells[0].text.strip() for r in rows]
+    today = tznow().strftime("%Y-%m-%d")
+    assert dates[0] == "2026-08-01"
+    assert dates[1] == today, dates
+
+
+# ---------- 测试时间与人员：参测人员首行取发起导出账号，其余取报告作者 ----------
+def test_schedule_table_first_row_generator(tmp_path):
+    # 发起人不在作者中：首行取 generator，其余按作者顺序
+    doc = _build(tmp_path, meta={"project_name": "X", "author": "张三、李四", "generator": "王博宇"})
+    table = doc.tables[5]
+    names = [r.cells[0].text.strip() for r in table.rows[4:] if r.cells[0].text.strip()]
+    assert names == ["王博宇", "张三", "李四"]
+
+
+def test_schedule_table_generator_in_author_no_dup(tmp_path):
+    # 发起人与作者重复：不重复，发起人仍为首行
+    doc = _build(tmp_path, meta={"project_name": "X", "author": "王博宇、李四", "generator": "王博宇"})
+    table = doc.tables[5]
+    names = [r.cells[0].text.strip() for r in table.rows[4:] if r.cells[0].text.strip()]
+    assert names == ["王博宇", "李四"]
+
+
+def test_schedule_table_expand_rows_beyond_3(tmp_path):
+    # 发起人 + 3 作者 = 4 人，模板仅 3 行，应自动克隆新增 1 行
+    doc = _build(tmp_path, meta={"project_name": "X", "author": "张三、李四、王五", "generator": "赵六"})
+    table = doc.tables[5]
+    names = [r.cells[0].text.strip() for r in table.rows[4:] if r.cells[0].text.strip()]
+    assert names == ["赵六", "张三", "李四", "王五"]
+    # 发起人缺失时首行取报告作者
+    doc2 = _build(tmp_path, meta={"project_name": "X", "author": "张三、李四"})
+    table2 = doc2.tables[5]
+    names2 = [r.cells[0].text.strip() for r in table2.rows[4:] if r.cells[0].text.strip()]
+    assert names2 == ["张三", "李四"]
+
+
+# ---------- 无漏洞报告：风险问题汇总以 \ 填充 ----------
+def test_no_vuln_summary_backslash_fill(tmp_path):
+    doc = _build(tmp_path, meta={"project_name": "X"})
+    table = doc.tables[6]
+    row = table.rows[1]
+    assert [c.text for c in row.cells] == ["\\", "\\", "\\", "\\"]
+
+
+# ---------- 图片导出：缺失图片不产生 <image:> 链接占位 ----------
+def test_missing_image_removed_not_placeholder(tmp_path):
+    sections = [{
+        "title": "缺失图片章节",
+        "vul_id": None,
+        "content_html": '<p>正文内容<img src="/storage/uploads/images/not_exist_xyz.png"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    body = [p.text for p in doc.paragraphs]
+    assert not any(t.strip().startswith("<image:") for t in body), body
+    assert any("正文内容" in t for t in body), body

@@ -29,15 +29,12 @@
             <div v-if="exportJobs[row.id]?.length" class="flex flex-col gap-1">
               <div v-for="job in exportJobs[row.id]" :key="job.id" class="flex items-center gap-2 text-xs">
                 <span class="uppercase font-mono text-gray-400">{{ job.fmt }}</span>
-                <el-tag size="small"
-                        :type="job.status === 'done' ? 'success' : job.status === 'failed' ? 'danger' : 'warning'">
-                  {{ job.status === 'done' ? '已完成' : job.status === 'failed' ? '失败' : '生成中' }}
-                </el-tag>
+                <span class="tl-tag" :style="exportJobSoftStyle(job.status)">{{ exportJobName(job.status) }}</span>
                 <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
-                  <el-icon color="#F56C6C"><WarningFilled /></el-icon>
+                  <el-icon :color="EXPORT_JOB_META.failed.color"><WarningFilled /></el-icon>
                 </el-tooltip>
                 <span class="text-gray-500 truncate">{{ job.title || row.title }}</span>
-                <span class="text-gray-400">{{ fmt(job.create_time) }}</span>
+                <span class="text-gray-400">{{ fmtDateTime(job.create_time) }}</span>
                 <div class="flex-1" />
                 <el-button v-if="job.status === 'done'" size="small" type="primary" link
                            @click="downloadJob(job)">下载</el-button>
@@ -63,15 +60,15 @@
       <el-table-column prop="author" label="作者" width="120" sortable="custom" />
       <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="statusTag(row.status)" size="small">{{ statusName(row.status) }}</el-tag>
+          <span class="tl-tag" :style="reportStatusSoftStyle(row.status)">{{ reportStatusName(row.status) }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="version" label="版本" width="70" sortable="custom" />
       <el-table-column prop="create_time" label="生成时间" width="170" sortable="custom">
-        <template #default="{ row }">{{ fmt(row.create_time) }}</template>
+        <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
       </el-table-column>
       <el-table-column prop="update_time" label="更新时间" width="170" sortable="custom">
-        <template #default="{ row }">{{ fmt(row.update_time) }}</template>
+        <template #default="{ row }">{{ fmtDateTime(row.update_time) }}</template>
       </el-table-column>
       <el-table-column label="操作" width="190" fixed="right">
         <template #default="{ row }">
@@ -86,6 +83,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无报告，可从漏洞生成或新建空白报告" :image-size="80" />
+      </template>
     </el-table>
 
     <div class="flex justify-end mt-4">
@@ -95,8 +95,8 @@
   </el-card>
 
   <el-dialog v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
-    <el-form label-width="100px">
-      <el-form-item label="关联渗透测试计划">
+    <el-form label-width="90px">
+      <el-form-item label="关联渗透测试工单">
         <el-select v-model="genPlanId" clearable filterable class="w-full"
                    placeholder="可选，关联后联动计划状态" @change="onPlanChange">
           <el-option v-for="p in plans" :key="p.id" :label="p.system_name" :value="p.id" />
@@ -126,6 +126,14 @@ import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { showTocNotice } from '../utils/tocNotice'
+import {
+  EXPORT_JOB_META,
+  exportJobName,
+  exportJobSoftStyle,
+  reportStatusName,
+  reportStatusSoftStyle,
+} from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -241,10 +249,7 @@ async function batchDownload() {
   }
 }
 
-const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
-const statusName = (s: string) => (s === 'final' ? '已定稿' : '草稿')
-const statusTag = (s: string) => (s === 'final' ? 'primary' : 'info')
 
 async function retest(id: number) {
   const { data } = await client.post(`/reports/${id}/retest`)

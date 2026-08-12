@@ -11,62 +11,64 @@
       </el-select>
       <div class="flex-1" />
       <el-button type="primary" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增非渗透计划
+        <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
       </el-button>
     </div>
 
     <!-- 统计概览：总数 / 复测完成 / 三类扫描次数 -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
       <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">非渗透计划总数</div>
-        <div class="text-2xl font-semibold" style="color: #409EFF">{{ stats.total ?? 0 }}</div>
+        <div class="text-xs" style="color: var(--tl-text-3)">漏扫基线工单总数</div>
+        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.blue }">{{ stats.total ?? 0 }}</div>
       </div>
       <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">复测完成数</div>
-        <div class="text-2xl font-semibold" style="color: #67C23A">{{ stats.retest_done ?? 0 }}</div>
+        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.green }">{{ stats.retest_done ?? 0 }}</div>
       </div>
       <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">基线扫描次数</div>
-        <div class="text-2xl font-semibold" style="color: #E6A23C">{{ stats.baseline_times ?? 0 }}</div>
+        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.orange }">{{ stats.baseline_times ?? 0 }}</div>
       </div>
       <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">主机扫描次数</div>
-        <div class="text-2xl font-semibold" style="color: #F56C6C">{{ stats.host_times ?? 0 }}</div>
+        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.red }">{{ stats.host_times ?? 0 }}</div>
       </div>
       <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">Web扫描次数</div>
-        <div class="text-2xl font-semibold" style="color: #909399">{{ stats.web_times ?? 0 }}</div>
+        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.gray }">{{ stats.web_times ?? 0 }}</div>
       </div>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
+    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
+              :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
-        <el-empty :image-size="90"
-                  :description="actionable || search ? '未找到符合条件（可进行 / 搜索）的非渗透计划' : '暂无非渗透计划，点击右上角「新增非渗透计划」开始'" />
+        <el-empty :image-size="80"
+                  :description="actionable || search ? '未找到符合条件（可进行 / 搜索）的漏扫基线工单' : '暂无漏扫基线工单，点击右上角「新增漏扫基线工单」开始'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column label="工单ID" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="font-mono" style="color: var(--el-color-primary); font-weight: 600">{{ row.ticket_id || '-' }}</span>
-          <span v-if="row.linked" class="linked-badge" title="由渗透测试计划联动创建，编辑/删除将与对方双向同步">联动</span>
+          <span v-if="row.linked" class="linked-badge" title="由渗透测试工单联动创建，编辑/删除将与对方双向同步">联动</span>
         </template>
       </el-table-column>
       <el-table-column prop="plan_name" label="计划名称" min-width="130" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.plan_name || '-' }}</template>
       </el-table-column>
       <el-table-column prop="system_name" label="测试系统" min-width="140" show-overflow-tooltip sortable="custom" />
-      <el-table-column prop="test_type" label="测试类型" width="110" show-overflow-tooltip sortable="custom">
+      <el-table-column prop="test_type" label="测试类型" width="150" show-overflow-tooltip sortable="custom"
+                       label-class-name="col-test-type">
         <template #default="{ row }">{{ row.test_type || '-' }}</template>
       </el-table-column>
       <el-table-column prop="department" label="所属部门" width="110" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.department || '-' }}</template>
       </el-table-column>
       <el-table-column label="工单提起" width="100">
-        <template #default="{ row }">{{ row.ticket_time || '-' }}</template>
+        <template #default="{ row }">{{ fmtDate(row.ticket_time) }}</template>
       </el-table-column>
-      <el-table-column prop="receive_time" label="需求接收" width="100" sortable="custom">
-        <template #default="{ row }">{{ row.receive_time || '-' }}</template>
+      <el-table-column prop="receive_time" label="需求接收" width="115" sortable="custom">
+        <template #default="{ row }">{{ fmtDate(row.receive_time) }}</template>
       </el-table-column>
       <el-table-column v-for="t in NONPEN_ITEMS" :key="t.key" :label="t.name" width="100">
         <template #default="{ row }">
@@ -81,7 +83,7 @@
         <template #default="{ row }">
           <el-button size="small" type="primary" @click="openWorkflow(row)">流程</el-button>
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
-          <el-popconfirm :title="row.linked ? '确认删除？将同步删除其来源渗透测试计划' : '确认删除该非渗透计划？'"
+          <el-popconfirm :title="row.linked ? '确认删除？将同步删除其来源渗透测试工单' : '确认删除该漏扫基线工单？'"
                          @confirm="remove(row)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -98,12 +100,22 @@
   </el-card>
 
   <!-- 新增 / 编辑弹窗 -->
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑非渗透计划' : '新增非渗透计划'" width="760px"
+  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="760px"
              :close-on-click-modal="false">
-    <el-form :model="form" label-width="100px">
-      <div class="grid grid-cols-2 gap-x-6">
+    <el-form :model="form" label-width="90px">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <el-form-item label="计划名称">
-          <el-input v-model="form.plan_name" placeholder="与测试系统区分的非渗透计划名称" />
+          <el-input v-model="form.plan_name" placeholder="与测试系统区分的漏扫基线工单名称" />
+        </el-form-item>
+        <el-form-item label="关联资产">
+          <div class="w-full flex gap-2">
+            <el-select v-model="form.asset_ids" multiple filterable remote clearable
+                       :remote-method="searchAssets" :loading="assetLoading"
+                       placeholder="输入资产名称搜索并选择，选择后自动带出测试系统与所属部门" class="flex-1"
+                       @change="onAssetsChange">
+              <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
+            </el-select>
+          </div>
         </el-form-item>
         <el-form-item label="测试系统" required>
           <el-input v-model="form.system_name" placeholder="被测系统名称" />
@@ -132,18 +144,9 @@
         <el-form-item label="需求接收">
           <el-date-picker v-model="form.receive_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
-        <el-form-item label="关联资产">
-          <div class="w-full flex gap-2">
-            <el-select v-model="form.asset_ids" multiple filterable remote clearable
-                       :remote-method="searchAssets" :loading="assetLoading"
-                       placeholder="输入资产名称搜索并选择" class="flex-1">
-              <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
-            </el-select>
-          </div>
-        </el-form-item>
       </div>
       <el-form-item label="测试项">
-        <div class="w-full grid grid-cols-3 gap-3">
+        <div class="w-full grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div v-for="t in NONPEN_ITEMS" :key="t.key" class="test-item-check" :class="{ checked: form.test_items.includes(t.key) }"
                @click="toggleTestItem(t.key)">
             <div class="tick"><el-icon v-if="form.test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
@@ -173,7 +176,8 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Plus, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
-import { softStyle } from '../utils/colors'
+import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { fmtDate } from '../utils/format'
 import { NONPEN_ITEMS, nonpenItemMeta } from '../constants/nonpen'
 import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
 
@@ -183,7 +187,7 @@ const page = ref(1)
 const size = ref(20)
 const search = ref('')
 const actionable = ref(false)
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
+const sort = reactive<{ prop: string; order: string }>({ prop: 'receive_time', order: 'desc' })
 const loading = ref(false)
 const stats = ref<Record<string, number>>({})
 const dialogVisible = ref(false)
@@ -267,6 +271,7 @@ function openDialog(row?: any) {
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
   assetOptions.value = []
   if (form.value.asset_ids.length) loadAssetLabels()
+  prevAssetIds = [...form.value.asset_ids]
   dialogVisible.value = true
 }
 
@@ -307,7 +312,7 @@ async function save() {
 async function remove(row: any) {
   if (row.linked) {
     await ElMessageBox.confirm(
-      `该计划由渗透测试计划联动创建，删除将同步删除其来源渗透测试计划（互相级联），确认删除「${row.plan_name || row.system_name}」？`,
+      `该计划由渗透测试工单联动创建，删除将同步删除其来源渗透测试工单（互相级联），确认删除「${row.plan_name || row.system_name}」？`,
       '删除确认', { type: 'warning' },
     )
   }
@@ -320,6 +325,7 @@ async function remove(row: any) {
 const assetOptions = ref<any[]>([])
 const assetLoading = ref(false)
 const assetCache = ref<Record<number, any>>({})
+let prevAssetIds: number[] = []
 
 function assetLabel(a: any) {
   const parts = [a.name]
@@ -358,6 +364,18 @@ async function loadAssetLabels() {
   }
 }
 
+// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
+function onAssetsChange(ids: number[]) {
+  if (form.value.id) return
+  const added = ids.filter((id) => !prevAssetIds.includes(id))
+  prevAssetIds = [...ids]
+  if (!added.length) return
+  const asset = assetCache.value[added[added.length - 1]]
+  if (!asset) return
+  if (asset.name) form.value.system_name = asset.name
+  if (asset.department) form.value.department = asset.department
+}
+
 // ---------- 流程抽屉 ----------
 const workflowVisible = ref(false)
 const workflowPlanId = ref<number | null>(null)
@@ -383,20 +401,10 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 联动角标：由测试计划联动创建 */
-.linked-badge {
-  margin-left: 6px;
-  display: inline-block;
-  padding: 0 6px;
-  font-size: 11px;
-  line-height: 18px;
-  border-radius: 4px;
-  background: #67c23a1f;
-  color: #67c23a;
-  border: 1px solid #67c23a66;
-  vertical-align: 1px;
+/* 表头统一单行：文案+排序箭头不换行，保持各列表头整洁对齐 */
+:deep(.el-table th .cell) {
+  white-space: nowrap;
 }
-
 /* 忽略标签弱化：低透明度 + 删除线，与「未开始」正常灰区分 */
 .ignored-tag {
   text-decoration: line-through;

@@ -18,7 +18,7 @@
           <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
         </template>
         <div class="flex-1" />
-        <el-select v-model="planId" filterable clearable placeholder="关联渗透测试计划（可选）" class="!w-52">
+        <el-select v-model="planId" filterable clearable placeholder="关联渗透测试工单（可选）" class="!w-52">
           <el-option v-for="p in plans" :key="p.id"
                      :label="p.plan_name ? `${p.plan_name}（${p.system_name}）` : p.system_name" :value="p.id" />
         </el-select>
@@ -33,7 +33,7 @@
         </el-button>
       </div>
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
-        报告格式确认入库时：已选择的渗透测试计划将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
+        报告格式确认入库时：已选择的渗透测试工单将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
       </div>
     </el-card>
 
@@ -41,7 +41,7 @@
              :class="{ 'opacity-50': rec.status === 'discarded' }">
       <div class="flex items-center gap-2 mb-3">
         <el-checkbox v-model="checked[rec.id]" :disabled="rec.status !== 'parsed'" />
-        <el-tag :type="recTag(rec.status)" size="small">{{ recName(rec.status) }}</el-tag>
+        <span class="tl-tag" :style="softStyle(importRecordMeta(rec.status).color)">{{ importRecordMeta(rec.status).label }}</span>
         <el-tag v-if="rec.parse_error" type="warning" size="small" effect="plain">{{ rec.parse_error }}</el-tag>
         <div class="flex-1" />
         <el-button v-if="rec.status !== 'confirmed' && rec.status !== 'discarded'" size="small"
@@ -55,11 +55,11 @@
       </div>
 
       <template v-if="editing === rec.id">
-        <el-form label-width="80px" size="small">
+        <el-form label-width="90px" size="small">
           <el-form-item label="漏洞名称">
             <el-input v-model="rec.title" />
           </el-form-item>
-          <div class="grid grid-cols-2">
+          <div class="grid grid-cols-1 md:grid-cols-2">
             <el-form-item label="等级">
               <el-select v-model="rec.level" class="w-full">
                 <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
@@ -105,7 +105,7 @@
       </template>
     </el-card>
 
-    <el-empty v-if="!records.length" description="该批次没有解析出漏洞记录，请检查文档是否符合模板" />
+    <el-empty v-if="!records.length" description="该批次没有解析出漏洞记录，请检查文档是否符合模板" :image-size="80" />
   </div>
 </template>
 
@@ -115,7 +115,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle } from '../utils/colors'
+import { importRecordMeta, levelSoftStyle, softStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 
 const auth = useAuthStore()
@@ -136,11 +136,6 @@ const checked = reactive<Record<number, boolean>>({})
 const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
 )
-
-const recName = (s: string) =>
-  ({ parsed: '待确认', error: '解析异常', confirmed: '已入库', discarded: '已丢弃' })[s] ?? s
-const recTag = (s: string) =>
-  ({ parsed: 'primary', error: 'warning', confirmed: 'success', discarded: 'info' })[s] ?? 'info'
 
 async function load() {
   const { data } = await client.get(`/imports/${route.params.id}`)

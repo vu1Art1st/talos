@@ -41,9 +41,9 @@
               </div>
             </div>
           </el-form-item>
-          <el-form-item label="关联渗透测试计划">
+          <el-form-item label="关联渗透测试工单">
             <el-select v-model="selectedPlanId" clearable filterable class="w-full"
-                       :placeholder="editId ? '可选：调整关联的渗透测试计划' : '可选：关联到渗透测试计划'"
+                       :placeholder="editId ? '可选：调整关联的渗透测试工单' : '可选：关联到渗透测试工单'"
                        :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
               <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
                          :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">
@@ -89,7 +89,7 @@
                     </el-button>
                   </template>
                 </el-select>
-                <el-tooltip content="从漏洞知识库套用该类型的标准描述与修复建议" placement="top">
+                <el-tooltip content="从漏洞模板库套用该类型的标准描述与修复建议" placement="top">
                   <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
                 </el-tooltip>
               </div>
@@ -190,7 +190,7 @@
            class="rounded-lg border border-gray-200 hover:border-blue-400 cursor-pointer p-3 transition"
            @click="applyEntry(t)">
         <div class="flex items-center gap-2">
-          <el-tag size="small" :type="levelTag(t.severity_level)">{{ levelName(t.severity_level) }}</el-tag>
+          <span class="tl-tag" :style="levelSoftStyle(t.severity_level)">{{ levelName(t.severity_level) }}</span>
           <span class="font-medium">{{ t.vulnerability_name }}</span>
           <span v-if="t.tags?.length" class="text-xs text-gray-400">{{ t.tags.join('、') }}</span>
         </div>
@@ -212,6 +212,7 @@ import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import AssetFormDialog from './AssetFormDialog.vue'
 import { useAuthStore } from '../stores/auth'
+import { levelName, levelSoftStyle } from '../utils/colors'
 
 // 漏洞录入/编辑表单面板：供独立页（VulnEdit）与测试计划流程抽屉复用。
 // 组件内不做路由跳转，保存成功后仅 emit saved，由宿主决定后续行为。
@@ -339,11 +340,6 @@ const filteredTemplateList = computed(() => {
     || plainSummary(t).toLowerCase().includes(kw),
   )
 })
-
-const levelName = (lv: number) =>
-  ({ 10: '严重', 20: '高危', 30: '中危', 40: '低危', 50: '安全' } as Record<number, string>)[lv] ?? lv
-const levelTag = (lv: number) =>
-  ({ 10: 'danger', 20: 'warning', 30: 'primary', 40: 'info', 50: 'success' } as Record<number, string>)[lv] ?? 'info'
 
 const plainSummary = (t: any) => {
   const html = t.description_html || ''

@@ -9,7 +9,7 @@ import html as _html_mod
 import re
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -65,17 +65,42 @@ _TPL_COMPANY = "中移系统集成有限公司"
 def _localize_images(html: str) -> str:
     """把 /storage/xx 图片 URL 替换为本地文件路径，供 htmldocx 内嵌图片。
 
-    仅接受解析后仍位于 storage 根目录内的路径，防止 ../ 路径遍历读取任意文件；
-    越界路径保持原样（本地无此文件将被后续降级处理跳过）。"""
+    兼容多种 src 形态：单双引号、属性实体转义（&quot;/&amp;）、URL 编码字符（%20 等）、
+    绝对 URL 与协议相对（//）前缀。仅接受解析后仍位于 storage 根目录内的路径，
+    防止 ../ 路径遍历读取任意文件；文件不存在时按文件名在 storage 下搜索兜底；
+    仍无法解析时保持原样，由 _drop_unresolvable_images 后续移除，杜绝链接式占位导出。"""
     base = settings.storage_path.resolve()
 
     def repl(m: re.Match) -> str:
-        candidate = (settings.storage_path / m.group(1)).resolve()
-        if not candidate.is_relative_to(base):
-            return m.group(0)
-        return f'src="{candidate.as_posix()}"'
+        tag = m.group(0)
+        raw = _html_mod.unescape(m.group(1))  # 仅还原 src 值内的属性实体，不做整段 unescape
+        path = unquote(raw)
+        # 剥掉绝对 URL / 协议相对前缀，归一化为 /storage/... 相对路径
+        for prefix in ("/storage/", "//", "http://", "https://"):
+            idx = path.find(prefix)
+            if idx >= 0:
+                path = path[idx:]
+                break
+        rel = re.sub(r"^/", "", path)
+        if not rel or ".." in rel:
+            return tag
+        candidate = (settings.storage_path / rel).resolve()
+        if candidate.is_relative_to(base) and candidate.is_file():
+            return f'src="{candidate.as_posix()}"'
+        # 文件不存在：按文件名在 storage 下搜索兜底（规避 URL 前缀差异导致的漏匹配）
+        name = Path(rel).name
+        if name and base.is_dir():
+            hit = next(base.rglob(name), None)
+            if hit is not None:
+                return f'src="{hit.as_posix()}"'
+        return tag
 
-    return _STORAGE_SRC.sub(repl, html or "")
+    return re.sub(
+        r"<img\b[^>]*?\bsrc\s*=\s*(['\"])(.*?)\1[^>]*>",
+        repl,
+        html or "",
+        flags=re.IGNORECASE | re.DOTALL,
+    )
 
 
 def _compress_image_file(src: Path) -> str:
@@ -130,6 +155,29 @@ def _compress_images(html: str) -> str:
         return tag.replace(f'src="{src}"', f'src="{new_src}"')
 
     return _IMG_SRC_RE.sub(repl, html or "")
+
+
+# img 标签匹配（src 单双引号均可，仅用于缺失判定，取值含引号内完整 src）
+_IMG_SRC_ANY_QUOTE = re.compile(
+    r"<img\b[^>]*?\bsrc\s*=\s*(['\"])(.*?)\1", re.IGNORECASE | re.DOTALL
+)
+
+
+def _drop_unresolvable_images(html: str) -> str:
+    """移除 src 既非本地文件也非 http(s) URL 的 img 标签，杜绝链接式占位导出。
+
+    htmldocx 对无法读取的本地图片会输出 `<image: 文件名>` 占位段落（即「图片以链接形式导出」）。
+    此处先过滤掉本地化/压缩后仍解析失败的 img；http(s) 远程图片保留交由 htmldocx 下载，
+    下载失败产生的占位由 build_report_docx 末尾的安全网统一清理。"""
+    def repl(m: re.Match) -> str:
+        src = m.group(2)
+        if src.startswith(("http://", "https://")):
+            return m.group(0)
+        if Path(src).exists():
+            return m.group(0)
+        return ""
+
+    return _IMG_SRC_ANY_QUOTE.sub(repl, html or "")
 
 
 def _demote_headings(html: str) -> str:
@@ -407,8 +455,10 @@ def _number_vuln_urls(html: str) -> str:
 
 def _add_html(doc: Document, html: str) -> None:
     # 图片统一宽度在 docx 层面由 _normalize_image_width 处理（htmldocx 忽略 HTML width）；
-    # 这里先压缩图像数据（重采样+JPEG），从源头减小 docx 体积
-    html = _compress_images(_localize_images(_demote_headings(html or "")))
+    # 先本地化 /storage 路径 → 压缩图像数据（重采样+JPEG）→ 过滤仍无法解析的 img，
+    # 避免 htmldocx 对缺失图片输出 <image: 文件名> 链接占位
+    html = _localize_images(_demote_headings(html or ""))
+    html = _drop_unresolvable_images(_compress_images(html))
     for kind, content, lang in _split_blocks(html):
         if kind == "code":
             try:
@@ -455,17 +505,23 @@ def _clone_row(table: Table, src_row: _Row) -> _Row:
 
 def _fill_cover(doc: Document, meta: dict, now: datetime) -> None:
     system_name = meta.get("project_name") or meta.get("title") or "渗透测试报告"
+    company_done = False
     for para in doc.paragraphs:
         text = para.text.strip()
         if text == _TPL_COVER_TITLE:
             # 封面第二行 = 系统名称（上一行为公司名、下两行为“渗透测试/报告”）
             _set_para_text(para, system_name)
+        elif text == "渗透测试报告":
+            # 首页第三行标题：复测报告自动变更为「渗透测试复测报告」
+            if meta.get("is_retest"):
+                _set_para_text(para, "渗透测试复测报告")
         elif text == _TPL_COVER_DATE:
             _set_para_text(para, now.strftime("%Y年%m月%d日"))
-        elif text == _TPL_COMPANY and meta.get("customer"):
+        elif not company_done and text == _TPL_COMPANY and meta.get("customer"):
+            # 只替换封面首个公司名段落（不能提前 break，否则跳过其后的系统名/标题占位），
+            # 统计段等由各自逻辑处理
             _set_para_text(para, meta["customer"])
-            # 只替换封面首个公司名段落，统计段等由各自逻辑处理
-            break
+            company_done = True
 
 
 def _fill_applicability(doc: Document, meta: dict) -> None:
@@ -490,12 +546,25 @@ def _fill_applicability(doc: Document, meta: dict) -> None:
 def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]:
     """按测试阶段生成版本变更记录序列：
     初测 = V1.0「初测创建」；第一轮复测 = V2.0「复测创建」；
-    第二轮起：修改人与上一轮相同则次版本 +1（V2.1），变更则升级主版本（V3.0）。"""
+    第二轮起：轮次创建人与上一轮相同则次版本 +1（V2.1），变更则升级主版本（V3.0）。
+
+    每一版记录时间取该版对应报告最近一次导出时间（meta.version_dates 按索引对齐），
+    缺失/越界时回退当前导出时间；修改人取发起导出报告的账号（meta.generator），
+    无则回退报告作者。版本号递增仍按轮次创建人比较，展示值与导出账号无关。"""
+    export_date = now.strftime("%Y-%m-%d")
+    version_dates = meta.get("version_dates") or []
+    modifier = meta.get("generator") or meta.get("author", "")
+
+    def pick_date(i: int) -> str:
+        # 取第 i 条记录对应报告的导出时间；空串/越界回退当前导出时间
+        vd = version_dates[i] if i < len(version_dates) else ""
+        return vd or export_date
+
     records = [{
-        "date": meta.get("report_create_date") or now.strftime("%Y-%m-%d"),
+        "date": pick_date(0),
         "version": "V1.0",
         "note": "初测创建",
-        "author": meta.get("author", ""),
+        "author": modifier,
     }]
     rounds = meta.get("retest_rounds") or []
     if not rounds and any(v.get("is_retest") for v in vulns):
@@ -515,10 +584,10 @@ def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]
                 major, minor = major + 1, 0
             note = "复测更新"
         records.append({
-            "date": r.get("date") or now.strftime("%Y-%m-%d"),
+            "date": pick_date(idx),
             "version": f"V{major}.{minor}",
             "note": note,
-            "author": creator or meta.get("author", ""),
+            "author": modifier,
         })
         prev_creator = creator
     return records
@@ -561,20 +630,22 @@ def _fill_schedule_table(doc: Document, meta: dict) -> None:
     table = doc.tables[5]
     _set_cell_text(table.rows[1].cells[1], meta.get("test_start", ""))
     _set_cell_text(table.rows[1].cells[3], meta.get("test_end", ""))
-    # 参测人员：一人独立占一个单元格（模板 row4 起为 总负责人/执行测试 行）
-    testers = meta.get("testers") or []
-    if not testers and meta.get("author"):
-        testers = [meta["author"]]
-    if not testers:
+    # 参测人员：第一行取发起导出账号姓名（meta.generator，即当前登录账号），
+    # 其余取报告作者（按 、,， 切分去空白）；generator 与作者重复时不重复；
+    # 总人数超过模板行数（3 行）时自动克隆新增行；generator 缺失时仅列作者
+    lead_name = (meta.get("generator") or "").strip()
+    authors = [n.strip() for n in re.split(r"[、,，]", meta.get("author") or "") if n.strip()]
+    names = [lead_name] + [a for a in authors if a != lead_name] if lead_name else authors
+    if not names:
         return
     sample = table.rows[5]
     rows = list(table.rows[4:])
-    for i, name in enumerate(testers):
+    for i, name in enumerate(names):
         if i >= len(rows):
             rows.append(_clone_row(table, sample))
         _set_cell_text(rows[i].cells[0], name)
     # 清空多余模板行的参测人员名，避免残留
-    for row in rows[len(testers):]:
+    for row in rows[len(names):]:
         _set_cell_text(row.cells[0], "")
 
 
@@ -643,8 +714,9 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
             for run in row.cells[3].paragraphs[0].runs:
                 run.font.color.rgb = FIXED_STATUS_COLOR
     if not vulns:
+        # 无漏洞报告：汇总表占位字段统一用反斜杠填充
         for cell in sample.cells:
-            _set_cell_text(cell, "")
+            _set_cell_text(cell, "\\")
     else:
         sample._tr.getparent().remove(sample._tr)
 
@@ -822,6 +894,16 @@ def _center_body_images(doc: Document) -> None:
         Paragraph(node, doc).alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
+def _remove_image_placeholders(doc: Document) -> None:
+    """清理 htmldocx 对缺失/下载失败图片输出的 `<image: xxx>` 占位段落（链接式图片导出）。
+
+    作为图片导出修复的最终安全网：无论前端过滤是否遗漏（如远程图片下载失败），
+    凡正文段落以 `<image:` 开头的占位一律删除，保证导出文档不含链接式图片。"""
+    for para in list(doc.paragraphs):
+        if para.text.strip().startswith("<image:"):
+            para._element.getparent().remove(para._element)
+
+
 def build_report_docx(
     meta: dict,
     vulns: list[dict],
@@ -852,6 +934,7 @@ def build_report_docx(
     _build_toc_field(doc)
     _normalize_image_width(doc)
     _center_body_images(doc)
+    _remove_image_placeholders(doc)
     _enable_update_fields(doc)
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)

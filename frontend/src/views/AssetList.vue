@@ -35,7 +35,7 @@
         <template #default="{ row }">
           <div v-for="(u, i) in (row.public_urls ?? []).slice(0, 2)" :key="i" class="flex items-center gap-1">
             <span class="truncate">{{ u.url }}</span>
-            <el-tag size="small" :type="u.tag === 10 ? 'warning' : 'info'">{{ meta?.url_tag?.[u.tag] ?? '-' }}</el-tag>
+            <span class="tl-tag" :style="softStyle(urlTagMeta(u.tag).color)">{{ urlTagMeta(u.tag).label }}</span>
           </div>
           <span v-if="(row.public_urls ?? []).length > 2" class="text-xs text-gray-400">
             等 {{ row.public_urls.length }} 条
@@ -49,9 +49,7 @@
       </el-table-column>
       <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">
-          <el-tag :type="row.status === 10 ? 'success' : 'info'" size="small">
-            {{ meta?.asset_status?.[row.status] ?? row.status }}
-          </el-tag>
+          <span class="tl-tag" :style="softStyle(assetStatusMeta(row.status).color)">{{ assetStatusMeta(row.status).label }}</span>
         </template>
       </el-table-column>
       <el-table-column label="操作" width="130" fixed="right">
@@ -64,6 +62,9 @@
           </el-popconfirm>
         </template>
       </el-table-column>
+      <template #empty>
+        <el-empty description="暂无资产记录，可下载模板后导入或直接新建" :image-size="80" />
+      </template>
     </el-table>
 
     <div class="flex justify-end mt-4">
@@ -82,6 +83,7 @@ import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
 import { useAuthStore } from '../stores/auth'
+import { assetStatusMeta, softStyle, urlTagMeta } from '../utils/colors'
 
 const auth = useAuthStore()
 const meta = ref<any>(null)

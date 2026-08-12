@@ -8,7 +8,7 @@ from app.db import Base
 
 
 class KnowledgeEntry(Base):
-    """漏洞知识库条目：按漏洞名称沉淀标准描述 / 危害说明 / 修复建议模板。
+    """漏洞模板库条目：按漏洞名称沉淀标准描述 / 危害说明 / 修复建议模板。
 
     每个漏洞名称（vulnerability_name）至多一条，同一漏洞类型（constants.VUL_TYPE）
     可包含多条具体漏洞。提交/编辑漏洞时可一键套用，Word 导入确认入库时

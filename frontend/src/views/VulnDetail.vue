@@ -9,18 +9,18 @@
               <span class="tl-tag" :style="levelSoftStyle(vul.level)">
                 {{ meta?.vul_level?.[vul.level] }}
               </span>
-              <el-tag size="small">{{ meta?.vul_type?.[vul.vul_type] }}</el-tag>
+              <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">{{ meta?.vul_type?.[vul.vul_type] }}</span>
               <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
                 {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
               </span>
-              <el-tag type="info" size="small" effect="plain">来源：{{ meta?.vul_source?.[vul.source] }}</el-tag>
+              <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">来源：{{ meta?.vul_source?.[vul.source] }}</span>
             </div>
           </div>
           <div class="flex gap-2">
             <el-tooltip v-if="auth.hasPerm('vuln:manage')" content="将本漏洞的描述与修复建议存入知识库，作为该类型的标准模板" placement="top">
               <el-button plain @click="saveAsTemplate">存为模板</el-button>
             </el-tooltip>
-            <el-tooltip v-if="!canEdit" content="仅已认领该渗透测试计划的账号可编辑该漏洞" placement="top">
+            <el-tooltip v-if="!canEdit" content="仅已认领该渗透测试工单的账号可编辑该漏洞" placement="top">
               <span>
                 <el-button :disabled="true" @click="router.push(`/vulns/${vul.id}/edit`)">编辑</el-button>
               </span>
@@ -38,14 +38,14 @@
           <el-descriptions-item label="关联资产">
             {{ (vul.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
           </el-descriptions-item>
-          <el-descriptions-item label="渗透测试计划">
+          <el-descriptions-item label="渗透测试工单">
             <el-link v-if="vul.testing_plan_id" type="primary"
                      @click="router.push('/testing-plans')">已关联计划</el-link>
             <span v-else>-</span>
           </el-descriptions-item>
-          <el-descriptions-item label="提交时间">{{ fmt(vul.submit_time) }}</el-descriptions-item>
-          <el-descriptions-item label="通知时间">{{ fmt(vul.notice_time) }}</el-descriptions-item>
-          <el-descriptions-item label="闭环时间">{{ fmt(vul.fix_time) }}</el-descriptions-item>
+          <el-descriptions-item label="提交时间">{{ fmtDateTime(vul.submit_time) }}</el-descriptions-item>
+          <el-descriptions-item label="通知时间">{{ fmtDateTime(vul.notice_time) }}</el-descriptions-item>
+          <el-descriptions-item label="闭环时间">{{ fmtDateTime(vul.fix_time) }}</el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -58,7 +58,7 @@
     <div class="space-y-4">
       <el-card v-if="auth.hasPerm('vuln:audit')" shadow="never" class="!rounded-lg">
         <template #header>状态流转</template>
-        <el-empty v-if="!transitions.length" description="当前状态没有可执行的流转" :image-size="60" />
+        <el-empty v-if="!transitions.length" description="当前状态没有可执行的流转" :image-size="80" />
         <div v-else class="space-y-2">
           <el-input v-model="comment" type="textarea" :rows="2" placeholder="处理意见（可选）" />
           <div class="flex flex-wrap gap-2">
@@ -74,7 +74,7 @@
       <el-card shadow="never" class="!rounded-lg">
         <template #header>操作日志</template>
         <el-timeline class="!pl-1">
-          <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmt(log.create_time)" size="small">
+          <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmtDateTime(log.create_time)" size="small">
             <div class="text-sm"><b>{{ log.username }}</b> {{ log.action }}</div>
             <div v-if="log.content" class="text-xs text-gray-400 mt-0.5">{{ log.content }}</div>
           </el-timeline-item>
@@ -88,10 +88,10 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import dayjs from 'dayjs'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
 
 const auth = useAuthStore()
@@ -106,8 +106,6 @@ const meta = ref<any>(null)
 // 影响URL 多值（后端换行分隔存储）逐行展示
 const affectedUrls = computed<string[]>(() =>
   (vul.value?.affected_url ?? '').split('\n').map((u: string) => u.trim()).filter(Boolean))
-
-const fmt = (v?: string) => (v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '-')
 
 // 复测中打回修复中时，按业务语义显示为「复测未通过」
 function transitionLabel(t: { status: number; name: string }) {
@@ -152,6 +150,7 @@ async function load() {
       const planResp = await client.get(`/testing-plans/${vul.value.testing_plan_id}`)
       planTesters.value = planResp.data?.testers ?? []
     } catch {
+      // 计划不存在/无权限时降级为空认领者，不阻断详情加载（错误提示由拦截器统一处理）
       planTesters.value = []
     }
   } else {
@@ -175,7 +174,7 @@ async function saveAsTemplate() {
     return
   }
   await client.post(`/knowledge/from-vul/${vul.value.id}`)
-  ElMessage.success('已存入漏洞知识库')
+  ElMessage.success('已存入漏洞模板库')
 }
 
 onMounted(async () => {

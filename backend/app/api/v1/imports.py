@@ -190,7 +190,7 @@ async def confirm_batch(
     if body.testing_plan_id is not None:
         plan = await session.get(TestingPlan, body.testing_plan_id)
         if plan is None:
-            raise HTTPException(400, "指定的渗透测试计划不存在")
+            raise HTTPException(400, "指定的渗透测试工单不存在")
 
     from app.api.v1.reports import _vuln_section_html
 

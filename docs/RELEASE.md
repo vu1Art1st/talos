@@ -50,6 +50,30 @@
 
 ---
 
+## [1.1.0] - 2026-08-13
+
+工单体系命名统一与复测轮次一致性修复。菜单与业务文案统一为「工单」风格；复测报告与复测轮次建立关联，删除复测报告时自动回退对应轮次；漏扫基线工单列表排序口径优化；全站时间格式化统一；文档截图清理。
+
+### 变更
+
+- **模块命名统一**：菜单标题与业务文案统一为「工单」风格——渗透测试计划→渗透测试工单、非渗透计划→漏扫基线工单、漏洞管理→历史漏洞库、漏洞知识库→漏洞模板库；同步更新侧边栏菜单 / 路由页面标题 / 表单 / 按钮 / 提示语 / Excel 导出与导入模板（sheet 名、文件名、表头）及后端错误提示与 API 文档 tags。路由路径 `/testing-plans`、`/nonpen-plans`、`/vulns`、`/knowledge` 与 API、表名保持不变
+- **漏扫基线工单列表排序口径**（`backend/app/api/v1/nonpen.py`）：列表默认排序由 `id desc` 改为「接收时间 desc → 工单序号 desc → id desc」，与渗透测试工单列表排序口径保持一致
+- **全站统一时间格式化**（`frontend/src/utils/format.ts` 新增 + 多视图改用 `fmtDateTime`/`fmtDate`）：抽离统一时间展示工具，禁止各视图内散落的 `slice`/`replace` 自定义格式，消除时间格式不一致
+
+### 修复
+
+- **删除复测报告后复测轮数不回退**（`backend/app/api/v1/reports.py` / `backend/app/services/plan_service.py`）：发起复测生成复测报告时，本轮次 `start_retest_round` 记录关联 `report_id`；删除该复测报告时调用新增 `rollback_retest_round_by_report` 移除对应轮次（无进行中轮次时对称撤销最近一轮完成点），保证复测轮数与报告数据一致。报告导出同步新增 `version_dates`，按计划下各报告创建顺序对齐各版本导出日期
+
+### 数据库
+
+- `testing_plan_retest_rounds` 新增 `report_id`（INTEGER，可空）：SQLite 走 `_migrate_lightweight` 幂等加列，PostgreSQL 走 Alembic 迁移 `d1e2f3a4b5c6`
+
+### 移除
+
+- 清理 `docs/images/` 下 15 张过期 UI 截图（登录 / 仪表盘 / 漏洞列表 / 报告编辑 / 导入 / 资产 / 测试计划 / 用户角色 / 复测等），文档引用同步移除
+
+---
+
 ## [Unreleased]
 
 （暂无）

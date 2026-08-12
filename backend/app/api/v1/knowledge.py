@@ -1,4 +1,4 @@
-"""漏洞知识库：按漏洞名称维护标准描述 / 危害说明 / 修复建议模板。
+"""漏洞模板库：按漏洞名称维护标准描述 / 危害说明 / 修复建议模板。
 
 每个漏洞名称至多一条，同一漏洞类型可含多条；支持批量导入（按名称 upsert）与批量删除。
 """
@@ -14,7 +14,7 @@ from app.models import KnowledgeEntry, Vul, VulnType
 from app.models.user import User
 from app.schemas import KnowledgeBatchDeleteIn, KnowledgeBatchIn, KnowledgeIn, KnowledgeOut
 
-router = APIRouter(prefix="/knowledge", tags=["漏洞知识库"])
+router = APIRouter(prefix="/knowledge", tags=["漏洞模板库"])
 
 
 async def _validate_dict_codes(session: AsyncSession, body: KnowledgeIn) -> None:

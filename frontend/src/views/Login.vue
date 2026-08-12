@@ -7,8 +7,8 @@
          style="background-image: radial-gradient(circle at 20% 20%, rgba(129,140,248,.35) 0, transparent 42%), radial-gradient(circle at 80% 75%, rgba(139,92,246,.30) 0, transparent 42%)" />
     <div class="login-card z-10 w-[400px] p-8">
       <div class="text-center mb-7">
-        <div class="inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-3"
-             style="background: linear-gradient(135deg,#6366f1,#8b5cf6); box-shadow: 0 10px 24px rgba(99,102,241,.45)">
+        <div class="inline-flex w-14 h-14 rounded-2xl items-center justify-center mb-3 tl-brand-gradient"
+             style="box-shadow: 0 10px 24px rgba(99,102,241,.45)">
           <el-icon :size="28" color="#fff"><Lock /></el-icon>
         </div>
         <div class="text-[22px] font-bold text-white">Talos 漏洞管理平台</div>
@@ -110,6 +110,7 @@ async function onLogin() {
   background: linear-gradient(135deg, #6366f1, #8b5cf6);
   transition: transform .15s, box-shadow .2s, filter .2s;
 }
+/* 注意：登录按钮渐变属品牌视觉，统一色源见 style.css .tl-brand-gradient（此处按钮为自定义样式故保留） */
 .login-btn:hover {
   filter: brightness(1.05);
   box-shadow: 0 10px 24px rgba(99, 102, 241, .5);

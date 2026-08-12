@@ -1,4 +1,4 @@
-"""工单ID分配与唯一性校验：测试计划与非渗透计划共享同一当日序号序列。"""
+"""工单ID分配与唯一性校验：测试计划与漏扫基线工单共享同一当日序号序列。"""
 import re
 
 from fastapi import HTTPException
@@ -11,10 +11,10 @@ _PLAN_MODELS = (TestingPlan, NonpenPlan)
 
 
 async def assign_ticket_seq(session: AsyncSession, row) -> None:
-    """按需求接收日期为测试计划/非渗透计划分配当日「最大编号+1」的录入次序（ticket_seq）。
+    """按需求接收日期为测试计划/漏扫基线工单分配当日「最大编号+1」的录入次序（ticket_seq）。
 
-    - 两表共享同一序号序列：同一接收日期内，测试计划与非渗透计划合计序号连续递增；
-      混合工单（勾选创建非渗透）由调用方把同一序号写入两条记录，此处只负责分配一次。
+    - 两表共享同一序号序列：同一接收日期内，测试计划与漏扫基线工单合计序号连续递增；
+      混合工单（勾选创建漏扫基线工单）由调用方把同一序号写入两条记录，此处只负责分配一次。
     - 占用口径与显示编号一致：纯自动记录（ticket_id_manual 为空）的 ticket_seq，
       以及手动指定编号（YYYYMMDD-N 且日期为当日）解析出的 N，均计入最大编号；
       新序号 = 最大编号 + 1，保证单调递增且不与任何占用冲突（含手动指定）。
@@ -50,7 +50,7 @@ async def check_ticket_id_unique(
     session: AsyncSession, ticket_id: str,
     exclude: list[tuple] | tuple | None = None,
 ) -> None:
-    """校验工单ID在测试计划与非渗透计划两表中全局唯一。
+    """校验工单ID在测试计划与漏扫基线工单两表中全局唯一。
 
     exclude: (model, id) 或 [(model, id), ...]，编辑场景排除自身及联动记录
     （联动双方共享同一工单ID，需相互排除）。
