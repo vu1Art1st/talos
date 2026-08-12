@@ -7,6 +7,8 @@
 - 封面第二行为 project_name（系统名称）
 - _affected_urls_html / _vuln_section_html 多 URL 渲染
 """
+from pathlib import Path
+
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
@@ -17,8 +19,13 @@ from PIL import Image
 
 from app.api.v1.reports import _affected_urls_html, _vuln_section_html
 from app.constants import VulStatus
+from app.core.config import settings
 from app.core.timeutil import now as tznow
-from app.services.report_builder import FIXED_STATUS_COLOR, build_report_docx
+from app.services.report_builder import (
+    _localize_images,
+    FIXED_STATUS_COLOR,
+    build_report_docx,
+)
 
 
 def _build(tmp_path, meta=None, vulns=None, sections=None):
@@ -364,3 +371,35 @@ def test_missing_image_removed_not_placeholder(tmp_path):
     body = [p.text for p in doc.paragraphs]
     assert not any(t.strip().startswith("<image:") for t in body), body
     assert any("正文内容" in t for t in body), body
+
+
+# ---------- 图片导出回归：/storage/ 真实图片必须本地化并嵌入 ----------
+def test_storage_image_localized_and_embedded(tmp_path, monkeypatch):
+    """回归：v1.1.0 _localize_images 取错正则分组（group(1) 是引号）且 repl 返回 src="..."
+    导致 /storage/ 图片全部丢失。真实存在的 storage 图片必须本地化并内嵌到 docx。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    img_dir = tmp_path / "uploads" / "images"
+    img_dir.mkdir(parents=True)
+    Image.new("RGB", (800, 600), "white").save(img_dir / "ab12cd34.png")
+    sections = [{
+        "title": "图片章节",
+        "vul_id": None,
+        "content_html": '<p>正文<img src="/storage/uploads/images/ab12cd34.png"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    body_shapes = [s for s in doc.inline_shapes if not _shape_in_table(s)]
+    assert body_shapes, "未找到正文图片：/storage/ 图片未被本地化嵌入 docx"
+
+
+def test_localize_images_keeps_img_tag_and_matches_real_file(tmp_path, monkeypatch):
+    """回归：本地化后必须保留完整 <img> 标签（此前 repl 返回 src="..." 丢 <img 与 >），
+    且 src 指向 storage 下真实存在的文件。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    img_dir = tmp_path / "uploads" / "images"
+    img_dir.mkdir(parents=True)
+    Image.new("RGB", (10, 10), "white").save(img_dir / "a1b2c3.png")
+    out = _localize_images('<img src="/storage/uploads/images/a1b2c3.png">')
+    assert out.startswith("<img "), out
+    assert out.endswith(">"), out
+    local_src = out[out.find('src="') + 5:out.rfind('"')]
+    assert Path(local_src).is_file(), out

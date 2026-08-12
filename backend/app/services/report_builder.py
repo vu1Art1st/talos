@@ -73,7 +73,11 @@ def _localize_images(html: str) -> str:
 
     def repl(m: re.Match) -> str:
         tag = m.group(0)
-        raw = _html_mod.unescape(m.group(1))  # 仅还原 src 值内的属性实体，不做整段 unescape
+        quote = m.group(1)
+        orig = m.group(2)
+        # 注意：本正则 (['\"'])(.*?)\1 中 group(1) 是引号、group(2) 才是 src 值，
+        # 取错分组会把路径变成引号导致所有图片无法本地化（曾在 v1.1.0 引发图片全部丢失）
+        raw = _html_mod.unescape(orig)  # 仅还原 src 值内的属性实体，不做整段 unescape
         path = unquote(raw)
         # 剥掉绝对 URL / 协议相对前缀，归一化为 /storage/... 相对路径
         for prefix in ("/storage/", "//", "http://", "https://"):
@@ -84,16 +88,25 @@ def _localize_images(html: str) -> str:
         rel = re.sub(r"^/", "", path)
         if not rel or ".." in rel:
             return tag
-        candidate = (settings.storage_path / rel).resolve()
-        if candidate.is_relative_to(base) and candidate.is_file():
-            return f'src="{candidate.as_posix()}"'
-        # 文件不存在：按文件名在 storage 下搜索兜底（规避 URL 前缀差异导致的漏匹配）
-        name = Path(rel).name
-        if name and base.is_dir():
-            hit = next(base.rglob(name), None)
-            if hit is not None:
-                return f'src="{hit.as_posix()}"'
-        return tag
+
+        def local_src() -> str | None:
+            candidate = (settings.storage_path / rel).resolve()
+            if candidate.is_relative_to(base) and candidate.is_file():
+                return candidate.as_posix()
+            # 文件不存在：按文件名在 storage 下搜索兜底（规避 URL 前缀差异导致的漏匹配）
+            name = Path(rel).name
+            if name and base.is_dir():
+                hit = next(base.rglob(name), None)
+                if hit is not None:
+                    return hit.as_posix()
+            return None
+
+        local = local_src()
+        if local is None:
+            return tag
+        # 只替换 src 属性值、保留 <img> 标签其余部分：
+        # 若直接返回 src="..." 会丢 <img 与 > 使标签残缺（v1.1.0 曾因此图片全部丢失）
+        return tag.replace(f"src={quote}{orig}{quote}", f'src="{local}"')
 
     return re.sub(
         r"<img\b[^>]*?\bsrc\s*=\s*(['\"])(.*?)\1[^>]*>",
