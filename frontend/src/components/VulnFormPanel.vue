@@ -147,7 +147,7 @@
       <el-card shadow="never" class="!rounded-lg">
         <template #header>操作</template>
         <div class="space-y-2">
-          <el-button type="primary" class="w-full" :loading="saving" @click="save">
+          <el-button type="primary" class="w-full !ml-0" :loading="saving" @click="save">
             {{ editId ? '保存' : `提交 ${vulns.length} 个漏洞` }}
           </el-button>
           <el-button v-if="!editId" class="w-full !ml-0" @click="addVuln">

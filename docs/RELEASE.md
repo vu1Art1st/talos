@@ -25,6 +25,21 @@
 
 ---
 
+## [1.12.1] - 2026-08-13
+
+报告编辑页复测处理复用 VulnRetestPanel 组件(与渗透测试工单流程抽屉一致),并修复若干前端交互细节。
+
+### 变更
+
+- **报告编辑页复测处理复用组件**（`frontend/src/views/ReportEditor.vue`）：移除内联复测面板与 `submitRetest`,改为复用 `VulnRetestPanel` 组件(`@changed="onRetestChanged"` 刷新漏洞状态),复测记录结构化、与渗透测试工单流程抽屉体验一致
+
+### 修复
+
+- **漏洞编辑页「取消」路由修正**（`frontend/src/views/VulnEdit.vue`）：「取消」按钮由 `router.back()` 改为 `router.push('/vulns')`,避免返回非预期页
+- **表单按钮对齐修复**（`VulnFormPanel.vue` / `VulnEdit.vue`）：保存/提交与复测按钮补充 `!ml-0`,消除 Element Plus 默认左边距错位
+
+---
+
 ## [1.12.0] - 2026-08-13
 
 复测记录标题支持手动编辑,可准确对应实际复测时间。

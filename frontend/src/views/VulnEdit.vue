@@ -10,12 +10,12 @@
         </div>
       </template>
       <template #actions-left>
-        <el-button v-if="editId" type="warning" plain class="w-full" @click="router.push(`/vulns/${editId}/retest`)">
+        <el-button v-if="editId" type="warning" plain class="w-full !ml-0" @click="router.push(`/vulns/${editId}/retest`)">
           复测
         </el-button>
       </template>
       <template #actions-right>
-        <el-button class="w-full !ml-0" @click="router.back()">取消</el-button>
+        <el-button class="w-full !ml-0" @click="router.push('/vulns')">取消</el-button>
       </template>
     </VulnFormPanel>
   </div>

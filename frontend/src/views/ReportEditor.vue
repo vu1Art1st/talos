@@ -95,35 +95,9 @@
                     @update:modelValue="markDirty"
                     @update:json="(j: any) => { sec.content_json = j; markDirty() }" />
 
-        <!-- 复测处理面板：漏洞处于复测中时逐条填写复测详情并提交结论 -->
-        <div v-if="sec.vul_id && vulnStates[sec.vul_id]?.status === 55"
-             class="mt-4 border border-orange-200 bg-orange-50/40 rounded-lg p-3">
-          <div class="flex items-center gap-2 mb-2">
-            <span class="text-sm font-medium text-orange-600">复测处理</span>
-            <span class="text-xs text-gray-400">填写复测详情并选择结论提交</span>
-          </div>
-          <RichEditor v-model="vulnStates[sec.vul_id].retest_html"
-                      @update:json="(j: any) => { vulnStates[sec.vul_id!].retest_json = j }" />
-          <div class="flex items-center gap-2 mt-2">
-            <el-select v-model="vulnStates[sec.vul_id].next_status" placeholder="选择复测结论" class="!w-44" size="small">
-              <el-option label="已修复" :value="60" />
-              <el-option label="复测未通过" :value="50" />
-              <el-option label="已忽略" :value="20" />
-              <el-option label="暂不处理" :value="35" />
-            </el-select>
-            <el-button type="primary" size="small"
-                       :disabled="!vulnStates[sec.vul_id].next_status"
-                       :loading="retestSubmitting === sec.vul_id"
-                       @click="submitRetest(sec.vul_id)">
-              提交复测结论
-            </el-button>
-          </div>
-        </div>
-        <!-- 已有复测详情且不在复测中：只读展示 -->
-        <div v-else-if="sec.vul_id && vulnStates[sec.vul_id]?.retest_html"
-             class="mt-4 border border-gray-200 rounded-lg p-3">
-          <div class="text-sm font-medium text-gray-600 mb-2">复测详情</div>
-          <div class="text-sm prose max-w-none" v-html="safeHtml(vulnStates[sec.vul_id].retest_html)" />
+        <!-- 复测处理：复用 VulnRetestPanel（与渗透测试工单流程抽屉一致），支持结构化复测记录 -->
+        <div v-if="sec.vul_id" class="mt-4">
+          <VulnRetestPanel :vul-id="sec.vul_id" @changed="onRetestChanged" />
         </div>
       </el-card>
 
@@ -231,6 +205,7 @@ import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
+import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { showTocNotice } from '../utils/tocNotice'
 import {
@@ -243,7 +218,6 @@ import {
   statusSoftStyle,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
-import { safeHtml } from '../utils/html'
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
@@ -265,7 +239,6 @@ const userOptions = ref<{ id: number; name: string }[]>([])
 const authorNames = ref<string[]>([])
 // 关联漏洞状态与复测详情，key 为 vul_id
 const vulnStates = ref<Record<number, any>>({})
-const retestSubmitting = ref<number | null>(null)
 let saveTimer: number | undefined
 let jobTimer: number | undefined
 
@@ -301,13 +274,7 @@ async function loadVulnStates() {
   const { data } = await client.get(`/reports/${route.params.id}/vuln-states`)
   const map: Record<number, any> = {}
   for (const v of data) {
-    const prev = vulnStates.value[v.vul_id]
-    // 复测面板有未提交的编辑内容时保留，避免报告保存触发的刷新将其覆盖
-    if (prev?.status === 55 && v.status === 55 && prev.retest_html !== v.retest_html) {
-      map[v.vul_id] = { ...v, retest_html: prev.retest_html, retest_json: prev.retest_json, next_status: prev.next_status }
-    } else {
-      map[v.vul_id] = { ...v, next_status: null }
-    }
+    map[v.vul_id] = { ...v }
   }
   vulnStates.value = map
 }
@@ -490,27 +457,9 @@ function move(i: number, dir: number) {
   markDirty()
 }
 
-// 提交单个漏洞的复测详情与结论（复测中 → 已修复/复测未通过/已忽略/暂不处理）
-async function submitRetest(vulId: number) {
-  const state = vulnStates.value[vulId]
-  if (!state?.next_status) return
-  // 复测结论（已修复/复测未通过）必须已填写复测详情，后端同步强制校验
-  if ((state.next_status === 60 || state.next_status === 50) && !(state.retest_html || '').trim()) {
-    ElMessage.warning('请先填写复测详情，再提交复测结论')
-    return
-  }
-  retestSubmitting.value = vulId
-  try {
-    await client.post(`/vulns/${vulId}/transition`, {
-      status: state.next_status,
-      retest_html: state.retest_html || '',
-      retest_json: state.retest_json ?? null,
-    })
-    ElMessage.success('复测结论已提交')
-    await loadVulnStates()
-  } finally {
-    retestSubmitting.value = null
-  }
+// 复测记录变更（新增/编辑/删除/状态调整）后刷新漏洞状态，保持侧栏状态标签与字段下拉框同步
+async function onRetestChanged() {
+  await loadVulnStates()
 }
 
 async function onVulnFormSaved() {
