@@ -546,33 +546,33 @@ def _fill_applicability(doc: Document, meta: dict) -> None:
 def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]:
     """按测试阶段生成版本变更记录序列：
     初测 = V1.0「初测创建」；第一轮复测 = V2.0「复测创建」；
-    第二轮起：轮次创建人与上一轮相同则次版本 +1（V2.1），变更则升级主版本（V3.0）。
+    第二轮起：复测报告创建人与上一份相同则次版本 +1（V2.1），变更则升级主版本（V3.0）。
 
-    每一版记录时间取该版对应报告最近一次导出时间（meta.version_dates 按索引对齐），
-    缺失/越界时回退当前导出时间；修改人取发起导出报告的账号（meta.generator），
-    无则回退报告作者。版本号递增仍按轮次创建人比较，展示值与导出账号无关。"""
+    版本清单（meta.report_records）取自计划实际关联的报告（每份报告含
+    is_retest / creator_name / date），版本号严格与复测报告数量一致——
+    手动流转、报告导入产生的无报告复测轮次不会虚增版本号。
+
+    每条记录时间取该版对应报告自身的 date，缺失回退当前导出时间；修改人取
+    发起导出报告的账号（meta.generator），无则回退报告作者。版本号递增仍按
+    报告创建人比较，展示值与导出账号无关。"""
     export_date = now.strftime("%Y-%m-%d")
-    version_dates = meta.get("version_dates") or []
+    report_records = meta.get("report_records") or []
     modifier = meta.get("generator") or meta.get("author", "")
 
-    def pick_date(i: int) -> str:
-        # 取第 i 条记录对应报告的导出时间；空串/越界回退当前导出时间
-        vd = version_dates[i] if i < len(version_dates) else ""
-        return vd or export_date
-
+    # 初测 V1.0：取报告清单中首份非复测报告的日期；无报告/全为复测时回退导出时间
+    first_report = next((r for r in report_records if not r.get("is_retest")), None)
     records = [{
-        "date": pick_date(0),
+        "date": (first_report.get("date") if first_report else "") or export_date,
         "version": "V1.0",
         "note": "初测创建",
         "author": modifier,
     }]
-    rounds = meta.get("retest_rounds") or []
-    if not rounds and any(v.get("is_retest") for v in vulns):
-        # 无计划轮次数据但存在复测漏洞时，V1.0 标记为复测更新（兼容旧行为）
+    if not report_records and any(v.get("is_retest") for v in vulns):
+        # 无报告清单但存在复测漏洞时，V1.0 标记为复测更新（兼容旧行为）
         records[0]["note"] = "复测更新"
     major, minor = 1, 0
     prev_creator = ""
-    for idx, r in enumerate(rounds, start=1):
+    for idx, r in enumerate((x for x in report_records if x.get("is_retest")), start=1):
         creator = (r.get("creator_name") or "").strip()
         if idx == 1:
             major, minor = 2, 0
@@ -584,7 +584,7 @@ def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]
                 major, minor = major + 1, 0
             note = "复测更新"
         records.append({
-            "date": pick_date(idx),
+            "date": r.get("date") or export_date,
             "version": f"V{major}.{minor}",
             "note": note,
             "author": modifier,

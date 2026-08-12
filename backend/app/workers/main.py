@@ -105,30 +105,20 @@ async def export_report_task(ctx, job_id: int) -> None:
                 gu = await session.get(User, job.creator_id)
                 if gu is not None:
                     meta["generator"] = gu.realname or gu.username or ""
-            # 关联测试计划：参测人员列表 + 复测轮次（供版本变更记录/人员表格使用）
+            # 关联测试计划：参测人员列表 + 版本记录清单（供版本变更记录/人员表格使用）
             plan = None
             if report.testing_plan_id is not None:
                 plan = await session.get(TestingPlan, report.testing_plan_id)
             testers: list[str] = []
-            rounds: list[dict] = []
-            # 版本变更记录各版对应报告的历史导出时间（按同计划报告创建顺序对齐）
-            version_dates: list[str] = []
+            report_records: list[dict] = []
             if plan is not None:
                 for u in plan.testers:
                     name = (u.realname or u.username or "").strip()
                     if name and name not in testers:
                         testers.append(name)
-                for r in sorted(plan.retest_rounds, key=lambda x: x.round_no):
-                    creator_name = ""
-                    if r.creator_id is not None:
-                        cu = await session.get(User, r.creator_id)
-                        if cu is not None:
-                            creator_name = cu.realname or cu.username or ""
-                    rounds.append({
-                        "date": (r.start_time or now()).strftime("%Y-%m-%d"),
-                        "creator_name": creator_name,
-                    })
-                # 该计划下的全部报告（初测 1 份 + 每轮复测各 1 份），按创建顺序对齐版本记录
+                # 该计划下的全部报告（初测 1 份 + 每轮复测各 1 份），按创建顺序对齐版本记录。
+                # 以「报告」为版本号唯一数据源：手动流转/导入产生的无报告复测轮次不再计入版本号，
+                # 保证版本号与实际复测报告数量严格一致
                 plan_reports = (
                     await session.execute(
                         select(Report)
@@ -156,16 +146,28 @@ async def export_report_task(ctx, job_id: int) -> None:
                 export_date_str = now().strftime("%Y-%m-%d")
                 for pr in plan_reports:
                     if pr.id == report.id:
-                        version_dates.append(export_date_str)  # 当前报告取本次导出时间
+                        rdate = export_date_str  # 当前报告取本次导出时间
                     elif pr.id in last_done:
-                        version_dates.append(last_done[pr.id])
+                        rdate = last_done[pr.id]
                     elif pr.create_time is not None:
-                        version_dates.append(pr.create_time.strftime("%Y-%m-%d"))
+                        rdate = pr.create_time.strftime("%Y-%m-%d")
                     else:
-                        version_dates.append("")
+                        rdate = ""
+                    creator_name = ""
+                    if pr.creator_id is not None:
+                        cu = await session.get(User, pr.creator_id)
+                        if cu is not None:
+                            creator_name = cu.realname or cu.username or ""
+                    if not creator_name:
+                        creator_name = pr.author or ""
+                    report_records.append({
+                        # 复测判定与初测报告标题口径一致：标题含「复测」为复测报告
+                        "is_retest": "复测" in (pr.title or ""),
+                        "creator_name": creator_name,
+                        "date": rdate,
+                    })
             meta["testers"] = testers
-            meta["retest_rounds"] = rounds
-            meta["version_dates"] = version_dates
+            meta["report_records"] = report_records
             sections = [
                 {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
                 for s in report.sections

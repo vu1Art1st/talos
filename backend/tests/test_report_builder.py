@@ -220,13 +220,16 @@ def test_cover_normal_title_unchanged(tmp_path):
     assert "渗透测试复测报告" not in texts
 
 
-# ---------- 版本变更记录：时间=导出时间、修改人=发起导出账号 ----------
+# ---------- 版本变更记录：时间=报告自身日期、修改人=发起导出账号 ----------
 def test_version_records_use_export_time_and_generator(tmp_path):
     meta = {
         "project_name": "统一门户系统",
         "author": "报告作者甲",
         "generator": "导出账号乙",
-        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
+        "report_records": [
+            {"is_retest": False, "creator_name": "报告作者甲", "date": ""},
+            {"is_retest": True, "creator_name": "轮次创建人", "date": ""},
+        ],
     }
     doc = _build(tmp_path, meta=meta)
     table = doc.tables[1]
@@ -239,13 +242,15 @@ def test_version_records_use_export_time_and_generator(tmp_path):
 
 
 def test_version_records_each_version_own_export_date(tmp_path):
-    # 各版记录时间取各自对应报告的导出时间，不得被最后一次导出时间覆盖
+    # 各版记录时间取各自对应报告自身的日期，不得被最后一次导出时间覆盖
     meta = {
         "project_name": "统一门户系统",
         "author": "报告作者甲",
         "generator": "导出账号乙",
-        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
-        "version_dates": ["2026-08-01", "2026-08-07"],
+        "report_records": [
+            {"is_retest": False, "creator_name": "报告作者甲", "date": "2026-08-01"},
+            {"is_retest": True, "creator_name": "轮次创建人", "date": "2026-08-07"},
+        ],
     }
     doc = _build(tmp_path, meta=meta)
     table = doc.tables[1]
@@ -256,13 +261,15 @@ def test_version_records_each_version_own_export_date(tmp_path):
     assert versions == ["V1.0", "V2.0"], versions
 
 
-def test_version_records_fallback_when_dates_short(tmp_path):
-    # version_dates 长度不足：越界记录回退当前导出时间（today）
+def test_version_records_fallback_when_dates_empty(tmp_path):
+    # 报告 date 缺失（空串）：回退当前导出时间（today）
     meta = {
         "project_name": "统一门户系统",
         "author": "报告作者甲",
-        "retest_rounds": [{"date": "2026-01-01", "creator_name": "轮次创建人"}],
-        "version_dates": ["2026-08-01"],
+        "report_records": [
+            {"is_retest": False, "creator_name": "报告作者甲", "date": "2026-08-01"},
+            {"is_retest": True, "creator_name": "轮次创建人", "date": ""},
+        ],
     }
     doc = _build(tmp_path, meta=meta)
     table = doc.tables[1]
@@ -271,6 +278,41 @@ def test_version_records_fallback_when_dates_short(tmp_path):
     today = tznow().strftime("%Y-%m-%d")
     assert dates[0] == "2026-08-01"
     assert dates[1] == today, dates
+
+
+def test_version_records_count_matches_retest_reports(tmp_path):
+    # 回归：版本号严格按复测报告数量输出，与复测轮次/幽灵数据无关。
+    # 仅 2 份复测报告（同创建人）→ V1.0 / V2.0 / V2.1，不得虚增到 V2.5
+    meta = {
+        "project_name": "统一门户系统",
+        "report_records": [
+            {"is_retest": False, "creator_name": "甲", "date": "2026-07-21"},
+            {"is_retest": True, "creator_name": "乙", "date": "2026-07-28"},
+            {"is_retest": True, "creator_name": "乙", "date": "2026-08-04"},
+        ],
+    }
+    doc = _build(tmp_path, meta=meta)
+    table = doc.tables[1]
+    versions = [r.cells[1].text.strip() for r in table.rows[2:5]]
+    notes = [r.cells[2].text.strip() for r in table.rows[2:5]]
+    assert versions == ["V1.0", "V2.0", "V2.1"], versions
+    assert notes == ["初测创建", "复测创建", "复测更新"], notes
+
+
+def test_version_records_creator_change_bumps_major(tmp_path):
+    # 复测报告创建人与上一份不同 → 主版本 +1（V3.0）
+    meta = {
+        "project_name": "统一门户系统",
+        "report_records": [
+            {"is_retest": False, "creator_name": "甲", "date": ""},
+            {"is_retest": True, "creator_name": "乙", "date": ""},
+            {"is_retest": True, "creator_name": "丙", "date": ""},
+        ],
+    }
+    doc = _build(tmp_path, meta=meta)
+    table = doc.tables[1]
+    versions = [r.cells[1].text.strip() for r in table.rows[2:5]]
+    assert versions == ["V1.0", "V2.0", "V3.0"], versions
 
 
 # ---------- 测试时间与人员：参测人员首行取发起导出账号，其余取报告作者 ----------
