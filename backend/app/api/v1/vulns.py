@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE
+from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE, VulStatus
 from app.core.deps import get_current_user, require_perm, user_permissions
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
@@ -16,6 +18,7 @@ from app.models import (
     VulLog,
     VulRetestRecord,
     spring_action_vulns,
+    vuln_assets,
 )
 from app.schemas import (
     Page,
@@ -104,14 +107,130 @@ async def _clean_vul_references(session: AsyncSession, vul_ids: list[int]) -> No
     )
 
 
+def _build_vuln_conditions(
+    *,
+    search: str = "",
+    status: int | None = None,
+    level: int | None = None,
+    levels: list[int] | None = None,
+    statuses: list[int] | None = None,
+    vul_type: int | None = None,
+    vul_types: list[int] | None = None,
+    asset_id: int | None = None,
+    asset_ids: list[int] | None = None,
+    department: str = "",
+    departments: list[str] | None = None,
+    system_type: str = "",
+    system_types: list[str] | None = None,
+    testing_plan_id: int | None = None,
+    test_type: str = "",
+    test_types: list[str] | None = None,
+    submit_time_from: datetime | None = None,
+    submit_time_to: datetime | None = None,
+    mine: bool = False,
+    user: User | None = None,
+) -> list:
+    """漏洞筛选条件构建器（列表查询与统计端点共用，保证统计口径与列表一致）。
+
+    - level / levels：单选与多选互斥（levels 非空时优先用多选 IN 过滤），
+      多选服务于统计表「按等级筛选」多选控件；
+    - department / system_type：匹配漏洞「任一关联资产」的部门 / 系统类型，
+      与 build_vul_out 归属部门展示口径一致；
+    - test_type：匹配漏洞关联测试计划的测试类型；
+    - 上述维度均提供多选（statuses / vul_types / asset_ids / departments /
+      system_types / test_types）以支持前端筛选区的多选功能；
+    - submit_time_from / submit_time_to：按漏洞录入时间做闭区间范围筛选。
+    各单值参数保留以兼容旧调用，列表/多选参数非空时优先使用多选。
+    """
+    cond = []
+    if search:
+        cond.append(Vul.title.ilike(f"%{search}%") | Vul.affected_url.ilike(f"%{search}%"))
+    if levels:
+        cond.append(Vul.level.in_(levels))
+    elif level is not None:
+        cond.append(Vul.level == level)
+    if statuses:
+        cond.append(Vul.status.in_(statuses))
+    elif status is not None:
+        cond.append(Vul.status == status)
+    if vul_types:
+        cond.append(Vul.vul_type.in_(vul_types))
+    elif vul_type is not None:
+        cond.append(Vul.vul_type == vul_type)
+    if asset_ids:
+        cond.append(Vul.assets.any(Asset.id.in_(asset_ids)))
+    elif asset_id is not None:
+        cond.append(Vul.assets.any(Asset.id == asset_id))
+    if departments:
+        cond.append(Vul.assets.any(Asset.department.in_(departments)))
+    elif department:
+        cond.append(Vul.assets.any(Asset.department == department))
+    if system_types:
+        cond.append(Vul.assets.any(Asset.system_type.in_(system_types)))
+    elif system_type:
+        cond.append(Vul.assets.any(Asset.system_type == system_type))
+    if testing_plan_id is not None:
+        cond.append(Vul.testing_plan_id == testing_plan_id)
+    if test_types:
+        cond.append(
+            Vul.testing_plan_id.in_(
+                select(TestingPlan.id).where(TestingPlan.test_type.in_(test_types))
+            )
+        )
+    elif test_type:
+        cond.append(
+            Vul.testing_plan_id.in_(
+                select(TestingPlan.id).where(TestingPlan.test_type == test_type)
+            )
+        )
+    if submit_time_from is not None:
+        cond.append(Vul.submit_time >= submit_time_from)
+    if submit_time_to is not None:
+        # submit_time_to 取当天结束（含当天），等价于 < 次日 00:00
+        cond.append(Vul.submit_time < submit_time_to + timedelta(days=1))
+    if mine and user is not None:
+        cond.append(Vul.submitter_id == user.id)
+    return cond
+
+
+def _parse_int_list(raw: str) -> list[int] | None:
+    """逗号分隔字符串转 int 列表；空 / 全空 → None（等价不筛选）。"""
+    return [int(x) for x in raw.split(",") if x.strip().isdigit()] or None
+
+
+def _parse_str_list(raw: str) -> list[str] | None:
+    """逗号分隔字符串转 str 列表；空 / 全空 → None（等价不筛选）。"""
+    return [x.strip() for x in raw.split(",") if x.strip()] or None
+
+
+def _parse_date(raw: str) -> datetime | None:
+    """解析 YYYY-MM-DD 为 datetime（本地 0 点）；非法值返回 None。"""
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
 @router.get("", response_model=Page[VulOut])
 async def list_vulns(
     search: str = "",
     status: int | None = None,
     level: int | None = None,
+    levels: str = "",
+    statuses: str = "",
     vul_type: int | None = None,
+    vul_types: str = "",
     asset_id: int | None = None,
+    asset_ids: str = "",
+    department: str = "",
+    departments: str = "",
+    system_type: str = "",
+    system_types: str = "",
     testing_plan_id: int | None = None,
+    test_type: str = "",
+    test_types: str = "",
+    submit_time_from: str = "",
+    submit_time_to: str = "",
     mine: bool = False,
     sort: str = "",
     order: str = "desc",
@@ -120,21 +239,21 @@ async def list_vulns(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    cond = []
-    if search:
-        cond.append(Vul.title.ilike(f"%{search}%") | Vul.affected_url.ilike(f"%{search}%"))
-    if status is not None:
-        cond.append(Vul.status == status)
-    if level is not None:
-        cond.append(Vul.level == level)
-    if vul_type is not None:
-        cond.append(Vul.vul_type == vul_type)
-    if asset_id is not None:
-        cond.append(Vul.assets.any(Asset.id == asset_id))
-    if testing_plan_id is not None:
-        cond.append(Vul.testing_plan_id == testing_plan_id)
-    if mine:
-        cond.append(Vul.submitter_id == user.id)
+    # 多选：逗号分隔字符串转列表；空字符串/全空 → None（等价不筛选）
+    level_list = _parse_int_list(levels)
+    cond = _build_vuln_conditions(
+        search=search, status=status, level=level, levels=level_list,
+        statuses=_parse_int_list(statuses),
+        vul_type=vul_type, vul_types=_parse_int_list(vul_types),
+        asset_id=asset_id, asset_ids=_parse_int_list(asset_ids),
+        department=department, departments=_parse_str_list(departments),
+        system_type=system_type, system_types=_parse_str_list(system_types),
+        testing_plan_id=testing_plan_id, test_type=test_type,
+        test_types=_parse_str_list(test_types),
+        submit_time_from=_parse_date(submit_time_from),
+        submit_time_to=_parse_date(submit_time_to),
+        mine=mine, user=user,
+    )
 
     stmt = select(Vul).where(*cond)
     if sort == "level":
@@ -149,6 +268,260 @@ async def list_vulns(
         )
     total, vulns = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_vul_out(v) for v in vulns])
+
+
+# 修复情况归并口径（与前端展示一致）：已修复 / 修复中(含复测中) / 未修复 / 其他(已忽略+暂不处理)
+FIX_STATUS_DEF = [
+    ("fixed", "已修复"),
+    ("fixing", "修复中"),
+    ("unfixed", "未修复"),
+    ("other", "其他"),
+]
+
+
+@router.get("/stats")
+async def vuln_stats(
+    search: str = "",
+    status: int | None = None,
+    level: int | None = None,
+    levels: str = "",
+    statuses: str = "",
+    vul_type: int | None = None,
+    vul_types: str = "",
+    asset_id: int | None = None,
+    asset_ids: str = "",
+    department: str = "",
+    departments: str = "",
+    system_type: str = "",
+    system_types: str = "",
+    testing_plan_id: int | None = None,
+    test_type: str = "",
+    test_types: str = "",
+    submit_time_from: str = "",
+    submit_time_to: str = "",
+    mine: bool = False,
+    user: User = Depends(require_perm("dashboard:view")),
+    session: AsyncSession = Depends(get_session),
+):
+    """漏洞数量统计：支持按测试状态/资产系统类型/测试类型/具体资产/归属部门组合筛选，
+    以及按录入时间范围筛选（submit_time_from / submit_time_to）。
+
+    返回漏洞总数、等级分布、状态分布、修复情况归并，以及按部门/系统(资产)/系统类型/测试类型分组统计。
+    分组统计基于漏洞-资产多对多关联（JOIN vuln_assets+Asset），同一漏洞关联多资产时
+    会在分组维度重复计入（按关联关系统计），total 仍为漏洞条数。
+    """
+    level_list = _parse_int_list(levels)
+    cond = _build_vuln_conditions(
+        search=search, status=status, level=level, levels=level_list,
+        statuses=_parse_int_list(statuses),
+        vul_type=vul_type, vul_types=_parse_int_list(vul_types),
+        asset_id=asset_id, asset_ids=_parse_int_list(asset_ids),
+        department=department, departments=_parse_str_list(departments),
+        system_type=system_type, system_types=_parse_str_list(system_types),
+        testing_plan_id=testing_plan_id, test_type=test_type,
+        test_types=_parse_str_list(test_types),
+        submit_time_from=_parse_date(submit_time_from),
+        submit_time_to=_parse_date(submit_time_to),
+        mine=mine, user=user,
+    )
+
+    total = (await session.execute(select(func.count(Vul.id)).where(*cond))).scalar_one()
+
+    level_rows = (
+        await session.execute(
+            select(Vul.level, func.count(Vul.id)).where(*cond).group_by(Vul.level)
+        )
+    ).all()
+    by_level = [
+        {"level": lv, "name": VUL_LEVEL.get(lv, str(lv)), "count": c}
+        for lv, c in sorted(level_rows)
+    ]
+
+    status_rows = (
+        await session.execute(
+            select(Vul.status, func.count(Vul.id)).where(*cond).group_by(Vul.status)
+        )
+    ).all()
+    by_status = [
+        {"status": s, "name": VUL_STATUS.get(s, str(s)), "count": c}
+        for s, c in sorted(status_rows)
+    ]
+
+    # 修复情况归并（应用层聚合，避免多次分组查询）
+    fix_agg: dict[str, int] = {}
+    for s, c in status_rows:
+        if s == VulStatus.FIXED:
+            key = "fixed"
+        elif s in (VulStatus.FIXING, VulStatus.RETESTING):
+            key = "fixing"
+        elif s == VulStatus.UNFIXED:
+            key = "unfixed"
+        else:
+            key = "other"
+        fix_agg[key] = fix_agg.get(key, 0) + c
+    by_fix_status = [
+        {"key": k, "name": n, "count": fix_agg.get(k, 0)} for k, n in FIX_STATUS_DEF
+    ]
+
+    # 按关联资产部门 / 系统类型分组统计（多对多 JOIN，无关联资产的漏洞不计入分组）
+    dept_rows = (
+        await session.execute(
+            select(Asset.department, func.count(Vul.id))
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(Asset.department)
+        )
+    ).all()
+    by_department = [
+        {"department": d or "未填写", "count": c}
+        for d, c in sorted(dept_rows, key=lambda x: x[1], reverse=True)
+    ]
+
+    st_rows = (
+        await session.execute(
+            select(Asset.system_type, func.count(Vul.id))
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(Asset.system_type)
+        )
+    ).all()
+    by_system_type = [
+        {"system_type": st or "未填写", "count": c}
+        for st, c in sorted(st_rows, key=lambda x: x[1], reverse=True)
+    ]
+
+    # 按具体资产/系统分组统计（多对多 JOIN，与部门/系统类型同口径，无关联资产的漏洞不计入）
+    asset_rows = (
+        await session.execute(
+            select(Asset.id, Asset.name, func.count(Vul.id))
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(Asset.id, Asset.name)
+        )
+    ).all()
+    by_asset = [
+        {"asset_id": aid, "name": name or "未命名", "count": c}
+        for aid, name, c in sorted(asset_rows, key=lambda x: x[2], reverse=True)
+    ]
+
+    # 资产归属部门去重列表（供「部门+系统组合统计」工具选择部门，覆盖所有资产部门）
+    dept_names = (
+        await session.execute(
+            select(Asset.department).where(Asset.department.isnot(None)).distinct()
+        )
+    ).scalars().all()
+    departments = sorted(d for d in dept_names if d.strip())
+
+    # 按测试计划测试类型分组统计（LEFT JOIN，未关联计划的漏洞计入「未关联」）
+    tt_rows = (
+        await session.execute(
+            select(TestingPlan.test_type, func.count(Vul.id))
+            .select_from(Vul)
+            .outerjoin(TestingPlan, TestingPlan.id == Vul.testing_plan_id)
+            .where(*cond)
+            .group_by(TestingPlan.test_type)
+        )
+    ).all()
+    by_test_type = [
+        {"test_type": t or "未关联", "count": c}
+        for t, c in sorted(tt_rows, key=lambda x: x[1], reverse=True)
+    ]
+
+    # ---- 交叉表（pivot）：按 部门→系统 分行，列=等级×修复状态 ----
+    # 查询原始粒度：每个 (部门, 资产ID, 资产名, 系统类型, 等级, 修复状态) 的漏洞数
+    from sqlalchemy import case, literal_column
+
+    _fix_case = case(
+        (Vul.status == VulStatus.FIXED, "fixed"),
+        (Vul.status.in_((VulStatus.FIXING, VulStatus.RETESTING)), "fixing"),
+        (Vul.status == VulStatus.UNFIXED, "unfixed"),
+        else_="other",
+    ).label("fix_key")
+
+    pivot_raw = (
+        await session.execute(
+            select(
+                Asset.department,
+                Asset.id.label("asset_id"),
+                Asset.name.label("asset_name"),
+                Asset.system_type,
+                Vul.level,
+                _fix_case,
+                func.count(Vul.id).label("cnt"),
+            )
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(
+                Asset.department, Asset.id, Asset.name,
+                Asset.system_type, Vul.level,
+                _fix_case,
+            )
+            .order_by(Asset.department, Asset.name, Vul.level)
+        )
+    ).all()
+
+    # 聚合为前端可消费的透视表行
+    _LEVELS = [10, 20, 30, 40]
+    _row_map: dict[int, dict] = {}  # asset_id → row dict
+    for d, aid, aname, stype, lv, fk, cnt in pivot_raw:
+        if aid not in _row_map:
+            _row_map[aid] = {
+                "department": d or "未填写",
+                "asset_id": aid,
+                "asset_name": aname or "未命名",
+                "system_type": stype or "未填写",
+                "total": 0,
+                "fixed_total": 0,
+                "levels": {lv2: {"count": 0, "fixed": 0, "unfixed": 0} for lv2 in _LEVELS},
+            }
+        r = _row_map[aid]
+        r["total"] += cnt
+        if fk == "fixed":
+            r["fixed_total"] += cnt
+            r["levels"][lv]["fixed"] += cnt
+        elif fk == "unfixed":
+            r["levels"][lv]["unfixed"] += cnt
+        r["levels"][lv]["count"] += cnt
+
+    # 按 部门 → 资产名 排序
+    pivot_rows = sorted(_row_map.values(), key=lambda x: (x["department"], x["asset_name"]))
+    # 计算每行修复率
+    for r in pivot_rows:
+        r["fix_rate"] = round(r["fixed_total"] / r["total"] * 100) if r["total"] else 0
+
+    # 合计行
+    totals = {"total": 0, "fixed_total": 0, "levels": {lv: {"count": 0, "fixed": 0, "unfixed": 0} for lv in _LEVELS}}
+    for r in pivot_rows:
+        totals["total"] += r["total"]
+        totals["fixed_total"] += r["fixed_total"]
+        for lv in _LEVELS:
+            for k in ("count", "fixed", "unfixed"):
+                totals["levels"][lv][k] += r["levels"][lv][k]
+    totals["fix_rate"] = round(totals["fixed_total"] / totals["total"] * 100) if totals["total"] else 0
+
+    return {
+        "total": total,
+        "by_level": by_level,
+        "by_status": by_status,
+        "by_fix_status": by_fix_status,
+        "by_department": by_department,
+        "by_asset": by_asset,
+        "departments": departments,
+        "by_system_type": by_system_type,
+        "by_test_type": by_test_type,
+        "pivot": {
+            "rows": pivot_rows,
+            "totals": totals,
+        },
+    }
 
 
 @router.post("", response_model=VulOut)

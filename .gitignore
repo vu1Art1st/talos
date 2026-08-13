@@ -58,3 +58,14 @@ frontend/*.png
 /backend/_verify_stats.py
 /backend/tmp_ver_check.py
 /backend/verify_retest.py
+/backend/_smoke_vuln_stats.py
+/backend/_smoke_vuln_stats_table.py
+/backend/_smoke_vuln_stats_summary.py
+/backend/_smoke_uvicorn.log
+/backend/_smoke_uvicorn.err
+/backend/_uvicorn_dev.log
+/backend/_uvicorn_dev.err
+/frontend/_vite_dev.log
+/frontend/_vite_dev.err
+/backend/tests/test_vp_stats.db
+/backend/tests/test_vp_stats_summary.db

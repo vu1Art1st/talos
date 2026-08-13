@@ -1666,6 +1666,52 @@ async def test_dashboard_by_department(client: AsyncClient, auth: dict):
     assert dept2["fix_rate"] == 50.0
 
 
+async def test_vuln_stats_by_asset(client: AsyncClient, auth: dict):
+    """/vulns/stats 按资产分组：by_asset 存在、计数正确、部门筛选联动。"""
+    a1 = (await client.post(
+        "/api/v1/assets", headers=auth,
+        json={"name": "统计资产甲", "department": "统计部门A"},
+    )).json()
+    a2 = (await client.post(
+        "/api/v1/assets", headers=auth,
+        json={"name": "统计资产乙", "department": "统计部门B"},
+    )).json()
+    v1 = v2 = None
+    try:
+        v1 = (await client.post(
+            "/api/v1/vulns", headers=auth,
+            json={"title": "统计漏洞一", "level": 20, "asset_ids": [a1["id"], a2["id"]]},
+        )).json()
+        v2 = (await client.post(
+            "/api/v1/vulns", headers=auth,
+            json={"title": "统计漏洞二", "level": 30, "asset_ids": [a2["id"]]},
+        )).json()
+
+        # 全量统计：同一漏洞关联多资产时按关联关系在各资产分组重复计入
+        # （session 级共享数据库，不依赖全局 total，只校验本次创建的资产）
+        stats = (await client.get("/api/v1/vulns/stats", headers=auth)).json()
+        assert "by_asset" in stats
+        asset_count = {r["asset_id"]: r["count"] for r in stats["by_asset"]}
+        assert asset_count[a1["id"]] == 1
+        assert asset_count[a2["id"]] == 2
+        # departments：资产部门去重列表（含全部资产部门，供组合工具选部门）
+        assert "departments" in stats
+        assert {"统计部门A", "统计部门B"} <= set(stats["departments"])
+
+        # 部门筛选联动：该部门漏洞计入（跨部门关联的乙也会带出，前端以资产列表为选项源过滤）
+        dept_stats = (await client.get(
+            "/api/v1/vulns/stats", headers=auth, params={"department": "统计部门A"},
+        )).json()
+        dept_asset_count = {r["asset_id"]: r["count"] for r in dept_stats["by_asset"]}
+        assert dept_asset_count[a1["id"]] == 1
+    finally:
+        for v in (v1, v2):
+            if v:
+                await client.delete(f"/api/v1/vulns/{v['id']}", headers=auth)
+        await client.delete(f"/api/v1/assets/{a2['id']}", headers=auth)
+        await client.delete(f"/api/v1/assets/{a1['id']}", headers=auth)
+
+
 async def test_testing_plan_filter_stats_export(client: AsyncClient, auth: dict):
     """测试计划筛选（类型/部门/时间范围）、多维度统计与 Excel 双 sheet 导出。"""
     from openpyxl import load_workbook

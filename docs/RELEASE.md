@@ -25,6 +25,27 @@
 
 ---
 
+## [1.13.0] - 2026-08-13
+
+漏洞列表多维筛选与透视聚合统计,并新增前端演示页。
+
+### 新增
+
+- **漏洞列表多维筛选**（`backend/app/api/v1/vulns.py`）：`list_vulns` 新增多选过滤维度 `levels` / `statuses` / `vul_types` / `asset_ids` / `departments` / `system_types` / `test_types`(逗号分隔字符串)与录入时间区间 `submit_time_from` / `submit_time_to`;条件构建抽离为 `_build_vuln_conditions`(单选与多选互斥,多选服务于统计表多选控件)
+- **漏洞统计聚合接口**（`backend/app/api/v1/vulns.py`）：`/vulns/stats` 新增按资产分组 `by_asset` 与透视表 `pivot`(按 资产 → 部门 聚合,含每行修复率与合计行),并补齐 `by_fix_status` / `by_department` / `by_system_type` / `by_test_type`
+- **漏洞列表透视表前端**（`frontend/src/views/VulnList.vue`）：新增按资产/部门的透视统计表(部门列合并单元格 + 合计行),筛选区支持多选维度联动
+- **演示页**（`demo/dashboard.html` / `demo/testing-plan.html` / `demo/vuln-list.html`）：新增前后端原型演示页
+
+### 测试
+
+- **按资产分组统计**（`backend/tests/test_api.py`）：新增 `test_vuln_stats_by_asset`,覆盖 `/vulns/stats` 按资产分组计数正确、部门筛选联动
+
+### 变更
+
+- **`.gitignore`** 补充 smoke 脚本(`_smoke_*.py`)与开发日志(`_uvicorn_dev.*` / `_vite_dev.*` / `test_vp_stats*.db`)忽略项
+
+---
+
 ## [1.12.2] - 2026-08-13
 
 复测结论校验增强:二轮复测不得误用首轮历史复测记录放行。

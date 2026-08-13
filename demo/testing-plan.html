@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<!--
+  渗透测试工单 UI 优化 Demo (testing-plan.html)
+  单文件 HTML，CDN 引入 Vue3 + Element Plus + Tailwind，零构建双击预览。
+  风格与 vuln-list.html 完全一致：统一设计令牌、统计概览标题居中装饰线、
+  5 张统计卡同 padding/圆角/间距、工具栏按钮组规范、工单列表等级四色徽章。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>渗透测试工单 · Talos UI 优化 Demo</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="https://unpkg.com/element-plus"></script>
+  <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+  <script src="https://unpkg.com/element-plus/dist/locale/zh-cn.min.js"></script>
+  <style>
+    :root {
+      --tl-bg: #f6f7f9; --tl-surface: #ffffff; --tl-surface-2: #f9fafb;
+      --tl-border: #e5e7eb; --tl-text-1: #111827; --tl-text-2: #4b5563; --tl-text-3: #9ca3af;
+      --tl-primary: #4f46e5; --tl-primary-light-9: #edecfc; --el-color-primary: #4f46e5;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body { font-family: 'Inter','Helvetica Neue',Helvetica,'PingFang SC','Microsoft YaHei',Arial,sans-serif; background: var(--tl-bg); color: var(--tl-text-1); font-size: 14px; }
+    .tl-brand-gradient { background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+    .app-shell { display: flex; height: 100vh; overflow: hidden; }
+    .tl-aside { width: 220px; flex: none; background: var(--tl-surface); border-right: 1px solid var(--tl-border); display: flex; flex-direction: column; }
+    .tl-logo { height: 56px; display: flex; align-items: center; gap: 10px; padding: 0 16px; border-bottom: 1px solid var(--tl-border); }
+    .tl-logo-name { font-weight: 700; font-size: 15px; white-space: nowrap; }
+    .tl-menu { flex: 1; padding-top: 4px; list-style: none; margin: 0; }
+    .tl-menu-item { display: flex; align-items: center; gap: 10px; height: 42px; margin: 3px 10px; padding: 0 12px; border-radius: 8px; color: var(--tl-text-2); cursor: pointer; font-size: 14px; transition: background .2s, color .2s; }
+    .tl-menu-item:hover { background: var(--tl-surface-2); color: var(--tl-text-1); }
+    .tl-menu-item.active { background: var(--tl-primary-light-9); color: var(--el-color-primary); font-weight: 600; }
+    .tl-aside-foot { padding: 12px; border-top: 1px solid var(--tl-border); }
+    .tl-header { height: 56px; flex: none; background: var(--tl-surface); border-bottom: 1px solid var(--tl-border); display: flex; align-items: center; justify-content: space-between; padding: 0 20px; }
+    .tl-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+    .tl-content { flex: 1; overflow: auto; padding: 16px; }
+    .tl-card { background: var(--tl-surface); border: 1px solid var(--tl-border); border-radius: 12px; transition: box-shadow .25s ease, transform .25s ease; }
+    .tl-card.hoverable:hover { box-shadow: 0 4px 12px rgba(0,0,0,.08), 0 12px 32px rgba(79,70,229,.10); transform: translateY(-2px); }
+    .section-title { display: flex; align-items: center; justify-content: center; gap: 16px; margin: 4px 0 4px; }
+    .section-title::before, .section-title::after { content: ''; height: 1px; flex: none; width: 120px; }
+    .section-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
+    .section-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
+    .section-title .txt { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
+    .section-sub { text-align: center; font-size: 12px; color: var(--tl-text-3); margin-bottom: 14px; }
+    .stat-card { padding: 16px 18px; }
+    .stat-card .label { font-size: 13px; color: var(--tl-text-2); display: flex; align-items: center; gap: 6px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; line-height: 1.2; margin-top: 8px; font-variant-numeric: tabular-nums; }
+    .stat-card .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .tl-tag { display: inline-flex; align-items: center; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+    .tl-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tl-table th { background: var(--tl-surface-2); color: var(--tl-text-2); font-weight: 600; text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--tl-border); }
+    .tl-table td { padding: 11px 14px; border-bottom: 1px solid var(--tl-border); color: var(--tl-text-1); }
+    .tl-table tbody tr:hover { background: var(--tl-primary-light-9); }
+    .unify-w-search { width: 256px !important; }
+    .unify-w-md { width: 160px !important; }
+    .lv-badge { display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:22px; padding:0 7px; border-radius:6px; font-size:12px; font-weight:600; line-height:20px; }
+    .tl-content::-webkit-scrollbar { width: 8px; }
+    .tl-content::-webkit-scrollbar-thumb { background: #d8dbe0; border-radius: 4px; }
+  </style>
+</head>
+<body>
+<div id="app" class="app-shell">
+  <aside class="tl-aside">
+    <div class="tl-logo">
+      <div class="w-8 h-8 rounded-lg flex items-center justify-center flex-none tl-brand-gradient">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      </div>
+      <span class="tl-logo-name">Talos 漏洞管理平台</span>
+    </div>
+    <ul class="tl-menu">
+      <li class="tl-menu-item"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>安全态势</li>
+      <li class="tl-menu-item active"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7h18v13H3z"/><path d="M8 7V5a4 4 0 0 1 8 0v2"/></svg>渗透测试工单</li>
+      <li class="tl-menu-item"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>漏扫基线工单</li>
+      <li class="tl-menu-item"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7v6c0 5 10 9 10 9s10-4 10-9V7z"/><path d="M12 8v4m0 4h.01"/></svg>历史漏洞库</li>
+      <li class="tl-menu-item"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v14H4z"/><path d="M4 9h16"/></svg>漏洞模板库</li>
+      <li class="tl-menu-item"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>报告中心</li>
+    </ul>
+    <div class="tl-aside-foot">
+      <button class="tl-menu-item" style="border:1px solid var(--tl-border); justify-content:center; width:100%; margin:0;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3v18M3 9h18"/></svg>收起菜单
+      </button>
+    </div>
+  </aside>
+
+  <div class="tl-main">
+    <header class="tl-header">
+      <div class="text-base font-semibold">渗透测试工单</div>
+      <div class="flex items-center gap-3">
+        <button class="tl-menu-item" style="margin:0; padding:6px; border-radius:8px;">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+        </button>
+        <span class="flex items-center gap-2 cursor-pointer">
+          <span class="w-[30px] h-[30px] rounded-full flex items-center justify-center text-white tl-brand-gradient">管</span>
+          安全管理员
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+      </div>
+    </header>
+
+    <main class="tl-content">
+      <!-- 工具栏 -->
+      <div class="tl-card p-4 mb-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <div class="flex items-center relative unify-w-search">
+            <svg class="absolute left-3 z-10" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="#9ca3af" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+            <input class="w-full pl-9 pr-3 h-8 rounded-md border border-[#e5e7eb] text-sm outline-none focus:border-[#4f46e5]" placeholder="搜索工单ID / 计划名称" style="border-radius:8px;" />
+          </div>
+          <button class="h-8 px-3 rounded-md text-sm border border-[#e5e7eb] bg-white flex items-center gap-1.5" style="border-radius:8px;">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+            筛选
+            <span class="ml-0.5 px-1.5 rounded-full text-white text-[11px]" style="background:#4f46e5">3</span>
+          </button>
+          <select class="unify-w-md h-8 rounded-md border border-[#e5e7eb] text-sm px-2 outline-none bg-white"><option>全部测试类型</option><option>Web应用</option><option>主机系统</option><option>移动端</option></select>
+          <select class="unify-w-md h-8 rounded-md border border-[#e5e7eb] text-sm px-2 outline-none bg-white"><option>全部部门</option><option>信息科技部</option><option>运营管理部</option><option>风控合规部</option></select>
+          <label class="flex items-center gap-1.5 text-sm text-[#4b5563]"><input type="checkbox" class="accent-[#4f46e5]" />仅我的工单</label>
+          <div class="flex-1"></div>
+          <button class="h-8 px-3 rounded-md text-sm border border-[#e5e7eb] bg-white" style="border-radius:8px;">导入模板</button>
+          <button class="h-8 px-3 rounded-md text-sm border border-[#e5e7eb] bg-white" style="border-radius:8px;">导入Excel</button>
+          <button class="h-8 px-3 rounded-md text-sm border border-[#e5e7eb] bg-white" style="border-radius:8px;">导出Excel</button>
+          <button class="h-8 px-4 rounded-md text-white text-sm font-medium" style="background:#4f46e5; border-radius:8px;">+ 新增工单</button>
+        </div>
+      </div>
+
+      <!-- 统计概览（与漏洞库一致） -->
+      <div class="mb-4">
+        <div class="section-title"><span class="txt">统计概览</span></div>
+        <div class="section-sub">本期渗透测试工单执行状态与漏洞产出统计</div>
+        <div class="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div class="tl-card hoverable stat-card"><div class="label"><span class="dot" style="background:#4F46E5"></span>工单总数</div><div class="value" style="color:#4F46E5">128</div></div>
+          <div class="tl-card hoverable stat-card"><div class="label"><span class="dot" style="background:#E6A23C"></span>初测中</div><div class="value" style="color:#E6A23C">36</div></div>
+          <div class="tl-card hoverable stat-card"><div class="label"><span class="dot" style="background:#F56C6C"></span>复测中</div><div class="value" style="color:#F56C6C">22</div></div>
+          <div class="tl-card hoverable stat-card"><div class="label"><span class="dot" style="background:#67C23A"></span>测试通过</div><div class="value" style="color:#67C23A">58</div></div>
+          <div class="tl-card hoverable stat-card"><div class="label"><span class="dot" style="background:#909399"></span>未开始</div><div class="value" style="color:#909399">12</div></div>
+        </div>
+      </div>
+
+      <!-- 工单列表 -->
+      <div class="tl-card p-4 max-w-7xl mx-auto">
+        <div class="flex items-center justify-between mb-3">
+          <div class="font-semibold text-[15px]">工单列表</div>
+          <div class="text-xs text-[#9ca3af]">共 128 条 · 当前页 1-10</div>
+        </div>
+        <table class="tl-table">
+          <thead>
+            <tr>
+              <th style="width:130px">工单ID</th><th>计划名称</th><th>测试系统</th><th>测试类型</th><th>所属部门</th>
+              <th style="width:90px">状态</th><th style="width:200px">漏洞统计</th><th style="width:100px">测试人员</th><th style="width:90px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(p,i) in plans" :key="i">
+              <td class="font-mono text-[#4b5563]">{{ p.id }}</td>
+              <td>{{ p.name }}</td>
+              <td>{{ p.system }}</td>
+              <td>{{ p.type }}</td>
+              <td>{{ p.dept }}</td>
+              <td><span class="tl-tag" :style="{background: p.stColor+'1f', color: p.stColor}">{{ p.status }}</span></td>
+              <td>
+                <span class="lv-badge" :style="lvBadgeStyle(b)" v-for="(b,bi) in p.levels" :key="bi" :title="b.name">{{ b.name.slice(0,1) }} {{ b.count }}</span>
+              </td>
+              <td>{{ p.tester }}</td>
+              <td><button class="text-sm font-medium" style="color:#4f46e5; background:none; border:none; cursor:pointer;">查看</button></td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="flex justify-end mt-3">
+          <div class="flex items-center gap-1 text-sm text-[#4b5563]">
+            <button class="px-2.5 py-1 rounded border border-[#e5e7eb] bg-white">上一页</button>
+            <button class="px-2.5 py-1 rounded border border-[#4f46e5] text-white" style="background:#4f46e5">1</button>
+            <button class="px-2.5 py-1 rounded border border-[#e5e7eb] bg-white">2</button>
+            <button class="px-2.5 py-1 rounded border border-[#e5e7eb] bg-white">3</button>
+            <button class="px-2.5 py-1 rounded border border-[#e5e7eb] bg-white">下一页</button>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<script>
+  const { createApp } = Vue
+  const LV = { 严重:'#A61B29', 高危:'#F56C6C', 中危:'#E6A23C', 低危:'#409EFF' }
+  createApp({
+    data() {
+      return {
+        plans: [
+          { id:'20260813-1', name:'核心交易系统专项渗透', system:'核心交易-10.20.5.22', type:'Web应用', dept:'信息科技部', status:'复测中', stColor:'#F56C6C', tester:'张工', levels:[{name:'严重',count:1,color:LV.严重},{name:'高危',count:4,color:LV.高危},{name:'中危',count:6,color:LV.中危},{name:'低危',count:3,color:LV.低危}] },
+          { id:'20260813-2', name:'门户系统安全评估', system:'门户系统-10.20.3.11', type:'Web应用', dept:'信息科技部', status:'测试通过', stColor:'#67C23A', tester:'李工', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:2,color:LV.高危},{name:'中危',count:5,color:LV.中危},{name:'低危',count:8,color:LV.低危}] },
+          { id:'20260812-7', name:'办公网边界检测', system:'办公网出口-10.20.2.0', type:'主机系统', dept:'风控合规部', status:'初测中', stColor:'#E6A23C', tester:'王工', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:3,color:LV.高危},{name:'中危',count:4,color:LV.中危},{name:'低危',count:2,color:LV.低危}] },
+          { id:'20260812-5', name:'移动营销APP测试', system:'营销APP-Android', type:'移动端', dept:'运营管理部', status:'初测中', stColor:'#E6A23C', tester:'赵工', levels:[{name:'严重',count:1,color:LV.严重},{name:'高危',count:1,color:LV.高危},{name:'中危',count:7,color:LV.中危},{name:'低危',count:5,color:LV.低危}] },
+          { id:'20260811-9', name:'数据库安全巡检', system:'财务库-10.20.13.9', type:'主机系统', dept:'风控合规部', status:'未开始', stColor:'#909399', tester:'-', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:0,color:LV.高危},{name:'中危',count:0,color:LV.中危},{name:'低危',count:0,color:LV.低危}] },
+          { id:'20260811-3', name:'统一认证平台测试', system:'统一认证-10.20.6.7', type:'Web应用', dept:'信息科技部', status:'复测中', stColor:'#F56C6C', tester:'张工', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:1,color:LV.高危},{name:'中危',count:3,color:LV.中危},{name:'低危',count:4,color:LV.低危}] },
+          { id:'20260810-6', name:'反向代理安全加固', system:'反向代理-10.20.2.5', type:'网络设备', dept:'风控合规部', status:'测试通过', stColor:'#67C23A', tester:'王工', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:0,color:LV.高危},{name:'中危',count:2,color:LV.中危},{name:'低危',count:6,color:LV.低危}] },
+          { id:'20260810-1', name:'开放平台API测试', system:'开放平台-10.20.8.1', type:'Web应用', dept:'运营管理部', status:'初测中', stColor:'#E6A23C', tester:'赵工', levels:[{name:'严重',count:0,color:LV.严重},{name:'高危',count:2,color:LV.高危},{name:'中危',count:6,color:LV.中危},{name:'低危',count:3,color:LV.低危}] },
+        ],
+      }
+    },
+    methods: {
+      lvBadgeStyle(b) {
+        return b.count > 0 ? { background: b.color, color: '#fff' } : { background: b.color + '1f', color: b.color }
+      },
+    },
+  }).use(ElementPlus).mount('#app')
+</script>
+</body>
+</html>
