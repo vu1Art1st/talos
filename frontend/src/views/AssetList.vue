@@ -1,7 +1,7 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
     <div class="flex items-center gap-2 mb-4 flex-wrap">
-      <el-input v-model="search" placeholder="搜索系统 / 子系统 / 部门 / URL" clearable class="!w-72"
+      <el-input v-model="search" placeholder="搜索系统 / 子系统 / 部门 / URL" clearable class="!w-64"
                 @keyup.enter="load(1)" @clear="load(1)">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>

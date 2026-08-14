@@ -3,7 +3,7 @@
     <!-- 筛选工具栏 -->
     <el-card shadow="never" class="!rounded-lg">
       <div class="flex flex-wrap items-center gap-2">
-        <el-input v-model="query.search" placeholder="搜索标题 / URL" clearable class="!w-56"
+        <el-input v-model="query.search" placeholder="搜索标题 / URL" clearable class="!w-64"
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -27,9 +27,9 @@
                    class="!w-52" @change="reload">
           <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
         </el-select>
-        <el-select v-model="query.asset_ids" placeholder="选择资产" clearable filterable multiple collapse-tags
-                   :loading="assetLoading" class="!w-56" @visible-change="onAssetVisible" @change="reload">
-          <el-option v-for="a in assetOptions" :key="a.id" :label="a.name" :value="a.id" />
+        <el-select v-model="query.asset_ids" placeholder="选择资产" clearable filterable remote multiple collapse-tags
+                   :remote-method="searchAssets" :loading="assetLoading" class="!w-56" @change="reload">
+          <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
         </el-select>
         <el-select v-model="query.departments" placeholder="归属部门" clearable filterable multiple collapse-tags
                    class="!w-48" @change="reload">
@@ -40,10 +40,10 @@
                         value-format="YYYY-MM-DD" class="!w-64" @change="reload" />
         <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
         <div class="flex-1" />
-        <el-button v-if="auth.hasPerm('vuln:manage') && selected.length" type="danger" @click="batchRemove">
+        <el-button v-if="auth.hasPerm('vuln:manage') && selected.length" type="danger" class="btn-min" @click="batchRemove">
           <el-icon class="mr-1"><Delete /></el-icon>删除选中 ({{ selected.length }})
         </el-button>
-        <el-button v-if="auth.hasPerm('vuln:submit')" type="primary" @click="router.push('/vulns/new')">
+        <el-button v-if="auth.hasPerm('vuln:submit')" type="primary" class="btn-min" @click="router.push('/vulns/new')">
           <el-icon class="mr-1"><Plus /></el-icon>提交漏洞
         </el-button>
       </div>
@@ -53,28 +53,30 @@
     <el-collapse v-model="statsOpen" class="!border-0">
       <el-collapse-item name="stats">
         <template #title>
-          <span class="font-medium">统计概览</span>
-          <span class="text-xs ml-2" style="color: var(--tl-text-3)">（与筛选条件联动实时更新）</span>
+          <span class="tl-collapse-title">
+            <span class="tl-collapse-title__main">统计概览</span>
+            <span class="tl-collapse-title__sub">（与筛选条件联动实时更新）</span>
+          </span>
         </template>
         <div v-loading="statsLoading">
           <!-- 数据卡片：总数 / 4 等级 / 已修复 / 修复率 -->
-          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
-            <div class="rounded-xl px-4 py-3 text-white"
+          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-4 max-w-7xl mx-auto">
+            <div class="rounded-xl px-5 py-4 text-white border border-transparent"
                  style="background: linear-gradient(135deg,#6366f1,#8b5cf6)">
               <div class="text-xs opacity-80">漏洞总数</div>
               <div class="text-2xl font-bold tabular-nums">{{ stats?.total ?? 0 }}</div>
             </div>
-            <div v-for="lv in levelCards" :key="lv.code" class="rounded-xl px-4 py-3 border"
+            <div v-for="lv in levelCards" :key="lv.code" class="rounded-xl px-5 py-4 border"
                  :style="{ background: lv.color + '0f', borderColor: lv.color + '33' }">
               <div class="text-xs" :style="{ color: lv.color }">{{ lv.label }}</div>
               <div class="text-2xl font-bold tabular-nums" :style="{ color: lv.color }">{{ levelCount(lv.code) }}</div>
             </div>
-            <div class="rounded-xl px-4 py-3 border"
+            <div class="rounded-xl px-5 py-4 border"
                  style="background: #67c23a0f; border-color: #67c23a33">
               <div class="text-xs" style="color: #67C23A">已修复</div>
               <div class="text-2xl font-bold tabular-nums" style="color: #67C23A">{{ fixedCount }}</div>
             </div>
-            <div class="rounded-xl px-4 py-3 border"
+            <div class="rounded-xl px-5 py-4 border"
                  style="background: #409eff0f; border-color: #409eff33">
               <div class="text-xs" style="color: #409EFF">修复率</div>
               <div class="text-2xl font-bold tabular-nums" style="color: #409EFF">{{ fixRate }}%</div>
@@ -105,6 +107,7 @@
                 </div>
               </div>
             </template>
+            <div class="max-w-[1300px] mx-auto">
             <el-table :data="pivotTableData" stripe border :max-height="520" :fit="false"
                       :span-method="pivotSpanMethod" show-summary
                       :summary-method="pivotSummaryMethod"
@@ -143,6 +146,7 @@
                 <el-empty description="暂无统计数据" :image-size="60" />
               </template>
             </el-table>
+            </div>
           </el-card>
         </div>
       </el-collapse-item>
@@ -223,7 +227,8 @@ const query = reactive({
 // ---------- 筛选数据源：测试类型 / 部门 / 资产远程搜索 ----------
 const testTypes = ref<string[]>([])
 const departments = ref<string[]>([])
-const assetOptions = ref<{ id: number; name: string }[]>([])
+const assetOptions = ref<{ id: number; label: string }[]>([])
+const assetCache = ref<Record<number, any>>({})
 const assetLoading = ref(false)
 
 async function loadTestTypes() {
@@ -236,19 +241,34 @@ async function loadDepartments() {
   departments.value = data.map((g: any) => g.name)
 }
 
-// 资产下拉：展开时一次性加载（下拉选择，非远程输入搜索）
-async function loadAssets() {
-  if (assetOptions.value.length) return
+// 下拉展示：系统名称 +（子系统）+（系统类型），区分同名系统的不同环境
+function assetLabel(a: any) {
+  const parts = [a.name]
+  if (a.sub_system) parts.push(`（${a.sub_system}）`)
+  if (a.system_type) parts.push(`（${a.system_type}）`)
+  return parts.join('')
+}
+
+// 资产下拉：远程搜索。已选中的资产始终合并进选项，保证多选标签可正确回显
+async function searchAssets(keyword = '') {
   assetLoading.value = true
   try {
-    const { data } = await client.get('/assets', { params: { size: 500 } })
-    assetOptions.value = data.items.map((a: any) => ({ id: a.id, name: a.name }))
+    const { data } = await client.get('/assets', { params: { search: keyword, page: 1, size: 50 } })
+    const opts = data.items.map((a: any) => {
+      assetCache.value[a.id] = a
+      return { id: a.id, label: assetLabel(a) }
+    })
+    // 已选资产若不在搜索结果中，追加其标签，避免多选回显为纯数字
+    for (const id of query.asset_ids) {
+      if (!opts.some((o: any) => o.id === id)) {
+        const cached = assetCache.value[id]
+        if (cached) opts.push({ id, label: assetLabel(cached) })
+      }
+    }
+    assetOptions.value = opts
   } finally {
     assetLoading.value = false
   }
-}
-function onAssetVisible(visible: boolean) {
-  if (visible) loadAssets()
 }
 
 // ---------- 统计概览（顶部 7 张数据卡片） ----------
@@ -393,6 +413,29 @@ async function batchRemove() {
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
-  await Promise.all([reload(), loadTestTypes(), loadDepartments(), loadAssets()])
+  await Promise.all([reload(), loadTestTypes(), loadDepartments(), searchAssets()])
 })
 </script>
+
+<style scoped>
+/* 统计概览标题：居中 + 两侧渐变装饰线；保留 el-collapse 折叠/展开能力，仅做视觉增强 */
+.tl-collapse-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+.tl-collapse-title::before,
+.tl-collapse-title::after {
+  content: '';
+  height: 1px;
+  flex: none;
+  width: 100px;
+}
+.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
+.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
+.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
+.tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
+</style>

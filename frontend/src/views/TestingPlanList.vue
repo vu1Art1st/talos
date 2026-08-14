@@ -49,15 +49,17 @@
     <el-collapse v-model="statsPanel" class="mb-4">
       <el-collapse-item name="stats">
         <template #title>
-          <span class="font-medium">统计概览</span>
-          <span class="text-xs text-gray-400 ml-2">（与筛选条件联动实时更新）</span>
+          <span class="tl-collapse-title">
+            <span class="tl-collapse-title__main">统计概览</span>
+            <span class="tl-collapse-title__sub">（与筛选条件联动实时更新）</span>
+          </span>
         </template>
         <el-checkbox-group v-model="dims" class="mb-3">
           <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
         </el-checkbox-group>
-        <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 max-w-7xl mx-auto">
           <div v-for="d in cardDims" :key="d.key"
-               class="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+               class="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3.5">
             <div class="text-xs text-gray-500">{{ d.label }}</div>
             <div class="text-2xl font-semibold" :style="{ color: d.color }">{{ stats[d.key] ?? 0 }}</div>
           </div>
@@ -1000,4 +1002,25 @@ onBeforeUnmount(() => {
 }
 .ti-name { font-size: 13px; font-weight: 500; }
 .ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
+
+/* 统计概览标题：居中 + 两侧渐变装饰线；保留 el-collapse 折叠/展开能力，仅做视觉增强 */
+.tl-collapse-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+.tl-collapse-title::before,
+.tl-collapse-title::after {
+  content: '';
+  height: 1px;
+  flex: none;
+  width: 100px;
+}
+.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
+.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
+.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
+.tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
 </style>

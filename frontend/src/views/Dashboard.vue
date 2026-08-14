@@ -2,8 +2,8 @@
   <div class="space-y-4">
     <el-card shadow="never" class="!rounded-lg">
       <div class="flex items-center flex-wrap gap-2">
-        <span class="text-sm" style="color: var(--tl-text-3)">按事件筛选：</span>
-        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-64"
+        <span class="text-sm" style="color: var(--tl-text-3)">按时间筛选：</span>
+        <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-60"
                         start-placeholder="提交起" end-placeholder="提交止" @change="reload" />
         <el-select v-model="deptFilter" filterable clearable placeholder="全部部门" class="!w-40" @change="reload">
           <el-option v-for="d in departments" :key="d" :label="d" :value="d" />

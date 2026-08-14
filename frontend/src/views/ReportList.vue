@@ -6,16 +6,16 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
-      <el-button :disabled="!selected.length" :loading="batchDownloading" @click="batchDownload">
+      <el-button :disabled="!selected.length" :loading="batchDownloading" class="btn-min" @click="batchDownload">
         <el-icon class="mr-1"><Download /></el-icon>批量下载（{{ selected.length }}）
       </el-button>
-      <el-button v-if="auth.hasPerm('import:manage')" @click="router.push('/reports/imports')">
+      <el-button v-if="auth.hasPerm('import:manage')" class="btn-min" @click="router.push('/reports/imports')">
         <el-icon class="mr-1"><Upload /></el-icon>Word 导入
       </el-button>
-      <el-button type="primary" @click="fromVulnsVisible = true">
+      <el-button type="primary" class="btn-min" @click="fromVulnsVisible = true">
         <el-icon class="mr-1"><MagicStick /></el-icon>从漏洞生成
       </el-button>
-      <el-button @click="createBlank">
+      <el-button class="btn-min" @click="createBlank">
         <el-icon class="mr-1"><Plus /></el-icon>新建空白报告
       </el-button>
     </div>

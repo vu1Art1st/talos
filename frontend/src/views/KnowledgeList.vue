@@ -7,13 +7,13 @@
       <span class="text-gray-400 text-sm">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
       <div class="flex-1" />
       <template v-if="auth.hasPerm('vuln:manage')">
-        <el-button type="danger" plain :disabled="!selected.length" @click="removeBatch">
+        <el-button type="danger" plain :disabled="!selected.length" class="btn-min" @click="removeBatch">
           <el-icon class="mr-1"><Delete /></el-icon>批量删除{{ selected.length ? `(${selected.length})` : '' }}
         </el-button>
-        <el-button @click="importVisible = true">
+        <el-button @click="importVisible = true" class="btn-min">
           <el-icon class="mr-1"><Upload /></el-icon>批量导入
         </el-button>
-        <el-button type="primary" @click="openDialog()">
+        <el-button type="primary" @click="openDialog()" class="btn-min">
           <el-icon class="mr-1"><Plus /></el-icon>新建条目
         </el-button>
       </template>

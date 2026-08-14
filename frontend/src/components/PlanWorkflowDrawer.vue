@@ -117,27 +117,29 @@
           </el-table-column>
           <el-table-column label="操作" width="170">
             <template #default="{ row }">
-              <el-dropdown v-if="canManageVulns" trigger="click"
-                           @visible-change="(v: boolean) => v && loadTransitions(row)"
-                           @command="(s: number) => transition(row, s)">
-                <el-button size="small" type="primary" link>
-                  流转<el-icon class="ml-0.5"><ArrowDown /></el-icon>
+              <div class="flex items-center gap-2">
+                <el-dropdown v-if="canManageVulns" trigger="click"
+                             @visible-change="(v: boolean) => v && loadTransitions(row)"
+                             @command="(s: number) => transition(row, s)">
+                  <el-button size="small" type="primary" link>
+                    流转<el-icon class="ml-0.5"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <template v-if="transitionsMap[row.id]?.length">
+                        <el-dropdown-item v-for="t in transitionsMap[row.id]" :key="t.status" :command="t.status">
+                          {{ t.name }}
+                        </el-dropdown-item>
+                      </template>
+                      <el-dropdown-item v-else disabled>无可流转状态</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+                <el-button v-if="canManageVulns" size="small" type="warning" link
+                           @click="router.push(`/vulns/${row.id}/edit`)">
+                  编辑
                 </el-button>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <template v-if="transitionsMap[row.id]?.length">
-                      <el-dropdown-item v-for="t in transitionsMap[row.id]" :key="t.status" :command="t.status">
-                        {{ t.name }}
-                      </el-dropdown-item>
-                    </template>
-                    <el-dropdown-item v-else disabled>无可流转状态</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-              <el-button v-if="canManageVulns" size="small" type="warning" link
-                         @click="router.push(`/vulns/${row.id}/edit`)">
-                编辑
-              </el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>

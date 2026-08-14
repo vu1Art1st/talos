@@ -96,6 +96,7 @@ body,
   border-radius: 12px;
   transition: box-shadow .25s ease, transform .25s ease, background-color .25s ease;
 }
+.el-card:hover,
 .el-card.is-hover-shadow:hover,
 .el-card.tl-hover:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, .08), 0 12px 32px rgba(79, 70, 229, .10);
@@ -214,4 +215,17 @@ body,
   float: left;
   height: 0;
   pointer-events: none;
+}
+
+/* ============ 操作按钮统一最小宽度（样式增强，不改变任何业务逻辑 / 列 / 文案） ============ */
+/* 工具栏主操作按钮统一最小宽度，文字居中，避免长短不一导致的视觉参差 */
+.btn-min {
+  min-width: 96px;
+  justify-content: center;
+}
+
+/* ============ 统计卡片留白优化（仅样式增强，卡片数量 / 内容 / 折叠逻辑不变） ============ */
+/* 统一统计卡片内边距，提升呼吸感；不影响数据展示与交互 */
+.tl-stat-card {
+  padding: 16px 20px;
 }

@@ -10,30 +10,30 @@
         <el-option label="仅可进行" :value="true" />
       </el-select>
       <div class="flex-1" />
-      <el-button type="primary" @click="openDialog()">
+      <el-button type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
       </el-button>
     </div>
 
     <!-- 统计概览：总数 / 复测完成 / 三类扫描次数 -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
-      <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
+      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">漏扫基线工单总数</div>
         <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.blue }">{{ stats.total ?? 0 }}</div>
       </div>
-      <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
+      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">复测完成数</div>
         <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.green }">{{ stats.retest_done ?? 0 }}</div>
       </div>
-      <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
+      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">基线扫描次数</div>
         <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.orange }">{{ stats.baseline_times ?? 0 }}</div>
       </div>
-      <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
+      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">主机扫描次数</div>
         <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.red }">{{ stats.host_times ?? 0 }}</div>
       </div>
-      <div class="rounded-lg border px-4 py-3" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
+      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
         <div class="text-xs" style="color: var(--tl-text-3)">Web扫描次数</div>
         <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.gray }">{{ stats.web_times ?? 0 }}</div>
       </div>
