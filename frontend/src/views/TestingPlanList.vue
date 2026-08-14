@@ -26,21 +26,44 @@
           </div>
         </div>
       </el-popover>
-      <el-checkbox v-model="myTests" @change="reload">显示当前可测试系统</el-checkbox>
-      <el-checkbox v-model="unclaimed" @change="reload">显示无人认领的测试</el-checkbox>
-      <el-checkbox v-model="pending" @change="reload">显示待办流程</el-checkbox>
+      <!-- 快捷筛选：三项布尔筛选收纳为下拉多选，勾选任意条件即触发筛选 -->
+      <el-popover trigger="click" placement="bottom-start" :width="240">
+        <template #reference>
+          <el-button :type="quickFilterCount ? 'primary' : 'default'">
+            <el-icon class="mr-1"><Filter /></el-icon>快捷筛选
+            <span v-if="quickFilterCount" class="filter-count">{{ quickFilterCount }}</span>
+          </el-button>
+        </template>
+        <div class="quick-filter-panel">
+          <div class="mb-2 text-sm font-medium">快捷筛选</div>
+          <el-checkbox-group v-model="quickFilters" class="quick-filter-group" @change="onQuickFilterChange">
+            <el-checkbox value="my_tests">显示当前可测试系统</el-checkbox>
+            <el-checkbox value="unclaimed">显示无人认领的测试</el-checkbox>
+            <el-checkbox value="pending">显示待办流程</el-checkbox>
+          </el-checkbox-group>
+        </div>
+      </el-popover>
       <div class="flex-1" />
-      <el-button @click="downloadTemplate">
-        <el-icon class="mr-1"><Download /></el-icon>导入模板下载
-      </el-button>
-      <el-upload :show-file-list="false" :http-request="doImport" accept=".xlsx" class="inline-block">
-        <el-button :loading="importing">
-          <el-icon class="mr-1"><Upload /></el-icon>导入Excel
+      <!-- 导入导出：三操作收纳为下拉，分别对应原「导入模板下载 / 导入 Excel / 导出 Excel」 -->
+      <el-dropdown trigger="click" @command="onImportExport">
+        <el-button>
+          导入导出<el-icon class="ml-1"><ArrowDown /></el-icon>
         </el-button>
-      </el-upload>
-      <el-button @click="exportExcel">
-        <el-icon class="mr-1"><Download /></el-icon>导出Excel
-      </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="template">
+              <el-icon class="mr-1"><Download /></el-icon>导入模板下载
+            </el-dropdown-item>
+            <el-dropdown-item command="import" :disabled="importing">
+              <el-icon class="mr-1"><Upload /></el-icon>导入 Excel
+            </el-dropdown-item>
+            <el-dropdown-item command="export">
+              <el-icon class="mr-1"><Download /></el-icon>导出 Excel
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
+      <input ref="importInputRef" type="file" accept=".xlsx" class="hidden" @change="onImportFileChange" />
       <el-button type="primary" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试工单
       </el-button>
@@ -397,9 +420,15 @@ const items = ref<any[]>([])
 const total = ref(0)
 const page = ref(1)
 const search = ref('')
-const myTests = ref(false)
-const unclaimed = ref(false)
-const pending = ref(false)
+// 快捷筛选：三项布尔筛选收敛为单个下拉多选，myTests/unclaimed/pending 由勾选项派生
+const quickFilters = ref<string[]>([])
+const myTests = computed(() => quickFilters.value.includes('my_tests'))
+const unclaimed = computed(() => quickFilters.value.includes('unclaimed'))
+const pending = computed(() => quickFilters.value.includes('pending'))
+const quickFilterCount = computed(() => quickFilters.value.length)
+function onQuickFilterChange() {
+  reload()
+}
 const sort = reactive<{ prop: string; order: string }>({ prop: 'receive_time', order: 'desc' })
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -703,6 +732,24 @@ async function doImport(options: any) {
   }
 }
 
+// ---------- 导入导出下拉 ----------
+const importInputRef = ref<HTMLInputElement>()
+
+// 下拉命令分发：分别对应原「导入模板下载 / 导入 Excel / 导出 Excel」，逻辑完全不变
+function onImportExport(command: string) {
+  if (command === 'template') downloadTemplate()
+  else if (command === 'export') exportExcel()
+  else if (command === 'import') importInputRef.value?.click()
+}
+
+// 隐藏文件选择器触发后走原 doImport 逻辑（沿用原 el-upload 的 http-request 入参结构 { file }）
+function onImportFileChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) doImport({ file })
+  input.value = ''
+}
+
 function openDialog(row?: any) {
   dialogRow.value = row ?? null
   form.value = row ? { ...emptyForm(), ...row } : emptyForm()
@@ -927,6 +974,18 @@ onBeforeUnmount(() => {
   line-height: 16px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.28);
+}
+/* 快捷筛选下拉：纵向排列 + 每项可整行点击 */
+.quick-filter-panel :deep(.el-checkbox-group) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.quick-filter-panel :deep(.el-checkbox) {
+  margin-right: 0;
+  height: 32px;
+  display: flex;
+  align-items: center;
 }
 
 /* ---------- 创建漏扫基线工单（联动） ---------- */

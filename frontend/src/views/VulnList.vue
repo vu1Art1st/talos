@@ -7,38 +7,78 @@
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <el-select v-model="query.statuses" placeholder="状态" clearable multiple collapse-tags
-                   class="!w-44" @change="reload">
-          <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
-        <el-select v-model="query.levels" placeholder="等级" clearable multiple collapse-tags
-                   class="!w-44" @change="reload">
-          <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
-        <el-select v-model="query.vul_types" placeholder="类型" clearable filterable multiple collapse-tags
-                   class="!w-52" @change="reload">
-          <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
-        </el-select>
-        <el-select v-model="query.system_types" placeholder="系统类型" clearable filterable multiple collapse-tags
-                   class="!w-52" @change="reload">
-          <el-option v-for="st in (meta?.system_type ?? [])" :key="st" :label="st" :value="st" />
-        </el-select>
-        <el-select v-model="query.test_types" placeholder="测试类型" clearable filterable multiple collapse-tags
-                   class="!w-52" @change="reload">
-          <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
-        </el-select>
-        <el-select v-model="query.asset_ids" placeholder="选择资产" clearable filterable remote multiple collapse-tags
-                   :remote-method="searchAssets" :loading="assetLoading" class="!w-56" @change="reload">
-          <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
-        </el-select>
-        <el-select v-model="query.departments" placeholder="归属部门" clearable filterable multiple collapse-tags
-                   class="!w-48" @change="reload">
-          <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
-        </el-select>
-        <el-date-picker v-model="query.dateRange" type="daterange" unlink-panels
-                        range-separator="至" start-placeholder="录入开始" end-placeholder="录入结束"
-                        value-format="YYYY-MM-DD" class="!w-64" @change="reload" />
-        <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
+        <!-- 筛选：多组筛选条件收纳为单个下拉弹窗，勾选后实时联动列表与统计 -->
+        <el-popover trigger="click" placement="bottom-start" :width="680">
+          <template #reference>
+            <el-button :type="activeFilterCount ? 'primary' : 'default'">
+              <el-icon class="mr-1"><Filter /></el-icon>筛选
+              <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+            </el-button>
+          </template>
+          <div class="vuln-filter-panel">
+            <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div>
+                <div class="filter-label">状态</div>
+                <el-select v-model="query.statuses" placeholder="全部" clearable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">等级</div>
+                <el-select v-model="query.levels" placeholder="全部" clearable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">类型</div>
+                <el-select v-model="query.vul_types" placeholder="全部" clearable filterable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">系统类型</div>
+                <el-select v-model="query.system_types" placeholder="全部" clearable filterable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="st in (meta?.system_type ?? [])" :key="st" :label="st" :value="st" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">测试类型</div>
+                <el-select v-model="query.test_types" placeholder="全部" clearable filterable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">选择资产</div>
+                <el-select v-model="query.asset_ids" placeholder="全部" clearable filterable remote multiple collapse-tags
+                           :remote-method="searchAssets" :loading="assetLoading" class="w-full" @change="reload">
+                  <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">归属部门</div>
+                <el-select v-model="query.departments" placeholder="全部" clearable filterable multiple collapse-tags
+                           class="w-full" @change="reload">
+                  <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
+                </el-select>
+              </div>
+              <div>
+                <div class="filter-label">录入时间</div>
+                <el-date-picker v-model="query.dateRange" type="daterange" unlink-panels
+                                range-separator="至" start-placeholder="开始" end-placeholder="结束"
+                                value-format="YYYY-MM-DD" class="w-full" @change="reload" />
+              </div>
+            </div>
+            <div class="flex items-center justify-between mt-3 pt-3" style="border-top: 1px solid var(--tl-border)">
+              <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
+              <el-button size="small" text type="primary" @click="resetFilters">重置筛选</el-button>
+            </div>
+          </div>
+        </el-popover>
         <div class="flex-1" />
         <el-button v-if="auth.hasPerm('vuln:manage') && selected.length" type="danger" class="btn-min" @click="batchRemove">
           <el-icon class="mr-1"><Delete /></el-icon>删除选中 ({{ selected.length }})
@@ -223,6 +263,35 @@ const query = reactive({
   asset_ids: [], departments: [], dateRange: [],
   mine: false, page: 1, size: 20, sort: '', order: '',
 })
+
+// 已启用的筛选维度数（用于「筛选」按钮徽标）
+const activeFilterCount = computed(() => {
+  let n = 0
+  if (query.statuses.length) n++
+  if (query.levels.length) n++
+  if (query.vul_types.length) n++
+  if (query.system_types.length) n++
+  if (query.test_types.length) n++
+  if (query.asset_ids.length) n++
+  if (query.departments.length) n++
+  if (query.dateRange && query.dateRange.length === 2) n++
+  if (query.mine) n++
+  return n
+})
+
+// 一键清空所有筛选条件（保留搜索关键字与分页状态）
+function resetFilters() {
+  query.statuses = []
+  query.levels = []
+  query.vul_types = []
+  query.system_types = []
+  query.test_types = []
+  query.asset_ids = []
+  query.departments = []
+  query.dateRange = []
+  query.mine = false
+  reload()
+}
 
 // ---------- 筛选数据源：测试类型 / 部门 / 资产远程搜索 ----------
 const testTypes = ref<string[]>([])
@@ -438,4 +507,27 @@ onMounted(async () => {
 .tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
 .tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
 .tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
+/* 筛选弹窗：字段小标签 + 已启用条件数徽标 */
+.filter-label {
+  font-size: 12px;
+  color: var(--tl-text-3);
+  margin-bottom: 4px;
+}
+.filter-count {
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+}
+/* 弹窗内日期范围编辑器撑满列宽 */
+.vuln-filter-panel :deep(.el-date-editor) {
+  width: 100%;
+}
 </style>
