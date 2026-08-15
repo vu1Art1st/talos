@@ -105,7 +105,9 @@
               </el-select>
             </el-form-item>
             <el-form-item label="漏洞来源">
-              <el-select v-model="vul.source" class="w-full">
+              <!-- 关联渗透测试工单：来源固定为「渗透测试工单」不可修改；单独提交时可选远程检测来源 -->
+              <el-input v-if="selectedPlanId" :model-value="'渗透测试工单'" disabled class="w-full" />
+              <el-select v-else v-model="vul.source" class="w-full" clearable placeholder="未选择（可选）">
                 <el-option v-for="(name, code) in meta?.vul_source" :key="code" :label="name" :value="Number(code)" />
               </el-select>
             </el-form-item>
@@ -205,7 +207,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -231,6 +233,10 @@ const planId = props.planId ?? null
 
 // ---------- 关联测试计划 ----------
 const selectedPlanId = ref<number | null>(planId)
+// 关联渗透测试工单后来源固定为「渗透测试工单」（展示层派生），不落库来源值
+watch(selectedPlanId, (v) => {
+  if (v != null) vulns.value.forEach((x: any) => (x.source = 0))
+})
 const planOptions = ref<any[]>([])
 const planLoading = ref(false)
 let plansLoaded = false
@@ -306,7 +312,7 @@ const emptyVul = () => ({
   description_html: '', description_json: null,
   reproduce_html: '', reproduce_json: null,
   solution_html: '', solution_json: null,
-  source: 70, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
+  source: 0, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
 })
 const vulns = ref<any[]>([emptyVul()])
 

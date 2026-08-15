@@ -29,17 +29,28 @@ testing_plan_testers = Table(
 
 
 class RemoteTesting(Base):
-    """远程检测记录。"""
+    """远程检测记录（2026-08-14 按通报口径重构）。
+
+    表单项对应通报列表：通报时间 / 系统名称 / 资产归属 / 被通报单位 / 是否外部项目 /
+    漏洞名称 / 漏洞类型 / 申诉状态 / 申诉报告(附件) / 申诉方式。
+    申诉报告不再关联报告中心，改为附件上传（appeal_file_* 字段）。
+    """
 
     __tablename__ = "remote_testings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str] = mapped_column(String(255), index=True)
-    system_name: Mapped[str] = mapped_column(String(128), default="")
-    test_time: Mapped[str] = mapped_column(String(32), default="")
-    department: Mapped[str] = mapped_column(String(128), default="")
-    appeal_success: Mapped[bool] = mapped_column(Boolean, default=False)
-    appeal_report_id: Mapped[int | None] = mapped_column(ForeignKey("reports.id"), nullable=True)
+    notice_time: Mapped[str] = mapped_column(String(32), default="")  # 通报时间（YYYY-MM）
+    system_name: Mapped[str] = mapped_column(String(128), index=True)
+    department: Mapped[str] = mapped_column(String(128), default="")  # 资产归属
+    notified_unit: Mapped[str] = mapped_column(String(128), default="")  # 被通报单位
+    is_external: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否外部项目
+    vuln_name: Mapped[str] = mapped_column(String(255), default="")  # 漏洞名称
+    vuln_type: Mapped[str] = mapped_column(String(64), default="")  # 漏洞类型
+    appeal_status: Mapped[str] = mapped_column(String(16), default="")  # 申诉状态：''未申诉 / success申诉成功 / fail申诉失败
+    appeal_method: Mapped[str] = mapped_column(String(64), default="")  # 申诉方式
+    appeal_file_name: Mapped[str] = mapped_column(String(255), default="")  # 申诉报告附件原始文件名
+    appeal_file_path: Mapped[str] = mapped_column(String(512), default="")  # 附件存储相对路径（storage/ 下）
+    appeal_file_size: Mapped[int] = mapped_column(Integer, default=0)  # 附件大小（字节）
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

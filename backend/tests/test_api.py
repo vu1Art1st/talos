@@ -293,13 +293,13 @@ async def test_word_import_flow(client: AsyncClient, auth: dict):
     assert resp.status_code == 200, resp.text
     assert resp.json()["created"] == 1
 
-    # 入库漏洞 source=60(Word导入)
+    # 入库漏洞 source=0（来源未选择；Word导入不再单列来源）
     resp = await client.get(
         "/api/v1/vulns", headers=auth, params={"search": "已确认"}
     )
     items = resp.json()["items"]
     assert len(items) == 1
-    assert items[0]["source"] == 60
+    assert items[0]["source"] == 0
 
 
 def _build_report_docx(system_name: str, target_url: str, target_ip: str, sections: list[tuple[str, str, str, bool]]):
@@ -1011,29 +1011,44 @@ async def test_import_confirm_into_report(client: AsyncClient, auth: dict):
 
 async def test_special_modules_crud(client: AsyncClient, auth: dict):
     """三个专项模块：远程检测 / 测试计划 / 春耕行动 CRUD。"""
-    # ---- 远程检测 ----
+    # ---- 远程检测（2026-08-14 按通报口径重构：申诉报告改为附件上传） ----
     resp = await client.post(
         "/api/v1/remote-testings", headers=auth,
-        json={"title": "远程检测A", "system_name": "门户系统", "test_time": "2026-01-10",
-              "department": "信息部", "appeal_success": False, "appeal_report_id": None},
+        json={"system_name": "门户系统", "notice_time": "2026-01", "department": "信息部",
+              "notified_unit": "省公司", "is_external": False, "vuln_name": "SQL注入",
+              "vuln_type": "SQL注入", "appeal_status": "", "appeal_method": "",
+              "appeal_file_name": "", "appeal_file_path": "", "appeal_file_size": 0},
     )
     assert resp.status_code == 200, resp.text
     rt_id = resp.json()["id"]
+    assert resp.json()["system_name"] == "门户系统"
 
-    # 不存在的申诉报告被拒绝
+    # 申诉报告附件上传（返回文件元信息供表单绑定）
     resp = await client.post(
-        "/api/v1/remote-testings", headers=auth,
-        json={"title": "坏申诉", "appeal_report_id": 999999},
+        "/api/v1/remote-testings/upload-appeal", headers=auth,
+        files={"file": ("appeal.pdf", b"%PDF-1.4 test", "application/pdf")},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 200, resp.text
+    up = resp.json()
+    assert up["name"] == "appeal.pdf"
+    assert up["path"].startswith("uploads/remote_appeal/")
+    assert up["size"] == len(b"%PDF-1.4 test")
 
     resp = await client.put(
         f"/api/v1/remote-testings/{rt_id}", headers=auth,
-        json={"title": "远程检测A-改", "system_name": "门户系统", "test_time": "2026-01-10",
-              "department": "信息部", "appeal_success": True, "appeal_report_id": None},
+        json={"system_name": "门户系统", "notice_time": "2026-02", "department": "信息部",
+              "notified_unit": "省公司", "is_external": True, "vuln_name": "SQL注入",
+              "vuln_type": "SQL注入", "appeal_status": "success", "appeal_method": "线下申诉",
+              "appeal_file_name": up["name"], "appeal_file_path": up["path"],
+              "appeal_file_size": up["size"]},
     )
     assert resp.status_code == 200
-    assert resp.json()["appeal_success"] is True
+    assert resp.json()["appeal_status"] == "success"
+
+    # 申诉报告附件下载
+    resp = await client.get(f"/api/v1/remote-testings/{rt_id}/appeal", headers=auth)
+    assert resp.status_code == 200
+    assert resp.content == b"%PDF-1.4 test"
 
     resp = await client.get("/api/v1/remote-testings", headers=auth, params={"search": "门户"})
     assert rt_id in [r["id"] for r in resp.json()["items"]]
@@ -2062,10 +2077,19 @@ async def test_dashboard_event_filters(client: AsyncClient, auth: dict):
     )).json()
     assert stats["total_vulns"] == 1
 
-    # 部门 + 来源
+    # 单独录入的漏洞（未关联工单）：来源可选，且关联工单的漏洞来源恒为工单（source 强制 0）
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "态势来源资产"})
+    src_asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "态势来源筛选漏洞", "level": 30, "source": 20, "asset_ids": [src_asset_id]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 来源筛选：仅命中单独录入且来源=20（春耕行动）的漏洞；关联工单的漏洞来源被强制为 0 不参与
     stats = (await client.get(
         "/api/v1/dashboard/stats", headers=auth,
-        params={"department": dept, "source": 20},
+        params={"source": 20},
     )).json()
     assert stats["total_vulns"] == 1
 

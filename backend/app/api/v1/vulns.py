@@ -533,6 +533,9 @@ async def create_vuln(
     data = body.model_dump()
     asset_ids = data.pop("asset_ids", [])
     await _check_plan_access(session, data.get("testing_plan_id"), user)
+    if data.get("testing_plan_id") is not None:
+        # 关联渗透测试工单：漏洞来源固定为「渗透测试工单」（展示层派生），不落库来源值
+        data["source"] = 0
     vul = Vul(**data, submitter_id=user.id)
     vul.assets = await _fetch_assets(session, asset_ids)
     session.add(vul)
@@ -560,6 +563,9 @@ async def create_vulns_batch(
     for item in body.vulns:
         data = item.model_dump()
         item_asset_ids = data.pop("asset_ids", [])
+        if data.get("testing_plan_id") is not None:
+            # 关联渗透测试工单：来源固定为「渗透测试工单」，不落库来源值
+            data["source"] = 0
         merged_ids = list(dict.fromkeys([*body.asset_ids, *item_asset_ids]))
         vul = Vul(**data, submitter_id=user.id)
         vul.assets = await _fetch_assets(session, merged_ids)
@@ -603,6 +609,9 @@ async def update_vuln(
         await _check_plan_access(session, data.get("testing_plan_id"), user)
     for k, v in data.items():
         setattr(vul, k, v)
+    # 关联渗透测试工单：来源恒为「渗透测试工单」，不可通过编辑修改来源值
+    if vul.testing_plan_id is not None:
+        vul.source = 0
     vul.assets = await _fetch_assets(session, asset_ids)
     vuln_service.add_log(session, vul, user, "编辑漏洞")
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态

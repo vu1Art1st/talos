@@ -1,7 +1,7 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
     <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索报告标题 / 项目" clearable class="!w-64"
+      <el-input v-model="search" placeholder="搜索报告标题 / 测试系统" clearable class="!w-64"
                 @keyup.enter="load(1)" @clear="load(1)">
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
@@ -55,8 +55,17 @@
       </el-table-column>
       <el-table-column type="index" label="序号" width="70"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
-      <el-table-column prop="title" label="报告标题" min-width="240" show-overflow-tooltip sortable="custom" />
-      <el-table-column prop="project_name" label="项目" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="title" label="报告标题" min-width="220" show-overflow-tooltip sortable="custom" />
+      <el-table-column label="关联工单" width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          <template v-if="row.ticket_id">
+            <span class="font-mono text-xs">{{ row.ticket_id }}</span>
+            <span class="text-gray-400 text-xs"> · {{ row.ticket_system_name || '未填写' }}</span>
+          </template>
+          <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="project_name" label="测试系统" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="author" label="作者" width="120" sortable="custom" />
       <el-table-column prop="status" label="状态" width="90" sortable="custom">
         <template #default="{ row }">

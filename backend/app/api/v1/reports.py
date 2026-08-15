@@ -240,7 +240,39 @@ async def list_reports(
         Report.update_time.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
-    return Page(total=total, items=items)
+    # 批量取出关联渗透测试工单，用于列表展示「关联工单」信息（工单号 + 测试系统）
+    plan_ids = {r.testing_plan_id for r in items if r.testing_plan_id}
+    plan_map: dict[int, TestingPlan] = {}
+    if plan_ids:
+        plan_map = {
+            p.id: p
+            for p in (
+                await session.execute(select(TestingPlan).where(TestingPlan.id.in_(plan_ids)))
+            ).scalars().all()
+        }
+    result = []
+    for r in items:
+        plan = plan_map.get(r.testing_plan_id) if r.testing_plan_id else None
+        result.append({
+            "id": r.id,
+            "title": r.title,
+            "project_name": r.project_name,
+            "customer": r.customer,
+            "author": r.author,
+            "test_start": r.test_start,
+            "test_end": r.test_end,
+            "target_ip": r.target_ip,
+            "status": r.status,
+            "version": r.version,
+            "revision": r.revision,
+            "actual_mandays": r.actual_mandays,
+            "testing_plan_id": r.testing_plan_id,
+            "ticket_id": plan.ticket_id if plan else "",
+            "ticket_system_name": plan.system_name if plan else "",
+            "create_time": r.create_time,
+            "update_time": r.update_time,
+        })
+    return Page(total=total, items=result)
 
 
 @router.post("", response_model=ReportOut)

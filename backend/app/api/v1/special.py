@@ -2,17 +2,20 @@
 import html as html_mod
 import json
 import re
+import uuid
 from datetime import datetime, timedelta
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import String, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import NONPEN_ITEMS, TESTING_PLAN_STATUS, PlanStatus
+from app.core.config import settings
 from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
@@ -60,23 +63,46 @@ async def list_remote_testings(
     cond = []
     if search:
         cond.append(
-            RemoteTesting.title.ilike(f"%{search}%")
-            | RemoteTesting.system_name.ilike(f"%{search}%")
+            RemoteTesting.system_name.ilike(f"%{search}%")
             | RemoteTesting.department.ilike(f"%{search}%")
+            | RemoteTesting.notified_unit.ilike(f"%{search}%")
+            | RemoteTesting.vuln_name.ilike(f"%{search}%")
         )
     stmt = select(RemoteTesting).where(*cond)
     stmt = apply_sort(
         stmt, RemoteTesting, sort, order,
-        {"id", "title", "system_name", "test_time", "department", "appeal_success", "create_time"},
+        {"id", "system_name", "notice_time", "department", "is_external",
+         "vuln_name", "appeal_status", "create_time"},
         RemoteTesting.id.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
 
-async def _check_appeal_report(session: AsyncSession, report_id: int | None) -> None:
-    if report_id is not None and await session.get(Report, report_id) is None:
-        raise HTTPException(400, "指定的申诉报告不存在")
+# 申诉报告附件大小上限
+MAX_APPEAL_FILE_BYTES = 20 * 1024 * 1024
+
+
+@router.post("/remote-testings/upload-appeal")
+async def upload_remote_appeal(
+    file: UploadFile,
+    _: User = Depends(require_perm("special:manage")),
+):
+    """上传远程检测-申诉报告附件（支持 Word/PDF/图片等），返回文件元信息供表单绑定。"""
+    data = await file.read()
+    if len(data) > MAX_APPEAL_FILE_BYTES:
+        raise HTTPException(400, "申诉报告文件大小不能超过 20MB")
+    if not data:
+        raise HTTPException(400, "文件内容为空")
+    ext = Path(file.filename or "").suffix.lower() or ".bin"
+    name = f"{uuid.uuid4().hex}{ext}"
+    path = settings.storage_sub("uploads", "remote_appeal") / name
+    path.write_bytes(data)
+    return {
+        "name": file.filename or name,
+        "path": str(Path("uploads", "remote_appeal") / name).replace("\\", "/"),
+        "size": len(data),
+    }
 
 
 @router.post("/remote-testings", response_model=RemoteTestingOut)
@@ -85,7 +111,6 @@ async def create_remote_testing(
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    await _check_appeal_report(session, body.appeal_report_id)
     row = RemoteTesting(**body.model_dump(), creator_id=user.id)
     session.add(row)
     await session.commit()
@@ -101,12 +126,43 @@ async def update_remote_testing(
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, RemoteTesting, row_id, "远程检测记录不存在")
-    await _check_appeal_report(session, body.appeal_report_id)
+    old_path = row.appeal_file_path
     for k, v in body.model_dump().items():
         setattr(row, k, v)
     await session.commit()
+    # 替换附件时清理旧文件（更新失败时旧文件仍保留，不影响记录）
+    if old_path and old_path != row.appeal_file_path:
+        _remove_appeal_file(old_path)
     await session.refresh(row)
     return row
+
+
+@router.get("/remote-testings/{row_id}/appeal")
+async def download_remote_appeal(
+    row_id: int,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """下载远程检测-申诉报告附件。"""
+    row = await get_or_404(session, RemoteTesting, row_id, "远程检测记录不存在")
+    if not row.appeal_file_path:
+        raise HTTPException(404, "暂无申诉报告附件")
+    path = settings.storage_path / row.appeal_file_path
+    if not path.is_file():
+        raise HTTPException(404, "申诉报告文件已被清理")
+    filename = quote(row.appeal_file_name or "appeal")
+    return FileResponse(
+        path,
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    )
+
+
+def _remove_appeal_file(rel_path: str) -> None:
+    """删除申诉报告附件（尽力而为，文件缺失时忽略）。"""
+    try:
+        (settings.storage_path / rel_path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 @router.delete("/remote-testings/{row_id}")
@@ -117,6 +173,8 @@ async def delete_remote_testing(
 ):
     row = await session.get(RemoteTesting, row_id)
     if row:
+        if row.appeal_file_path:
+            _remove_appeal_file(row.appeal_file_path)
         await session.delete(row)
         await session.commit()
     return {"msg": "删除成功"}
@@ -1116,6 +1174,7 @@ async def attach_vulns_to_plan(
     vulns = await _load_vulns(session, vul_ids)
     for v in vulns:
         v.testing_plan_id = row_id
+        v.source = 0  # 关联渗透测试工单后漏洞来源固定为「渗透测试工单」（展示层派生）
     # 已确认无漏洞（测试通过）的计划重新关联到漏洞时自动重开为「初测中」
     await plan_service.reopen_passed_plan(session, row_id)
     await plan_service.refresh_stats(session, row_id)

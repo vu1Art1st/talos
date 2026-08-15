@@ -221,6 +221,90 @@ async def _migrate_lightweight() -> None:
             "  SELECT DISTINCT testing_plan_id FROM vulns "
             "  WHERE testing_plan_id IS NOT NULL AND status NOT IN (20, 60))"
         ))
+        # 漏洞来源口径重构（2026-08-14）：旧口径（安全部/SRC/众测/Word导入等）废弃，
+        # 新口径仅 5 项远程检测来源；关联渗透测试工单的漏洞来源展示为「渗透测试工单」不落库。
+        # 旧值与新口径同码不同义，一次性全部重置为 0（未选择），以 app_meta 标记保证幂等。
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        ))
+        source_migrated = (
+            await conn.execute(text("SELECT 1 FROM app_meta WHERE key = 'vul_source_v2'"))
+        ).scalar_one_or_none()
+        if source_migrated is None:
+            await conn.execute(text("UPDATE vulns SET source = 0"))
+            await conn.execute(text("INSERT INTO app_meta (key, value) VALUES ('vul_source_v2', '1')"))
+        # 远程检测重构（2026-08-14）：按通报口径重构表单项，申诉报告改为附件上传。
+        # 新增通报时间/被通报单位/外部项目/漏洞名/漏洞类型/申诉方式/附件字段；申诉状态替换原申诉成功布尔；
+        # 废弃 title / test_time / appeal_report_id 列（SQLite ≥3.35 支持 DROP COLUMN）。
+        rt_cols = {r[1] for r in (
+            await conn.execute(text("PRAGMA table_info(remote_testings)"))
+        ).fetchall()}
+        if rt_cols:
+            for col, ddl in (
+                ("notice_time", "VARCHAR(32) NOT NULL DEFAULT ''"),
+                ("notified_unit", "VARCHAR(128) NOT NULL DEFAULT ''"),
+                ("vuln_name", "VARCHAR(255) NOT NULL DEFAULT ''"),
+                ("vuln_type", "VARCHAR(64) NOT NULL DEFAULT ''"),
+                ("appeal_method", "VARCHAR(64) NOT NULL DEFAULT ''"),
+                ("appeal_file_name", "VARCHAR(255) NOT NULL DEFAULT ''"),
+                ("appeal_file_path", "VARCHAR(512) NOT NULL DEFAULT ''"),
+            ):
+                if col not in rt_cols:
+                    await conn.execute(text(f"ALTER TABLE remote_testings ADD COLUMN {col} {ddl}"))
+            if "is_external" not in rt_cols:
+                await conn.execute(
+                    text("ALTER TABLE remote_testings ADD COLUMN is_external BOOLEAN NOT NULL DEFAULT 0")
+                )
+            if "appeal_file_size" not in rt_cols:
+                await conn.execute(
+                    text("ALTER TABLE remote_testings ADD COLUMN appeal_file_size INTEGER NOT NULL DEFAULT 0")
+                )
+            if "appeal_status" not in rt_cols:
+                await conn.execute(text(
+                    "ALTER TABLE remote_testings ADD COLUMN appeal_status VARCHAR(16) NOT NULL DEFAULT ''"
+                ))
+                # 存量回填：原申诉成功布尔 → 申诉成功
+                await conn.execute(text(
+                    "UPDATE remote_testings SET appeal_status = 'success' WHERE appeal_success = 1"
+                ))
+            # 废弃列 title（带索引）/ test_time / appeal_report_id（带外键）无法直接 DROP，
+            # 采用「重建表」整体清理，保证模型与库结构一致
+            if {"title", "test_time", "appeal_report_id"} & rt_cols:
+                await conn.execute(text("PRAGMA foreign_keys=OFF"))
+                await conn.execute(text("ALTER TABLE remote_testings RENAME TO remote_testings_old"))
+                await conn.execute(text(
+                    "CREATE TABLE remote_testings ("
+                    "id INTEGER NOT NULL PRIMARY KEY,"
+                    "notice_time VARCHAR(32) NOT NULL DEFAULT '',"
+                    "system_name VARCHAR(128) NOT NULL,"
+                    "department VARCHAR(128) NOT NULL DEFAULT '',"
+                    "notified_unit VARCHAR(128) NOT NULL DEFAULT '',"
+                    "is_external BOOLEAN NOT NULL DEFAULT 0,"
+                    "vuln_name VARCHAR(255) NOT NULL DEFAULT '',"
+                    "vuln_type VARCHAR(64) NOT NULL DEFAULT '',"
+                    "appeal_status VARCHAR(16) NOT NULL DEFAULT '',"
+                    "appeal_method VARCHAR(64) NOT NULL DEFAULT '',"
+                    "appeal_file_name VARCHAR(255) NOT NULL DEFAULT '',"
+                    "appeal_file_path VARCHAR(512) NOT NULL DEFAULT '',"
+                    "appeal_file_size INTEGER NOT NULL DEFAULT 0,"
+                    "creator_id INTEGER,"
+                    "create_time DATETIME,"
+                    "update_time DATETIME)"
+                ))
+                cols = ("notice_time", "system_name", "department", "notified_unit", "is_external",
+                        "vuln_name", "vuln_type", "appeal_status", "appeal_method",
+                        "appeal_file_name", "appeal_file_path", "appeal_file_size",
+                        "creator_id", "create_time", "update_time")
+                await conn.execute(text(
+                    f"INSERT INTO remote_testings ({', '.join(cols)}) "
+                    f"SELECT {', '.join(cols)} FROM remote_testings_old"
+                ))
+                await conn.execute(text("DROP TABLE remote_testings_old"))
+                await conn.execute(text(
+                    "CREATE INDEX IF NOT EXISTS ix_remote_testings_system_name "
+                    "ON remote_testings (system_name)"
+                ))
+                await conn.execute(text("PRAGMA foreign_keys=ON"))
 
 
 async def _backfill_asset_tech_fields() -> None:

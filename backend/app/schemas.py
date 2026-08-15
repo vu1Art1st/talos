@@ -187,7 +187,7 @@ class VulIn(BaseModel):
     title: str
     vul_type: int = 75
     level: int = 30
-    source: int = 70  # 默认「数智化部」
+    source: int = 0  # 漏洞来源（0=未选择；关联渗透测试工单时固定为「渗透测试工单」，服务端强制置 0）
     layer: int = 10
     affected_url: str = ""
     description_html: str = ""
@@ -497,6 +497,8 @@ class ReportListOut(ReportMetaIn):
     revision: int = 0
     actual_mandays: float = 0  # 实际人天（自动计算：结束日期 - 开始日期）
     testing_plan_id: int | None = None
+    ticket_id: str = ""  # 关联工单号（由关联渗透测试工单提供，未关联为空）
+    ticket_system_name: str = ""  # 关联工单的测试系统名称
     create_time: datetime | None = None
     update_time: datetime | None = None
 
@@ -555,12 +557,20 @@ class ReportVulnStateOut(BaseModel):
 
 # ---------- 专项管理 ----------
 class RemoteTestingIn(BaseModel):
-    title: str = Field(min_length=1, max_length=255)
-    system_name: str = ""
-    test_time: str = ""
-    department: str = ""
-    appeal_success: bool = False
-    appeal_report_id: int | None = None
+    """远程检测记录（2026-08-14 按通报口径重构，申诉报告改为附件上传）。"""
+
+    system_name: str = Field(min_length=1, max_length=128)
+    notice_time: str = ""  # 通报时间（YYYY-MM）
+    department: str = ""  # 资产归属
+    notified_unit: str = ""  # 被通报单位
+    is_external: bool = False  # 是否外部项目
+    vuln_name: str = ""  # 漏洞名称
+    vuln_type: str = ""  # 漏洞类型
+    appeal_status: str = ""  # 申诉状态：''/success/fail
+    appeal_method: str = ""  # 申诉方式
+    appeal_file_name: str = ""  # 申诉报告附件原始文件名
+    appeal_file_path: str = ""  # 附件存储相对路径
+    appeal_file_size: int = 0  # 附件大小（字节）
 
 
 class RemoteTestingOut(RemoteTestingIn):

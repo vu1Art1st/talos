@@ -126,6 +126,30 @@ export const STAT_CARD_COLORS = {
   gray: '#909399',
 } as const
 
+/* ============================================================
+   漏洞类型差异化色板（对齐 VUL_TYPE，色相分散便于区分；
+   灰色固定留给「其他」，未知类型码自动落到灰色）
+   ============================================================ */
+export const VUL_TYPE_COLORS: Record<number, string> = {
+  10: '#E0442F', // SQL注入 朱红
+  15: '#E6A23C', // XSS跨站 橙
+  20: '#8C1D18', // 命令执行 暗红
+  25: '#8B5CF6', // 代码执行 紫
+  30: '#6366F1', // 文件包含 靛蓝
+  35: '#2D7DD2', // 任意文件操作 蓝
+  40: '#F59E0B', // 权限绕过 琥珀
+  45: '#0EA5E9', // 逻辑漏洞 天蓝
+  50: '#DC2626', // 存在后门 鲜红
+  55: '#059669', // 信息泄露 翠绿
+  60: '#D97706', // 文件上传 深橙
+  65: '#7C3AED', // 弱口令 深紫
+  70: '#0D9488', // 威胁情报 青
+  75: '#909399', // 其他 灰
+}
+export const vulTypeColor = (t: number | null | undefined) =>
+  VUL_TYPE_COLORS[Number(t) ?? 75] ?? '#909399'
+export const vulTypeSoftStyle = (t: number | null | undefined) => softStyle(vulTypeColor(t))
+
 // Word 导入批次状态（pending/parsing/parsed/confirmed/failed）
 export const IMPORT_STATUS: Record<string, { label: string; color: string }> = {
   pending: { label: '排队中', color: '#909399' },

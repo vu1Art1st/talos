@@ -24,7 +24,7 @@
       <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
         <template #default="{ row }">
-          <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
+          <span class="tl-tag" :style="vulTypeSoftStyle(row.vul_type)">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="severity_level" label="危害等级" width="90" sortable>
@@ -39,9 +39,6 @@
       </el-table-column>
       <el-table-column label="修复建议" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">{{ plainText(row.solution_html) || '-' }}</template>
-      </el-table-column>
-      <el-table-column label="参考链接" width="90">
-        <template #default="{ row }">{{ (row.references ?? []).length || '-' }}</template>
       </el-table-column>
       <el-table-column prop="username" label="维护人" width="110" sortable>
         <template #default="{ row }">{{ row.username || '-' }}</template>
@@ -135,7 +132,7 @@ import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { levelSoftStyle, vulTypeSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()

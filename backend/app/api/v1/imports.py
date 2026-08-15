@@ -309,7 +309,7 @@ async def confirm_batch(
             description_html=description_html,
             reproduce_html=rec.reproduce_html,
             solution_html=solution_html,
-            source=60,  # Word导入
+            source=0,  # 来源未选择（Word导入不再单列，关联工单时展示为「渗透测试工单」）
             submitter_id=user.id,
         )
         # 显式指定或报告格式自动匹配的测试计划：任何文档格式均关联漏洞

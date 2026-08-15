@@ -208,13 +208,20 @@
           </template>
         </el-table-column>
         <el-table-column prop="vul_type" label="类型" width="150" sortable="custom">
-          <template #default="{ row }">{{ meta?.vul_type?.[row.vul_type] ?? '-' }}</template>
+          <template #default="{ row }">
+            <span class="tl-tag" :style="vulTypeSoftStyle(row.vul_type)">{{ meta?.vul_type?.[row.vul_type] ?? '-' }}</span>
+          </template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" sortable="custom">
           <template #default="{ row }">
             <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
               {{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="漏洞来源" width="130" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span>{{ sourceLabel(row) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="关联资产" width="150" show-overflow-tooltip>
@@ -248,7 +255,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusLabel, statusSoftStyleEx, levelColor } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleEx, levelColor, vulTypeSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
@@ -352,6 +359,10 @@ const levelCards = [
   { code: 30, label: '中危', color: levelColor(30) },
   { code: 40, label: '低危', color: levelColor(40) },
 ]
+// 漏洞来源展示：关联渗透测试工单 → 恒为「渗透测试工单」；否则取可选来源值（未选择显示 -）
+const sourceLabel = (row: any) =>
+  row.testing_plan_id ? '渗透测试工单' : (meta.value?.vul_source?.[row.source] ?? '-')
+
 const levelCount = (code: number) => stats.value?.by_level?.find((x: any) => x.level === code)?.count ?? 0
 const fixedCount = computed(() => stats.value?.by_fix_status?.find((x: any) => x.key === 'fixed')?.count ?? 0)
 const fixRate = computed(() => {

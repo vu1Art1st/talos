@@ -25,6 +25,31 @@
 
 ---
 
+## [2.0.0] - 2026-08-15
+
+破坏性的数据库结构重构:远程检测表按通报口径重构、漏洞来源口径重置。
+
+### 数据库（破坏性变更，需迁移）
+
+- **远程检测表重构**（`backend/app/models/special.py` / 迁移 `backend/alembic/versions/e5f6a7b8c9d0_refactor_vul_source_and_remote_testing.py`）：移除 `title` / `test_time` / `appeal_success` / `appeal_report_id`,新增通报口径字段 `notice_time`(通报月份) / `notified_unit`(通报单位) / `is_external`(是否外部通报) / `vuln_name` / `vuln_type` / `appeal_status` / `appeal_method` / `appeal_file_name` / `appeal_file_path` / `appeal_file_size`;申诉报告由 `appeal_report_id`(关联报告)改为**附件上传**（新增 `upload-appeal` 接口与 `/{id}/appeal` 下载接口）。迁移脚本删除旧列并重置表数据,**历史远程检测记录需重新录入**
+- **漏洞来源口径重置**（`backend/app/constants.py` / `backend/app/models/business.py`）：`vulns.source` 不再承载「渗透测试工单」来源——凡 `testing_plan_id` 非空的漏洞恒为「渗透测试工单」来源（前端展示与统计统一按此口径）；`VUL_SOURCE` 枚举重置为可选来源值（关联工单时不再占用 source 枚举）。迁移一并重置 `vulns.source` 字段数据
+
+### 新增
+
+- **报告列表「关联工单」列**（`frontend/src/views/ReportList.vue`）：展示报告关联渗透测试工单号与系统名（`ticket_id` / `ticket_system_name`）
+
+### 变更
+
+- **漏洞来源展示统一**（`frontend/src/views/VulnList.vue` / `frontend/src/views/VulnDetail.vue` / `frontend/src/components/PlanWorkflowDrawer.vue`）：关联渗透测试工单的漏洞恒显「渗透测试工单」；否则取 `meta.vul_source` 可选值（未选择显 `-`）；工单流程抽屉漏洞详情新增「渗透测试工单」关联标识
+- **报告导入来源处理**（`backend/app/api/v1/imports.py` / `backend/app/api/v1/reports.py`）：报告导入与创建按新来源口径填充 `testing_plan_id` / `source`；报告移除 `vuln_source` 冗余字段,改由漏洞自身来源口径展示
+- **仪表盘统计按新来源口径**（`backend/app/api/v1/dashboard.py`）：漏洞来源统计适配重置后的 `VUL_SOURCE` 枚举
+
+### 测试
+
+- **远程检测重构测试**（`backend/tests/test_api.py`）：`test_special_modules_crud` 远程检测段按新接口重写（申诉附件上传 `upload-appeal` + 下载校验、字段名更新）；`test_dashboard_event_filters` 适配新来源枚举
+
+---
+
 ## [1.13.2] - 2026-08-14
 
 列表工具栏筛选与导入导出收纳优化,新增筛选徽标与一键重置。

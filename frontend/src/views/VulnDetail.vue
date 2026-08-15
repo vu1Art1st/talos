@@ -9,11 +9,13 @@
               <span class="tl-tag" :style="levelSoftStyle(vul.level)">
                 {{ meta?.vul_level?.[vul.level] }}
               </span>
-              <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">{{ meta?.vul_type?.[vul.vul_type] }}</span>
+              <span class="tl-tag" :style="vulTypeSoftStyle(vul.vul_type)">{{ meta?.vul_type?.[vul.vul_type] }}</span>
               <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
                 {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
               </span>
-              <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">来源：{{ meta?.vul_source?.[vul.source] }}</span>
+              <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">
+                来源：{{ vul.testing_plan_id ? '渗透测试工单' : (meta?.vul_source?.[vul.source] ?? '-') }}
+              </span>
             </div>
           </div>
           <div class="flex gap-2">
@@ -90,7 +92,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleEx, vulTypeSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
 

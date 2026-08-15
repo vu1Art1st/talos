@@ -13,10 +13,10 @@
         </template>
         <el-form label-width="90px" size="default">
           <el-form-item label="报告标题">
-            <el-input v-model="report.title" placeholder="标准名称（邮件、台账）-系统名称（网页）" @input="markDirty" />
+            <el-input v-model="report.title" placeholder="标准名称（邮件、台账）-测试系统（网页）" @input="markDirty" />
           </el-form-item>
           <div class="grid grid-cols-1 md:grid-cols-2">
-            <el-form-item label="系统名称">
+            <el-form-item label="测试系统">
               <el-input v-model="report.project_name" @input="markDirty" />
             </el-form-item>
             <el-form-item label="归属单位">

@@ -103,7 +103,7 @@
           </el-table-column>
           <el-table-column label="漏洞标题" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
-              <el-button type="primary" link class="!p-0" @click="router.push(`/vulns/${row.id}`)">
+              <el-button type="primary" link class="!p-0" @click="openVulnDetail(row.id)">
                 {{ row.title }}
               </el-button>
             </template>
@@ -147,6 +147,53 @@
           点击行首箭头展开复测记录；「流转」按状态机推进漏洞状态，闭环后报告与计划状态自动联动
         </div>
       </el-card>
+
+      <!-- 漏洞详情弹窗：点击漏洞标题在当前抽屉内弹出展示，不再跳转历史漏洞库页面 -->
+      <el-dialog v-model="vulnDetailVisible" title="漏洞详情" append-to-body :width="detailDialogWidth"
+                 @closed="vulnDetailVisible = false">
+        <div v-loading="detailLoading" element-loading-text="正在加载漏洞信息…">
+          <template v-if="detailVuln">
+            <div class="flex items-start justify-between gap-3">
+              <div class="text-lg font-semibold text-gray-800 leading-snug break-words">{{ detailVuln.title }}</div>
+              <el-button class="shrink-0" :icon="Close" circle plain size="small"
+                         @click="vulnDetailVisible = false" aria-label="关闭" />
+            </div>
+            <div class="flex flex-wrap items-center gap-2 mt-3">
+              <span class="tl-tag" :style="levelSoftStyle(detailVuln.level)">{{ levelName(detailVuln.level) }}</span>
+              <span class="tl-tag" :style="vulTypeSoftStyle(detailVuln.vul_type)">
+                {{ meta?.vul_type?.[detailVuln.vul_type] ?? detailVuln.vul_type }}
+              </span>
+              <span class="tl-tag" :style="statusSoftStyleEx(detailVuln.status, detailVuln.is_retest)">
+                {{ statusLabel(detailVuln.status, detailVuln.is_retest, vulStatusMap) }}
+              </span>
+              <span v-if="detailVuln.assets?.length" class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">
+                关联资产：{{ detailVuln.assets.map((a: any) => a.name).join('、') }}
+              </span>
+            </div>
+            <el-descriptions :column="detailCols" border class="mt-4" size="small">
+              <el-descriptions-item label="影响URL" :span="detailCols">
+                <div v-if="detailAffectedUrls.length" class="flex flex-col gap-0.5">
+                  <span v-for="(u, i) in detailAffectedUrls" :key="i">{{ u }}</span>
+                </div>
+                <span v-else>-</span>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="detailVuln.testing_plan_id" label="渗透测试工单">已关联工单</el-descriptions-item>
+            </el-descriptions>
+            <div v-if="detailSections.length" class="mt-4 space-y-4">
+              <section v-for="sec in detailSections" :key="sec.title">
+                <h4 class="text-sm font-semibold text-gray-700 mb-1.5">{{ sec.title }}</h4>
+                <div v-if="sec.html" class="rich-content" v-html="safeHtml(sec.html)" />
+                <div v-else class="text-sm text-gray-400">暂无内容</div>
+              </section>
+            </div>
+          </template>
+          <el-empty v-else-if="!detailLoading" description="未获取到漏洞详情" :image-size="80" />
+        </div>
+        <template #footer>
+          <el-button @click="vulnDetailVisible = false">关闭</el-button>
+          <el-button type="primary" @click="router.push(`/vulns/${detailVuln?.id}`)">查看完整详情</el-button>
+        </template>
+      </el-dialog>
 
       <!-- 从漏洞库选择漏洞 -->
       <el-dialog v-model="vulnPickerVisible" title="从漏洞库选择" width="720px" append-to-body
@@ -330,7 +377,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
-import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
+import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck, Close } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -346,8 +393,10 @@ import {
   STAT_CARD_COLORS,
   statusSoftStyleEx,
   statusLabel,
+  vulTypeSoftStyle,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import { safeHtml } from '../utils/html'
 import { showTocNotice } from '../utils/tocNotice'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
@@ -398,6 +447,27 @@ const pickerSelection = ref<any[]>([])
 const pickerAttaching = ref(false)
 // 已关联当前计划的漏洞 ID，用于选择器禁用与标记
 const pickerLinkedIds = computed(() => vulns.value.map((v: any) => v.id))
+
+// ---------- 漏洞详情弹窗 ----------
+const vulnDetailVisible = ref(false)
+const detailLoading = ref(false)
+const detailVuln = ref<any>(null)
+const meta = ref<any>(null)
+// 影响URL 多值（后端换行分隔存储）逐行展示
+const detailAffectedUrls = computed<string[]>(() =>
+  (detailVuln.value?.affected_url ?? '').split('\n').map((u: string) => u.trim()).filter(Boolean))
+// 描述 / 复现 / 修复建议 等富文本区段（仅展示有内容的）
+const detailSections = computed(() =>
+  [
+    { title: '漏洞描述', html: detailVuln.value?.description_html },
+    { title: '复现步骤', html: detailVuln.value?.reproduce_html },
+    { title: '修复建议', html: detailVuln.value?.solution_html },
+  ].filter((s) => s.html || s.title === '漏洞描述'))
+// 移动端单列、桌面端双列（响应式）
+const detailDialogWidth = computed(() =>
+  typeof window !== 'undefined' && window.innerWidth < 640 ? '92%' : '720px')
+const detailCols = computed(() =>
+  typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2)
 
 const exportJobs = ref<Record<number, any[]>>({})
 const exporting = ref<Record<number, string>>({})
@@ -554,6 +624,20 @@ async function transition(row: any, status: number) {
   ElMessage.success(`已流转为「${vulStatusMap.value[status] ?? status}」`)
   dirty.value = true
   await refresh()
+}
+
+// ---------- 漏洞详情弹窗 ----------
+async function openVulnDetail(id: number) {
+  vulnDetailVisible.value = true
+  detailLoading.value = true
+  detailVuln.value = null
+  try {
+    if (!meta.value?.vul_type) meta.value = await auth.fetchMeta()
+    const { data } = await client.get(`/vulns/${id}`)
+    detailVuln.value = data
+  } finally {
+    detailLoading.value = false
+  }
 }
 
 // ---------- 报告 ----------

@@ -78,13 +78,22 @@ async def stats(
             .where(*vul_cond)
             .group_by(Vul.vul_type)
             .order_by(func.count(Vul.id).desc())
-            .limit(10)
         )
     ).all()
+    # 应用层合并「其他」：未知类型码（含 NULL）与字典中的「其他(75)」统一归并为
+    # 同一个「其他」分类，避免 Top10 图表出现两个「其他」条目
+    merged: dict[str, int] = {}
+    for t, c in by_type_rows:
+        name = VUL_TYPE.get(t, "其他")
+        merged[name] = merged.get(name, 0) + c
     by_type = [
-        {"type": t, "name": VUL_TYPE.get(t, "其他"), "count": c}
-        for t, c in by_type_rows
-    ]
+        {
+            "type": next((t for t, _ in by_type_rows if VUL_TYPE.get(t, "其他") == name), None),
+            "name": name,
+            "count": c,
+        }
+        for name, c in sorted(merged.items(), key=lambda x: x[1], reverse=True)
+    ][:10]
 
     # 近12个月提交趋势（数据库无关：取一年内数据在应用层聚合），叠加筛选条件
     since = tznow() - timedelta(days=365)

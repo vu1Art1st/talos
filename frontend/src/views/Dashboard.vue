@@ -83,8 +83,8 @@ import { DataLine, CircleCheck, Warning, Grid } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
-import { LEVEL_COLORS_BY_NAME, STATUS_COLORS_BY_NAME } from '../utils/colors'
-import { areaGradient, barGradient, chartThemeName } from '../utils/chartTheme'
+import { LEVEL_COLORS_BY_NAME, STATUS_COLORS_BY_NAME, vulTypeColor } from '../utils/colors'
+import { areaGradient, chartThemeName } from '../utils/chartTheme'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -243,15 +243,18 @@ function renderCharts() {
     }],
   })
 
-  // 类型 Top10：圆角渐变横向柱
+  // 类型 Top10：横向柱，每根柱子按漏洞类型差异化着色（同类型恒为同色）
   mk(typeRef.value, {
     tooltip: { trigger: 'axis' },
     grid: { left: 110, right: 32, top: 16, bottom: 30 },
     xAxis: { type: 'value', minInterval: 1 },
     yAxis: { type: 'category', data: data.by_type.map((x: any) => x.name).reverse() },
     series: [{
-      type: 'bar', barMaxWidth: 14, data: data.by_type.map((x: any) => x.count).reverse(),
-      itemStyle: { borderRadius: [0, 6, 6, 0], color: barGradient() },
+      type: 'bar', barMaxWidth: 14,
+      data: [...data.by_type].reverse().map((x: any) => ({
+        value: x.count,
+        itemStyle: { color: vulTypeColor(x.type), borderRadius: [0, 6, 6, 0] },
+      })),
     }],
   })
 
