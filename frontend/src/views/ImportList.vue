@@ -1,15 +1,25 @@
 <template>
   <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-upload :show-file-list="false" accept=".docx" :http-request="doUpload">
-        <el-button type="primary">
-          <el-icon class="mr-1"><Upload /></el-icon>上传 Word 文档
-        </el-button>
+    <div class="flex items-center gap-2 mb-3">
+      <el-upload ref="uploadRef" :auto-upload="false" multiple accept=".docx" :on-change="onFileChange"
+                 :on-remove="onFileRemove" :on-exceed="onFileExceed" :limit="20" :file-list="fileList"
+                 drag class="!flex-1">
+        <el-icon class="mr-1"><Upload /></el-icon>选择报告文件（可多选）
+        <template #tip>
+          <div class="text-xs text-gray-400">支持一次选择多份 .docx（标准模板或平台导出的渗透测试/复测报告），选好后点「开始上传」批量入库解析</div>
+        </template>
       </el-upload>
-      <el-button @click="downloadTemplate">
-        <el-icon class="mr-1"><Download /></el-icon>下载导入模板
-      </el-button>
-      <span class="text-gray-400 text-sm">支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成渗透测试工单</span>
+      <div class="flex flex-col gap-1">
+        <el-button type="primary" :disabled="!fileList.length || uploading" @click="doUpload" :loading="uploading">
+          <el-icon class="mr-1"><Upload /></el-icon>{{ uploading ? `上传中 ${uploaded}/${fileList.length}` : `开始上传（${fileList.length} 份）` }}
+        </el-button>
+        <el-button @click="downloadTemplate" :disabled="uploading">
+          <el-icon class="mr-1"><Download /></el-icon>下载导入模板
+        </el-button>
+      </div>
+    </div>
+    <div class="mb-4 text-gray-400 text-sm">
+      支持标准导入模板及平台导出的渗透测试（复测）报告 .docx，上传后自动解析；复测报告确认入库时将自动生成渗透测试工单。同一工单下相同名称的漏洞将自动去重合并。
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
@@ -69,6 +79,10 @@ const total = ref(0)
 const loading = ref(false)
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 const query = reactive({ page: 1, size: 20, sort: '', order: '' })
+const uploadRef = ref()
+const fileList = ref<any[]>([])
+const uploading = ref(false)
+const uploaded = ref(0)
 let timer: number | undefined
 
 
@@ -91,12 +105,48 @@ function onSortChange({ prop, order }: any) {
   load(1)
 }
 
-async function doUpload(opt: any) {
-  const form = new FormData()
-  form.append('file', opt.file)
-  await client.post('/imports', form)
-  ElMessage.success('上传成功，后台解析中')
-  await load(1)
+function onFileChange(file: any) {
+  if (file.status === 'ready') fileList.value.push(file)
+}
+
+function onFileRemove(file: any) {
+  fileList.value = fileList.value.filter((f) => f.uid !== file.uid)
+}
+
+function onFileExceed() {
+  ElMessage.warning('单次最多上传 20 份报告')
+}
+
+async function doUpload() {
+  if (!fileList.value.length || uploading.value) return
+  uploading.value = true
+  uploaded.value = 0
+  const total = fileList.value.length
+  let failed = 0
+  try {
+    for (const f of fileList.value) {
+      const form = new FormData()
+      form.append('file', f.raw)
+      try {
+        await client.post('/imports', form)
+      } catch (e: any) {
+        failed++
+        ElMessage.error(`「${f.name}」上传失败：${e?.response?.data?.detail || e?.message || '未知错误'}`)
+      }
+      uploaded.value++
+    }
+    if (failed) {
+      ElMessage.warning(`上传完成：成功 ${total - failed} 份，失败 ${failed} 份`)
+    } else {
+      ElMessage.success(`成功上传 ${total} 份报告，后台解析中`)
+    }
+    fileList.value = []
+    uploadRef.value?.clearFiles()
+    await load(1)
+  } finally {
+    uploading.value = false
+    uploaded.value = 0
+  }
 }
 
 async function downloadTemplate() {

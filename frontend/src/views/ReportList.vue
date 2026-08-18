@@ -67,12 +67,6 @@
       </el-table-column>
       <el-table-column prop="project_name" label="测试系统" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="author" label="作者" width="120" sortable="custom" />
-      <el-table-column prop="status" label="状态" width="90" sortable="custom">
-        <template #default="{ row }">
-          <span class="tl-tag" :style="reportStatusSoftStyle(row.status)">{{ reportStatusName(row.status) }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="version" label="版本" width="70" sortable="custom" />
       <el-table-column prop="create_time" label="生成时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
       </el-table-column>
@@ -139,8 +133,6 @@ import {
   EXPORT_JOB_META,
   exportJobName,
   exportJobSoftStyle,
-  reportStatusName,
-  reportStatusSoftStyle,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 

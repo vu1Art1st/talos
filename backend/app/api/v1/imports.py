@@ -218,15 +218,17 @@ async def confirm_batch(
             # 复测轮次为惰性关系，新建计划需显式加载后才能在同步逻辑中访问
             await session.refresh(plan, attribute_names=["retest_rounds"])
             report_date = batch_meta.get("report_date") or ""
+            round_row = None
             if is_retest:
-                # 按记录实际修复情况判定：全部修复才算复测完成，否则仍处于复测中
+                # 每份复测报告代表一轮复测：无论修复与否统一建轮（force 会把上一轮未闭环轮次打点后再开新一轮），
+                # 全部修复才打完成点并置复测完成；否则停留在复测中待后续复测报告闭环
+                round_row = plan_service.start_retest_round(session, plan, "报告导入复测", user.id, force=True)
                 if all_fixed:
                     plan.status = 60  # 复测完成
                     plan.retest_done_time = report_date or plan.retest_done_time
                     plan_service.finish_retest_round(plan)
                 else:
                     plan.status = 50  # 复测中：仍有未修复漏洞待闭环
-                    plan_service.start_retest_round(session, plan, "报告导入复测", user.id, force=True)
             else:
                 plan.status = 30  # 初测完成，等待复测
                 plan.first_test_done_time = report_date or plan.first_test_done_time
@@ -275,6 +277,9 @@ async def confirm_batch(
                 await session.flush()
                 await session.refresh(report, attribute_names=["sections"])
                 report_auto_created = True
+            # 复测轮次关联本次生成的报告：删除报告时据此回退轮次，保持复测轮数与报告一致
+            if round_row is not None and report is not None:
+                round_row.report_id = report.id
 
     created = 0
     new_vul_ids: list[int] = []
@@ -301,39 +306,76 @@ async def confirm_batch(
                     description_html += f"<p><strong>危害说明：</strong></p>{kb.harm_html}"
             if not (solution_html or "").strip() and kb.solution_html:
                 solution_html = kb.solution_html
-        vul = Vul(
-            title=rec.title,
-            vul_type=rec.vul_type,
-            level=rec.level,
-            affected_url=rec.affected_url,
-            description_html=description_html,
-            reproduce_html=rec.reproduce_html,
-            solution_html=solution_html,
-            source=0,  # 来源未选择（Word导入不再单列，关联工单时展示为「渗透测试工单」）
-            submitter_id=user.id,
-        )
-        # 显式指定或报告格式自动匹配的测试计划：任何文档格式均关联漏洞
-        if plan is not None:
-            vul.testing_plan_id = plan.id
-        if batch.doc_kind == "report":
-            vul.is_retest = bool(batch_meta.get("is_retest"))
-            vul.retest_html = rec.retest_html
-            if rec.fixed:
-                vul.status = 60  # 报告中标记已修复
-                vul.fix_time = now()
-            elif is_retest:
-                vul.status = 55  # 复测报告中仍未修复：进入复测中，可在报告编辑页填写复测结论
-        if asset is not None:
-            vul.assets = [asset]
-        session.add(vul)
-        await session.flush()
+
+        # 报告格式：同工单 + 同漏洞标题去重归并。初测导入创建漏洞，后续复测报告更新同一漏洞
+        # 的状态/复测详情，保证「越权-劳动合同变更审批」之类贯穿三轮测试的漏洞只有一条记录。
+        existing = None
+        if plan is not None and batch.doc_kind == "report":
+            existing = (
+                await session.execute(
+                    select(Vul)
+                    .where(Vul.testing_plan_id == plan.id, Vul.title == rec.title)
+                    .order_by(Vul.id.desc()).limit(1)
+                )
+            ).scalar_one_or_none()
+
+        if existing is not None:
+            vul = existing
+            # 复测报告更新既有漏洞：仅覆盖本轮报告携带的信息，保留初测提交时间等不变
+            vul.level = rec.level
+            vul.vul_type = rec.vul_type
+            if rec.affected_url:
+                vul.affected_url = rec.affected_url
+            if description_html:
+                vul.description_html = description_html
+            if rec.reproduce_html:
+                vul.reproduce_html = rec.reproduce_html
+            if solution_html:
+                vul.solution_html = solution_html
+            if rec.retest_html:
+                vul.retest_html = rec.retest_html
+            if is_retest:
+                vul.is_retest = True
+                if rec.fixed:
+                    vul.status = 60  # 复测报告标记已修复
+                    vul.fix_time = now()
+                else:
+                    vul.status = 50  # 复测未修复：修复中 + is_retest，展示层为「复测未修复/复测未通过」
+        else:
+            vul = Vul(
+                title=rec.title,
+                vul_type=rec.vul_type,
+                level=rec.level,
+                affected_url=rec.affected_url,
+                description_html=description_html,
+                reproduce_html=rec.reproduce_html,
+                solution_html=solution_html,
+                source=0,  # 来源未选择（Word导入不再单列，关联工单时展示为「渗透测试工单」）
+                submitter_id=user.id,
+            )
+            # 显式指定或报告格式自动匹配的测试计划：任何文档格式均关联漏洞
+            if plan is not None:
+                vul.testing_plan_id = plan.id
+            if batch.doc_kind == "report":
+                vul.is_retest = bool(batch_meta.get("is_retest"))
+                vul.retest_html = rec.retest_html
+                if rec.fixed:
+                    vul.status = 60  # 报告中标记已修复
+                    vul.fix_time = now()
+                elif is_retest:
+                    vul.status = 50  # 复测未修复：修复中 + is_retest，展示层为「复测未修复/复测未通过」
+            if asset is not None:
+                vul.assets = [asset]
+            session.add(vul)
+            await session.flush()
+            new_vul_ids.append(vul.id)
         session.add(VulLog(
             vul_id=vul.id, user_id=user.id, username=user.username,
-            action="Word导入创建", content=f"来源批次 #{batch_id}（{batch.filename}）",
+            action="Word导入创建" if existing is None else "Word导入复测更新",
+            content=f"来源批次 #{batch_id}（{batch.filename}）",
         ))
         rec.status = "confirmed"
         rec.vul_id = vul.id
-        new_vul_ids.append(vul.id)
         # 关联到指定报告：自动追加为漏洞章节
         if report is not None:
             session.add(ReportSection(
@@ -366,7 +408,7 @@ async def confirm_batch(
     if remaining == 0:
         batch.status = "confirmed"
     await session.commit()
-    msg = f"成功创建 {created} 条漏洞记录"
+    msg = f"成功处理 {created} 条漏洞记录"
     if plan is not None:
         msg += f"，已关联测试计划「{plan.system_name}」"
     if report_auto_created and report is not None:

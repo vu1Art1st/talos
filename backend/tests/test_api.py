@@ -302,10 +302,12 @@ async def test_word_import_flow(client: AsyncClient, auth: dict):
     assert items[0]["source"] == 0
 
 
-def _build_report_docx(system_name: str, target_url: str, target_ip: str, sections: list[tuple[str, str, str, bool]]):
+def _build_report_docx(system_name: str, target_url: str, target_ip: str, sections: list[tuple[str, str, str, bool]],
+                       status_texts: list[str] | None = None):
     """构造平台报告格式 docx：测试目标表 + 风险问题汇总表 + 风险问题详情章节。
 
     sections: [(标题, 等级文本, 类型文本, 是否已修复)]
+    status_texts: 可选，逐条覆盖汇总表「修复状态」文本（如「部分未修复」），默认已修复/未修复。
     """
     from docx import Document
 
@@ -324,7 +326,10 @@ def _build_report_docx(system_name: str, target_url: str, target_ip: str, sectio
         s.rows[ri].cells[0].text = level_text
         s.rows[ri].cells[1].text = type_text
         s.rows[ri].cells[2].text = title
-        s.rows[ri].cells[3].text = "已修复" if fixed else "未修复"
+        if status_texts is not None and ri - 1 < len(status_texts):
+            s.rows[ri].cells[3].text = status_texts[ri - 1]
+        else:
+            s.rows[ri].cells[3].text = "已修复" if fixed else "未修复"
     # 风险问题详情
     doc.add_heading("风险问题详情", level=1)
     for title, _lvl, _typ, fixed in sections:
@@ -374,7 +379,7 @@ async def _find_vuln(client: AsyncClient, auth: dict, keyword: str) -> dict:
 
 
 async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict):
-    """复测报告含未修复漏洞：计划应为复测中(50)、未修复漏洞置复测中(55)、自动建资产与报告。"""
+    """复测报告含未修复漏洞：计划应为复测中(50)、未修复漏洞置「复测未修复」(50+is_retest)、自动建资产与报告。"""
     system_name = "综合办公系统ZZ"
     target_url = "http://10.9.9.9/officezz"
     doc = _build_report_docx(
@@ -395,11 +400,12 @@ async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict)
     assert len(plans) == 1, plans
     assert plans[0]["status"] == 50
 
-    # 已修复漏洞 → 60；未修复漏洞 → 55（复测中，可在报告编辑页填写复测结论）
+    # 已修复漏洞 → 60；未修复漏洞 → 50 且 is_retest=True（展示层为「复测未修复/复测未通过」）
     fixed_vuln = await _find_vuln(client, auth, "平行越权访问漏洞ZZ")
     assert fixed_vuln["status"] == 60
     unfixed_vuln = await _find_vuln(client, auth, "敏感信息泄露漏洞ZZ")
-    assert unfixed_vuln["status"] == 55
+    assert unfixed_vuln["status"] == 50
+    assert unfixed_vuln["is_retest"] is True
     assert any(a["name"] == system_name for a in unfixed_vuln["assets"])
 
     # 自动创建资产：系统名匹配，被测 URL 入内网地址
@@ -438,6 +444,68 @@ async def test_report_import_all_fixed_flow(client: AsyncClient, auth: dict):
     resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
     reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
     assert reports and reports[0]["status"] == "draft"
+
+
+async def test_report_import_full_rounds_flow(client: AsyncClient, auth: dict):
+    """初测 + 两轮复测报告依次导入：漏洞归并为同一条、状态按 未修复→复测未修复→已修复 流转，
+    复测轮次=2、计划复测完成(60)、三份报告均自动创建。"""
+    system_name = "综合办公系统RR"
+    target_url = "http://10.7.7.7/oarr"
+    vuln_title = "越权-劳动合同变更审批RR"
+
+    # 1) 初测报告：发现漏洞，未修复
+    _records, result = await _import_report(
+        client, auth, "20250917中移系统集成有限公司综合办公系统RR渗透测试报告.docx",
+        _build_report_docx(system_name, target_url, "10.7.7.7",
+                           sections=[(vuln_title, "高危", "逻辑漏洞", False)]),
+    )
+    assert result["created"] == 1
+    plan = (await client.get("/api/v1/testing-plans", headers=auth,
+                             params={"search": system_name})).json()["items"][0]
+    assert plan["status"] == 30  # 初测完成，等待复测
+    vuln = await _find_vuln(client, auth, vuln_title)
+    assert vuln["status"] == 10 and vuln["is_retest"] is False  # 初测发现漏洞，未修复
+
+    # 2) 第一轮复测（无后缀）：部分未修复 → 漏洞置「复测未修复」(50+is_retest)
+    #    标题带「（部分未修复）」后缀 + 汇总表状态「部分未修复」，验证归一化后与初测漏洞去重合并
+    _records, result = await _import_report(
+        client, auth, "20251011中移系统集成有限公司综合办公系统RR渗透测试复测报告.docx",
+        _build_report_docx(system_name, target_url, "10.7.7.7",
+                           sections=[(vuln_title + "（部分未修复）", "高危", "逻辑漏洞", False)],
+                           status_texts=["部分未修复"]),
+    )
+    assert result["created"] == 1
+    plan = (await client.get("/api/v1/testing-plans", headers=auth,
+                             params={"search": system_name})).json()["items"][0]
+    assert plan["status"] == 50  # 复测中
+    vuln = await _find_vuln(client, auth, vuln_title)
+    assert vuln["status"] == 50 and vuln["is_retest"] is True
+
+    # 3) 第二轮复测（-1 后缀）：已修复 → 漏洞闭环，计划复测完成
+    _records, result = await _import_report(
+        client, auth, "20251011中移系统集成有限公司综合办公系统RR渗透测试复测报告-1.docx",
+        _build_report_docx(system_name, target_url, "10.7.7.7",
+                           sections=[(vuln_title, "高危", "逻辑漏洞", True)]),
+    )
+    assert result["created"] == 1
+
+    # 漏洞始终只有一条，贯穿三轮
+    resp = await client.get("/api/v1/vulns", headers=auth, params={"search": vuln_title})
+    assert len(resp.json()["items"]) == 1
+    vuln = resp.json()["items"][0]
+    assert vuln["status"] == 60 and vuln["is_retest"] is True
+
+    # 计划：复测完成(60)，两轮复测轮次记录
+    plan = (await client.get("/api/v1/testing-plans", headers=auth,
+                             params={"search": system_name})).json()["items"][0]
+    assert plan["status"] == 60
+    assert plan["retest_round_count"] == 2
+
+    # 三份报告均自动创建，且都关联到同一工单
+    resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
+    reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
+    assert len(reports) == 3, reports
+    assert {r["testing_plan_id"] for r in reports} == {plan["id"]}
 
 
 async def _wait_job(client: AsyncClient, auth: dict, report_id: int, job_id: int) -> dict:

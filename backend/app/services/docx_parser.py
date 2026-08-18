@@ -165,7 +165,11 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[di
 
 _SUMMARY_HEADERS = ("问题等级", "风险类型", "风险问题", "修复状态")
 _LEVEL_EXPORT_REVERSE = {v: k for k, v in VUL_LEVEL_EXPORT.items()}  # 超危→10 等报告口径
-_REPORT_NAME_RE = re.compile(r"^(\d{8})?(.*?)(?:渗透测试)?(复测)?报告$")
+# 报告文件名：日期 + 公司/系统名 + 渗透测试(复测)报告 + 可选轮次后缀 -N（同日重复发起复测自动追加 -1/-2）
+# 例：20250917中移系统集成有限公司综合办公系统渗透测试复测报告-1.docx → 第二轮复测
+_REPORT_NAME_RE = re.compile(r"^(\d{8})?(.*?)(?:渗透测试)?(复测)?报告(?:-(\d+))?$")
+# 文件名兜底系统名剥离公司前缀：取最后一个「有限公司」之后的部分（如「中移系统集成有限公司综合办公系统」→「综合办公系统」）
+_COMPANY_SUFFIX_RE = re.compile(r"(.*?有限公司)(.*)$")
 _COVER_DATE_RE = re.compile(r"^(\d{4})年(\d{1,2})月(\d{1,2})日$")
 _RETEST_LABEL_RE = re.compile(r"^\d*漏洞复测$")
 # H3 章节内的字段标签行（归一化后） -> 记录字段
@@ -199,16 +203,26 @@ def is_report_docx(doc: Document) -> bool:
 
 
 def parse_report_filename(filename: str) -> dict:
-    """从文件名提取报告日期/系统名/是否复测，如 20260729综合办公系统渗透测试复测报告.docx。"""
-    out = {"report_date": "", "system_name": "", "is_retest": False}
+    """从文件名提取报告日期/系统名/是否复测/复测轮次序号。
+
+    文件名示例：20260729综合办公系统渗透测试报告.docx、20251011综合办公系统渗透测试复测报告-1.docx。
+    复测轮次序号 retest_round_seq：初测=0；首份复测（无后缀）=1；同日重复复测带 -N 后缀=N+1（如 -1 即第二轮复测）。
+    系统名剥离常见公司前缀（最后一个「有限公司」之后），保证与工单 system_name（纯系统名）匹配。
+    """
+    out = {"report_date": "", "system_name": "", "is_retest": False, "retest_round_seq": 0}
     m = _REPORT_NAME_RE.match(Path(filename or "").stem.strip())
     if not m:
         return out
     if m.group(1):
         d = m.group(1)
         out["report_date"] = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
-    out["system_name"] = m.group(2).strip()
+    system_name = m.group(2).strip()
+    cm = _COMPANY_SUFFIX_RE.match(system_name)
+    if cm and cm.group(2).strip():
+        system_name = cm.group(2).strip()
+    out["system_name"] = system_name
     out["is_retest"] = bool(m.group(3))
+    out["retest_round_seq"] = (int(m.group(4)) + 1) if m.group(4) else (1 if m.group(3) else 0)
     return out
 
 
@@ -292,6 +306,32 @@ def _fuzzy_type(text: str) -> int:
     return best if best_score >= 2 else 75
 
 
+def _normalize_vul_title(raw_title: str) -> tuple[str, bool]:
+    """归一化报告中的漏洞标题，并判定该条记录是否「已修复」。
+
+    - 剥掉结尾括号里的修复/整改状态后缀（含修饰词，如「（部分未修复）」「（基本已修复）」），
+      使同一漏洞在初测/多轮复测报告中标题一致，从而支持跨报告去重合并。
+    - fixed 判定：仅当标题明确「已修复/已整改」且不含「部分/未修复/未整改」等否定或部分修饰时才为 True。
+    """
+    raw_title = (raw_title or "").strip()
+    title = raw_title
+    # 循环剥掉结尾的修复/整改状态括号（兼容嵌套，如「（部分未修复）（未修复）」）
+    while True:
+        stripped = re.sub(r"[（(][^（）()]*(?:修复|整改)[^（）()]*[)）]\s*$", "", title).strip()
+        if stripped == title:
+            break
+        title = stripped
+    fixed = (
+        ("已修复" in raw_title or "已整改" in raw_title)
+        and "部分" not in raw_title
+        and "基本" not in raw_title
+        and "大部分" not in raw_title
+        and "未修复" not in raw_title
+        and "未整改" not in raw_title
+    )
+    return title or raw_title, fixed
+
+
 def _match_summary(summary: list[dict], title: str) -> dict | None:
     """按标题包含关系匹配汇总表行，未命中时取公共字符最多的行。"""
     t = _norm_label(title)
@@ -318,14 +358,24 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
     part = doc.part
     img_dir = Path(image_dir)
 
-    # meta：封面优先，文件名兜底，测试目标表补齐系统名与 URL/IP
-    meta = {"system_name": "", "report_date": "", "is_retest": False, "target_url": "", "target_ip": ""}
+    # meta：封面优先，文件名兜底，测试目标表补齐系统名与 URL/IP。
+    # 封面/文件名系统名含乱码（U+FFFD）时视为无效，回退到下一数据源，保证能匹配现有工单
+    meta = {"system_name": "", "report_date": "", "is_retest": False, "target_url": "", "target_ip": "",
+            "retest_round_seq": 0}
     from_name = parse_report_filename(filename or Path(file_path).name)
     cover = _parse_cover(doc)
     target = _parse_target_table(doc)
-    meta["system_name"] = cover["system_name"] or from_name["system_name"] or target.get("system_name", "")
+
+    def _clean(name: str) -> str:
+        name = (name or "").strip()
+        return "" if "\ufffd" in name else name
+
+    meta["system_name"] = (_clean(cover["system_name"])
+                           or _clean(from_name["system_name"])
+                           or _clean(target.get("system_name", "")))
     meta["report_date"] = cover["report_date"] or from_name["report_date"]
     meta["is_retest"] = cover["is_retest"] or from_name["is_retest"]
+    meta["retest_round_seq"] = from_name.get("retest_round_seq", 0)
     meta["target_url"] = target.get("target_url", "")
     meta["target_ip"] = target.get("target_ip", "")
 
@@ -352,7 +402,7 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
     summary = _parse_summary_rows(_find_summary_table(doc))
     records: list[dict] = []
     for idx, (raw_title, paras) in enumerate(sections):
-        title = re.sub(r"[（(]\s*(已修复|未修复|已整改|未整改)\s*[)）]\s*$", "", raw_title).strip()
+        title, fixed = _normalize_vul_title(raw_title)
         record: dict = {
             "title": title,
             "level": 30,
@@ -362,7 +412,7 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
             "reproduce_html": "",
             "solution_html": "",
             "retest_html": "",
-            "fixed": "已修复" in raw_title,
+            "fixed": fixed,
             "errors": [],
         }
         bucket: str | None = None

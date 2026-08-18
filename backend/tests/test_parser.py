@@ -119,12 +119,45 @@ _SAMPLE_REPORT = Path(__file__).resolve().parents[1] / "storage" / "uploads" / "
 
 def test_parse_report_filename():
     info = parse_report_filename("20260729综合办公系统渗透测试复测报告.docx")
-    assert info == {"report_date": "2026-07-29", "system_name": "综合办公系统", "is_retest": True}
+    assert info == {
+        "report_date": "2026-07-29", "system_name": "综合办公系统",
+        "is_retest": True, "retest_round_seq": 1,
+    }
 
     info = parse_report_filename("门户系统渗透测试报告.docx")
     assert info["system_name"] == "门户系统"
     assert info["is_retest"] is False
     assert info["report_date"] == ""
+    assert info["retest_round_seq"] == 0
+
+    # 同日重复复测带 -N 后缀：-1 表示第二轮复测（round_seq=2）
+    info = parse_report_filename("20251011中移系统集成有限公司综合办公系统渗透测试复测报告-1.docx")
+    assert info == {
+        "report_date": "2025-10-11", "system_name": "综合办公系统",
+        "is_retest": True, "retest_round_seq": 2,
+    }
+
+
+def test_normalize_vul_title():
+    """标题归一化：剥掉（部分未修复）等修复状态后缀，供跨报告去重合并；fixed 判定严谨。"""
+    from app.services.docx_parser import _normalize_vul_title
+
+    # 初测：无后缀，未修复
+    assert _normalize_vul_title("越权-劳动合同变更审批") == ("越权-劳动合同变更审批", False)
+    # 已修复
+    assert _normalize_vul_title("越权-劳动合同变更审批（已修复）") == ("越权-劳动合同变更审批", True)
+    # 未修复
+    assert _normalize_vul_title("越权-劳动合同变更审批（未修复）") == ("越权-劳动合同变更审批", False)
+    # 部分未修复 → 剥后缀且不算已修复
+    assert _normalize_vul_title("越权-劳动合同变更审批（部分未修复）") == ("越权-劳动合同变更审批", False)
+    # 部分已修复 → 剥后缀且不算已修复（存在未闭环部分）
+    assert _normalize_vul_title("越权-劳动合同变更审批（部分已修复）") == ("越权-劳动合同变更审批", False)
+    # 基本已修复 → 剥后缀且不算已修复
+    assert _normalize_vul_title("越权-劳动合同变更审批（基本已修复）") == ("越权-劳动合同变更审批", False)
+    # 半角括号
+    assert _normalize_vul_title("越权-劳动合同变更审批(已修复)") == ("越权-劳动合同变更审批", True)
+    # 标题含括号但非修复状态 → 不误删
+    assert _normalize_vul_title("后台接口存在SQL注入（GET参数）") == ("后台接口存在SQL注入（GET参数）", False)
 
 
 def test_is_report_docx_on_template(tmp_path: Path):
