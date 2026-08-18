@@ -37,6 +37,9 @@ frontend/*.png
 *.log
 /2026*.docx
 
+# 导入解析器测试样例（本地 docx 样例，勿入库）
+/import-test/
+
 # 调试临时产物（时区/环境排查记录等，勿入库）
 /_db.txt
 /_proc*.txt
