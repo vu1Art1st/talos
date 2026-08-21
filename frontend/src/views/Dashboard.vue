@@ -81,10 +81,13 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import * as echarts from 'echarts'
 import { DataLine, CircleCheck, Warning, Grid } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { areaGradient, chartThemeName, PALETTE } from '../utils/chartTheme'
+
+// 图表系列色（唯一色源 chartTheme.PALETTE，语义化命名便于系列引用）
+const [SERIES_MAIN, SERIES_GREEN, SERIES_AMBER, , , , SERIES_PINK] = PALETTE
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { LEVEL_COLORS_BY_NAME, STATUS_COLORS_BY_NAME, vulTypeColor } from '../utils/colors'
-import { areaGradient, chartThemeName } from '../utils/chartTheme'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -189,7 +192,7 @@ function renderCharts() {
       tooltip: { show: false },
       series: [{
         type: 'line', data: sparks[i], smooth: true, symbol: 'none',
-        lineStyle: { width: 2, color: '#6366f1' }, areaStyle: { color: areaGradient('#6366f1') },
+        lineStyle: { width: 2, color: SERIES_MAIN }, areaStyle: { color: areaGradient(SERIES_MAIN) },
       }],
     })
   })
@@ -203,9 +206,9 @@ function renderCharts() {
     yAxis: { type: 'value', minInterval: 1 },
     series: [
       { name: '提交', type: 'line', smooth: true, symbol: 'none', data: submitted,
-        lineStyle: { width: 2.5, color: '#6366f1' }, itemStyle: { color: '#6366f1' }, areaStyle: { color: areaGradient('#6366f1') } },
+        lineStyle: { width: 2.5, color: SERIES_MAIN }, itemStyle: { color: SERIES_MAIN }, areaStyle: { color: areaGradient(SERIES_MAIN) } },
       { name: '修复完成', type: 'line', smooth: true, symbol: 'none', data: fixed,
-        lineStyle: { width: 2.5, color: '#22c55e' }, itemStyle: { color: '#22c55e' }, areaStyle: { color: areaGradient('#22c55e') } },
+        lineStyle: { width: 2.5, color: SERIES_GREEN }, itemStyle: { color: SERIES_GREEN }, areaStyle: { color: areaGradient(SERIES_GREEN) } },
     ],
   })
 
@@ -270,11 +273,11 @@ function renderCharts() {
         { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' }, splitLine: { show: false } },
       ],
       series: [
-        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: '#6366f1' }, data: deptData.value.map((d: any) => d.plans) },
-        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: '#f59e0b' }, data: deptData.value.map((d: any) => d.vulns) },
-        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: '#22c55e' }, data: deptData.value.map((d: any) => d.fixed) },
+        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_MAIN }, data: deptData.value.map((d: any) => d.plans) },
+        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_AMBER }, data: deptData.value.map((d: any) => d.vulns) },
+        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_GREEN }, data: deptData.value.map((d: any) => d.fixed) },
         { name: '修复率(%)', type: 'line', yAxisIndex: 1, smooth: true, symbolSize: 7,
-          lineStyle: { width: 2.5, color: '#ec4899' }, itemStyle: { color: '#ec4899' }, data: deptData.value.map((d: any) => d.fix_rate) },
+          lineStyle: { width: 2.5, color: SERIES_PINK }, itemStyle: { color: SERIES_PINK }, data: deptData.value.map((d: any) => d.fix_rate) },
       ],
     })
   }

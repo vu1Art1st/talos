@@ -37,3 +37,13 @@ async def get_or_404(session: AsyncSession, model, pk, detail: str = "资源不�
     if obj is None:
         raise HTTPException(404, detail)
     return obj
+
+
+def parse_int_list(raw: str) -> list[int] | None:
+    """逗号分隔字符串转 int 列表；空 / 全空 → None（等价不筛选）。"""
+    return [int(x) for x in raw.split(",") if x.strip().isdigit()] or None
+
+
+def parse_str_list(raw: str) -> list[str] | None:
+    """逗号分隔字符串转 str 列表；空 / 全空 → None（等价不筛选）。"""
+    return [x.strip() for x in raw.split(",") if x.strip()] or None

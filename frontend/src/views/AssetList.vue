@@ -17,7 +17,7 @@
       <el-button @click="exportExcel">
         <el-icon class="mr-1"><Download /></el-icon>导出Excel
       </el-button>
-      <el-button type="primary" @click="openEdit()">
+      <el-button type="primary" class="btn-min" @click="openEdit()">
         <el-icon class="mr-1"><Plus /></el-icon>新建资产
       </el-button>
     </div>
@@ -77,43 +77,22 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
+import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
+import { saveBlob } from '../utils/download'
 import { assetStatusMeta, softStyle, urlTagMeta } from '../utils/colors'
 
 const auth = useAuthStore()
 const meta = ref<any>(null)
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const search = ref('')
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
-const loading = ref(false)
+const { items, total, page, search, loading, load, onSortChange } = useListPage('/assets')
 const importing = ref(false)
 const dialogVisible = ref(false)
 const editing = ref<any>(null)
-
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/assets', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
 
 function openEdit(row?: any) {
   editing.value = row ?? null
@@ -124,15 +103,6 @@ async function remove(id: number) {
   await client.delete(`/assets/${id}`)
   ElMessage.success('删除成功')
   await load()
-}
-
-function saveBlob(data: Blob, filename: string) {
-  const url = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 async function downloadTemplate() {

@@ -6,7 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL_TYPE, VulStatus
 from app.core.deps import get_current_user, require_perm, user_permissions
-from app.core.query import get_or_404, paginate, apply_sort
+from app.core.query import get_or_404, paginate, apply_sort, parse_int_list, parse_str_list
+from app.core.timeutil import parse_date
 from app.db import get_session
 from app.models import (
     Asset,
@@ -193,24 +194,6 @@ def _build_vuln_conditions(
     return cond
 
 
-def _parse_int_list(raw: str) -> list[int] | None:
-    """逗号分隔字符串转 int 列表；空 / 全空 → None（等价不筛选）。"""
-    return [int(x) for x in raw.split(",") if x.strip().isdigit()] or None
-
-
-def _parse_str_list(raw: str) -> list[str] | None:
-    """逗号分隔字符串转 str 列表；空 / 全空 → None（等价不筛选）。"""
-    return [x.strip() for x in raw.split(",") if x.strip()] or None
-
-
-def _parse_date(raw: str) -> datetime | None:
-    """解析 YYYY-MM-DD 为 datetime（本地 0 点）；非法值返回 None。"""
-    try:
-        return datetime.strptime(raw, "%Y-%m-%d")
-    except (ValueError, TypeError):
-        return None
-
-
 @router.get("", response_model=Page[VulOut])
 async def list_vulns(
     search: str = "",
@@ -240,18 +223,18 @@ async def list_vulns(
     session: AsyncSession = Depends(get_session),
 ):
     # 多选：逗号分隔字符串转列表；空字符串/全空 → None（等价不筛选）
-    level_list = _parse_int_list(levels)
+    level_list = parse_int_list(levels)
     cond = _build_vuln_conditions(
         search=search, status=status, level=level, levels=level_list,
-        statuses=_parse_int_list(statuses),
-        vul_type=vul_type, vul_types=_parse_int_list(vul_types),
-        asset_id=asset_id, asset_ids=_parse_int_list(asset_ids),
-        department=department, departments=_parse_str_list(departments),
-        system_type=system_type, system_types=_parse_str_list(system_types),
+        statuses=parse_int_list(statuses),
+        vul_type=vul_type, vul_types=parse_int_list(vul_types),
+        asset_id=asset_id, asset_ids=parse_int_list(asset_ids),
+        department=department, departments=parse_str_list(departments),
+        system_type=system_type, system_types=parse_str_list(system_types),
         testing_plan_id=testing_plan_id, test_type=test_type,
-        test_types=_parse_str_list(test_types),
-        submit_time_from=_parse_date(submit_time_from),
-        submit_time_to=_parse_date(submit_time_to),
+        test_types=parse_str_list(test_types),
+        submit_time_from=parse_date(submit_time_from),
+        submit_time_to=parse_date(submit_time_to),
         mine=mine, user=user,
     )
 
@@ -310,18 +293,18 @@ async def vuln_stats(
     分组统计基于漏洞-资产多对多关联（JOIN vuln_assets+Asset），同一漏洞关联多资产时
     会在分组维度重复计入（按关联关系统计），total 仍为漏洞条数。
     """
-    level_list = _parse_int_list(levels)
+    level_list = parse_int_list(levels)
     cond = _build_vuln_conditions(
         search=search, status=status, level=level, levels=level_list,
-        statuses=_parse_int_list(statuses),
-        vul_type=vul_type, vul_types=_parse_int_list(vul_types),
-        asset_id=asset_id, asset_ids=_parse_int_list(asset_ids),
-        department=department, departments=_parse_str_list(departments),
-        system_type=system_type, system_types=_parse_str_list(system_types),
+        statuses=parse_int_list(statuses),
+        vul_type=vul_type, vul_types=parse_int_list(vul_types),
+        asset_id=asset_id, asset_ids=parse_int_list(asset_ids),
+        department=department, departments=parse_str_list(departments),
+        system_type=system_type, system_types=parse_str_list(system_types),
         testing_plan_id=testing_plan_id, test_type=test_type,
-        test_types=_parse_str_list(test_types),
-        submit_time_from=_parse_date(submit_time_from),
-        submit_time_to=_parse_date(submit_time_to),
+        test_types=parse_str_list(test_types),
+        submit_time_from=parse_date(submit_time_from),
+        submit_time_to=parse_date(submit_time_to),
         mine=mine, user=user,
     )
 

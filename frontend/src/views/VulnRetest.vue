@@ -25,6 +25,8 @@
       </template>
     </VulnRetestPanel>
   </div>
+<!-- 首屏加载占位：避免数据未到时的空白闪现 -->
+  <div v-else v-loading="true" class="h-64" element-loading-text="加载中..." />
 </template>
 
 <script setup lang="ts">

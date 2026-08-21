@@ -3,7 +3,7 @@
     <!-- 筛选工具栏 -->
     <el-card shadow="never" class="!rounded-lg">
       <div class="flex flex-wrap items-center gap-2">
-        <el-input v-model="query.search" placeholder="搜索标题 / URL" clearable class="!w-64"
+        <el-input v-model="search" placeholder="搜索标题 / URL" clearable class="!w-64"
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -99,28 +99,12 @@
           </span>
         </template>
         <div v-loading="statsLoading">
-          <!-- 数据卡片：总数 / 4 等级 / 已修复 / 修复率 -->
+          <!-- 数据卡片：总数 / 4 等级 / 已修复 / 修复率（StatCard 统一风格，色源走 colors.ts） -->
           <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-4 max-w-7xl mx-auto">
-            <div class="rounded-xl px-5 py-4 text-white border border-transparent"
-                 style="background: linear-gradient(135deg,#6366f1,#8b5cf6)">
-              <div class="text-xs opacity-80">漏洞总数</div>
-              <div class="text-2xl font-bold tabular-nums">{{ stats?.total ?? 0 }}</div>
-            </div>
-            <div v-for="lv in levelCards" :key="lv.code" class="rounded-xl px-5 py-4 border"
-                 :style="{ background: lv.color + '0f', borderColor: lv.color + '33' }">
-              <div class="text-xs" :style="{ color: lv.color }">{{ lv.label }}</div>
-              <div class="text-2xl font-bold tabular-nums" :style="{ color: lv.color }">{{ levelCount(lv.code) }}</div>
-            </div>
-            <div class="rounded-xl px-5 py-4 border"
-                 style="background: #67c23a0f; border-color: #67c23a33">
-              <div class="text-xs" style="color: #67C23A">已修复</div>
-              <div class="text-2xl font-bold tabular-nums" style="color: #67C23A">{{ fixedCount }}</div>
-            </div>
-            <div class="rounded-xl px-5 py-4 border"
-                 style="background: #409eff0f; border-color: #409eff33">
-              <div class="text-xs" style="color: #409EFF">修复率</div>
-              <div class="text-2xl font-bold tabular-nums" style="color: #409EFF">{{ fixRate }}%</div>
-            </div>
+            <StatCard label="漏洞总数" :color="STAT_CARD_COLORS.blue" :value="stats?.total ?? 0" />
+            <StatCard v-for="lv in levelCards" :key="lv.code" :label="lv.label" :color="lv.color" :value="levelCount(lv.code)" />
+            <StatCard label="已修复" :color="STAT_CARD_COLORS.green" :value="fixedCount" />
+            <StatCard label="修复率" :color="STAT_CARD_COLORS.blue" :value="`${fixRate}%`" />
           </div>
 
           <!-- Excel 风格交叉透视表：行=部门→系统，列=等级×修复状态 -->
@@ -161,7 +145,7 @@
                 <template #default="{ row }"><span class="tabular-nums font-medium">{{ row.total }}</span></template>
               </el-table-column>
               <el-table-column label="已修复总数" width="90" align="center">
-                <template #default="{ row }"><span class="tabular-nums" style="color:#67C23A">{{ row.fixed_total }}</span></template>
+                <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.green }">{{ row.fixed_total }}</span></template>
               </el-table-column>
               <el-table-column label="总修复率" width="80" align="center">
                 <template #default="{ row }"><span class="tabular-nums">{{ row.fix_rate }}%</span></template>
@@ -176,14 +160,14 @@
                   </template>
                 </el-table-column>
                 <el-table-column label="已修复" width="58" align="center">
-                  <template #default="{ row }"><span class="tabular-nums" style="color:#67C23A">{{ row.levels[lv.code]?.fixed ?? 0 }}</span></template>
+                  <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.green }">{{ row.levels[lv.code]?.fixed ?? 0 }}</span></template>
                 </el-table-column>
                 <el-table-column label="未修复" width="58" align="center">
-                  <template #default="{ row }"><span class="tabular-nums" style="color:#F56C6C">{{ row.levels[lv.code]?.unfixed ?? 0 }}</span></template>
+                  <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.red }">{{ row.levels[lv.code]?.unfixed ?? 0 }}</span></template>
                 </el-table-column>
               </el-table-column>
               <template #empty>
-                <el-empty description="暂无统计数据" :image-size="60" />
+                <el-empty description="暂无统计数据" :image-size="80" />
               </template>
             </el-table>
             </div>
@@ -198,7 +182,7 @@
                 class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
                 @sort-change="onSortChange">
         <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="42" />
-        <el-table-column type="index" label="序号" width="70" :index="(i: number) => (query.page - 1) * query.size + i + 1" />
+        <el-table-column type="index" label="序号" width="70" :index="(i: number) => (page - 1) * 20 + i + 1" />
         <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="level" label="等级" width="90" sortable="custom">
           <template #default="{ row }">
@@ -242,7 +226,7 @@
 
       <div class="flex justify-end mt-4">
         <el-pagination background layout="total, prev, pager, next" :total="total"
-                       :page-size="query.size" :current-page="query.page"
+                       :page-size="20" :current-page="page"
                        @current-change="load" />
       </div>
     </el-card>
@@ -254,22 +238,23 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
+import { useAssetSelect } from '../composables/useAssetSelect'
+import { useDictOptions } from '../composables/useDictOptions'
+import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusLabel, statusSoftStyleEx, levelColor, vulTypeSoftStyle } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleEx, levelColor, vulTypeSoftStyle, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
 const router = useRouter()
 const meta = ref<any>(null)
-const items = ref<any[]>([])
-const total = ref(0)
-const loading = ref(false)
 const selected = ref<any[]>([])
 const query = reactive({
-  search: '', statuses: [], levels: [], vul_types: [], system_types: [], test_types: [],
+  statuses: [], levels: [], vul_types: [], system_types: [], test_types: [],
   asset_ids: [], departments: [], dateRange: [],
-  mine: false, page: 1, size: 20, sort: '', order: '',
+  mine: false,
 })
+const { items, total, page, search, loading, load, onSortChange } = useListPage('/vulns', { extraParams: filterParams })
 
 // 已启用的筛选维度数（用于「筛选」按钮徽标）
 const activeFilterCount = computed(() => {
@@ -300,51 +285,13 @@ function resetFilters() {
   reload()
 }
 
-// ---------- 筛选数据源：测试类型 / 部门 / 资产远程搜索 ----------
-const testTypes = ref<string[]>([])
-const departments = ref<string[]>([])
-const assetOptions = ref<{ id: number; label: string }[]>([])
-const assetCache = ref<Record<number, any>>({})
-const assetLoading = ref(false)
+// ---------- 筛选数据源：测试类型 / 部门 / 资产远程搜索（composables） ----------
+const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
+const { assetOptions, assetLoading, assetCache, assetLabel, searchAssets: searchAssetsRaw } = useAssetSelect()
 
-async function loadTestTypes() {
-  const { data } = await client.get('/dict/test_type')
-  testTypes.value = data.map((o: any) => o.name)
-}
-
-async function loadDepartments() {
-  const { data } = await client.get('/groups')
-  departments.value = data.map((g: any) => g.name)
-}
-
-// 下拉展示：系统名称 +（子系统）+（系统类型），区分同名系统的不同环境
-function assetLabel(a: any) {
-  const parts = [a.name]
-  if (a.sub_system) parts.push(`（${a.sub_system}）`)
-  if (a.system_type) parts.push(`（${a.system_type}）`)
-  return parts.join('')
-}
-
-// 资产下拉：远程搜索。已选中的资产始终合并进选项，保证多选标签可正确回显
-async function searchAssets(keyword = '') {
-  assetLoading.value = true
-  try {
-    const { data } = await client.get('/assets', { params: { search: keyword, page: 1, size: 50 } })
-    const opts = data.items.map((a: any) => {
-      assetCache.value[a.id] = a
-      return { id: a.id, label: assetLabel(a) }
-    })
-    // 已选资产若不在搜索结果中，追加其标签，避免多选回显为纯数字
-    for (const id of query.asset_ids) {
-      if (!opts.some((o: any) => o.id === id)) {
-        const cached = assetCache.value[id]
-        if (cached) opts.push({ id, label: assetLabel(cached) })
-      }
-    }
-    assetOptions.value = opts
-  } finally {
-    assetLoading.value = false
-  }
+// 资产下拉：远程搜索，并把已选资产合并进选项（保证多选回显）
+function searchAssets(keyword = '') {
+  return searchAssetsRaw(keyword, query.asset_ids)
 }
 
 // ---------- 统计概览（顶部 7 张数据卡片） ----------
@@ -373,7 +320,7 @@ const fixRate = computed(() => {
 // 多选字段统一走逗号分隔字符串下发（与后端 _parse_*_list 对齐）
 function filterParams(): Record<string, any> {
   const p: Record<string, any> = {
-    search: query.search || undefined,
+    search: search.value || undefined,
     mine: query.mine,
   }
   if (query.statuses.length) p.statuses = query.statuses.join(',')
@@ -447,33 +394,7 @@ function pivotSummaryMethod({ columns, data }: { columns: any[]; data: any[] }) 
   return sums
 }
 
-// ---------- 列表加载 ----------
-function onSortChange({ prop, order }: any) {
-  query.sort = order ? prop : ''
-  query.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
-
-async function load(page = query.page) {
-  query.page = page
-  loading.value = true
-  try {
-    const { data } = await client.get('/vulns', {
-      params: {
-        ...filterParams(),
-        page: query.page,
-        size: query.size,
-        sort: query.sort,
-        order: query.order,
-      },
-    })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
+// ---------- 列表加载（骨架走 useListPage，reload 联动统计概览） ----------
 async function reload() {
   await Promise.all([load(1), loadStats()])
 }
@@ -486,7 +407,7 @@ async function batchRemove() {
   await client.post('/vulns/batch-delete', { ids })
   ElMessage.success(`已删除 ${ids.length} 个漏洞`)
   // 当前页被删空时回退一页
-  const remainPages = Math.max(1, Math.ceil((total.value - ids.length) / query.size))
+  const remainPages = Math.max(1, Math.ceil((total.value - ids.length) / 20))
   await reload()
   await load(Math.min(query.page, remainPages))
 }
@@ -498,44 +419,11 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-/* 统计概览标题：居中 + 两侧渐变装饰线；保留 el-collapse 折叠/展开能力，仅做视觉增强 */
-.tl-collapse-title {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-width: 0;
-}
-.tl-collapse-title::before,
-.tl-collapse-title::after {
-  content: '';
-  height: 1px;
-  flex: none;
-  width: 100px;
-}
-.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
-.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
-.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
-.tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
-/* 筛选弹窗：字段小标签 + 已启用条件数徽标 */
+/* 筛选弹窗：字段小标签（统计卡/勾选卡/折叠标题样式已上提 style.css 全局共用） */
 .filter-label {
   font-size: 12px;
   color: var(--tl-text-3);
   margin-bottom: 4px;
-}
-.filter-count {
-  margin-left: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  font-size: 11px;
-  line-height: 16px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.28);
 }
 /* 弹窗内日期范围编辑器撑满列宽 */
 .vuln-filter-panel :deep(.el-date-editor) {

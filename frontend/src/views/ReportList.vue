@@ -97,7 +97,8 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
     <el-form label-width="90px">
       <el-form-item label="关联渗透测试工单">
         <el-select v-model="genPlanId" clearable filterable class="w-full"
@@ -122,11 +123,13 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import { useExportJobs } from '../composables/useExportJobs'
+import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { showTocNotice } from '../utils/tocNotice'
 import {
@@ -139,12 +142,8 @@ import { fmtDateTime } from '../utils/format'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const search = ref('')
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
-const loading = ref(false)
+const { items, total, page, search, loading, load, onSortChange } = useListPage('/reports')
+const { downloadJob, downloadZip, fetchJobs, removeExportJob: deleteExportJob } = useExportJobs()
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')
 const genVulIds = ref<number[]>([])
@@ -161,13 +160,13 @@ function onSelectionChange(rows: any[]) {
   selected.value = rows
 }
 
+// 导出任务：下载/删除走 useExportJobs，列表缓存结构留在本页（按报告展开懒加载）
 // 懒加载该报告的导出历史版本列表（展开行时调用，已有缓存则跳过）
 async function loadExportJobs(reportId: number) {
   if (exportJobs.value[reportId]?.length) return
   exportLoading.value[reportId] = true
   try {
-    const { data } = await client.get(`/reports/${reportId}/exports`)
-    exportJobs.value[reportId] = data
+    exportJobs.value[reportId] = await fetchJobs(reportId)
   } finally {
     exportLoading.value[reportId] = false
   }
@@ -178,40 +177,13 @@ async function onExpandChange(row: any, expandedRows: any[]) {
 }
 
 async function removeExportJob(row: any, job: any) {
-  await client.delete(`/reports/exports/${job.id}`)
-  ElMessage.success('导出记录已删除')
+  await deleteExportJob(job.id)
   exportJobs.value[row.id] = (exportJobs.value[row.id] || []).filter((j: any) => j.id !== job.id)
-}
-
-async function downloadJob(job: any) {
-  const resp = await client.get(`/reports/exports/${job.id}/download`, { responseType: 'blob' })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${job.title || 'report'}.${job.fmt}`
-  a.click()
-  URL.revokeObjectURL(url)
-  // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
-  if (job.fmt === 'docx' && !job.toc_auto_updated) {
-    showTocNotice()
-  }
 }
 
 async function fetchJobStatus(jobIds: string) {
   const { data } = await client.get('/reports/export-jobs/status', { params: { job_ids: jobIds } })
   return data
-}
-
-async function downloadZip(jobIds: string) {
-  const resp = await client.get('/reports/batch-download', {
-    params: { job_ids: jobIds }, responseType: 'blob',
-  })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = '测试报告批量下载.zip'
-  a.click()
-  URL.revokeObjectURL(url)
 }
 
 async function batchDownload() {
@@ -256,24 +228,6 @@ async function retest(id: number) {
   const { data } = await client.post(`/reports/${id}/retest`)
   ElMessage.success('已发起复测，已自动生成复测报告')
   router.push(`/reports/${data.id}`)
-}
-
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/reports', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
 }
 
 async function createBlank() {

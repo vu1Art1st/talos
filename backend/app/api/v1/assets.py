@@ -1,8 +1,6 @@
 from io import BytesIO
-from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import StreamingResponse
 from sqlalchemy import cast, func, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,13 +8,12 @@ from app.constants import ASSET_STATUS, URL_TAG
 from app.core.deps import get_current_user, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
+from app.core.xlsx import xlsx_response
 from app.db import get_session
 from app.models import Asset, Group, GroupMember, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
 
 router = APIRouter(prefix="/assets", tags=["资产"])
-
-XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # Excel 列定义（顺序即模板列顺序）
 EXCEL_HEADERS = [
@@ -26,7 +23,6 @@ EXCEL_HEADERS = [
 
 STATUS_REVERSE = {v: k for k, v in ASSET_STATUS.items()}
 URL_TAG_REVERSE = {v: k for k, v in URL_TAG.items()}
-
 
 def _asset_conditions(search: str, department: str, status: int | None) -> list:
     cond = []
@@ -44,7 +40,6 @@ def _asset_conditions(search: str, department: str, status: int | None) -> list:
     if status is not None:
         cond.append(Asset.status == status)
     return cond
-
 
 @router.get("", response_model=Page[AssetOut])
 async def list_assets(
@@ -68,7 +63,6 @@ async def list_assets(
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
 
-
 @router.post("", response_model=AssetOut)
 async def create_asset(
     body: AssetIn,
@@ -84,7 +78,6 @@ async def create_asset(
     await session.refresh(asset)
     return asset
 
-
 # ---------- Excel 导入导出（需在 /{asset_id} 之前注册，避免路径冲突） ----------
 def _dump_owners(owners: list | None) -> str:
     return ";".join(
@@ -92,12 +85,10 @@ def _dump_owners(owners: list | None) -> str:
         for o in (owners or [])
     )
 
-
 def _dump_public_urls(urls: list | None) -> str:
     return ";".join(
         f"{u.get('url', '')}|{URL_TAG.get(u.get('tag', 10), '互联网')}" for u in (urls or [])
     )
-
 
 def _parse_owners(text: str) -> list[dict]:
     owners = []
@@ -109,7 +100,6 @@ def _parse_owners(text: str) -> list[dict]:
             "email": fields[2].strip() if len(fields) > 2 else "",
         })
     return owners
-
 
 async def _sync_owners_to_group_members(
     session: AsyncSession, department: str, owners: list[dict],
@@ -137,7 +127,6 @@ async def _sync_owners_to_group_members(
             ))
             existing.add(name)
 
-
 def _parse_public_urls(text: str) -> list[dict]:
     urls = []
     for part in filter(None, (p.strip() for p in text.split(";"))):
@@ -145,16 +134,13 @@ def _parse_public_urls(text: str) -> list[dict]:
         urls.append({"url": url.strip(), "tag": URL_TAG_REVERSE.get(tag_name.strip(), 10)})
     return urls
 
-
 def _parse_list(text: str) -> list[str]:
     return [p.strip() for p in text.split(";") if p.strip()]
-
 
 def _dump_port_services(items: list | None) -> str:
     return ";".join(
         f"{i.get('port', '')}:{i.get('service', '')}".strip(":") for i in (items or [])
     )
-
 
 def _parse_port_services(text: str) -> list[dict]:
     """解析「[端口]:[服务]」对，分号分隔多组，如 80:Web服务;443:HTTPS。"""
@@ -164,12 +150,10 @@ def _parse_port_services(text: str) -> list[dict]:
         items.append({"port": port.strip(), "service": service.strip()})
     return items
 
-
 def _dump_name_versions(items: list | None) -> str:
     return ";".join(
         "/".join(filter(None, [i.get("name", ""), i.get("version", "")])) for i in (items or [])
     )
-
 
 def _parse_name_versions(text: str) -> list[dict]:
     """解析「名称/版本」条目，分号分隔多组，如 Nginx/1.24;Tomcat/9.0。"""
@@ -178,7 +162,6 @@ def _parse_name_versions(text: str) -> list[dict]:
         name, _, version = part.partition("/")
         items.append({"name": name.strip(), "version": version.strip()})
     return items
-
 
 def _build_workbook(assets: list[Asset]):
     from openpyxl import Workbook
@@ -201,18 +184,6 @@ def _build_workbook(assets: list[Asset]):
         )])
     return wb
 
-
-def _xlsx_response(wb, filename: str) -> StreamingResponse:
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return StreamingResponse(
-        buf,
-        media_type=XLSX_MIME,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
-    )
-
-
 @router.get("/export")
 async def export_assets(
     search: str = "",
@@ -225,8 +196,7 @@ async def export_assets(
     assets = (
         await session.execute(select(Asset).where(*cond).order_by(Asset.id))
     ).scalars().all()
-    return _xlsx_response(_build_workbook(list(assets)), "资产导出.xlsx")
-
+    return xlsx_response(_build_workbook(list(assets)), "资产导出.xlsx")
 
 @router.get("/import/template")
 async def download_import_template(_: User = Depends(require_perm("asset:manage"))):
@@ -244,8 +214,7 @@ async def download_import_template(_: User = Depends(require_perm("asset:manage"
         "张三/13800000000/zhangsan@example.com;李四/13900000000/lisi@example.com",
         "线上", "示例行，导入前请删除",
     ])
-    return _xlsx_response(wb, "资产导入模板.xlsx")
-
+    return xlsx_response(wb, "资产导入模板.xlsx")
 
 @router.post("/import", response_model=AssetImportResultOut)
 async def import_assets(
@@ -299,7 +268,6 @@ async def import_assets(
     await session.commit()
     return result
 
-
 @router.get("/{asset_id}", response_model=AssetOut)
 async def get_asset(
     asset_id: int,
@@ -308,7 +276,6 @@ async def get_asset(
 ):
     asset = await get_or_404(session, Asset, asset_id, "资产不存在")
     return asset
-
 
 @router.put("/{asset_id}", response_model=AssetOut)
 async def update_asset(
@@ -326,7 +293,6 @@ async def update_asset(
     await session.commit()
     await session.refresh(asset)
     return asset
-
 
 @router.delete("/{asset_id}")
 async def delete_asset(

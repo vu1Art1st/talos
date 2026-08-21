@@ -112,10 +112,10 @@
         <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
           <template v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`">
             <!-- 拖拽指示线：标记目标插入位置 -->
-            <div v-if="dropLineIndex === i" class="mx-2 h-0.5 rounded-full bg-blue-500"></div>
+            <div v-if="dropLineIndex === i" class="mx-2 h-0.5 rounded-full bg-brand-500"></div>
             <div class="flex items-center gap-2 px-2 py-1.5 rounded text-sm select-none"
                  :class="{
-                   'bg-blue-50 text-blue-600': activeSection === i && dragIndex !== i,
+                   'bg-brand-50 text-brand-600': activeSection === i && dragIndex !== i,
                    'text-gray-600': activeSection !== i || dragIndex === i,
                    'cursor-pointer': dragIndex !== i,
                    'cursor-grabbing opacity-40': dragIndex === i,
@@ -137,7 +137,7 @@
               </span>
             </div>
           </template>
-          <div v-if="dropLineIndex === report.sections.length" class="mx-2 h-0.5 rounded-full bg-blue-500"></div>
+          <div v-if="dropLineIndex === report.sections.length" class="mx-2 h-0.5 rounded-full bg-brand-500"></div>
         </div>
       </el-card>
 
@@ -189,9 +189,13 @@
     </div>
   </div>
 
+  <!-- 首屏加载占位：避免数据未到时的空白闪现 -->
+  <div v-else v-loading="true" class="h-64" element-loading-text="加载中..." />
+
   <PdfPreviewDialog ref="previewRef" />
 
-  <el-dialog v-model="vulnFormVisible" title="录入漏洞" width="780px" top="6vh">
+  <el-dialog
+             :close-on-click-modal="false" v-model="vulnFormVisible" title="录入漏洞" width="800px" top="6vh">
     <VulnFormPanel :plan-id="report?.testing_plan_id ?? null" @saved="onVulnFormSaved" />
   </el-dialog>
 </template>
@@ -207,7 +211,7 @@ import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
-import { showTocNotice } from '../utils/tocNotice'
+import { useExportJobs } from '../composables/useExportJobs'
 import {
   EXPORT_JOB_META,
   exportJobName,
@@ -217,7 +221,6 @@ import {
   statusName,
   statusSoftStyle,
 } from '../utils/colors'
-import { fmtDateTime } from '../utils/format'
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
@@ -226,6 +229,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 const auth = useAuthStore()
 const route = useRoute()
+const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
 const report = ref<any>(null)
 const meta = ref<any>(null)
 const jobs = ref<any[]>([])
@@ -398,13 +402,11 @@ async function load() {
 }
 
 async function loadJobs() {
-  const { data } = await client.get(`/reports/${route.params.id}/exports`)
-  jobs.value = data
+  jobs.value = await fetchJobs(route.params.id as string)
 }
 
 async function removeJob(job: any) {
-  await client.delete(`/reports/exports/${job.id}`)
-  ElMessage.success('导出记录已删除')
+  await deleteExportJob(job.id)
   await loadJobs()
 }
 
@@ -469,50 +471,12 @@ async function onVulnFormSaved() {
 
 async function doExport(fmt: string) {
   if (saveState.value !== '已保存') await save(true)
-  // 重复导出检测：报告内容与最近一次同格式导出完全一致时，确认后仍可继续
-  try {
-    const { data } = await client.post(`/reports/${route.params.id}/export-check`, { fmt })
-    if (data.duplicate) {
-      const lastStatusName = data.last_status === 'done' ? '已完成' : data.last_status || ''
-      const sizeText = data.last_file_size != null ? `（${(data.last_file_size / 1024).toFixed(1)} KB）` : ''
-      const message =
-        `检测到该报告已有相同的导出记录：\n` +
-        `· 报告：《${data.report_title || report.value.title}》\n` +
-        `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
-        `· 导出版本：v${data.last_version ?? ''}\n` +
-        `· 已存在记录：${fmtDateTime(data.last_time)}（${lastStatusName}）\n` +
-        `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
-        `是否仍要继续导出？`
-      const ok = await ElMessageBox.confirm(message, '检测到重复导出', {
-        confirmButtonText: '继续导出',
-        cancelButtonText: '取消',
-        type: 'warning',
-        width: 460,
-      }).then(() => true).catch(() => false)
-      if (!ok) return
-    }
-  } catch {
-    // 检查接口异常时不阻断导出
-  }
-  await client.post(`/reports/${route.params.id}/export`, { fmt })
-  ElMessage.success('导出任务已提交，请稍候在导出记录中下载')
-  await loadJobs()
+  const ok = await submitExport(route.params.id as string, fmt, report.value.title)
+  if (ok) await loadJobs()
 }
 
 function download(job: any) {
-  // 带鉴权下载
-  client.get(`/reports/exports/${job.id}/download`, { responseType: 'blob' }).then((resp) => {
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${job.title || report.value.title}.${job.fmt}`
-    a.click()
-    URL.revokeObjectURL(url)
-    // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
-    if (job.fmt === 'docx' && !job.toc_auto_updated) {
-      showTocNotice()
-    }
-  })
+  downloadJob(job, report.value.title)
 }
 
 onMounted(async () => {

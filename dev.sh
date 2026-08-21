@@ -22,7 +22,7 @@ BACKEND_HEALTH_PATH="/api/v1/meta"
 # 前端健康检查路径：Vite 根路径返回 200
 FRONTEND_HEALTH_PATH="/"
 
-for cmd in python3 node npm curl; do
+for cmd in python3 node pnpm curl; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[dev] 未找到 $cmd，请先安装后重试"; exit 1; }
 done
 
@@ -139,7 +139,7 @@ fi
 
 if [ ! -d "$FRONTEND/node_modules" ]; then
   echo "[dev] 安装前端依赖..."
-  (cd "$FRONTEND" && npm install)
+  (cd "$FRONTEND" && pnpm install)
 fi
 
 # ---------- 启动后端（后台）并等待就绪 ----------
@@ -166,7 +166,7 @@ echo "[dev] 启动前端 http://0.0.0.0:$FRONTEND_PORT （Vite Dev Server）"
 (
   cd "$FRONTEND"
   # 传递端口给 vite.config.ts（前端页面通过 Vite 代理访问后端，外部只需放行前端端口）
-  VP_FRONTEND_PORT="$FRONTEND_PORT" VP_BACKEND_PORT="$BACKEND_PORT" npm run dev
+  VP_FRONTEND_PORT="$FRONTEND_PORT" VP_BACKEND_PORT="$BACKEND_PORT" pnpm run dev
 ) &
 FRONTEND_PID=$!
 trap 'echo "[dev] 停止前后端..."; kill "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true' EXIT

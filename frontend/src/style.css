@@ -14,6 +14,21 @@
   --tl-text-2: #4b5563;
   --tl-text-3: #9ca3af;
 
+  /* Tailwind 灰阶映射（RGB 三元组，支持 / 透明度修饰符）：
+     text-gray-* / bg-gray-* / border-gray-* 经 tailwind.config.js 指向此处，
+     暗黑模式自动翻转，视图内禁止再写死浅色灰阶类 */
+  --tl-gray-0: 255 255 255;      /* surface */
+  --tl-gray-50: 249 250 251;
+  --tl-gray-100: 243 244 246;
+  --tl-gray-200: 229 231 235;    /* border */
+  --tl-gray-300: 209 213 219;
+  --tl-gray-400: 156 163 175;    /* text-3 */
+  --tl-gray-500: 107 114 128;
+  --tl-gray-600: 75 85 99;       /* text-2 */
+  --tl-gray-700: 55 65 81;
+  --tl-gray-800: 17 24 39;       /* text-1 */
+  --tl-gray-900: 3 7 18;
+
   /* 功能色令牌（与 utils/colors.ts 对齐，供纯 CSS 场景引用） */
   --tl-success: #67c23a;
   --tl-warning: #e6a23c;
@@ -47,6 +62,19 @@ html.dark {
   --tl-text-1: #e6edf3;
   --tl-text-2: #9da7b3;
   --tl-text-3: #6e7681;
+
+  /* 暗色灰阶：浅背景变深、深文字变浅，与上方亮色语义一一对应 */
+  --tl-gray-0: 22 27 34;         /* surface */
+  --tl-gray-50: 28 33 40;
+  --tl-gray-100: 33 38 45;
+  --tl-gray-200: 48 54 61;       /* border */
+  --tl-gray-300: 61 68 77;
+  --tl-gray-400: 110 118 129;    /* text-3 */
+  --tl-gray-500: 139 148 158;
+  --tl-gray-600: 157 167 179;    /* text-2 */
+  --tl-gray-700: 182 190 200;
+  --tl-gray-800: 230 237 243;    /* text-1 */
+  --tl-gray-900: 240 246 252;
 
   --el-color-primary: #6366f1;
   --el-color-primary-light-1: #5a5edb;
@@ -229,3 +257,76 @@ body,
 .tl-stat-card {
   padding: 16px 20px;
 }
+
+/* ============ 统计概览折叠标题（统计概览区块共用，两侧渐变装饰线） ============ */
+.tl-collapse-title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-width: 0;
+}
+.tl-collapse-title::before,
+.tl-collapse-title::after {
+  content: '';
+  height: 1px;
+  flex: none;
+  width: 100px;
+}
+.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
+.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
+.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
+.tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
+
+/* ============ 筛选按钮徽标（主色按钮上的已启用条件数） ============ */
+.filter-count {
+  margin-left: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: 11px;
+  line-height: 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+}
+
+/* ============ 测试项勾选卡（测试计划 / 漏扫基线工单表单共用） ============ */
+.test-item-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: var(--tl-surface);
+}
+.test-item-check:hover { border-color: var(--el-color-primary); }
+.test-item-check.checked {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary-light-9);
+}
+.test-item-check .tick {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 1px solid var(--tl-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+.test-item-check.checked .tick {
+  border-color: var(--el-color-primary);
+  background: var(--el-color-primary);
+  color: #fff;
+}
+.test-item-check .ti-name { font-size: 13px; font-weight: 500; }
+.test-item-check .ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }

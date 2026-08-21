@@ -27,6 +27,15 @@ async def client():
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as c:
             yield c
+    # session 结束：先释放引擎连接池再清理产物（Windows 下未释放的 SQLite 句柄会锁文件）
+    import shutil
+
+    from app.db import engine
+
+    await engine.dispose()
+    for db in _TESTS_DIR.glob("test_vp*.db*"):
+        db.unlink(missing_ok=True)
+    shutil.rmtree(_TESTS_DIR / "test_storage", ignore_errors=True)
 
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")

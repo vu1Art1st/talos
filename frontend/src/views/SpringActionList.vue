@@ -6,7 +6,7 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
-      <el-button type="primary" @click="openDialog()">
+      <el-button type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增春耕行动
       </el-button>
     </div>
@@ -73,7 +73,8 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'" width="600px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'" width="640px">
     <el-form :model="form" label-width="90px">
       <el-form-item label="报告编号" required>
         <el-input v-model="form.report_no" placeholder="原始报告编号" />
@@ -106,86 +107,57 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :disabled="!form.report_no" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.report_no" @click="save">保存</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import { useCrudDialog } from '../composables/useCrudDialog'
+import { useListPage } from '../composables/useListPage'
 import { levelName, levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
 const router = useRouter()
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const search = ref('')
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
-const loading = ref(false)
-const dialogVisible = ref(false)
+const { items, total, page, search, loading, load, onSortChange } = useListPage('/spring-actions')
 const vulns = ref<any[]>([])
 
-const emptyForm = () => ({
-  id: null as number | null,
-  report_no: '',
-  system_name: '',
-  year: '',
-  phase: '',
-  appeal_success: false,
-  score_deduction: 0,
-  doc_no: '',
-  vul_ids: [] as number[],
+const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useCrudDialog({
+  empty: () => ({
+    id: null as number | null,
+    report_no: '',
+    system_name: '',
+    year: '',
+    phase: '',
+    appeal_success: false,
+    score_deduction: 0,
+    doc_no: '',
+    vul_ids: [] as number[],
+  }),
+  save: async (f) => {
+    const body = { ...f }
+    delete (body as any).vuls
+    if (f.id) {
+      await client.put(`/spring-actions/${f.id}`, body)
+    } else {
+      await client.post('/spring-actions', body)
+    }
+  },
+  afterSave: () => load(),
 })
-const form = ref(emptyForm())
-
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/spring-actions', { params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order } })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
 
 async function openDialog(row?: any) {
-  form.value = row
-    ? { ...emptyForm(), ...row, vul_ids: row.vuls?.map((v: any) => v.id) ?? [] }
-    : emptyForm()
-  dialogVisible.value = true
+  openCrud(row ? { ...row, vul_ids: row.vuls?.map((v: any) => v.id) ?? [] } : null)
   if (!vulns.value.length) {
     const { data } = await client.get('/vulns', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
     vulns.value = data.items
   }
 }
 
-async function save() {
-  const body = { ...form.value }
-  delete (body as any).vuls
-  if (form.value.id) {
-    await client.put(`/spring-actions/${form.value.id}`, body)
-  } else {
-    await client.post('/spring-actions', body)
-  }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  await load()
-}
-
 async function remove(id: number) {
   await client.delete(`/spring-actions/${id}`)
-  ElMessage.success('删除成功')
   await load()
 }
 

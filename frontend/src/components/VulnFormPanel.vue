@@ -179,7 +179,8 @@
   <AssetFormDialog v-model:visible="assetDialogVisible" :asset="assetPrefill" @saved="onAssetCreated" />
 
   <!-- 知识库模板选择弹窗 -->
-  <el-dialog v-model="templateVisible" title="选择知识库模板" width="620px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="templateVisible" title="选择知识库模板" width="640px">
     <el-input v-model="templateSearch" placeholder="搜索模板名称 / 标签 / 描述" clearable class="mb-3">
       <template #prefix><el-icon><Search /></el-icon></template>
     </el-input>
@@ -189,7 +190,7 @@
     </div>
     <div v-else class="flex flex-col gap-2 max-h-96 overflow-auto">
       <div v-for="(t, i) in filteredTemplateList" :key="t.id"
-           class="rounded-lg border border-gray-200 hover:border-blue-400 cursor-pointer p-3 transition"
+           class="rounded-lg border border-gray-200 hover:border-brand-400 cursor-pointer p-3 transition"
            @click="applyEntry(t)">
         <div class="flex items-center gap-2">
           <span class="tl-tag" :style="levelSoftStyle(t.severity_level)">{{ levelName(t.severity_level) }}</span>

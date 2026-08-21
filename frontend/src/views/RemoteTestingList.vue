@@ -6,7 +6,7 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="flex-1" />
-      <el-button type="primary" @click="openDialog()">
+      <el-button type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增远程检测
       </el-button>
     </div>
@@ -64,8 +64,9 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'" width="620px">
-    <el-form :model="form" label-width="100px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'" width="640px">
+    <el-form :model="form" label-width="90px">
       <el-form-item label="系统名称" required>
         <el-input v-model="form.system_name" placeholder="被检系统名称" />
       </el-form-item>
@@ -120,25 +121,21 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :disabled="!form.system_name" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.system_name" @click="save">保存</el-button>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { useCrudDialog } from '../composables/useCrudDialog'
+import { useListPage } from '../composables/useListPage'
+import { saveBlob } from '../utils/download'
 import { STAT_CARD_COLORS, softStyle } from '../utils/colors'
 
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const search = ref('')
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
-const loading = ref(false)
-const dialogVisible = ref(false)
+const { items, total, page, search, loading, load, onSortChange } = useListPage('/remote-testings')
 
 const emptyForm = () => ({
   id: null as number | null,
@@ -155,38 +152,23 @@ const emptyForm = () => ({
   appeal_file_path: '',
   appeal_file_size: 0,
 })
-const form = ref(emptyForm())
+const { dialogVisible, saving, form, openDialog, submit: save } = useCrudDialog({
+  empty: emptyForm,
+  save: async (f) => {
+    if (f.id) {
+      await client.put(`/remote-testings/${f.id}`, f)
+    } else {
+      await client.post('/remote-testings', f)
+    }
+  },
+  afterSave: () => load(),
+})
 
 const appealStatusLabel = (s: string) =>
   s === 'success' ? '申诉成功' : s === 'fail' ? '申诉失败' : '未申诉'
 const appealStatusStyle = (s: string) =>
   s === 'success' ? softStyle(STAT_CARD_COLORS.green)
     : s === 'fail' ? softStyle(STAT_CARD_COLORS.red) : softStyle(STAT_CARD_COLORS.gray)
-
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/remote-testings', {
-      params: { search: search.value, page: p, size: 20, sort: sort.prop, order: sort.order },
-    })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
-
-async function openDialog(row?: any) {
-  form.value = row ? { ...emptyForm(), ...row } : emptyForm()
-  dialogVisible.value = true
-}
 
 async function uploadAppeal(options: any) {
   const fd = new FormData()
@@ -206,29 +188,11 @@ function clearAppeal() {
 
 async function downloadAppeal(row: any) {
   const { data } = await client.get(`/remote-testings/${row.id}/appeal`, { responseType: 'blob' })
-  const url = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = row.appeal_file_name || 'appeal'
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-async function save() {
-  const body = { ...form.value }
-  if (form.value.id) {
-    await client.put(`/remote-testings/${form.value.id}`, body)
-  } else {
-    await client.post('/remote-testings', body)
-  }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  await load()
+  saveBlob(data, row.appeal_file_name || 'appeal')
 }
 
 async function remove(row: any) {
   await client.delete(`/remote-testings/${row.id}`)
-  ElMessage.success('删除成功')
   await load()
 }
 

@@ -1,7 +1,6 @@
 import html as html_mod
 import logging
 import re
-from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -15,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import ReportStatus, VUL_LEVEL_EXPORT, VulStatus
 from app.core.deps import require_perm
-from app.core.timeutil import now
+from app.core.timeutil import mandays_between, now
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
@@ -101,22 +100,6 @@ async def _snapshot_vul_edits(session: AsyncSession, vul_ids: list[int]) -> dict
         await session.execute(select(Vul.id, Vul.update_time).where(Vul.id.in_(ids)))
     ).all()
     return {str(vid): t.isoformat() if t else "" for vid, t in rows}
-
-
-def _calc_mandays(test_start: str, test_end: str) -> float:
-    """实际人天：报告测试结束日期 - 开始日期 + 1（含首尾，最小 1 天）。
-
-    测试周期为 YYYY-MM-DD 字符串；任一缺失、非法或结束早于开始时视为 0。
-    报告创建/保存/导出时均自动重算，用户手动修改测试周期后以修改后的时间为准。
-    """
-    try:
-        start = datetime.strptime(test_start, "%Y-%m-%d")
-        end = datetime.strptime(test_end, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        return 0.0
-    if end < start:
-        return 0.0
-    return float((end - start).days + 1)
 
 
 def _vul_status_snapshot(vulns: list[Vul]) -> dict:
@@ -213,7 +196,7 @@ async def _create_retest_report(
         ))
     session.add(report)
     await session.flush()
-    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     report.vul_edit_snapshot = await _snapshot_vul_edits(
         session, [s.vul_id for s in report.sections if s.vul_id]
     )
@@ -297,7 +280,7 @@ async def create_report(
     # 漏洞流转（自动进入修复中）会刷新其最后编辑时间，故快照需在流转后采集
     report.vul_edit_snapshot = await _snapshot_vul_edits(session, linked_ids)
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1
-    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
@@ -361,7 +344,7 @@ async def create_report_from_vulns(
         if not plan.first_test_done_time:
             plan.first_test_done_time = now().date().isoformat()
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1
-    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
@@ -594,7 +577,7 @@ async def save_report(
             session, [s.vul_id for s in body.sections if s.vul_id]
         )
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1（用户手动修改时间后以修改后的时间为准）
-    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     if old_plan_id and old_plan_id != report.testing_plan_id:
@@ -791,7 +774,7 @@ async def export_report(
         if not report.test_end:
             report.test_end = now().date().isoformat()
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1（导出时预填周期同样会刷新该值）
-    report.actual_mandays = _calc_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     # 预填测试周期会触发报告 update_time（onupdate）刷新，且该值不会回写对象属性，

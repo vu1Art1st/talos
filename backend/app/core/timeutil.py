@@ -36,3 +36,23 @@ def now() -> datetime:
 def utcnow() -> datetime:
     """当前 UTC 时间（naive），用于 JWT 等绝对时间戳，区别于业务本地时间。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def parse_date(raw) -> datetime | None:
+    """解析 YYYY-MM-DD 为 datetime（本地 0 点）；空 / 非法值返回 None。"""
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d")
+    except (ValueError, TypeError):
+        return None
+
+
+def mandays_between(test_start: str, test_end: str) -> float:
+    """实际人天：结束日期 - 开始日期 + 1（含首尾，最小 1 天）。
+
+    报告与专项工单模块共用口径；任一缺失、非法或结束早于开始时为 0。
+    """
+    start = parse_date(test_start)
+    end = parse_date(test_end)
+    if start is None or end is None or end < start:
+        return 0.0
+    return float((end - start).days + 1)

@@ -6,14 +6,13 @@
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <el-popover
-        ref="popoverRef"
         :visible="filterVisible"
         trigger="manual"
         placement="bottom-start"
         :width="880"
       >
         <template #reference>
-          <el-button ref="filterButtonRef" :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
+          <el-button :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
             <el-icon class="mr-1"><Filter /></el-icon>筛选
             <span v-if="filterCount" class="filter-count">{{ filterCount }}</span>
           </el-button>
@@ -64,7 +63,7 @@
         </template>
       </el-dropdown>
       <input ref="importInputRef" type="file" accept=".xlsx" class="hidden" @change="onImportFileChange" />
-      <el-button type="primary" @click="openDialog()">
+      <el-button type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试工单
       </el-button>
     </div>
@@ -81,11 +80,7 @@
           <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
         </el-checkbox-group>
         <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 max-w-7xl mx-auto">
-          <div v-for="d in cardDims" :key="d.key"
-               class="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3.5">
-            <div class="text-xs text-gray-500">{{ d.label }}</div>
-            <div class="text-2xl font-semibold" :style="{ color: d.color }">{{ stats[d.key] ?? 0 }}</div>
-          </div>
+          <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="stats[d.key] ?? 0" />
         </div>
         <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-4" />
       </el-collapse-item>
@@ -218,7 +213,7 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="openWorkflow(row)">流程</el-button>
+          <el-button size="small" type="primary" link @click="openWorkflow(row)">流程</el-button>
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该计划？" @confirm="remove(row.id)">
             <template #reference>
@@ -235,7 +230,8 @@
     </div>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="680px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="640px">
     <el-form :model="form" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
         <el-form-item label="计划名称">
@@ -380,7 +376,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :disabled="!form.system_name" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.system_name" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -410,16 +406,20 @@ import {
 import { fmtDate, fmtDateTime } from '../utils/format'
 import { NONPEN_ITEMS } from '../constants/nonpen'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
+import StatCard from '../components/StatCard.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
+import { useAssetSelect } from '../composables/useAssetSelect'
+import { useDictOptions } from '../composables/useDictOptions'
+import { useListPage } from '../composables/useListPage'
 import type { FilterFieldDef, FilterRule } from '../components/FilterBuilder.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const search = ref('')
+const { items, total, page, search, sort, loading, load, onSortChange } = useListPage('/testing-plans', {
+  defaultSort: { prop: 'receive_time', order: 'desc' },
+  extraParams: filterParams,
+})
 // 快捷筛选：三项布尔筛选收敛为单个下拉多选，myTests/unclaimed/pending 由勾选项派生
 const quickFilters = ref<string[]>([])
 const myTests = computed(() => quickFilters.value.includes('my_tests'))
@@ -429,18 +429,14 @@ const quickFilterCount = computed(() => quickFilters.value.length)
 function onQuickFilterChange() {
   reload()
 }
-const sort = reactive<{ prop: string; order: string }>({ prop: 'receive_time', order: 'desc' })
-const loading = ref(false)
 const dialogVisible = ref(false)
+const saving = ref(false)
 const statusMap = ref<Record<number, string>>({})
 const dialogRow = ref<any>(null)
-const testTypes = ref<string[]>([])
-const departments = ref<string[]>([])
+const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
 
 // ---------- 聚合筛选 ----------
 const filterVisible = ref(false)
-const popoverRef = ref()
-const filterButtonRef = ref()
 const RULES_KEY = 'testing_plan_filters'
 
 // 聚合筛选可选字段（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
@@ -637,26 +633,6 @@ function filterParams(): Record<string, any> {
   return params
 }
 
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/testing-plans', {
-      params: { ...filterParams(), page: p, size: 20 },
-    })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
-
 async function loadStats() {
   statsLoading.value = true
   try {
@@ -692,22 +668,12 @@ async function exportExcel() {
   const { data } = await client.get('/testing-plans/export', {
     params: filterParams(), responseType: 'blob',
   })
-  const url = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = '渗透测试工单导出.xlsx'
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(data, '渗透测试工单导出.xlsx')
 }
 
 async function downloadTemplate() {
   const { data } = await client.get('/testing-plans/import/template', { responseType: 'blob' })
-  const url = URL.createObjectURL(data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = '渗透测试工单导入模板.xlsx'
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(data, '渗透测试工单导入模板.xlsx')
 }
 
 const importing = ref(false)
@@ -756,91 +722,50 @@ function openDialog(row?: any) {
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
   assetOptions.value = []
   if (form.value.asset_ids.length) loadAssetLabels()
-  prevAssetIds = [...form.value.asset_ids]
+  resetBaseline([...form.value.asset_ids])
   dialogVisible.value = true
 }
 
 // ---------- 关联资产 ----------
-const assetOptions = ref<any[]>([])
-const assetLoading = ref(false)
-const assetCache = ref<Record<number, any>>({})
+const {
+  assetOptions, assetLoading, assetCache, assetLabel,
+  searchAssets, loadAssetLabels: loadAssetLabelsRaw, cacheAsset, diffIds, resetBaseline, lastKeyword,
+} = useAssetSelect()
 let assetSearchTimer: ReturnType<typeof setTimeout> | null = null
 const assetDialogVisible = ref(false)
 const assetPrefill = ref<any>(null)
-let lastAssetKeyword = ''
-let prevAssetIds: number[] = []
 
-// 下拉展示：系统名称 +（子系统）+（系统类型，用于区分同名系统的不同环境）
-function assetLabel(a: any) {
-  const parts = [a.name]
-  if (a.sub_system) parts.push(`（${a.sub_system}）`)
-  if (a.system_type) parts.push(`（${a.system_type}）`)
-  return parts.join('')
-}
-
-async function searchAssets(keyword: string) {
-  lastAssetKeyword = keyword
-  assetLoading.value = true
-  try {
-    const { data } = await client.get('/assets', {
-      params: { search: keyword, page: 1, size: 50 },
-    })
-    assetOptions.value = data.items.map((a: any) => {
-      assetCache.value[a.id] = a
-      return { id: a.id, label: assetLabel(a) }
-    })
-  } finally {
-    assetLoading.value = false
-  }
+function loadAssetLabels() {
+  return loadAssetLabelsRaw([...form.value.asset_ids])
 }
 
 // 新增渗透测试工单时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
 function openCreateAsset() {
-  assetPrefill.value = lastAssetKeyword ? { name: lastAssetKeyword } : null
+  assetPrefill.value = lastKeyword() ? { name: lastKeyword() } : null
   assetDialogVisible.value = true
 }
 
 function onAssetCreated(asset: any) {
   if (!asset?.id) return
-  assetCache.value[asset.id] = asset
-  const label = assetLabel(asset)
-  if (!assetOptions.value.some((o: any) => o.id === asset.id)) {
-    assetOptions.value.push({ id: asset.id, label })
-  }
+  cacheAsset(asset)
   if (!form.value.asset_ids.includes(asset.id)) {
     form.value.asset_ids.push(asset.id)
   }
   // 自动填充测试系统与所属部门（资产信息），仅带出纯系统名称（不含系统类型/子系统），用户仍可手动修改/覆盖
   form.value.system_name = asset.name
   form.value.department = asset.department || ''
-  prevAssetIds = [...form.value.asset_ids]
+  resetBaseline([...form.value.asset_ids])
 }
 
 // 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
 function onAssetsChange(ids: number[]) {
   if (form.value.id) return
-  const added = ids.filter((id) => !prevAssetIds.includes(id))
-  prevAssetIds = [...ids]
+  const added = diffIds(ids)
   if (!added.length) return
   const asset = assetCache.value[added[added.length - 1]]
   if (!asset) return
   form.value.system_name = asset.name
   form.value.department = asset.department || ''
-}
-
-async function loadAssetLabels() {
-  const ids = [...form.value.asset_ids]
-  if (!ids.length) return
-  const rows = await Promise.all(
-    ids.map((id: number) => client.get(`/assets/${id}`).catch(() => null)),
-  )
-  for (const r of rows) {
-    const a = r?.data
-    if (a && !assetOptions.value.some((o: any) => o.id === a.id)) {
-      assetCache.value[a.id] = a
-      assetOptions.value.push({ id: a.id, label: assetLabel(a) })
-    }
-  }
 }
 
 async function save() {
@@ -854,34 +779,29 @@ async function save() {
     ElMessage.warning('已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID')
     return
   }
-  const body = { ...form.value }
-  delete (body as any).testers
-  delete (body as any).vuls
-  delete (body as any).reports
-  delete (body as any).retest_rounds
-  delete (body as any).retest_round_count
-  delete (body as any).ticket_id
-  delete (body as any).ticket_seq
-  if (form.value.id) {
-    delete (body as any).create_nonpen
-    delete (body as any).nonpen_test_items
-    await client.put(`/testing-plans/${form.value.id}`, body)
-  } else {
-    await client.post('/testing-plans', body)
+  saving.value = true
+  try {
+    const body = { ...form.value }
+    delete (body as any).testers
+    delete (body as any).vuls
+    delete (body as any).reports
+    delete (body as any).retest_rounds
+    delete (body as any).retest_round_count
+    delete (body as any).ticket_id
+    delete (body as any).ticket_seq
+    if (form.value.id) {
+      delete (body as any).create_nonpen
+      delete (body as any).nonpen_test_items
+      await client.put(`/testing-plans/${form.value.id}`, body)
+    } else {
+      await client.post('/testing-plans', body)
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    await Promise.all([load(), loadStats()])
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  await Promise.all([load(), loadStats()])
-}
-
-async function loadTestTypes() {
-  const { data } = await client.get('/dict/test_type')
-  testTypes.value = data.map((o: any) => o.name)
-}
-
-async function loadDepartments() {
-  const { data } = await client.get('/groups')
-  departments.value = data.map((g: any) => g.name)
 }
 
 async function addTestType() {
@@ -939,7 +859,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   if (filterTimer) clearTimeout(filterTimer)
-  document.removeEventListener('mousedown', onPopoverDocMouseDown)
   window.removeEventListener('resize', onResize)
   monthChart?.dispose()
   monthChart = null
@@ -962,19 +881,6 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 /* 筛选按钮上的条件数徽标 */
-.filter-count {
-  margin-left: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 5px;
-  font-size: 11px;
-  line-height: 16px;
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.28);
-}
 /* 快捷筛选下拉：纵向排列 + 每项可整行点击 */
 .quick-filter-panel :deep(.el-checkbox-group) {
   display: flex;
@@ -1025,61 +931,5 @@ onBeforeUnmount(() => {
 /* 渐变注释：品牌视觉渐变统一色源见 style.css .tl-brand-gradient */
 .tp-create-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
 
-/* 测试项勾选卡片（与测试计划/漏扫基线工单共用样式） */
-.test-item-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--tl-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: var(--tl-surface);
-}
-.test-item-check:hover { border-color: var(--el-color-primary); }
-.test-item-check.checked {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
-.test-item-check .tick {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  margin-top: 1px;
-  border-radius: 50%;
-  border: 1px solid var(--tl-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-.test-item-check.checked .tick {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary);
-  color: #fff;
-}
-.ti-name { font-size: 13px; font-weight: 500; }
-.ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
+/* 统计卡 / 勾选卡 / 折叠标题样式已上提 style.css 全局共用 */</style>
 
-/* 统计概览标题：居中 + 两侧渐变装饰线；保留 el-collapse 折叠/展开能力，仅做视觉增强 */
-.tl-collapse-title {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-width: 0;
-}
-.tl-collapse-title::before,
-.tl-collapse-title::after {
-  content: '';
-  height: 1px;
-  flex: none;
-  width: 100px;
-}
-.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
-.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
-.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
-.tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
-</style>

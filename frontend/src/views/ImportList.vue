@@ -24,7 +24,7 @@
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
       <el-table-column type="index" label="序号" width="80"
-                       :index="(i: number) => (query.page - 1) * query.size + i + 1" />
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="status" label="状态" width="120" sortable="custom">
         <template #default="{ row }">
@@ -57,7 +57,7 @@
 
     <div class="flex justify-end mt-4">
       <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="query.size" :current-page="query.page" @current-change="load" />
+                     :page-size="20" :current-page="page" @current-change="load" />
     </div>
   </el-card>
 
@@ -65,45 +65,25 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, reactive, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import { useListPage } from '../composables/useListPage'
+import { saveBlob } from '../utils/download'
 import { importStatusMeta, softStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const router = useRouter()
-const items = ref<any[]>([])
-const total = ref(0)
-const loading = ref(false)
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
-const query = reactive({ page: 1, size: 20, sort: '', order: '' })
 const uploadRef = ref()
 const fileList = ref<any[]>([])
 const uploading = ref(false)
 const uploaded = ref(0)
 let timer: number | undefined
 
-
-
-async function load(page = query.page) {
-  query.page = page
-  loading.value = true
-  try {
-    const { data } = await client.get('/imports', { params: { ...query } })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  query.sort = order ? prop : ''
-  query.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
-}
+const { items, total, page, loading, load, onSortChange } = useListPage('/imports')
 
 function onFileChange(file: any) {
   if (file.status === 'ready') fileList.value.push(file)
@@ -151,12 +131,7 @@ async function doUpload() {
 
 async function downloadTemplate() {
   const resp = await client.get('/imports/template', { responseType: 'blob' })
-  const url = URL.createObjectURL(resp.data)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = '漏洞导入模板.docx'
-  a.click()
-  URL.revokeObjectURL(url)
+  saveBlob(resp.data, '漏洞导入模板.docx')
 }
 
 async function removeBatch(id: number) {

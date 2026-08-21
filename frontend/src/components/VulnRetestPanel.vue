@@ -54,7 +54,8 @@
       <slot name="actions" />
     </div>
 
-    <el-dialog v-model="addVisible" title="新增复测记录" width="640px">
+    <el-dialog
+             :close-on-click-modal="false" v-model="addVisible" title="新增复测记录" width="640px">
       <div class="mb-3">
         <div class="text-sm font-medium text-gray-600 mb-2">复测标题 <span class="text-xs text-gray-400">（选填，留空按创建日期自动生成）</span></div>
         <el-input v-model="addForm.title" placeholder="如：复测记录250815" maxlength="255" clearable />

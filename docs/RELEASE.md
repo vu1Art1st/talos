@@ -25,6 +25,34 @@
 
 ---
 
+## [2.0.2] - 2026-08-22
+
+大规模重构:导出/下载/色彩/消毒统一封装,前端设计系统抽取,迁移 pnpm,补充前端测试。
+
+### 变更
+
+- **前端包管理迁移 npm → pnpm**（`frontend/package.json` / `pnpm-workspace.yaml` / `pnpm-lock.yaml`；删除 `package-lock.json`）：新增 `packageManager: pnpm@11.6.0` 与 `test`/`test:watch`(vitest) 脚本；开发/构建/安装统一改用 pnpm
+- **开发脚本同步**（`dev.ps1` / `dev.sh` / `frontend/Dockerfile` / `README.md` / `.gitignore`）：安装与启动命令适配 pnpm；`.gitignore` 补充 pnpm/uv/测试产物忽略项
+
+### 重构
+
+- **Excel 导出统一封装**（`backend/app/core/xlsx.py` 新增）：抽出 `xlsx_response(wb, filename)`,所有 xlsx 导出接口(`assets.py` / `special.py` / `reports.py`)移除散落的 `BytesIO`+`StreamingResponse` 样板,统一走 `xlsx_response`
+- **人天口径统一**（`backend/app/core/timeutil.py` 新增 `mandays_between` / `parse_date`）：`special.py`(`_no_vul_mandays`)、`reports.py`(`_calc_mandays`)、`vulns.py`(`_parse_date`)的本地副本统一改为调用 `query.parse_int_list`/`parse_str_list` 与 `timeutil`,消除重复
+- **富文本消毒统一**（`backend/app/schemas.py`）：抽出 `HtmlStr` / `OptHtmlStr` 注解类型,全站富文本字段统一经 `sanitize_html` 消毒,移除各模型重复的 `_clean_html` validator
+- **前端设计系统抽取**（`frontend/src/components/StatCard.vue` 新增、`utils/colors.ts` / `utils/chartTheme.ts` 单一色源）：`Dashboard` 等图表系列色改用语义化 `PALETTE`,统计卡统一走 `StatCard`；新增 `utils/download.ts`(`saveBlob`/`saveReportBlob` 统一 blob 下载,docx 目录域未更新时提示)、`composables/`(`useListPage` / `useExportJobs` / `useAssetSelect` / `useCrudDialog` / `useDictOptions`)；多个视图(`TestingPlanList` / `NonpenPlanList` / `VulnList` / `RemoteTestingList` / `ReportList` / `ReportEditor` / `SpringActionList` / `UserList` / `GroupList` / `KnowledgeList` / `AssetList` / `PlanWorkflowDrawer` / `ImportList`)适配统一组件与样式
+
+### 测试
+
+- **新增前端单测（vitest）**：`frontend/src/utils/__tests__/download.spec.ts`、`frontend/src/composables/__tests__/useListPage.spec.ts`；`backend/tests/conftest.py` 补充种子数据钩子
+- **开发种子数据脚本**（`backend/scripts/seed_dev_data.py` 新增）：一键灌入演示用资产/系统/漏洞/工单数据,便于本地预览
+
+### 文档
+
+- **`AGENTS.md`**（新增）：仓库唯一项目规范入口（选型/命令/约束）,供协作者与 AI 工具遵循
+- **`docs/ROADMAP.md`**（恢复）：补回路线图文档
+
+---
+
 ## [2.0.1] - 2026-08-19
 
 报告导入健壮性与批量上传:跨报告去重合并、解析器乱码回退、复测轮次修正。
@@ -45,7 +73,7 @@
 
 - **解析器测试**（`backend/tests/test_parser.py`）：新增 `test_normalize_vul_title`（标题归一化与 fixed 判定覆盖「部分已修复/基本已修复/半角括号/含括号非状态」等边界）、文件名 `retest_round_seq` 解析（含 `-1` 第二轮）
 - **导入跨报告去重测试**（`backend/tests/test_api.py`）：新增复测报告贯穿三轮导入后漏洞唯一、计划复测完成且两轮复测轮次记录的断言
-- **测试样例**（`import-test/`）：新增 3 份中移综合办公系统渗透测试/复测报告 `.docx` 样例,供解析器与导入测试使用
+- **测试样例**：3 份中移综合办公系统渗透测试/复测报告 `.docx` 样例仅本地手测用（不入库）；`test_parser.py` 的 docx 样例为测试内 python-docx 现造,不依赖外部文件
 
 ---
 

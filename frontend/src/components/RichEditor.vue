@@ -1,5 +1,5 @@
 <template>
-  <div class="border border-gray-300 rounded-md bg-white">
+  <div class="border border-gray-300 rounded-md bg-surface">
     <div v-if="editor" class="flex flex-wrap gap-1 border-b border-gray-200 p-1.5">
       <el-button-group size="small">
         <el-button :type="editor.isActive('bold') ? 'primary' : ''"

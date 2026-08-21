@@ -17,26 +17,11 @@
 
     <!-- 统计概览：总数 / 复测完成 / 三类扫描次数 -->
     <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
-      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">漏扫基线工单总数</div>
-        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.blue }">{{ stats.total ?? 0 }}</div>
-      </div>
-      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">复测完成数</div>
-        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.green }">{{ stats.retest_done ?? 0 }}</div>
-      </div>
-      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">基线扫描次数</div>
-        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.orange }">{{ stats.baseline_times ?? 0 }}</div>
-      </div>
-      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">主机扫描次数</div>
-        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.red }">{{ stats.host_times ?? 0 }}</div>
-      </div>
-      <div class="rounded-lg border px-5 py-4" style="border-color: var(--tl-border); background: var(--tl-surface-2)">
-        <div class="text-xs" style="color: var(--tl-text-3)">Web扫描次数</div>
-        <div class="text-2xl font-semibold" :style="{ color: STAT_CARD_COLORS.gray }">{{ stats.web_times ?? 0 }}</div>
-      </div>
+      <StatCard label="漏扫基线工单总数" :color="STAT_CARD_COLORS.blue" :value="stats.total ?? 0" />
+      <StatCard label="复测完成数" :color="STAT_CARD_COLORS.green" :value="stats.retest_done ?? 0" />
+      <StatCard label="基线扫描次数" :color="STAT_CARD_COLORS.orange" :value="stats.baseline_times ?? 0" />
+      <StatCard label="主机扫描次数" :color="STAT_CARD_COLORS.red" :value="stats.host_times ?? 0" />
+      <StatCard label="Web扫描次数" :color="STAT_CARD_COLORS.gray" :value="stats.web_times ?? 0" />
     </div>
 
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
@@ -46,7 +31,7 @@
                   :description="actionable || search ? '未找到符合条件（可进行 / 搜索）的漏扫基线工单' : '暂无漏扫基线工单，点击右上角「新增漏扫基线工单」开始'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
-                       :index="(i: number) => (page - 1) * size + i + 1" />
+                       :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column label="工单ID" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="font-mono" style="color: var(--el-color-primary); font-weight: 600">{{ row.ticket_id || '-' }}</span>
@@ -81,7 +66,7 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" @click="openWorkflow(row)">流程</el-button>
+          <el-button size="small" type="primary" link @click="openWorkflow(row)">流程</el-button>
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm :title="row.linked ? '确认删除？将同步删除其来源渗透测试工单' : '确认删除该漏扫基线工单？'"
                          @confirm="remove(row)">
@@ -95,12 +80,12 @@
 
     <div class="flex justify-end mt-4">
       <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="size" :current-page="page" @current-change="load" />
+                     :page-size="20" :current-page="page" @current-change="load" />
     </div>
   </el-card>
 
   <!-- 新增 / 编辑弹窗 -->
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="760px"
+  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="800px"
              :close-on-click-modal="false">
     <el-form :model="form" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
@@ -164,7 +149,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :disabled="!form.system_name" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" :disabled="!form.system_name" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -176,23 +161,23 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Plus, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { useAssetSelect } from '../composables/useAssetSelect'
+import { useDictOptions } from '../composables/useDictOptions'
+import { useListPage } from '../composables/useListPage'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDate } from '../utils/format'
 import { NONPEN_ITEMS, nonpenItemMeta } from '../constants/nonpen'
 import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
+import StatCard from '../components/StatCard.vue'
 
-const items = ref<any[]>([])
-const total = ref(0)
-const page = ref(1)
-const size = ref(20)
-const search = ref('')
 const actionable = ref(false)
-const sort = reactive<{ prop: string; order: string }>({ prop: 'receive_time', order: 'desc' })
-const loading = ref(false)
+const { items, total, page, search, sort, loading, load, onSortChange } = useListPage('/nonpen-plans', {
+  defaultSort: { prop: 'receive_time', order: 'desc' },
+  extraParams: () => (actionable.value ? { actionable: true } : {}),
+})
 const stats = ref<Record<string, number>>({})
 const dialogVisible = ref(false)
-const testTypes = ref<string[]>([])
-const departments = ref<string[]>([])
+const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
 
 const emptyForm = () => ({
   id: null as number | null,
@@ -219,39 +204,9 @@ const departmentOptions = computed(() =>
     ? [...departments.value, form.value.department]
     : departments.value)
 
-function filterParams(): Record<string, any> {
-  const params: Record<string, any> = { search: search.value }
-  if (actionable.value) params.actionable = true
-  if (sort.prop) {
-    params.sort = sort.prop
-    params.order = sort.order
-  }
-  return params
-}
-
-async function load(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/nonpen-plans', {
-      params: { ...filterParams(), page: p, size: size.value },
-    })
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
 async function loadStats() {
   const { data } = await client.get('/nonpen-plans/stats')
   stats.value = data
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  load(1)
 }
 
 async function reload() {
@@ -271,7 +226,7 @@ function openDialog(row?: any) {
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
   assetOptions.value = []
   if (form.value.asset_ids.length) loadAssetLabels()
-  prevAssetIds = [...form.value.asset_ids]
+  resetBaseline([...form.value.asset_ids])
   dialogVisible.value = true
 }
 
@@ -283,37 +238,44 @@ function selectedItems(row: any): string[] {
     .map((t) => t.key)
 }
 
+const saving = ref(false)
+
 async function save() {
   // 工单ID必须有来源：需求接收日期（自动生成）或手动工单ID（二者至少其一）
   if (!form.value.ticket_id_manual && !form.value.receive_time) {
     ElMessage.warning('请填写「需求接收日期」（用于自动生成工单ID），或手动指定工单ID')
     return
   }
-  const body: any = { ...form.value }
-  delete body.id
-  delete body.ticket_id
-  delete body.ticket_seq
-  delete body.items
-  delete body.linked
-  delete body.actionable
-  delete body.testing_plan_id
-  delete body.create_time
-  delete body.update_time
-  if (form.value.id) {
-    await client.put(`/nonpen-plans/${form.value.id}`, body)
-  } else {
-    await client.post('/nonpen-plans', body)
+  saving.value = true
+  try {
+    const body: any = { ...form.value }
+    delete body.id
+    delete body.ticket_id
+    delete body.ticket_seq
+    delete body.items
+    delete body.linked
+    delete body.actionable
+    delete body.testing_plan_id
+    delete body.create_time
+    delete body.update_time
+    if (form.value.id) {
+      await client.put(`/nonpen-plans/${form.value.id}`, body)
+    } else {
+      await client.post('/nonpen-plans', body)
+    }
+    ElMessage.success('保存成功')
+    dialogVisible.value = false
+    await reload()
+  } finally {
+    saving.value = false
   }
-  ElMessage.success('保存成功')
-  dialogVisible.value = false
-  await reload()
 }
 
 async function remove(row: any) {
   if (row.linked) {
     await ElMessageBox.confirm(
       `该计划由渗透测试工单联动创建，删除将同步删除其来源渗透测试工单（互相级联），确认删除「${row.plan_name || row.system_name}」？`,
-      '删除确认', { type: 'warning' },
+      '删除确认', { type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger' },
     )
   }
   await client.delete(`/nonpen-plans/${row.id}`)
@@ -321,54 +283,17 @@ async function remove(row: any) {
   await reload()
 }
 
-// ---------- 关联资产 ----------
-const assetOptions = ref<any[]>([])
-const assetLoading = ref(false)
-const assetCache = ref<Record<number, any>>({})
-let prevAssetIds: number[] = []
+// ---------- 关联资产（composable） ----------
+const { assetOptions, assetLoading, assetCache, searchAssets, loadAssetLabels: loadAssetLabelsRaw, diffIds, resetBaseline } = useAssetSelect()
 
-function assetLabel(a: any) {
-  const parts = [a.name]
-  if (a.sub_system) parts.push(`（${a.sub_system}）`)
-  if (a.system_type) parts.push(`（${a.system_type}）`)
-  return parts.join('')
-}
-
-async function searchAssets(keyword: string) {
-  assetLoading.value = true
-  try {
-    const { data } = await client.get('/assets', {
-      params: { search: keyword, page: 1, size: 50 },
-    })
-    assetOptions.value = data.items.map((a: any) => {
-      assetCache.value[a.id] = a
-      return { id: a.id, label: assetLabel(a) }
-    })
-  } finally {
-    assetLoading.value = false
-  }
-}
-
-async function loadAssetLabels() {
-  const ids = [...form.value.asset_ids]
-  if (!ids.length) return
-  const rows = await Promise.all(
-    ids.map((id: number) => client.get(`/assets/${id}`).catch(() => null)),
-  )
-  for (const r of rows) {
-    const a = r?.data
-    if (a && !assetOptions.value.some((o: any) => o.id === a.id)) {
-      assetCache.value[a.id] = a
-      assetOptions.value.push({ id: a.id, label: assetLabel(a) })
-    }
-  }
+function loadAssetLabels() {
+  return loadAssetLabelsRaw([...form.value.asset_ids])
 }
 
 // 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
 function onAssetsChange(ids: number[]) {
   if (form.value.id) return
-  const added = ids.filter((id) => !prevAssetIds.includes(id))
-  prevAssetIds = [...ids]
+  const added = diffIds(ids)
   if (!added.length) return
   const asset = assetCache.value[added[added.length - 1]]
   if (!asset) return
@@ -386,12 +311,7 @@ function openWorkflow(row: any) {
 }
 
 async function loadDicts() {
-  const [{ data: t }, { data: g }] = await Promise.all([
-    client.get('/dict/test_type'),
-    client.get('/groups'),
-  ])
-  testTypes.value = t.map((o: any) => o.name)
-  departments.value = g.map((x: any) => x.name)
+  await Promise.all([loadTestTypes(), loadDepartments()])
 }
 
 onMounted(async () => {
@@ -412,39 +332,4 @@ onMounted(async () => {
 }
 
 /* 测试项勾选卡片 */
-.test-item-check {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--tl-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: var(--tl-surface);
-}
-.test-item-check:hover { border-color: var(--el-color-primary); }
-.test-item-check.checked {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary-light-9);
-}
-.test-item-check .tick {
-  width: 18px;
-  height: 18px;
-  flex: none;
-  margin-top: 1px;
-  border-radius: 50%;
-  border: 1px solid var(--tl-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-.test-item-check.checked .tick {
-  border-color: var(--el-color-primary);
-  background: var(--el-color-primary);
-  color: #fff;
-}
-.ti-name { font-size: 13px; font-weight: 500; }
-.ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
 </style>

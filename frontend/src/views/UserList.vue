@@ -79,7 +79,8 @@
     </el-card>
   </div>
 
-  <el-dialog v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
     <el-form :model="userForm" label-width="90px">
       <el-form-item label="用户名" required>
         <el-input v-model="userForm.username" :disabled="!!userForm.id" />
@@ -105,11 +106,12 @@
     </el-form>
     <template #footer>
       <el-button @click="userDialog = false">取消</el-button>
-      <el-button type="primary" @click="saveUser">保存</el-button>
+      <el-button type="primary" :loading="userSaving" @click="saveUser">保存</el-button>
     </template>
   </el-dialog>
 
-  <el-dialog v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="520px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="480px">
     <el-form :model="roleForm" label-width="90px">
       <el-form-item label="角色名称" required>
         <el-input v-model="roleForm.name" />
@@ -125,7 +127,7 @@
     </el-form>
     <template #footer>
       <el-button @click="roleDialog = false">取消</el-button>
-      <el-button type="primary" @click="saveRole">保存</el-button>
+      <el-button type="primary" :loading="roleSaving" @click="saveRole">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -134,38 +136,19 @@
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import { useListPage } from '../composables/useListPage'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
-const users = ref<any[]>([])
+const { items: users, total, page, loading, load: loadUsers, onSortChange } = useListPage('/users')
 const roles = ref<any[]>([])
 const allPerms = ref<string[]>([])
-const total = ref(0)
-const page = ref(1)
-const sort = reactive<{ prop: string; order: string }>({ prop: '', order: '' })
-const loading = ref(false)
 const rolesLoading = ref(false)
 const userDialog = ref(false)
 const roleDialog = ref(false)
+const userSaving = ref(false)
+const roleSaving = ref(false)
 const userForm = reactive<any>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
 const roleForm = reactive<any>({ id: null, name: '', permissions: [], remark: '' })
-
-async function loadUsers(p = page.value) {
-  page.value = p
-  loading.value = true
-  try {
-    const { data } = await client.get('/users', { params: { page: p, size: 20, sort: sort.prop, order: sort.order } })
-    users.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
-  }
-}
-
-function onSortChange({ prop, order }: any) {
-  sort.prop = order ? prop : ''
-  sort.order = order === 'ascending' ? 'asc' : order === 'descending' ? 'desc' : ''
-  loadUsers(1)
-}
 
 async function loadRoles() {
   rolesLoading.value = true
@@ -187,12 +170,17 @@ function openUser(row?: any) {
 
 async function saveUser() {
   if (!userForm.username.trim()) return ElMessage.warning('请填写用户名')
-  const body = { ...userForm, password: userForm.password || null }
-  if (userForm.id) await client.put(`/users/${userForm.id}`, body)
-  else await client.post('/users', body)
-  ElMessage.success('保存成功')
-  userDialog.value = false
-  await loadUsers()
+  userSaving.value = true
+  try {
+    const body = { ...userForm, password: userForm.password || null }
+    if (userForm.id) await client.put(`/users/${userForm.id}`, body)
+    else await client.post('/users', body)
+    ElMessage.success('保存成功')
+    userDialog.value = false
+    await loadUsers()
+  } finally {
+    userSaving.value = false
+  }
 }
 
 async function removeUser(id: number) {
@@ -210,11 +198,16 @@ function openRole(row?: any) {
 
 async function saveRole() {
   if (!roleForm.name.trim()) return ElMessage.warning('请填写角色名称')
-  if (roleForm.id) await client.put(`/roles/${roleForm.id}`, roleForm)
-  else await client.post('/roles', roleForm)
-  ElMessage.success('保存成功')
-  roleDialog.value = false
-  await loadRoles()
+  roleSaving.value = true
+  try {
+    if (roleForm.id) await client.put(`/roles/${roleForm.id}`, roleForm)
+    else await client.post('/roles', roleForm)
+    ElMessage.success('保存成功')
+    roleDialog.value = false
+    await loadRoles()
+  } finally {
+    roleSaving.value = false
+  }
 }
 
 async function removeRole(id: number) {

@@ -149,7 +149,8 @@
       </el-card>
 
       <!-- 漏洞详情弹窗：点击漏洞标题在当前抽屉内弹出展示，不再跳转历史漏洞库页面 -->
-      <el-dialog v-model="vulnDetailVisible" title="漏洞详情" append-to-body :width="detailDialogWidth"
+      <el-dialog
+             :close-on-click-modal="false" v-model="vulnDetailVisible" title="漏洞详情" append-to-body :width="detailDialogWidth"
                  @closed="vulnDetailVisible = false">
         <div v-loading="detailLoading" element-loading-text="正在加载漏洞信息…">
           <template v-if="detailVuln">
@@ -196,7 +197,8 @@
       </el-dialog>
 
       <!-- 从漏洞库选择漏洞 -->
-      <el-dialog v-model="vulnPickerVisible" title="从漏洞库选择" width="720px" append-to-body
+      <el-dialog
+             :close-on-click-modal="false" v-model="vulnPickerVisible" title="从漏洞库选择" width="800px" append-to-body
                  @closed="pickerSelection = []">
         <div class="mb-3 flex items-center gap-3">
           <el-input v-model="pickerSearch" placeholder="搜索漏洞标题 / 等级 / 状态" clearable class="flex-1"
@@ -345,7 +347,8 @@
     </div>
 
       <!-- 无漏洞闭环完结：测试完成且未发现漏洞时确认「测试通过」，可选同步生成无漏洞报告 -->
-      <el-dialog v-model="noVulnVisible" title="确认测试完成（无漏洞）" width="520px" append-to-body>
+      <el-dialog
+             :close-on-click-modal="false" v-model="noVulnVisible" title="确认测试完成（无漏洞）" width="480px" append-to-body>
         <el-form label-width="90px">
           <el-form-item label="测试结论">
             <el-input v-model="noVulnConclusion" type="textarea" :rows="3"
@@ -397,7 +400,7 @@ import {
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
-import { showTocNotice } from '../utils/tocNotice'
+import { useExportJobs } from '../composables/useExportJobs'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
@@ -469,6 +472,7 @@ const detailDialogWidth = computed(() =>
 const detailCols = computed(() =>
   typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2)
 
+const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
 const exportJobs = ref<Record<number, any[]>>({})
 const exporting = ref<Record<number, string>>({})
 // 当前展开导出历史的报告 ID（点击箭头展示该报告的导出版本列表）
@@ -695,8 +699,7 @@ async function removeReport(r: any) {
 }
 
 async function removeExportJob(r: any, job: any) {
-  await client.delete(`/reports/exports/${job.id}`)
-  ElMessage.success('导出记录已删除')
+  await deleteExportJob(job.id)
   exportJobs.value[r.id] = (exportJobs.value[r.id] || []).filter((j: any) => j.id !== job.id)
 }
 
@@ -735,9 +738,8 @@ async function completeNoVuln() {
 
 // ---------- 导出（提交后轮询任务列表至完成） ----------
 async function loadJobs(reportId: number) {
-  const { data } = await client.get(`/reports/${reportId}/exports`)
-  exportJobs.value[reportId] = data
-  return data as any[]
+  exportJobs.value[reportId] = await fetchJobs(reportId)
+  return exportJobs.value[reportId]
 }
 
 // 展开/收起报告的导出历史版本列表；首次展开时懒加载导出记录
@@ -771,55 +773,20 @@ function pollJobs(reportId: number) {
 }
 
 async function doExport(r: any, fmt: string) {
-  // 重复导出检查：报告内容与最近一次同格式成功导出完全一致时，确认后仍可继续
-  try {
-    const { data } = await client.post(`/reports/${r.id}/export-check`, { fmt })
-    if (data.duplicate) {
-      const statusName = data.last_status === 'done' ? '已完成' : data.last_status || ''
-      const sizeText = data.last_file_size != null ? `（${(data.last_file_size / 1024).toFixed(1)} KB）` : ''
-      const message =
-        `检测到该报告已有相同的导出记录：\n` +
-        `· 报告：《${data.report_title || r.title}》\n` +
-        `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
-        `· 导出版本：v${data.last_version ?? ''}\n` +
-        `· 已存在记录：${fmtDateTime(data.last_time)}（${statusName}）\n` +
-        `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
-        `是否仍要继续导出？`
-      const ok = await ElMessageBox.confirm(message, '检测到重复导出', {
-        confirmButtonText: '继续导出',
-        cancelButtonText: '取消',
-        type: 'warning',
-        width: 460,
-      }).then(() => true).catch(() => false)
-      if (!ok) return
-    }
-  } catch {
-    // 检查接口异常时不阻断导出
-  }
   exporting.value[r.id] = fmt
   try {
-    await client.post(`/reports/${r.id}/export`, { fmt })
-    ElMessage.success('导出任务已提交，生成完成后可在下方下载')
-    await loadJobs(r.id)
-    pollJobs(r.id)
+    const ok = await submitExport(r.id, fmt, r.title || plan.value?.system_name || 'report')
+    if (ok) {
+      await loadJobs(r.id)
+      pollJobs(r.id)
+    }
   } finally {
     delete exporting.value[r.id]
   }
 }
 
 function download(job: any) {
-  client.get(`/reports/exports/${job.id}/download`, { responseType: 'blob' }).then((resp) => {
-    const url = URL.createObjectURL(resp.data)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${job.title || plan.value?.system_name || 'report'}.${job.fmt}`
-    a.click()
-    URL.revokeObjectURL(url)
-    // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
-    if (job.fmt === 'docx' && !job.toc_auto_updated) {
-      showTocNotice()
-    }
-  })
+  downloadJob(job, plan.value?.system_name || 'report')
 }
 
 onBeforeUnmount(stopPolling)

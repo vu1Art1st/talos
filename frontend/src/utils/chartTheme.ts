@@ -1,7 +1,8 @@
 import * as echarts from 'echarts'
 
 // ECharts 明 / 暗双主题（唯一图表主题源），与 style.css 令牌层视觉对齐
-const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#ec4899', '#84cc16']
+// 图表系列色唯一色源：视图内自定义系列色时必须引用 PALETTE，禁止散落硬编码
+export const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#ec4899', '#84cc16']
 
 function makeTheme(dark: boolean) {
   const axis = dark ? '#6e7681' : '#9ca3af'

@@ -35,7 +35,7 @@ $backend = Join-Path $root 'backend'
 $frontend = Join-Path $root 'frontend'
 $venvPython = Join-Path $backend '.venv\Scripts\python.exe'
 
-foreach ($cmd in 'python', 'node', 'npm') {
+foreach ($cmd in 'python', 'node', 'pnpm') {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
         Write-Host "[dev] 未找到 $cmd，请先安装后重试" -ForegroundColor Red
         exit 1
@@ -168,7 +168,7 @@ if (-not (Test-Path $venvPython)) {
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {
     Write-Host '[dev] 安装前端依赖...' -ForegroundColor Cyan
     Push-Location $frontend
-    npm install
+    pnpm install
     Pop-Location
 }
 
@@ -199,11 +199,11 @@ try {
     # 传递端口给 vite.config.ts（前端页面通过 Vite 代理访问后端，外部只需放行前端端口）
     $env:VP_FRONTEND_PORT = "$FrontendPort"
     $env:VP_BACKEND_PORT = "$BackendPort"
-    # Windows 上 npm 是 .cmd/.ps1 shim（mise/nvm 环境下尤其如此），Start-Process 无法直接执行，
-    # 须经 cmd.exe /c 包装，与开发机上直接敲 npm 命令的行为一致
+    # Windows 上 pnpm 是 .cmd/.ps1 shim（mise/nvm 环境下尤其如此），Start-Process 无法直接执行，
+    # 须经 cmd.exe /c 包装，与开发机上直接敲 pnpm 命令的行为一致
     $cmdExe = Join-Path $env:SystemRoot 'System32\cmd.exe'
     $frontendProc = Start-Process -FilePath $cmdExe `
-        -ArgumentList '/d', '/c', 'npm run dev' `
+        -ArgumentList '/d', '/c', 'pnpm run dev' `
         -WorkingDirectory $frontend -NoNewWindow -PassThru
 
     if (-not (Wait-ServiceReady -Port $FrontendPort -Name '前端' -Path '/')) {

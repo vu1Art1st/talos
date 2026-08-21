@@ -62,7 +62,8 @@
     </el-table>
   </el-card>
 
-  <el-dialog v-model="dialogVisible" :title="editing ? '编辑条目' : '新建条目'" width="860px" top="4vh">
+  <el-dialog
+             :close-on-click-modal="false" v-model="dialogVisible" :title="editing ? '编辑条目' : '新建条目'" width="800px" top="4vh">
     <el-form label-width="90px">
       <el-form-item label="漏洞名称" required>
         <el-input v-model="form.vulnerability_name" maxlength="255" placeholder="例如 SQL注入、SSRF服务器端请求伪造" class="!w-96" />
@@ -105,7 +106,8 @@
     </template>
   </el-dialog>
 
-  <el-dialog v-model="importVisible" title="批量导入知识库条目" width="720px" top="6vh">
+  <el-dialog
+             :close-on-click-modal="false" v-model="importVisible" title="批量导入知识库条目" width="800px" top="6vh">
     <div class="text-gray-400 text-xs mb-2 leading-5">
       粘贴或选择 JSON 文件，格式为条目数组；按「漏洞名称」匹配，已存在则覆盖，单次至多 500 条。<br>
       必填：vulnerability_name（漏洞名称）、vul_type（类型码）、severity_level（等级码）；
@@ -134,6 +136,7 @@ import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
 import { levelSoftStyle, vulTypeSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import { saveBlob } from '../utils/download'
 
 const auth = useAuthStore()
 const meta = ref<any>(null)
@@ -231,7 +234,9 @@ async function addVulnType() {
 }
 
 async function removeBatch() {
-  await ElMessageBox.confirm(`确认删除选中的 ${selected.value.length} 条知识库条目？`, '批量删除', { type: 'warning' })
+  await ElMessageBox.confirm(`确认删除选中的 ${selected.value.length} 条知识库条目？`, '批量删除', {
+    type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger',
+  })
   const { data } = await client.post('/knowledge/batch-delete', { ids: selected.value.map((r) => r.id) })
   ElMessage.success(`已删除 ${data.deleted} 条`)
   await load()
@@ -259,11 +264,7 @@ function downloadTemplate() {
     references: ['https://owasp.org/Top10/'],
   }]
   const blob = new Blob([JSON.stringify(sample, null, 2)], { type: 'application/json' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = 'knowledge-import-template.json'
-  a.click()
-  URL.revokeObjectURL(a.href)
+  saveBlob(blob, 'knowledge-import-template.json')
 }
 
 async function doImport() {

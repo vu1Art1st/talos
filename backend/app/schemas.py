@@ -1,13 +1,22 @@
 """API 请求/响应模型。"""
 from datetime import datetime
-from typing import Generic, TypeVar
+from typing import Annotated, Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.constants import NONPEN_ITEMS
 from app.core.sanitize import sanitize_html
 
 T = TypeVar("T")
+
+
+def _sanitize_opt(v: str | None) -> str | None:
+    return sanitize_html(v) if v is not None else v
+
+
+# 入库富文本统一消毒类型：所有富文本字段必须使用其一，替代各模型重复的 _clean_html validator
+HtmlStr = Annotated[str, AfterValidator(sanitize_html)]
+OptHtmlStr = Annotated[str | None, AfterValidator(_sanitize_opt)]
 
 
 class Page(BaseModel, Generic[T]):
@@ -190,11 +199,11 @@ class VulIn(BaseModel):
     source: int = 0  # 漏洞来源（0=未选择；关联渗透测试工单时固定为「渗透测试工单」，服务端强制置 0）
     layer: int = 10
     affected_url: str = ""
-    description_html: str = ""
+    description_html: HtmlStr = ""
     description_json: dict | None = None
-    reproduce_html: str = ""
+    reproduce_html: HtmlStr = ""
     reproduce_json: dict | None = None
-    solution_html: str = ""
+    solution_html: HtmlStr = ""
     solution_json: dict | None = None
     score: int = 0
     risk_score: int = 0
@@ -202,11 +211,6 @@ class VulIn(BaseModel):
     asset_level: int = 0
     asset_ids: list[int] = []
     testing_plan_id: int | None = None  # 关联测试计划
-
-    @field_validator("description_html", "reproduce_html", "solution_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str) -> str:
-        return sanitize_html(v)
 
 
 class VulOut(VulIn):
@@ -252,13 +256,8 @@ class VulTransitionIn(BaseModel):
     status: int
     comment: str = ""
     # 复测编辑界面随流转一并提交的复测详情（可选）
-    retest_html: str | None = None
+    retest_html: OptHtmlStr = None
     retest_json: dict | None = None
-
-    @field_validator("retest_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str | None) -> str | None:
-        return sanitize_html(v) if v is not None else v
 
 
 class VulDelayIn(BaseModel):
@@ -285,14 +284,9 @@ class VulRetestRecordIn(BaseModel):
     """
 
     title: str | None = None
-    content_html: str = ""
+    content_html: HtmlStr = ""
     content_json: dict | None = None
     status: int | None = None
-
-    @field_validator("content_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str) -> str:
-        return sanitize_html(v)
 
     @field_validator("title", mode="after")
     @classmethod
@@ -330,11 +324,11 @@ class KnowledgeIn(BaseModel):
     vulnerability_name: str = Field(min_length=1, max_length=255)
     vul_type: int
     severity_level: int = 30
-    description_html: str = ""
+    description_html: HtmlStr = ""
     description_json: dict | None = None
-    harm_html: str = ""
+    harm_html: HtmlStr = ""
     harm_json: dict | None = None
-    solution_html: str = ""
+    solution_html: HtmlStr = ""
     solution_json: dict | None = None
     references: list[str] = []
 
@@ -355,11 +349,6 @@ class KnowledgeIn(BaseModel):
             if not url.lower().startswith(("http://", "https://")):
                 raise ValueError(f"参考链接必须以 http:// 或 https:// 开头：{url}")
         return cleaned
-
-    @field_validator("description_html", "harm_html", "solution_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str) -> str:
-        return sanitize_html(v)
 
 
 class KnowledgeBatchIn(BaseModel):
@@ -406,14 +395,9 @@ class ImportRecordUpdateIn(BaseModel):
     vul_type: int | None = None
     level: int | None = None
     affected_url: str | None = None
-    description_html: str | None = None
-    reproduce_html: str | None = None
-    solution_html: str | None = None
-
-    @field_validator("description_html", "reproduce_html", "solution_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str | None) -> str | None:
-        return sanitize_html(v) if v is not None else v
+    description_html: OptHtmlStr = None
+    reproduce_html: OptHtmlStr = None
+    solution_html: OptHtmlStr = None
 
 
 class ImportBatchOut(BaseModel):
@@ -443,14 +427,9 @@ class SectionIn(BaseModel):
     id: int | None = None
     order: int = 0
     title: str = ""
-    content_html: str = ""
+    content_html: HtmlStr = ""
     content_json: dict | None = None
     vul_id: int | None = None
-
-    @field_validator("content_html", mode="after")
-    @classmethod
-    def _clean_html(cls, v: str) -> str:
-        return sanitize_html(v)
 
 
 class SectionOut(SectionIn):

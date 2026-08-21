@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import String, and_, exists, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
+from app.core.xlsx import xlsx_response
+from app.core.timeutil import mandays_between
 from app.core.timeutil import now as tznow
 from app.db import get_session
 from app.models import (
@@ -748,15 +750,7 @@ async def export_testing_plans(
     for row in stats["vulns_by_month"]:
         ws2.append([row["month"], row["count"]])
 
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    filename = "渗透测试工单导出.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
-    )
+    return xlsx_response(wb, "渗透测试工单导出.xlsx")
 
 
 PLAN_STATUS_REVERSE = {v: k for k, v in TESTING_PLAN_STATUS.items()}
@@ -792,15 +786,7 @@ async def download_plan_import_template(_: User = Depends(require_perm("special:
         5, 0,
         0, 0, 0, 0, 0,
     ])
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    filename = "渗透测试工单导入模板.xlsx"
-    return StreamingResponse(
-        buf,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"},
-    )
+    return xlsx_response(wb, "渗透测试工单导入模板.xlsx")
 
 
 @router.post("/testing-plans/import", response_model=PlanImportResultOut)
@@ -1031,18 +1017,6 @@ def _no_vul_section_html(system_name: str, conclusion: str) -> str:
     return "".join(parts)
 
 
-def _no_vul_mandays(test_start: str, test_end: str) -> float:
-    """无漏洞报告实际人天：与报告模块口径一致，结束日期 - 开始日期 + 1，非法时 0。"""
-    try:
-        start = datetime.strptime(test_start, "%Y-%m-%d")
-        end = datetime.strptime(test_end, "%Y-%m-%d")
-    except (TypeError, ValueError):
-        return 0.0
-    if end < start:
-        return 0.0
-    return float((end - start).days + 1)
-
-
 async def _create_no_vul_report(
     session: AsyncSession, plan: TestingPlan, user: User, title: str, conclusion: str,
 ) -> Report:
@@ -1081,7 +1055,7 @@ async def _create_no_vul_report(
     ))
     session.add(report)
     await session.flush()
-    report.actual_mandays = _no_vul_mandays(report.test_start, report.test_end)
+    report.actual_mandays = mandays_between(report.test_start, report.test_end)
     return report
 
 

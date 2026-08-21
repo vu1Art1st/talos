@@ -29,18 +29,20 @@ Talos（塔罗斯）取名自希腊神话中守卫克里特岛的青铜巨人—
 ```
 ├── backend/
 │   ├── app/
-│   │   ├── api/v1/        # auth, users, apps, assets, vulns, reports, imports, dashboard
-│   │   ├── core/          # 配置、安全、依赖注入
+│   │   ├── api/v1/        # auth, users, vulns, assets, reports, imports, dashboard, knowledge, special（专项工单）, nonpen
+│   │   ├── core/          # 配置、安全、依赖注入、查询分页
 │   │   ├── models/        # SQLAlchemy 模型
-│   │   ├── schemas/       # Pydantic 模型
+│   │   ├── schemas.py     # Pydantic 模型（单文件集中定义）
 │   │   ├── services/      # 状态机、docx 解析、报告构建、导出
+│   │   ├── constants.py   # 全部枚举/字典唯一来源
 │   │   └── workers/       # arq 后台任务
 │   ├── alembic/           # 数据库迁移
-│   ├── scripts/           # migrate_from_insight2.py 旧数据迁移
+│   ├── scripts/           # migrate_from_insight2.py 旧数据迁移等
 │   └── tests/             # pytest 集成测试
 ├── frontend/
-│   └── src/{api, stores, router, views, components, layouts}
+│   └── src/{api, stores, router, views, components, composables, utils, constants, layouts}
 ├── dev.ps1 / dev.sh       # 一键本地开发脚本
+├── AGENTS.md              # 项目约定与规范（含测试规范）
 └── docker-compose.yml
 ```
 
@@ -100,8 +102,8 @@ set VP_DISABLE_QUEUE=1
 
 ```bash
 cd frontend
-npm install
-npm run dev   # http://localhost:27014，代理 /api 与 /storage 到 27015
+pnpm install
+pnpm run dev   # http://localhost:27014，代理 /api 与 /storage 到 27015
 ```
 
 </details>
@@ -115,7 +117,7 @@ cd backend
 
 ## 功能规划
 
-后续功能设计详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
+重构还债与功能演进路线详见 [docs/ROADMAP.md](docs/ROADMAP.md)。
 
 ## 版本发布
 

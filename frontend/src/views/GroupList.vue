@@ -35,7 +35,8 @@
   </el-card>
 
   <!-- 组织编辑 -->
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑组织' : '新建组织'" width="480px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑组织' : '新建组织'" width="480px">
     <el-form :model="form" label-width="90px">
       <el-form-item label="名称" required>
         <el-input v-model="form.name" placeholder="请输入组织名称" maxlength="64" />
@@ -51,7 +52,8 @@
   </el-dialog>
 
   <!-- 人员录入 -->
-  <el-dialog v-model="memberDialogVisible" :title="`人员录入 - ${memberGroupName}`" width="640px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="memberDialogVisible" :title="`人员录入 - ${memberGroupName}`" width="640px">
     <div class="flex items-center gap-2 mb-3">
       <span class="text-gray-400 text-sm">组织成员将作为资产「系统负责人」的可选项</span>
       <div class="flex-1" />
@@ -85,7 +87,8 @@
   </el-dialog>
 
   <!-- 成员编辑 -->
-  <el-dialog v-model="memberFormVisible" :title="memberForm.id ? '编辑人员' : '录入人员'" width="480px">
+  <el-dialog
+             :close-on-click-modal="false" v-model="memberFormVisible" :title="memberForm.id ? '编辑人员' : '录入人员'" width="480px">
     <el-form :model="memberForm" label-width="90px">
       <el-form-item label="姓名" required>
         <el-input v-model="memberForm.name" placeholder="请输入姓名" maxlength="64" />

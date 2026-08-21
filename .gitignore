@@ -1,74 +1,62 @@
-# Python
+# ============================================================
+# Talos .gitignore
+# 原则：按类分组 + 通配模式优先，避免逐文件精确枚举——
+#       新增调试脚本/日志/临时库时无需再修改本文件。
+# ============================================================
+
+# ---------- Python ----------
 __pycache__/
 *.py[co]
 .venv/
 .pytest_cache/
 
-# 本地 SQLite 库（dev.db 无路径前缀，已覆盖 backend/dev.db 等同名文件）
-# 及其 WAL / journal 附属文件
+# ---------- 数据库（本地 SQLite 及备份；dev.db 无路径前缀，覆盖各目录同名文件） ----------
 dev.db
 _devrun.db
 test.db*
-test_vp.db
+test_vp*.db
 *.db-journal
 *.db-wal
 *.db-shm
 *.db.bak*
 
-# 本地存储与备份产物（含业务数据，勿入库）
+# ---------- 本地存储与备份（含业务数据，勿入库） ----------
 /storage/
 backend/storage/
 backend/_devstorage/
 backend/tests/test_storage/
 /backups/
 
-# 前端
+# ---------- 前端（依赖与构建产物） ----------
 node_modules/
 dist/
+frontend/dist_check/
 
-# 环境变量
+# ---------- 日志（任意位置） ----------
+*.log
+
+# ---------- 环境变量 ----------
 .env
 .env.local
 
-# 本地手测产物（浏览器 profile / 截图 / 日志 / 样例导出）
+# ---------- 本地调试 / 排查产物（模式化） ----------
 /_edgeprofile/
+/_*.txt
+/backend/_*.py
+/backend/_*.txt
+/backend/tmp_*.py
+/backend/verify_*.py
+frontend/_*.err
+
+# ---------- 截图与样例文档（根目录；入库模板在 backend/app/templates/） ----------
 /*.png
 frontend/*.png
-*.log
-/2026*.docx
+/*.docx
 
-# 导入解析器测试样例（本地 docx 样例，勿入库）
-/import-test/
-
-# 调试临时产物（时区/环境排查记录等，勿入库）
-/_db.txt
-/_proc*.txt
-/_venv.txt
-/backend/_tz.txt
-
-# 本地 IDE / 工具配置（repowiki 知识库等）
+# ---------- 本地 IDE / AI 工具配置 ----------
 .qoder/
 .codebuddy/
 .workbuddy/
-
-# 前端构建校验产物（dist_check 为验证用构建输出，勿入库）
-/frontend/dist_check/
-/docs/ui-demo/
-
-# 后端调试 / 复现脚本（临时排查用，勿入库）
-/backend/_repro.py
-/backend/_smoke2.py
-/backend/_verify_stats.py
-/backend/tmp_ver_check.py
-/backend/verify_retest.py
-/backend/_smoke_vuln_stats.py
-/backend/_smoke_vuln_stats_table.py
-/backend/_smoke_vuln_stats_summary.py
-/backend/_smoke_uvicorn.log
-/backend/_smoke_uvicorn.err
-/backend/_uvicorn_dev.log
-/backend/_uvicorn_dev.err
-/frontend/_vite_dev.log
-/frontend/_vite_dev.err
-/backend/tests/test_vp_stats.db
-/backend/tests/test_vp_stats_summary.db
+.zcode/
+.idea/
+.vscode/

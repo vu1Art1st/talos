@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
 from app.core.deps import require_perm
-from app.core.timeutil import now as tznow
+from app.core.timeutil import now as tznow, parse_date
 from app.db import get_session
 from app.models import Asset, TestingPlan, User, Vul
 
@@ -24,20 +24,14 @@ async def stats(
     session: AsyncSession = Depends(get_session),
 ):
     """安全态势：支持按事件多维筛选（时间范围/部门/来源/等级）后展示。"""
-    from datetime import datetime
-
     # 构造漏洞筛选条件，统一应用于各漏洞聚合查询
     vul_cond = []
-    if date_from:
-        try:
-            vul_cond.append(Vul.submit_time >= datetime.strptime(date_from, "%Y-%m-%d"))
-        except ValueError:
-            pass
-    if date_to:
-        try:
-            vul_cond.append(Vul.submit_time < datetime.strptime(date_to, "%Y-%m-%d") + timedelta(days=1))
-        except ValueError:
-            pass
+    d_from = parse_date(date_from)
+    if d_from:
+        vul_cond.append(Vul.submit_time >= d_from)
+    d_to = parse_date(date_to)
+    if d_to:
+        vul_cond.append(Vul.submit_time < d_to + timedelta(days=1))
     if source is not None:
         vul_cond.append(Vul.source == source)
     if level is not None:
