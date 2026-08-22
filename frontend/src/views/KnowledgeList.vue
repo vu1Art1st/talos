@@ -83,6 +83,18 @@
           <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
         </el-select>
       </el-form-item>
+      <el-form-item label="CVSS向量">
+        <div class="w-full flex items-center gap-3">
+          <el-input v-model="form.cvss_vector" class="flex-1" maxlength="255" clearable
+                    placeholder="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" />
+          <template v-if="cvssPreview">
+            <span class="text-lg font-semibold tabular-nums shrink-0" :style="{ color: cvssPreviewColor }">
+              {{ cvssPreview.score.toFixed(1) }}
+            </span>
+            <span class="tl-tag shrink-0" :style="softStyle(cvssPreviewColor)">{{ cvssPreview.severityLabel }}</span>
+          </template>
+        </div>
+      </el-form-item>
       <el-form-item label="标准描述">
         <RichEditor v-model="form.description_html" class="w-full"
                     @update:json="(j: any) => (form.description_json = j)" />
@@ -135,7 +147,9 @@ import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, vulTypeSoftStyle } from '../utils/colors'
+import { levelSoftStyle, softStyle, vulTypeSoftStyle } from '../utils/colors'
+import { scoreFromVector, scoreToLevel } from '../utils/cvss'
+import { levelColor } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { saveBlob } from '../utils/download'
 
@@ -168,8 +182,17 @@ const emptyForm = () => ({
   description_html: '', description_json: null,
   harm_html: '', harm_json: null,
   solution_html: '', solution_json: null,
+  cvss_vector: '',
 })
 const form = reactive<any>(emptyForm())
+
+// CVSS 向量评分预览：合法向量实时展示评分与等级色
+const cvssPreview = computed(() => scoreFromVector(form.cvss_vector))
+const cvssPreviewColor = computed(() => {
+  if (!cvssPreview.value) return '#909399'
+  const lv = scoreToLevel(cvssPreview.value.score)
+  return lv !== null ? levelColor(lv) : '#909399'
+})
 const formRef = ref<FormInstance>()
 const formRules: FormRules = {
   vulnerability_name: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],

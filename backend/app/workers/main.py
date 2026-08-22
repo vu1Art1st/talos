@@ -1,12 +1,14 @@
-"""arq 后台任务：Word 解析 / 报告导出 / 邮件发送。
+"""arq 后台任务：Word 解析 / 报告导出 / 邮件发送 / 渠道通知（webhook+邮件）。
 
 启动 worker: arq app.workers.main.WorkerSettings
 """
 import asyncio
+import logging
 import smtplib
 from email.header import Header
 from email.mime.text import MIMEText
 
+import httpx
 from arq import cron
 from arq.connections import RedisSettings
 from sqlalchemy import func, select
@@ -19,6 +21,8 @@ from app.models import ImportBatch, ImportRecord, ExportJob, Report, TestingPlan
 from app.services.docx_parser import parse_any_docx
 from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
+
+logger = logging.getLogger(__name__)
 
 
 async def parse_import_task(ctx, batch_id: int) -> None:
@@ -257,6 +261,31 @@ async def send_mail_task(ctx, to: list[str], subject: str, body: str) -> None:
     await asyncio.to_thread(_send_mail_sync, to, subject, body)
 
 
+async def send_notify_task(ctx, channel_type: str, config: dict, title: str, body: str) -> None:
+    """渠道通知（F3）：企业微信/钉钉 webhook 与邮件，尽力而为（失败仅告警不重试）。"""
+    try:
+        if channel_type in ("wecom", "dingtalk"):
+            url = (config or {}).get("url") or ""
+            if not url:
+                return
+            if channel_type == "wecom":
+                payload = {"msgtype": "markdown", "markdown": {"content": f"**{title}**\n{body}"}}
+            else:
+                payload = {"msgtype": "markdown", "markdown": {"title": title, "text": f"#### {title}\n\n{body}"}}
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(url, json=payload)
+                if resp.status_code != 200:
+                    logger.warning("webhook 通知发送失败 type=%s status=%s", channel_type, resp.status_code)
+        elif channel_type == "email":
+            recipients = (config or {}).get("recipients") or []
+            html = f"<p><strong>{title}</strong></p>" + "".join(
+                f"<p>{line}</p>" for line in body.splitlines() if line.strip()
+            )
+            await asyncio.to_thread(_send_mail_sync, recipients, title, html)
+    except Exception as exc:  # noqa: BLE001  通知失败不影响业务
+        logger.warning("通知发送异常 type=%s: %s", channel_type, exc)
+
+
 async def cleanup_previews_task(ctx) -> None:
     """定期清理超过 30 分钟未再打开的临时预览 PDF。"""
     await asyncio.to_thread(cleanup_stale_previews, 30)
@@ -266,6 +295,7 @@ TASK_FUNCS = {
     "parse_import_task": parse_import_task,
     "export_report_task": export_report_task,
     "send_mail_task": send_mail_task,
+    "send_notify_task": send_notify_task,
 }
 
 

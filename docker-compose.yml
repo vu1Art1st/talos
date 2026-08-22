@@ -48,6 +48,12 @@ services:
       VP_GOTENBERG_URL: http://gotenberg:3000
       VP_SECRET_KEY: ${VP_SECRET_KEY:?set VP_SECRET_KEY in .env, e.g. openssl rand -hex 32}
       VP_STORAGE_DIR: /app/storage
+      # 渠道通知邮件（F3）：VP_SMTP_HOST 留空则邮件通道禁用（webhook 通知不受影响）
+      VP_SMTP_HOST: ${VP_SMTP_HOST:-}
+      VP_SMTP_PORT: ${VP_SMTP_PORT:-25}
+      VP_SMTP_USER: ${VP_SMTP_USER:-}
+      VP_SMTP_PASS: ${VP_SMTP_PASS:-}
+      VP_SMTP_FROM: ${VP_SMTP_FROM:-}
     volumes:
       - storage_data:/app/storage
     depends_on:

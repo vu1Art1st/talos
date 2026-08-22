@@ -205,17 +205,20 @@ async def auto_transition(
     return changed
 
 
-async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> None:
+async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> list:
     """漏洞状态变化后双向联动测试计划（需求6：报告状态不再由漏洞闭环驱动，
     仅保留计划「复测完成/复测中」联动；报告状态由导出 Word 与内容变更管理）：
     - 某报告关联的全部漏洞均为「已修复/已忽略」时，关联计划进入「复测完成」；
     - 反向：已闭环报告出现未闭环漏洞（如已修复改回未修复）时，关联计划由「复测完成」
-      回退「复测中」并重开最近一轮复测。"""
+      回退「复测中」并重开最近一轮复测。
+
+    返回本次新进入「复测完成」的计划对象列表（供路由层在提交后发渠道通知）。"""
     from app.models import Report, ReportSection, TestingPlan
     from app.services import plan_service
 
+    completed: list[TestingPlan] = []
     if not vul_ids:
-        return
+        return completed
     report_ids = (
         await session.execute(
             select(ReportSection.report_id)
@@ -248,8 +251,10 @@ async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> N
                 plan.retest_done_time = now().date().isoformat()
             # 当前复测轮次闭环，打完成点
             plan_service.finish_retest_round(plan)
+            completed.append(plan)
         elif not all_closed and plan.status == PlanStatus.RETEST_DONE:
             plan.status = PlanStatus.RETESTING  # 复测完成 → 复测中
             plan.retest_done_time = ""
             # 撤销完成点，重开最近一轮复测
             plan_service.reopen_retest_round(plan)
+    return completed

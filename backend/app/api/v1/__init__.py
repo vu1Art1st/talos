@@ -2,12 +2,16 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     assets,
+    audit,
     auth,
     dashboard,
     imports,
     knowledge,
     misc,
     nonpen,
+    notify,
+    open_api,
+    pats,
     remote_testing,
     reports,
     spring_action,
@@ -29,4 +33,8 @@ api_router.include_router(testing_plan.router)
 api_router.include_router(spring_action.router)
 api_router.include_router(nonpen.router)
 api_router.include_router(dashboard.router)
+api_router.include_router(pats.router)
+api_router.include_router(open_api.router)
+api_router.include_router(audit.router)
+api_router.include_router(notify.router)
 api_router.include_router(misc.router)

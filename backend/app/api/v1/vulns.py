@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,8 +36,29 @@ from app.schemas import (
     VulUpdateIn,
 )
 from app.services import plan_service, vuln_service
+from app.services.audit_service import audit
+from app.services.notify_service import notify
 
 router = APIRouter(prefix="/vulns", tags=["漏洞"])
+
+
+async def _notify_transition(
+    request, session, user: User, vul: Vul,
+    old_status: int | None, new_status: int | None, done_plans: list,
+) -> None:
+    """漏洞流转后的渠道通知：状态变化 → vuln_transition；计划闭环 → retest_completed。"""
+    operator = user.realname or user.username
+    if old_status is not None and new_status is not None and new_status != old_status:
+        await notify(
+            request.app, session, "vuln_transition", title=vul.title, operator=operator,
+            **{
+                "from": VUL_STATUS.get(old_status, str(old_status)),
+                "to": VUL_STATUS.get(new_status, str(new_status)),
+            },
+        )
+    for plan in done_plans:
+        await notify(request.app, session, "retest_completed",
+                     system=plan.system_name, operator=operator)
 
 
 def build_vul_out(vul: Vul) -> VulOut:
@@ -510,6 +531,7 @@ async def vuln_stats(
 @router.post("", response_model=VulOut)
 async def create_vuln(
     body: VulIn,
+    request: Request,
     user: User = Depends(require_perm("vuln:submit")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -529,12 +551,16 @@ async def create_vuln(
     await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
+    await audit(session, request, "vuln_create", user, {"target": f"vulns/{vul.id}", "title": vul.title})
+    await notify(request.app, session, "vuln_created",
+                 title=vul.title, operator=user.realname or user.username)
     return build_vul_out(vul)
 
 
 @router.post("/batch", response_model=list[VulOut])
 async def create_vulns_batch(
     body: VulBatchIn,
+    request: Request,
     user: User = Depends(require_perm("vuln:submit")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -562,6 +588,14 @@ async def create_vulns_batch(
     await session.commit()
     for vul in vulns:
         await session.refresh(vul)
+    await audit(session, request, "vuln_create", user, {
+        "op": "batch", "count": len(vulns),
+        "titles": [v.title for v in vulns[:10]],
+    })
+    if vulns:
+        await notify(request.app, session, "vuln_created",
+                     title=vulns[0].title, count=len(vulns),
+                     operator=user.realname or user.username)
     return [build_vul_out(v) for v in vulns]
 
 
@@ -579,6 +613,7 @@ async def get_vuln(
 async def update_vuln(
     vul_id: int,
     body: VulUpdateIn,
+    request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -587,6 +622,7 @@ async def update_vuln(
     data = body.model_dump()
     asset_ids = data.pop("asset_ids", [])
     new_status = data.pop("status", None)
+    old_status = vul.status
     old_plan_id = vul.testing_plan_id
     if data.get("testing_plan_id") != old_plan_id:
         await _check_plan_access(session, data.get("testing_plan_id"), user)
@@ -597,40 +633,46 @@ async def update_vuln(
         vul.source = 0
     vul.assets = await _fetch_assets(session, asset_ids)
     vuln_service.add_log(session, vul, user, "编辑漏洞")
+    done_plans: list = []
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
     if new_status is not None and new_status != vul.status:
         await vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
-        await vuln_service.sync_report_completion(session, [vul.id])
+        done_plans = await vuln_service.sync_report_completion(session, [vul.id])
     # 等级或关联计划变化后重算涉及计划的统计；新关联计划若已确认无漏洞则自动重开
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
     for plan_id in {old_plan_id, vul.testing_plan_id}:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     await session.refresh(vul)
+    await _notify_transition(request, session, user, vul, old_status, new_status, done_plans)
     return build_vul_out(vul)
 
 
 @router.delete("/{vul_id}")
 async def delete_vuln(
     vul_id: int,
-    _: User = Depends(require_perm("vuln:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     vul = await session.get(Vul, vul_id)
     if vul:
+        title = vul.title
         plan_id = vul.testing_plan_id
         await _clean_vul_references(session, [vul_id])
         await session.delete(vul)
         await session.flush()
         await plan_service.refresh_stats(session, plan_id)
         await session.commit()
+        await audit(session, request, "vuln_delete", operator, {"target": f"vulns/{vul_id}", "title": title})
     return {"msg": "删除成功"}
 
 
 @router.post("/batch-delete")
 async def delete_vulns_batch(
     body: VulBatchDeleteIn,
-    _: User = Depends(require_perm("vuln:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """批量删除漏洞，删除后重算涉及测试计划的统计。"""
@@ -645,6 +687,9 @@ async def delete_vulns_batch(
     for plan_id in plan_ids:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
+    await audit(session, request, "vuln_delete", operator, {
+        "op": "batch", "count": len(vulns), "ids": body.ids[:50],
+    })
     return {"msg": "删除成功", "deleted": len(vulns)}
 
 
@@ -665,16 +710,24 @@ async def allowed_transitions(
 async def set_vuln_status(
     vul_id: int,
     body: VulTransitionIn,
+    request: Request,
     user: User = Depends(require_perm("vuln:audit")),
     session: AsyncSession = Depends(get_session),
 ):
     """直接设置漏洞状态（报告编辑页状态标签点选），不受状态机流转限制。"""
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
+    old_status = vul.status
     await vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
     # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
-    await vuln_service.sync_report_completion(session, [vul.id])
+    done_plans = await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
+    if body.status != old_status:
+        await audit(session, request, "vuln_transition", user, {
+            "target": f"vulns/{vul_id}", "title": vul.title,
+            "from": VUL_STATUS.get(old_status, str(old_status)), "to": VUL_STATUS.get(body.status, str(body.status)),
+        })
+    await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
     return build_vul_out(vul)
 
 
@@ -716,10 +769,12 @@ async def patch_vuln_fields(
 async def transition_vuln(
     vul_id: int,
     body: VulTransitionIn,
+    request: Request,
     user: User = Depends(require_perm("vuln:audit")),
     session: AsyncSession = Depends(get_session),
 ):
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
+    old_status = vul.status
     # 复测编辑面板可随流转一并提交复测详情
     comment = body.comment
     if body.retest_html is not None:
@@ -731,9 +786,15 @@ async def transition_vuln(
         retest_submitted=body.retest_html is not None,
     )
     # 状态流转后双向联动报告/测试计划（全部闭环自动标记完成，回退自动重开）
-    await vuln_service.sync_report_completion(session, [vul.id])
+    done_plans = await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
+    if body.status != old_status:
+        await audit(session, request, "vuln_transition", user, {
+            "target": f"vulns/{vul_id}", "title": vul.title,
+            "from": VUL_STATUS.get(old_status, str(old_status)), "to": VUL_STATUS.get(body.status, str(body.status)),
+        })
+    await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
     return build_vul_out(vul)
 
 
@@ -826,6 +887,7 @@ async def list_retest_records(
 async def create_retest_record(
     vul_id: int,
     body: VulRetestRecordIn,
+    request: Request,
     user: User = Depends(require_perm("vuln:audit")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -839,13 +901,16 @@ async def create_retest_record(
     vuln_service.add_log(session, vul, user, "新增复测记录")
     await session.flush()
     await _sync_vul_retest_html(session, vul)
+    old_status = vul.status
+    done_plans: list = []
     # 创建复测记录时可一并调整漏洞状态（复测未修复回修复中 / 已修复）：
     # 先聚合复测内容再流转，确保复测结论校验（必须填写复测详情）能够通过。
     if body.status is not None and body.status != vul.status:
         await vuln_service.transition(session, vul, body.status, user, "新增复测记录调整状态")
-        await vuln_service.sync_report_completion(session, [vul.id])
+        done_plans = await vuln_service.sync_report_completion(session, [vul.id])
     await session.commit()
     await session.refresh(record)
+    await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
     return record
 
 

@@ -46,6 +46,13 @@
           <el-menu-item index="/remote-testings">远程检测</el-menu-item>
           <el-menu-item index="/spring-actions">春耕行动</el-menu-item>
         </el-sub-menu>
+        <el-sub-menu v-if="auth.hasPerm('system:manage')" index="/system">
+          <template #title>
+            <el-icon><Setting /></el-icon><span>系统管理</span>
+          </template>
+          <el-menu-item index="/audit">审计日志</el-menu-item>
+          <el-menu-item index="/notify-channels">通知渠道</el-menu-item>
+        </el-sub-menu>
         <el-menu-item v-if="auth.hasPerm('user:manage')" index="/users">
           <el-icon><User /></el-icon><template #title>用户与权限</template>
         </el-menu-item>
@@ -77,6 +84,7 @@
             </span>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="tokens">访问令牌</el-dropdown-item>
                 <el-dropdown-item command="password">修改密码</el-dropdown-item>
                 <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
               </el-dropdown-menu>
@@ -174,6 +182,8 @@ function onCommand(cmd: string) {
     router.push('/login')
   } else if (cmd === 'password') {
     pwdVisible.value = true
+  } else if (cmd === 'tokens') {
+    router.push('/tokens')
   }
 }
 

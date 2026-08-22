@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now
@@ -78,10 +78,13 @@ class Vul(Base):
     retest_html: Mapped[str] = mapped_column(Text, default="")
     retest_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    score: Mapped[int] = mapped_column(Integer, default=0)
+    # CVSS 3.1 基础评分（0.0-10.0，一位小数；0 表示未评分）
+    score: Mapped[float] = mapped_column(Float, default=0)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     left_risk_score: Mapped[int] = mapped_column(Integer, default=0)
     asset_level: Mapped[int] = mapped_column(Integer, default=0)
+    # CVSS 3.1 向量字符串（F4 计算器写入），空表示未评
+    cvss_vector: Mapped[str] = mapped_column(String(255), default="")
     is_retest: Mapped[bool] = mapped_column(default=False)
     delay_days: Mapped[int] = mapped_column(Integer, default=0)
     delay_reason: Mapped[str] = mapped_column(Text, default="")

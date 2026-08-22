@@ -128,6 +128,16 @@
               </div>
             </el-form-item>
           </div>
+          <el-form-item label="CVSS 3.1">
+            <div class="w-full">
+              <div class="mb-1 flex items-center justify-between">
+                <span class="text-xs text-gray-400">按向量计算基础评分并写入漏洞评分</span>
+                <el-checkbox v-model="vul.cvss_sync_level" size="small">按评分同步等级</el-checkbox>
+              </div>
+              <CvssCalculator v-model:vector="vul.cvss_vector" v-model:score="vul.score"
+                              @level-suggest="(lv: number) => vul.cvss_sync_level && (vul.level = lv)" />
+            </div>
+          </el-form-item>
           <el-form-item label="漏洞描述">
             <RichEditor v-model="vul.description_html" class="w-full"
                         @update:json="(j: any) => (vul.description_json = j)" />
@@ -215,6 +225,7 @@ import { Plus, Delete, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import AssetFormDialog from './AssetFormDialog.vue'
+import CvssCalculator from './CvssCalculator.vue'
 import { useAuthStore } from '../stores/auth'
 import { levelName, levelSoftStyle } from '../utils/colors'
 
@@ -320,6 +331,7 @@ const emptyVul = () => ({
   reproduce_html: '', reproduce_json: null,
   solution_html: '', solution_json: null,
   source: 0, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
+  cvss_vector: '', cvss_sync_level: true,
 })
 const vulns = ref<any[]>([emptyVul()])
 
@@ -413,6 +425,7 @@ async function applyEntry(entry: any) {
   vul.description_json = entry.harm_html ? null : entry.description_json
   vul.solution_html = entry.solution_html || ''
   vul.solution_json = entry.solution_json
+  if (entry.cvss_vector) vul.cvss_vector = entry.cvss_vector
   templateVisible.value = false
   ElMessage.success(`已套用模板「${entry.vulnerability_name}」`)
 }
@@ -427,7 +440,7 @@ async function save() {
   try {
     // 影响URL 多值序列化为后端单字段（换行分隔），剔除前端临时字段
     const toPayload = (v: any) => {
-      const { affected_urls, ...rest } = v
+      const { affected_urls, cvss_sync_level, ...rest } = v
       return { ...rest, affected_url: joinUrls(affected_urls) }
     }
     if (editId) {

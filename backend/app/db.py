@@ -233,6 +233,13 @@ async def _migrate_lightweight() -> None:
         if source_migrated is None:
             await conn.execute(text("UPDATE vulns SET source = 0"))
             await conn.execute(text("INSERT INTO app_meta (key, value) VALUES ('vul_source_v2', '1')"))
+        # CVSS 3.1 计算器（F4）：漏洞与知识库新增向量列（SQLite 动态类型，score int→float 无需处理）
+        if "cvss_vector" not in vul_cols:
+            await conn.execute(text("ALTER TABLE vulns ADD COLUMN cvss_vector VARCHAR(255) NOT NULL DEFAULT ''"))
+        if kb_cols and "cvss_vector" not in kb_cols:
+            await conn.execute(text(
+                "ALTER TABLE knowledge_entries ADD COLUMN cvss_vector VARCHAR(255) NOT NULL DEFAULT ''"
+            ))
         # 远程检测重构（2026-08-14）：按通报口径重构表单项，申诉报告改为附件上传。
         # 新增通报时间/被通报单位/外部项目/漏洞名/漏洞类型/申诉方式/附件字段；申诉状态替换原申诉成功布尔；
         # 废弃 title / test_time / appeal_report_id 列（SQLite ≥3.35 支持 DROP COLUMN）。

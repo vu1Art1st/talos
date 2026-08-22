@@ -30,7 +30,9 @@ from app.schemas import (
     ReportVulnStateOut,
 )
 from app.services import plan_service, vuln_service
+from app.services.audit_service import audit
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
+from app.services.notify_service import notify
 from app.services.report_html import vuln_section_html as _vuln_section_html
 from app.workers.dispatch import dispatch
 
@@ -566,6 +568,7 @@ async def save_report(
 @router.post("/{report_id}/retest", response_model=ReportOut)
 async def retest_report(
     report_id: int,
+    request: Request,
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -625,6 +628,15 @@ async def retest_report(
     await plan_service.refresh_mandays(session, report.testing_plan_id)
     await session.commit()
     await session.refresh(retest)
+    await audit(session, request, "vuln_transition", user, {
+        "op": "report_retest", "target": f"reports/{report_id}", "title": report.title,
+        "to": "复测中", "retest_report": f"reports/{retest.id}",
+    })
+    if changed:
+        await notify(request.app, session, "vuln_transition",
+                     title=f"《{report.title}》关联漏洞（{len(changed)} 个）",
+                     **{"from": "未修复/修复中", "to": "复测中"},
+                     operator=user.realname or user.username)
     return retest
 
 
@@ -654,11 +666,13 @@ async def report_vuln_states(
 @router.delete("/{report_id}")
 async def delete_report(
     report_id: int,
-    _: User = Depends(require_perm("report:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     report = await session.get(Report, report_id)
     if report:
+        title = report.title
         # 删除由本次发起复测产生的复测报告时，回退对应复测轮次，保持复测轮数与报告一致
         if report.testing_plan_id is not None:
             plan = await session.get(TestingPlan, report.testing_plan_id)
@@ -669,6 +683,7 @@ async def delete_report(
         )
         await session.delete(report)
         await session.commit()
+        await audit(session, request, "report_delete", operator, {"target": f"reports/{report_id}", "title": title})
     return {"msg": "删除成功"}
 
 
@@ -765,6 +780,9 @@ async def export_report(
     await session.commit()
     await session.refresh(job)
     await dispatch(request.app, "export_report_task", job.id)
+    await audit(session, request, "report_export", user, {
+        "target": f"reports/{report_id}", "title": report.title, "fmt": body.fmt,
+    })
     return job
 
 

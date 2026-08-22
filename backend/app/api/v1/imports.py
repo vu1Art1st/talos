@@ -23,6 +23,7 @@ from app.schemas import (
     Page,
 )
 from app.services import import_service
+from app.services.audit_service import audit
 from app.services.docx_parser import build_import_template
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.workers.dispatch import dispatch
@@ -156,6 +157,7 @@ async def discard_record(
 async def confirm_batch(
     batch_id: int,
     body: ImportConfirmIn,
+    request: Request,
     user: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -213,6 +215,9 @@ async def confirm_batch(
         session, batch, plan, report, report_auto_created, new_vul_ids, user,
     )
     await session.commit()
+    await audit(session, request, "import_confirm", user, {
+        "target": f"imports/{batch_id}", "created": created,
+    })
     msg = f"成功处理 {created} 条漏洞记录"
     if plan is not None:
         msg += f"，已关联测试计划「{plan.system_name}」"

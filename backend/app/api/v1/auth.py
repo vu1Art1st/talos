@@ -17,6 +17,7 @@ from app.core.timeutil import now
 from app.db import get_session
 from app.models import User
 from app.schemas import PasswordIn, RefreshIn, TokenOut, UserOut
+from app.services.audit_service import audit
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -39,18 +40,22 @@ async def login(
     fail_key = f"login_fail:{form.username}:{client_ip}"
     window = settings.LOGIN_LOCK_SECONDS
     if await get_failures(fail_key, window) >= settings.LOGIN_MAX_FAILURES:
+        await audit(session, request, "login_locked", form.username, {"ip": client_ip})
         raise HTTPException(429, "登录失败次数过多，请稍后再试")
     user = (
         await session.execute(select(User).where(User.username == form.username))
     ).scalar_one_or_none()
     if user is None or not verify_password(form.password, user.password_hash):
         await incr_failure(fail_key, window)
+        await audit(session, request, "login_failure", form.username, {"ip": client_ip})
         raise HTTPException(401, "用户名或密码错误")
     if not user.is_active:
+        await audit(session, request, "login_failure", user, {"reason": "账号已禁用"})
         raise HTTPException(403, "账号已禁用")
     await clear_failures(fail_key)
     user.last_login = now()
     await session.commit()
+    await audit(session, request, "login_success", user, {"ip": client_ip})
     return TokenOut(
         access_token=create_access_token(user.id, user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),
@@ -82,6 +87,7 @@ async def me(user: User = Depends(get_current_user)):
 @router.post("/password", response_model=TokenOut)
 async def change_password(
     body: PasswordIn,
+    request: Request,
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
@@ -93,6 +99,7 @@ async def change_password(
     user.token_version += 1
     session.add(user)
     await session.commit()
+    await audit(session, request, "password_change", user)
     return TokenOut(
         access_token=create_access_token(user.id, user.token_version),
         refresh_token=create_refresh_token(user.id, user.token_version),

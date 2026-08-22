@@ -32,7 +32,7 @@ def create_access_token(user_id: int, ver: int = 0) -> str:
 
 
 def create_refresh_token(user_id: int, ver: int = 0) -> str:
-    return _create_token(str(user_id), "refresh", timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS), ver)
+    return _create_token(str(user_id), "refresh", timedelta(hours=settings.REFRESH_TOKEN_EXPIRE_HOURS), ver)
 
 
 def decode_token(token: str, expected_type: str = "access") -> tuple[int, int] | None:

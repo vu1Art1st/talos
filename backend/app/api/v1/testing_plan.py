@@ -2,12 +2,12 @@
 import html as html_mod
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from openpyxl import load_workbook
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import NONPEN_ITEMS, PlanStatus
+from app.constants import NONPEN_ITEMS, PlanStatus, TESTING_PLAN_STATUS
 from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.timeutil import mandays_between
@@ -25,6 +25,8 @@ from app.models import (
 )
 from app.schemas import CompleteNoVulnIn, Page, TestingPlanIn, TestingPlanOut
 from app.services import nonpen_service, plan_io, plan_query, plan_service, ticket_service, vuln_service
+from app.services.audit_service import audit
+from app.services.notify_service import notify
 
 router = APIRouter(tags=["专项管理"])
 
@@ -223,6 +225,7 @@ async def create_testing_plan(
 @router.post("/testing-plans/{row_id}/claim", response_model=TestingPlanOut)
 async def claim_testing_plan(
     row_id: int,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -234,6 +237,11 @@ async def claim_testing_plan(
         row.status = 20
     await session.commit()
     await session.refresh(row)
+    await audit(session, request, "plan_claim", user, {
+        "target": f"testing-plans/{row_id}", "system": row.system_name,
+    })
+    await notify(request.app, session, "plan_claimed",
+                 system=row.system_name, operator=user.realname or user.username)
     return row
 
 
@@ -312,6 +320,7 @@ async def _create_no_vul_report(
 async def complete_plan_no_vuln(
     row_id: int,
     body: CompleteNoVulnIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -373,6 +382,10 @@ async def complete_plan_no_vuln(
         ))
     await session.commit()
     await session.refresh(plan)
+    await audit(session, request, "plan_transition", user, {
+        "target": f"testing-plans/{row_id}", "system": plan.system_name,
+        "to": TESTING_PLAN_STATUS.get(PlanStatus.PASSED, "测试通过"), "no_vuln": True,
+    })
     return plan
 
 
@@ -410,10 +423,12 @@ async def attach_vulns_to_plan(
 async def update_testing_plan(
     row_id: int,
     body: TestingPlanIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    old_status = row.status
     if body.status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
     # 校验状态流转合法性（仅当状态有变化时）
@@ -458,6 +473,12 @@ async def update_testing_plan(
         nonpen_service.sync_linked_fields(row, np)
     await session.commit()
     await session.refresh(row)
+    if body.status != old_status:
+        await audit(session, request, "plan_transition", user, {
+            "target": f"testing-plans/{row_id}", "system": row.system_name,
+            "from": TESTING_PLAN_STATUS.get(old_status, str(old_status)),
+            "to": TESTING_PLAN_STATUS.get(body.status, str(body.status)),
+        })
     return row
 
 

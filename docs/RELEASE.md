@@ -25,6 +25,35 @@
 
 ---
 
+## [2.2.0] - 2026-08-22
+
+功能演进（ROADMAP F3/F4/F6/F7 落地 + 会话令牌空闲滑动过期；F2/F5 取消）。
+
+### 新增
+
+- **F3 通知渠道（webhook + 邮件）**：新表 `notification_channels` 与 `/notify-channels` CRUD（system:manage，含「测试发送」）；`constants.py` 新增 `NOTIFY_CHANNEL_TYPES`（企业微信/钉钉/邮件）与 `NOTIFY_EVENTS`（漏洞创建/工单认领/漏洞状态流转/复测完成），经 `/meta` 下发；新 worker 任务 `send_notify_task`（wecom/dingtalk webhook 走 httpx markdown 消息，邮件复用 SMTP 任务）；`services/notify_service.py` 在触发点（漏洞创建/认领/各流转端点/复测闭环）按渠道订阅分发，失败仅告警不影响业务；前端「系统管理 → 通知渠道」配置页
+- **F4 CVSS 3.1 计算器**：`vulns.score` 迁移为 Float 并新增 `cvss_vector` 列（知识库同步新增）；前端 `utils/cvss.ts` 实现 v3.1 基础评分（8 指标 + 官方 Roundup）与向量解析/构造，`CvssCalculator.vue` 组件嵌入漏洞表单（实时评分、等级色、向量串、「按评分同步等级」开关）；知识库表单支持向量录入与评分预览，套用模板/from-vul 双向带出向量；漏洞详情页展示 CVSS 评分标签
+- **F6 开放 API（PAT）**：新表 `personal_access_tokens`（仅存 sha256，明文 `tlp_` 前缀仅创建时返回一次）；`/pats` 个人令牌管理（登录即可，7/30/90/365 天档位，每人至多 20 个有效令牌）；`core/deps.get_pat_user` 认证依赖（过期/吊销/禁用校验 + 每令牌每分钟限流 `VP_PAT_RATE_LIMIT=120`）；`/open/vulns` 与 `/open/stats` 只读接口复用站内查询口径（`vulns._build_vuln_conditions` / `services/stats_service.py` 自 dashboard 提炼）；前端「用户下拉 → 访问令牌」管理页
+- **F7 登录与操作审计**：新表 `operation_logs`（IP/UA/操作人/动作/详情 JSON）；`services/audit_service.py` 统一写入，覆盖登录成功/失败/锁定、改密、用户与角色 CRUD、漏洞创建/删除/流转、工单认领与流转、报告导出/删除/发起复测、导入入库、知识库删除、PAT 与通知渠道变更；`GET /audit/logs` 查询端点（system:manage，类目/用户/动作/IP/日期筛选）；前端「系统管理 → 审计日志」双 tab 查询页
+- **会话令牌空闲滑动过期**：refresh token 有效期 7 天 → 24 小时空闲窗口（`VP_REFRESH_TOKEN_EXPIRE_HOURS`），每次 `/auth/refresh` 轮换即重置计时；前端 `client.ts` 请求拦截器临期（<5 分钟）主动静默续期（single-flight 复用），活跃用户无感知、空闲超 24 小时强制重新登录。PAT 不受此限制
+
+### 变更
+
+- dashboard 聚合逻辑提炼为 `services/stats_service.py::build_stats`（`/dashboard/stats` 与 `/open/stats` 共用口径）
+- `docker-compose.yml` backend_env 透传 `VP_SMTP_*`；根 `.env.example` 补 SMTP / 刷新窗口 / PAT 限流配置说明
+
+### 数据库迁移
+
+- `f6a7b8c9d0e1`：`vulns.score` Integer→Float（PostgreSQL USING 转换）、`vulns` / `knowledge_entries` 新增 `cvss_vector`；SQLite 开发库由 `db.py` 轻量迁移同步
+- `a7b8c9d0e1f2`：新建 `operation_logs` / `notification_channels` / `personal_access_tokens` 三表（用户删除时审计置空、令牌级联删除）
+
+### 测试
+
+- 后端 `test_api.py` 新增 8 组用例：refresh 轮换与过期拒绝、审计登录/操作/筛选、meta 字典下发、PAT 生命周期与认证边界/过期/限流、通知渠道 CRUD 与校验/emit 分发（monkeypatch dispatch）、CVSS 字段往返与知识库向量
+- 前端新增 `utils/__tests__/cvss.spec.ts`（官方向量→评分 9 组断言 + 解析/构造/等级映射）
+
+---
+
 ## [2.1.0] - 2026-08-22
 
 重构还债（ROADMAP R1-R6 全量落地）：后端巨石文件按域拆分、导入链路服务化、前后端字典单源化、全站表单校验体系化、前端测试覆盖扩展。

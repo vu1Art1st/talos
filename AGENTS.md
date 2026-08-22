@@ -40,13 +40,15 @@ pnpm test           # vitest 单测
 ```
 backend/
   app/api/v1/      # 路由（auth, users, vulns, assets, reports, imports, dashboard, knowledge,
-                   #   remote_testing / testing_plan / spring_action（专项三域）, nonpen, misc）
+                   #   remote_testing / testing_plan / spring_action（专项三域）, nonpen, misc,
+                   #   pats / open_api（个人访问令牌与开放只读 API）, audit（审计日志）, notify（通知渠道））
   app/core/        # config / deps / security / query（分页排序）/ filters（聚合筛选引擎）/ ratelimit / sanitize / timeutil / xlsx
   app/models/      # SQLAlchemy 模型
-  app/schemas/     # Pydantic 模型包（common / auth / asset / vuln / knowledge / import_ / report / special，
+  app/schemas/     # Pydantic 模型包（common / auth / asset / vuln / knowledge / import_ / report / special / system，
                    #   对外经 schemas/__init__.py 统一重导出，调用方一律 from app.schemas import ...）
   app/services/    # 业务逻辑（状态机、docx 解析、导入入库 import_service、报告章节 report_html、
-                   #   计划查询 plan_query / Excel plan_io、报告构建、导出）
+                   #   计划查询 plan_query / Excel plan_io、报告构建、导出、态势聚合 stats_service、
+                   #   审计 audit_service、渠道通知 notify_service）
   app/constants.py # 全部枚举/字典与展示色值唯一来源（经 /meta 下发前端）
   app/workers/     # arq 后台任务
   alembic/         # 迁移（改模型后必须生成迁移）
@@ -57,7 +59,7 @@ frontend/
   src/composables/ # 组合式函数（useListPage / useCrudDialog / useAssetSelect / useExportJobs / useDictOptions）
   src/components/  # 可复用组件（StatCard / FilterBuilder / VulnFormPanel ...）
   src/views/       # 页面视图
-  src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice
+  src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice / cvss（CVSS 3.1 评分）
 docs/              # DEPLOY / RELEASE / ROADMAP
 ```
 

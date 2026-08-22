@@ -163,6 +163,46 @@ PERMISSIONS = [
     "system:manage",
 ]
 
+# 审计动作（F7 登录与操作审计）：login_ 前缀为登录事件，其余为敏感操作；
+# 经 /meta 下发供审计查询页筛选下拉使用，新增动作必须在此登记
+AUDIT_ACTIONS = {
+    "login_success": "登录成功",
+    "login_failure": "登录失败",
+    "login_locked": "登录锁定",
+    "password_change": "修改密码",
+    "user_create": "创建用户",
+    "user_update": "编辑用户",
+    "user_delete": "删除用户",
+    "role_update": "角色变更",
+    "vuln_create": "创建漏洞",
+    "vuln_delete": "删除漏洞",
+    "vuln_transition": "漏洞流转",
+    "plan_transition": "工单流转",
+    "plan_claim": "工单认领",
+    "report_export": "导出报告",
+    "report_delete": "删除报告",
+    "import_confirm": "导入入库",
+    "knowledge_delete": "删除知识库条目",
+    "pat_create": "创建访问令牌",
+    "pat_revoke": "吊销访问令牌",
+    "notify_update": "通知渠道变更",
+}
+
+# 通知渠道类型（F3）：webhook 走 httpx 出站 POST，邮件复用 SMTP 任务
+NOTIFY_CHANNEL_TYPES = {
+    "wecom": "企业微信",
+    "dingtalk": "钉钉",
+    "email": "邮件",
+}
+
+# 可订阅的通知事件：触发点见各路由成功响应后的 notify_service.emit 调用
+NOTIFY_EVENTS = {
+    "vuln_created": "漏洞创建",
+    "plan_claimed": "工单认领",
+    "vuln_transition": "漏洞状态流转",
+    "retest_completed": "复测完成",
+}
+
 # Word 导入模板中「漏洞信息表格」的行标签 -> 字段映射
 # 标签命名与报告模板「风险问题详情」章节保持一致（漏洞链接/漏洞证明），
 # 同时保留旧模板标签（影响URL/复现步骤）作为兼容别名

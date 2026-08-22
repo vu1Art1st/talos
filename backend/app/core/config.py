@@ -13,20 +13,24 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
-    APP_VERSION: str = "2.1.0"
+    APP_VERSION: str = "2.2.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
 
     SECRET_KEY: str = "please-change-me-in-production"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+    # refresh token 空闲滑动窗口：每次触发 /auth/refresh 轮换即重置，空闲超时强制重新登录
+    REFRESH_TOKEN_EXPIRE_HOURS: int = 24
 
     # 内置 admin 初始口令：留空则首次启动随机生成并打印到日志（仅显示一次）
     INITIAL_ADMIN_PASSWORD: str = ""
     # 登录防爆破：同一用户名+IP 在窗口期内允许的最大失败次数与锁定窗口（秒）
     LOGIN_MAX_FAILURES: int = 10
     LOGIN_LOCK_SECONDS: int = 900
+
+    # 个人访问令牌（PAT）限流：每令牌每分钟最大请求数（开放 API 只读接口）
+    PAT_RATE_LIMIT: int = 120
 
     # 允许携带凭证的跨域来源白名单（前端部署地址），生产环境务必按实际域名收窄
     CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27014"]

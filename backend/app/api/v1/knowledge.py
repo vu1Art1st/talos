@@ -2,7 +2,7 @@
 
 每个漏洞名称至多一条，同一漏洞类型可含多条；支持批量导入（按名称 upsert）与批量删除。
 """
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.db import get_session
 from app.models import KnowledgeEntry, Vul, VulnType
 from app.models.user import User
 from app.schemas import KnowledgeBatchDeleteIn, KnowledgeBatchIn, KnowledgeIn, KnowledgeOut
+from app.services.audit_service import audit
 
 router = APIRouter(prefix="/knowledge", tags=["漏洞模板库"])
 
@@ -160,7 +161,8 @@ async def batch_import(
 @router.post("/batch-delete")
 async def batch_delete(
     body: KnowledgeBatchDeleteIn,
-    _: User = Depends(require_perm("vuln:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """批量删除：按 ID 列表删除，忽略不存在的 ID。"""
@@ -168,6 +170,9 @@ async def batch_delete(
         sa_delete(KnowledgeEntry).where(KnowledgeEntry.id.in_(body.ids))
     )
     await session.commit()
+    await audit(session, request, "knowledge_delete", operator, {
+        "op": "batch", "count": result.rowcount, "ids": body.ids[:50],
+    })
     return {"deleted": result.rowcount, "msg": "删除成功"}
 
 
@@ -196,6 +201,7 @@ async def save_from_vul(
     entry.description_json = vul.description_json
     entry.solution_html = vul.solution_html
     entry.solution_json = vul.solution_json
+    entry.cvss_vector = vul.cvss_vector or ""
     entry.creator_id = user.id
     entry.username = user.realname or user.username
     await session.commit()

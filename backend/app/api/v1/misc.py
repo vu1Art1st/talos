@@ -9,6 +9,7 @@ from app.constants import (
     ASSET_SEC_LEVEL,
     ASSET_STATUS,
     ASSET_STATUS_COLOR,
+    AUDIT_ACTIONS,
     EXPORT_JOB_STATUS_NAME,
     IMPORT_BATCH_STATUS_NAME,
     IMPORT_RECORD_STATUS_NAME,
@@ -17,6 +18,8 @@ from app.constants import (
     NONPEN_ITEM_COLORS,
     NONPEN_ITEM_STATUS,
     NONPEN_ITEMS,
+    NOTIFY_CHANNEL_TYPES,
+    NOTIFY_EVENTS,
     PERMISSIONS,
     REPORT_STATUS_COLOR,
     REPORT_STATUS_NAME,
@@ -90,6 +93,10 @@ async def meta(
         "import_record_status": IMPORT_RECORD_STATUS_NAME,
         "export_job_status": EXPORT_JOB_STATUS_NAME,
         "permissions": PERMISSIONS,
+        # 审计动作（登录/操作日志筛选下拉）与通知渠道字典（F3/F7）
+        "audit_actions": AUDIT_ACTIONS,
+        "notify_channel_types": NOTIFY_CHANNEL_TYPES,
+        "notify_events": NOTIFY_EVENTS,
         # 各字典的展示色值（key 与上方名称字典一一对应）
         "colors": {
             "vul_level": VUL_LEVEL_COLOR,

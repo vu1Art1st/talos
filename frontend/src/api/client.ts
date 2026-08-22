@@ -4,12 +4,6 @@ import router from '../router'
 
 const client = axios.create({ baseURL: '/api/v1', timeout: 30000 })
 
-client.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) config.headers.Authorization = `Bearer ${token}`
-  return config
-})
-
 let refreshing: Promise<string | null> | null = null
 
 async function refreshToken(): Promise<string | null> {
@@ -24,6 +18,29 @@ async function refreshToken(): Promise<string | null> {
     return null
   }
 }
+
+function tokenExpiresIn(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    return typeof payload.exp === 'number' ? payload.exp - Date.now() / 1000 : null
+  } catch {
+    return null
+  }
+}
+
+client.interceptors.request.use(async (config) => {
+  let token = localStorage.getItem('access_token')
+  // 临期主动刷新：距过期不足 5 分钟先续期（单飞去重），保证活跃用户的空闲窗口持续顺延
+  const expiresIn = token ? tokenExpiresIn(token) : null
+  if (token && expiresIn !== null && expiresIn < 300) {
+    refreshing = refreshing ?? refreshToken()
+    token = await refreshing
+    refreshing = null
+    if (!token) token = localStorage.getItem('access_token')
+  }
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
 
 client.interceptors.response.use(
   (resp) => resp,

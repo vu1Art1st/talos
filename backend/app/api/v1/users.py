@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -11,6 +11,7 @@ from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, GroupMember, Role, User
 from app.schemas import GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, RoleIn, RoleOut, UserIn, UserOption, UserOut
+from app.services.audit_service import audit
 
 router = APIRouter(tags=["用户与权限"])
 
@@ -54,7 +55,8 @@ async def list_user_options(
 @router.post("/users", response_model=UserOut)
 async def create_user(
     body: UserIn,
-    _: User = Depends(require_perm("user:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     exists = (await session.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
@@ -75,6 +77,7 @@ async def create_user(
     session.add(user)
     await session.commit()
     await session.refresh(user)
+    await audit(session, request, "user_create", operator, {"target": f"users/{user.id}", "username": user.username})
     return build_user_out(user)
 
 
@@ -82,7 +85,8 @@ async def create_user(
 async def update_user(
     user_id: int,
     body: UserIn,
-    _: User = Depends(require_perm("user:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     user = await get_or_404(session, User, user_id, "用户不存在")
@@ -101,12 +105,14 @@ async def update_user(
         user.token_version += 1
     await session.commit()
     await session.refresh(user)
+    await audit(session, request, "user_update", operator, {"target": f"users/{user.id}", "username": user.username})
     return build_user_out(user)
 
 
 @router.delete("/users/{user_id}")
 async def delete_user(
     user_id: int,
+    request: Request,
     current: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -116,6 +122,7 @@ async def delete_user(
     if user:
         await session.delete(user)
         await session.commit()
+        await audit(session, request, "user_delete", current, {"target": f"users/{user_id}", "username": user.username})
     return {"msg": "删除成功"}
 
 
@@ -137,13 +144,15 @@ async def list_permissions(_: User = Depends(get_current_user)):
 @router.post("/roles", response_model=RoleOut)
 async def create_role(
     body: RoleIn,
-    _: User = Depends(require_perm("user:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     role = Role(name=body.name, permissions=body.permissions, remark=body.remark)
     session.add(role)
     await session.commit()
     await session.refresh(role)
+    await audit(session, request, "role_update", operator, {"op": "create", "role": role.name})
     return role
 
 
@@ -151,7 +160,8 @@ async def create_role(
 async def update_role(
     role_id: int,
     body: RoleIn,
-    _: User = Depends(require_perm("user:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     role = await get_or_404(session, Role, role_id, "角色不存在")
@@ -159,13 +169,15 @@ async def update_role(
     role.permissions = body.permissions
     role.remark = body.remark
     await session.commit()
+    await audit(session, request, "role_update", operator, {"op": "update", "role": role.name})
     return role
 
 
 @router.delete("/roles/{role_id}")
 async def delete_role(
     role_id: int,
-    _: User = Depends(require_perm("user:manage")),
+    request: Request,
+    operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     used = (await session.execute(select(func.count(User.id)).where(User.role_id == role_id))).scalar_one()
@@ -173,8 +185,10 @@ async def delete_role(
         raise HTTPException(400, "角色下仍有用户，无法删除")
     role = await session.get(Role, role_id)
     if role:
+        name = role.name
         await session.delete(role)
         await session.commit()
+        await audit(session, request, "role_update", operator, {"op": "delete", "role": name})
     return {"msg": "删除成功"}
 
 

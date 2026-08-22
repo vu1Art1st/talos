@@ -20,10 +20,12 @@ class VulIn(BaseModel):
     reproduce_json: dict | None = None
     solution_html: HtmlStr = ""
     solution_json: dict | None = None
-    score: int = 0
+    score: float = 0.0
     risk_score: int = 0
     left_risk_score: int = 0
     asset_level: int = 0
+    # CVSS 3.1 向量字符串（如 CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H），空表示未评
+    cvss_vector: str = ""
     asset_ids: list[int] = []
     testing_plan_id: int | None = None  # 关联测试计划
 

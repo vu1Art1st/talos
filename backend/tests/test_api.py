@@ -2847,3 +2847,267 @@ async def test_plan_complete_no_vuln_requires_no_vulns(client: AsyncClient, auth
     assert plan["status"] == 20
 
 
+# ---------- refresh token 空闲 24h 滑动过期 ----------
+async def test_refresh_rotation_and_expiry(client: AsyncClient):
+    """refresh 轮换下发新令牌对（滑动重置）；过期 refresh 被拒绝。"""
+    resp = await client.post(
+        "/api/v1/auth/login", data={"username": "admin", "password": "admin123"}
+    )
+    refresh = resp.json()["refresh_token"]
+
+    # 轮换：新 access 可用，且再次下发新 refresh（计时重置的实现）
+    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": refresh})
+    assert resp.status_code == 200, resp.text
+    pair = resp.json()
+    me = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {pair['access_token']}"})
+    assert me.status_code == 200
+    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": pair["refresh_token"]})
+    assert resp.status_code == 200
+
+    # 空闲超 24 小时的 refresh（构造已过期令牌）被拒绝
+    from datetime import timedelta
+
+    from app.core import security
+
+    expired = security._create_token("1", "refresh", timedelta(hours=-1), 0)
+    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": expired})
+    assert resp.status_code == 401
+
+
+# ---------- F7 审计 ----------
+async def test_audit_login_and_operation(client: AsyncClient, auth: dict):
+    """登录成败写审计；敏感操作（建漏洞）写审计；查询端点按类目过滤。"""
+    # 失败登录 → login_failure
+    await client.post("/api/v1/auth/login", data={"username": "admin", "password": "nope"})
+
+    resp = await client.get("/api/v1/audit/logs", headers=auth, params={"category": "login", "size": 50})
+    assert resp.status_code == 200, resp.text
+    logs = resp.json()
+    assert logs["total"] >= 1
+    actions = {i["action"] for i in logs["items"]}
+    assert "login_success" in actions and "login_failure" in actions
+    sample = logs["items"][0]
+    assert sample["username"] and sample["ip"] != "" and sample["create_time"]
+
+    # 操作日志：建漏洞 → vuln_create
+    await client.post("/api/v1/vulns", headers=auth, json={"title": "审计测试漏洞", "level": 30})
+    resp = await client.get("/api/v1/audit/logs", headers=auth, params={"category": "operation", "size": 50})
+    actions = {i["action"] for i in resp.json()["items"]}
+    assert "vuln_create" in actions
+
+    # 筛选：按动作精确定位
+    resp = await client.get("/api/v1/audit/logs", headers=auth, params={"action": "login_failure"})
+    assert all(i["action"] == "login_failure" for i in resp.json()["items"])
+
+
+async def test_meta_audit_and_notify_dicts(client: AsyncClient, auth: dict):
+    resp = await client.get("/api/v1/meta", headers=auth)
+    meta = resp.json()
+    assert meta["audit_actions"]["login_success"] == "登录成功"
+    assert set(meta["notify_channel_types"]) == {"wecom", "dingtalk", "email"}
+    assert "retest_completed" in meta["notify_events"]
+
+
+# ---------- F6 PAT 与开放 API ----------
+async def test_pat_lifecycle_and_open_api(client: AsyncClient, auth: dict):
+    # 非法档位被拒
+    resp = await client.post("/api/v1/pats", headers=auth, json={"name": "非法档位", "expire_days": 15})
+    assert resp.status_code == 422
+
+    # 创建：明文仅此一次返回
+    resp = await client.post(
+        "/api/v1/pats", headers=auth, json={"name": "看板令牌", "expire_days": 30}
+    )
+    assert resp.status_code == 200, resp.text
+    pat = resp.json()
+    assert pat["token"].startswith("tlp_") and pat["prefix"]
+    pat_id, plaintext = pat["id"], pat["token"]
+
+    # 列表不含明文
+    resp = await client.get("/api/v1/pats", headers=auth)
+    items = resp.json()["items"]
+    assert all("token" not in i for i in items)
+    assert any(i["id"] == pat_id and i["name"] == "看板令牌" for i in items)
+
+    pat_headers = {"Authorization": f"Bearer {plaintext}"}
+    # 开放 API：PAT 可查询漏洞与统计
+    resp = await client.get("/api/v1/open/vulns", headers=pat_headers, params={"size": 5})
+    assert resp.status_code == 200, resp.text
+    assert "items" in resp.json() and "total" in resp.json()
+    resp = await client.get("/api/v1/open/stats", headers=pat_headers)
+    assert resp.status_code == 200, resp.text
+    assert "total_vulns" in resp.json()
+
+    # 认证边界：JWT 访问开放 API 被拒；PAT 访问站内端点被拒
+    resp = await client.get("/api/v1/open/vulns", headers=auth)
+    assert resp.status_code == 401
+    resp = await client.get("/api/v1/vulns", headers=pat_headers)
+    assert resp.status_code == 401
+
+    # 吊销后 PAT 失效
+    resp = await client.delete(f"/api/v1/pats/{pat_id}", headers=auth)
+    assert resp.status_code == 200
+    resp = await client.get("/api/v1/open/vulns", headers=pat_headers)
+    assert resp.status_code == 401
+
+
+async def test_pat_expired_rejected(client: AsyncClient, auth: dict):
+    """过期 PAT 被拒绝（直接落库一条已过期令牌）。"""
+    from datetime import timedelta
+
+    from app.core.timeutil import now
+    from app.db import async_session_maker
+    from app.models import PersonalAccessToken
+
+    from app.api.v1.pats import generate_pat
+
+    token, token_hash, prefix = generate_pat()
+    async with async_session_maker() as session:
+        session.add(PersonalAccessToken(
+            user_id=1, name="过期令牌", token_hash=token_hash, prefix=prefix,
+            expires_at=now() - timedelta(minutes=1),
+        ))
+        await session.commit()
+
+    resp = await client.get("/api/v1/open/vulns", headers={"Authorization": f"Bearer {token}"})
+    assert resp.status_code == 401
+    assert "过期" in resp.json()["detail"]
+
+
+async def test_pat_rate_limit(client: AsyncClient, auth: dict, monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PAT_RATE_LIMIT", 3)
+    resp = await client.post("/api/v1/pats", headers=auth, json={"name": "限流令牌", "expire_days": 7})
+    plaintext = resp.json()["token"]
+    headers = {"Authorization": f"Bearer {plaintext}"}
+    codes = [(await client.get("/api/v1/open/stats", headers=headers)).status_code for _ in range(4)]
+    assert codes[:3] == [200, 200, 200]
+    assert codes[3] == 429
+
+
+# ---------- F3 通知渠道 ----------
+async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dict):
+    # 类型非法 / webhook 地址缺失被拒
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={"name": "坏类型", "type": "sms", "config": {}, "events": ["vuln_created"]},
+    )
+    assert resp.status_code == 422
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={"name": "缺地址", "type": "wecom", "config": {}, "events": ["vuln_created"]},
+    )
+    assert resp.status_code == 422
+    # 邮箱渠道缺收件人被拒
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={"name": "缺收件人", "type": "email", "config": {}, "events": ["vuln_created"]},
+    )
+    assert resp.status_code == 422
+
+    # 正常创建 / 编辑 / 测试发送 / 删除
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={
+            "name": "安全群机器人", "type": "wecom",
+            "config": {"url": "https://qyapi.example.com/hook"},
+            "events": ["vuln_created", "retest_completed"], "is_active": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    channel = resp.json()
+    assert channel["events"] == ["vuln_created", "retest_completed"]
+
+    resp = await client.put(
+        f"/api/v1/notify-channels/{channel['id']}", headers=auth,
+        json={
+            "name": "安全群机器人", "type": "wecom",
+            "config": {"url": "https://qyapi.example.com/hook2"},
+            "events": ["vuln_transition"], "is_active": False,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+
+    resp = await client.post(f"/api/v1/notify-channels/{channel['id']}/test", headers=auth)
+    assert resp.status_code == 200
+    resp = await client.delete(f"/api/v1/notify-channels/{channel['id']}", headers=auth)
+    assert resp.status_code == 200
+
+
+async def test_notify_emit_on_vuln_created(client: AsyncClient, auth: dict, monkeypatch):
+    """漏洞创建事件触发渠道分发（monkeypatch dispatch 捕获，不出站）。"""
+    calls: list[tuple] = []
+
+    async def fake_dispatch(app, func_name, *args):
+        calls.append((func_name, args))
+
+    import app.services.notify_service as notify_service
+
+    monkeypatch.setattr(notify_service, "dispatch", fake_dispatch)
+
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={
+            "name": "邮件渠道", "type": "email",
+            "config": {"recipients": ["sec@example.com"]},
+            "events": ["vuln_created"], "is_active": True,
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = await client.post("/api/v1/vulns", headers=auth, json={"title": "通知触发漏洞", "level": 30})
+    assert resp.status_code == 200
+
+    notify_calls = [c for c in calls if c[0] == "send_notify_task"]
+    assert notify_calls, "漏洞创建应触发通知分发"
+    func_name, args = notify_calls[0]
+    assert args[0] == "email" and args[1]["recipients"] == ["sec@example.com"]
+    assert "[Talos] 新漏洞创建" in args[2]
+
+
+# ---------- F4 CVSS ----------
+async def test_vuln_cvss_fields(client: AsyncClient, auth: dict):
+    vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "CVSS评分漏洞", "level": 10, "score": 9.8, "cvss_vector": vector},
+    )
+    assert resp.status_code == 200, resp.text
+    vul = resp.json()
+    assert vul["score"] == 9.8
+    assert vul["cvss_vector"] == vector
+
+    # 编辑改分
+    resp = await client.put(
+        f"/api/v1/vulns/{vul['id']}", headers=auth,
+        json={"title": "CVSS评分漏洞", "level": 10, "score": 5.3,
+              "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["score"] == 5.3
+
+
+async def test_knowledge_cvss_vector(client: AsyncClient, auth: dict):
+    vector = "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H"
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "SSRF向量模板", "vul_type": 75, "severity_level": 20, "cvss_vector": vector},
+    )
+    assert resp.status_code == 200, resp.text
+    entry = resp.json()
+    assert entry["cvss_vector"] == vector
+
+    # from-vul：漏洞向量随「存为模板」带入知识库
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "存模板向量漏洞", "level": 20, "cvss_vector": vector},
+    )
+    vul_id = resp.json()["id"]
+    resp = await client.post(f"/api/v1/knowledge/from-vul/{vul_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["cvss_vector"] == vector
+
+
+

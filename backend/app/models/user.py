@@ -41,6 +41,27 @@ class User(Base):
     role: Mapped[Role | None] = relationship(back_populates="users", lazy="selectin")
 
 
+class PersonalAccessToken(Base):
+    """个人访问令牌（PAT）：开放只读 API 认证用，明文仅创建时返回，库中只存 sha256。"""
+
+    __tablename__ = "personal_access_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # CASCADE：用户删除后其访问令牌一并删除
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(64), default="")
+    # 明文 token 的 sha256 hex（64 字符），认证时按 hash 查表
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    # 明文前缀（前 12 字符）：列表页辨识用，不含敏感部分
+    prefix: Mapped[str] = mapped_column(String(16), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    user: Mapped[User] = relationship(lazy="selectin")
+
+
 class Group(Base):
     __tablename__ = "groups"
 
