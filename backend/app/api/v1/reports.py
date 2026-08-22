@@ -1,4 +1,3 @@
-import html as html_mod
 import logging
 import re
 from io import BytesIO
@@ -12,7 +11,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import ReportStatus, VUL_LEVEL_EXPORT, VulStatus
+from app.constants import ReportStatus, VulStatus
 from app.core.deps import require_perm
 from app.core.timeutil import mandays_between, now
 from app.core.query import get_or_404, paginate, apply_sort
@@ -32,33 +31,10 @@ from app.schemas import (
 )
 from app.services import plan_service, vuln_service
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
+from app.services.report_html import vuln_section_html as _vuln_section_html
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/reports", tags=["报告"])
-
-
-def _affected_urls_html(affected_url: str | None) -> str:
-    """影响 URL 多值以换行分隔存储，逐条转义后换行展示。"""
-    urls = [u.strip() for u in (affected_url or "").splitlines() if u.strip()]
-    return "<br/>".join(html_mod.escape(u) for u in urls) or "-"
-
-
-def _vuln_section_html(vul: Vul) -> str:
-    """由漏洞记录生成标准章节 HTML，标签结构对齐导出模板「风险问题详情」（供报告编辑器继续编辑）。"""
-    parts = [
-        f"<p><strong>测试状态：</strong>{'复测' if vul.is_retest else '初测'}</p>",
-        f"<p><strong>漏洞等级：</strong>{VUL_LEVEL_EXPORT.get(vul.level, '-')}</p>",
-        f"<p><strong>漏洞链接：</strong>{_affected_urls_html(vul.affected_url)}</p>",
-    ]
-    if vul.description_html:
-        parts.append(f"<p><strong>漏洞描述：</strong></p>{vul.description_html}")
-    if vul.reproduce_html:
-        parts.append(f"<p><strong>漏洞证明：</strong></p>{vul.reproduce_html}")
-    if vul.solution_html:
-        parts.append(f"<p><strong>修复建议：</strong></p>{vul.solution_html}")
-    if vul.retest_html:
-        parts.append(f"<p><strong>复测详情：</strong></p>{vul.retest_html}")
-    return "".join(parts)
 
 
 async def _get_report(session: AsyncSession, report_id: int) -> Report:

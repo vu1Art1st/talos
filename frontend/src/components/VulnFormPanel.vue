@@ -5,10 +5,10 @@
       <slot name="notice" />
 
       <el-card shadow="never" class="!rounded-lg" :class="asideActions ? '' : 'mb-4'">
-        <el-form label-width="90px">
-          <el-form-item label="测试目标" required>
+        <el-form ref="targetFormRef" :model="targetForm" :rules="targetRules" label-width="90px">
+          <el-form-item label="测试目标" prop="assetIds">
             <div class="w-full flex items-start gap-2">
-              <el-select v-model="assetIds" multiple filterable remote :remote-method="searchAssets"
+              <el-select v-model="targetForm.assetIds" multiple filterable remote :remote-method="searchAssets"
                          :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="flex-1"
                          @change="onAssetChange">
                 <el-option v-for="a in assetOptions" :key="a.id" :value="a.id"
@@ -68,8 +68,8 @@
             </el-button>
           </div>
         </template>
-        <el-form :model="vul" label-width="90px">
-          <el-form-item label="漏洞名称" required>
+        <el-form :ref="(el: any) => setVulFormRef(idx, el)" :model="vul" :rules="vulRules" label-width="90px">
+          <el-form-item label="漏洞名称" prop="title">
             <el-input v-model="vul.title" placeholder="例如：后台登录接口存在SQL注入" />
           </el-form-item>
           <div class="grid grid-cols-1 md:grid-cols-2">
@@ -208,8 +208,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Plus, Delete, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
@@ -262,7 +263,12 @@ async function loadPlans() {
 }
 
 // ---------- 资产选择 ----------
-const assetIds = ref<number[]>([])
+// assetIds 放入 reactive 表单模型，供外层 el-form 的 rules 校验（测试目标必选）
+const targetForm = reactive({ assetIds: [] as number[] })
+const targetFormRef = ref<FormInstance>()
+const targetRules: FormRules = {
+  assetIds: [{ required: true, type: 'array', message: '请选择测试目标资产', trigger: 'change' }],
+}
 const assetOptions = ref<any[]>([])
 const assetCache = ref<Record<number, any>>({})
 const assetLoading = ref(false)
@@ -270,7 +276,7 @@ const assetKeyword = ref('')
 const assetDialogVisible = ref(false)
 const assetPrefill = ref<any>(null)
 
-const selectedAssets = computed(() => assetIds.value.map((id) => assetCache.value[id]).filter(Boolean))
+const selectedAssets = computed(() => targetForm.assetIds.map((id) => assetCache.value[id]).filter(Boolean))
 
 async function searchAssets(keyword = '') {
   assetKeyword.value = keyword
@@ -292,7 +298,7 @@ function openCreateAsset() {
 function onAssetCreated(asset: any) {
   assetCache.value[asset.id] = asset
   assetOptions.value = [asset, ...assetOptions.value.filter((a) => a.id !== asset.id)]
-  assetIds.value = [...assetIds.value, asset.id]
+  targetForm.assetIds = [...targetForm.assetIds, asset.id]
   onAssetChange()
 }
 
@@ -316,6 +322,18 @@ const emptyVul = () => ({
   source: 0, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
 })
 const vulns = ref<any[]>([emptyVul()])
+
+// 每个漏洞卡片一张独立 el-form（动态多块），函数 ref 按下标收集，提交时逐一校验
+const vulFormRefs: FormInstance[] = []
+
+function setVulFormRef(idx: number, el: unknown) {
+  if (el) vulFormRefs[idx] = el as FormInstance
+  else vulFormRefs.splice(idx, 1)
+}
+
+const vulRules: FormRules = {
+  title: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
+}
 
 // 影响URL 多值与后端单字段（换行分隔）互转
 const joinUrls = (urls: string[]) => (urls ?? []).map((u) => u.trim()).filter(Boolean).join('\n')
@@ -400,10 +418,11 @@ async function applyEntry(entry: any) {
 }
 
 async function save() {
-  for (const [i, vul] of vulns.value.entries()) {
-    if (!vul.title.trim()) return ElMessage.warning(`请填写漏洞 #${i + 1} 的名称`)
-  }
-  if (!assetIds.value.length) return ElMessage.warning('请选择测试目标资产')
+  // 先校验测试目标，再并行校验每个漏洞卡片，全部通过才提交（错误内联展示在对应字段）
+  const targetValid = await targetFormRef.value.validate().catch(() => false)
+  if (!targetValid) return
+  const vulResults = await Promise.all(vulFormRefs.map((f) => f.validate().catch(() => false)))
+  if (vulResults.some((ok) => !ok)) return
   saving.value = true
   try {
     // 影响URL 多值序列化为后端单字段（换行分隔），剔除前端临时字段
@@ -414,14 +433,14 @@ async function save() {
     if (editId) {
       const { data } = await client.put(`/vulns/${editId}`, {
         ...toPayload(vulns.value[0]),
-        asset_ids: assetIds.value,
+        asset_ids: targetForm.assetIds,
         testing_plan_id: selectedPlanId.value,
       })
       ElMessage.success('保存成功')
       emit('saved', [data])
     } else {
       const { data } = await client.post('/vulns/batch', {
-        asset_ids: assetIds.value,
+        asset_ids: targetForm.assetIds,
         vulns: vulns.value.map((v) => {
           const payload = toPayload(v)
           const plan = selectedPlanId.value ?? planId
@@ -456,15 +475,15 @@ onMounted(async () => {
   if (editId) {
     const { data: vul } = await client.get(`/vulns/${editId}`)
     vulns.value = [{ ...emptyVul(), ...vul, affected_urls: splitUrls(vul.affected_url) }]
-    assetIds.value = vul.asset_ids ?? []
+    targetForm.assetIds = vul.asset_ids ?? []
     selectedPlanId.value = vul.testing_plan_id ?? null
-    await loadAssetsByIds(assetIds.value)
+    await loadAssetsByIds(targetForm.assetIds)
   } else if (planId) {
     // 计划编制时已前置录入的关联资产，录入漏洞时自动带入（仍可调整）
     const { data: plan } = await client.get(`/testing-plans/${planId}`)
     const ids = plan.asset_ids ?? []
     if (ids.length) {
-      assetIds.value = ids
+      targetForm.assetIds = ids
       await loadAssetsByIds(ids)
       onAssetChange()
     }

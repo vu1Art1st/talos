@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import client from '../api/client'
+import { applyDictMeta } from '../utils/colors'
 
 export interface UserInfo {
   id: number
@@ -37,6 +38,7 @@ export const useAuthStore = defineStore('auth', {
       if (this.meta) return this.meta
       const { data } = await client.get('/meta')
       this.meta = data
+      applyDictMeta(data)
       return data
     },
     hasPerm(perm: string): boolean {

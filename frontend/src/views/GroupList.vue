@@ -37,8 +37,8 @@
   <!-- 组织编辑 -->
   <el-dialog
              :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑组织' : '新建组织'" width="480px">
-    <el-form :model="form" label-width="90px">
-      <el-form-item label="名称" required>
+    <el-form ref="formRef" :model="form" :rules="nameRequiredRules" label-width="90px">
+      <el-form-item label="名称" prop="name">
         <el-input v-model="form.name" placeholder="请输入组织名称" maxlength="64" />
       </el-form-item>
       <el-form-item label="备注">
@@ -89,8 +89,8 @@
   <!-- 成员编辑 -->
   <el-dialog
              :close-on-click-modal="false" v-model="memberFormVisible" :title="memberForm.id ? '编辑人员' : '录入人员'" width="480px">
-    <el-form :model="memberForm" label-width="90px">
-      <el-form-item label="姓名" required>
+    <el-form ref="memberFormRef" :model="memberForm" :rules="nameRequiredRules" label-width="90px">
+      <el-form-item label="姓名" prop="name">
         <el-input v-model="memberForm.name" placeholder="请输入姓名" maxlength="64" />
       </el-form-item>
       <el-form-item label="电话">
@@ -110,6 +110,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 
@@ -119,6 +120,12 @@ const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
 const form = reactive({ id: 0, name: '', remark: '' })
+const formRef = ref<FormInstance>()
+
+// 组织与成员两个表单共用「名称必填」规则（whitespace 拦截纯空格）
+const nameRequiredRules: FormRules = {
+  name: [{ required: true, whitespace: true, message: '请输入名称', trigger: 'blur' }],
+}
 
 // 人员管理
 const memberDialogVisible = ref(false)
@@ -129,6 +136,7 @@ const membersLoading = ref(false)
 const memberFormVisible = ref(false)
 const memberSaving = ref(false)
 const memberForm = reactive({ id: 0, name: '', phone: '', email: '' })
+const memberFormRef = ref<FormInstance>()
 
 async function load() {
   loading.value = true
@@ -152,7 +160,8 @@ function openDialog(row?: any) {
 }
 
 async function save() {
-  if (!form.name.trim()) return ElMessage.warning('请输入组织名称')
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   const body = { name: form.name, remark: form.remark }
   saving.value = true
   try {
@@ -202,7 +211,8 @@ function openMemberForm(row?: any) {
 }
 
 async function saveMember() {
-  if (!memberForm.name.trim()) return ElMessage.warning('请输入姓名')
+  const valid = await memberFormRef.value.validate().catch(() => false)
+  if (!valid) return
   const body = { name: memberForm.name, phone: memberForm.phone, email: memberForm.email }
   memberSaving.value = true
   try {

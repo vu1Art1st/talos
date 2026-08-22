@@ -81,8 +81,8 @@
 
   <el-dialog
              :close-on-click-modal="false" v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
-    <el-form :model="userForm" label-width="90px">
-      <el-form-item label="用户名" required>
+    <el-form ref="userFormRef" :model="userForm" :rules="userRules" label-width="90px">
+      <el-form-item label="用户名" prop="username">
         <el-input v-model="userForm.username" :disabled="!!userForm.id" />
       </el-form-item>
       <el-form-item :label="userForm.id ? '重置密码' : '密码'">
@@ -112,8 +112,8 @@
 
   <el-dialog
              :close-on-click-modal="false" v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="480px">
-    <el-form :model="roleForm" label-width="90px">
-      <el-form-item label="角色名称" required>
+    <el-form ref="roleFormRef" :model="roleForm" :rules="roleRules" label-width="90px">
+      <el-form-item label="角色名称" prop="name">
         <el-input v-model="roleForm.name" />
       </el-form-item>
       <el-form-item label="权限">
@@ -135,6 +135,7 @@
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
@@ -148,7 +149,15 @@ const roleDialog = ref(false)
 const userSaving = ref(false)
 const roleSaving = ref(false)
 const userForm = reactive<any>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
+const userFormRef = ref<FormInstance>()
+const userRules: FormRules = {
+  username: [{ required: true, whitespace: true, message: '请填写用户名', trigger: 'blur' }],
+}
 const roleForm = reactive<any>({ id: null, name: '', permissions: [], remark: '' })
+const roleFormRef = ref<FormInstance>()
+const roleRules: FormRules = {
+  name: [{ required: true, whitespace: true, message: '请填写角色名称', trigger: 'blur' }],
+}
 
 async function loadRoles() {
   rolesLoading.value = true
@@ -169,7 +178,8 @@ function openUser(row?: any) {
 }
 
 async function saveUser() {
-  if (!userForm.username.trim()) return ElMessage.warning('请填写用户名')
+  const valid = await userFormRef.value.validate().catch(() => false)
+  if (!valid) return
   userSaving.value = true
   try {
     const body = { ...userForm, password: userForm.password || null }
@@ -197,7 +207,8 @@ function openRole(row?: any) {
 }
 
 async function saveRole() {
-  if (!roleForm.name.trim()) return ElMessage.warning('请填写角色名称')
+  const valid = await roleFormRef.value.validate().catch(() => false)
+  if (!valid) return
   roleSaving.value = true
   try {
     if (roleForm.id) await client.put(`/roles/${roleForm.id}`, roleForm)

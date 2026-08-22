@@ -321,7 +321,7 @@
                 <span class="uppercase font-mono text-gray-400">{{ job.fmt }}</span>
                 <span class="tl-tag" :style="exportJobSoftStyle(job.status)">{{ exportJobName(job.status) }}</span>
                 <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
-                  <el-icon :color="EXPORT_JOB_META.failed.color"><WarningFilled /></el-icon>
+                  <el-icon :color="exportJobColor('failed')"><WarningFilled /></el-icon>
                 </el-tooltip>
                 <span class="text-gray-400 truncate">{{ job.title || r.title }}</span>
                 <span class="text-gray-300">{{ fmtDateTime(job.create_time) }}</span>
@@ -384,7 +384,7 @@ import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, Cir
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
-  EXPORT_JOB_META,
+  exportJobColor,
   exportJobName,
   exportJobSoftStyle,
   levelName,

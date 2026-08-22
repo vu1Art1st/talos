@@ -8,13 +8,29 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import (
     ASSET_SEC_LEVEL,
     ASSET_STATUS,
+    ASSET_STATUS_COLOR,
+    EXPORT_JOB_STATUS_NAME,
+    IMPORT_BATCH_STATUS_NAME,
+    IMPORT_RECORD_STATUS_NAME,
+    NONPEN_ITEM_ACTION_NAMES,
+    NONPEN_ITEM_ACTIONS,
+    NONPEN_ITEM_COLORS,
+    NONPEN_ITEM_STATUS,
+    NONPEN_ITEMS,
     PERMISSIONS,
+    REPORT_STATUS_COLOR,
+    REPORT_STATUS_NAME,
     TESTING_PLAN_STATUS,
+    TESTING_PLAN_STATUS_COLOR,
     URL_TAG,
+    URL_TAG_COLOR,
     VUL_LAYER,
     VUL_LEVEL,
+    VUL_LEVEL_COLOR,
     VUL_SOURCE,
     VUL_STATUS,
+    VUL_STATUS_COLOR,
+    VUL_TYPE_COLOR,
 )
 from app.core.config import settings
 from app.core.deps import get_current_user, require_perm
@@ -42,7 +58,11 @@ async def meta(
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """业务字典，前端下拉框统一从此获取。漏洞类型从数据库读取，支持动态新增。"""
+    """业务字典，前端下拉框与状态标签统一从此获取（名称 + 颜色 + nonpen 命名空间均在此单源下发）。
+
+    漏洞类型从数据库读取，支持动态新增；colors 命名空间为各字典的展示色值，
+    动态新增的漏洞类型（code≥1000）无内置色值，由前端兜底灰色。
+    """
     vuln_types = (
         await session.execute(select(VulnType).order_by(VulnType.sort, VulnType.id))
     ).scalars().all()
@@ -65,7 +85,32 @@ async def meta(
         "system_type": system_type_list,
         "url_tag": URL_TAG,
         "testing_plan_status": TESTING_PLAN_STATUS,
+        "report_status": REPORT_STATUS_NAME,
+        "import_batch_status": IMPORT_BATCH_STATUS_NAME,
+        "import_record_status": IMPORT_RECORD_STATUS_NAME,
+        "export_job_status": EXPORT_JOB_STATUS_NAME,
         "permissions": PERMISSIONS,
+        # 各字典的展示色值（key 与上方名称字典一一对应）
+        "colors": {
+            "vul_level": VUL_LEVEL_COLOR,
+            "vul_status": VUL_STATUS_COLOR,
+            "vul_type": VUL_TYPE_COLOR,
+            "testing_plan_status": TESTING_PLAN_STATUS_COLOR,
+            "report_status": REPORT_STATUS_COLOR,
+            "asset_status": ASSET_STATUS_COLOR,
+            "url_tag": URL_TAG_COLOR,
+            "nonpen_item": NONPEN_ITEM_COLORS,
+        },
+        # 漏扫基线工单：测试项 / 状态 / 允许操作（有序，即按钮渲染顺序）与操作文案
+        "nonpen": {
+            "items": [
+                {"key": key, "name": name, "desc": desc}
+                for key, (name, desc) in NONPEN_ITEMS.items()
+            ],
+            "status": NONPEN_ITEM_STATUS,
+            "actions": {status: list(actions) for status, actions in NONPEN_ITEM_ACTIONS.items()},
+            "action_names": NONPEN_ITEM_ACTION_NAMES,
+        },
     }
 
 

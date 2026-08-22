@@ -55,7 +55,7 @@
       <el-table-column prop="receive_time" label="需求接收" width="115" sortable="custom">
         <template #default="{ row }">{{ fmtDate(row.receive_time) }}</template>
       </el-table-column>
-      <el-table-column v-for="t in NONPEN_ITEMS" :key="t.key" :label="t.name" width="100">
+      <el-table-column v-for="t in nonpenItems()" :key="t.key" :label="t.name" width="100">
         <template #default="{ row }">
           <span v-if="row.items?.[t.key]" class="tl-tag" :class="{ 'ignored-tag': row.items[t.key].status === 'ignored' }"
                 :style="softStyle(nonpenItemMeta(row.items[t.key].status).color)">
@@ -87,7 +87,7 @@
   <!-- 新增 / 编辑弹窗 -->
   <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="800px"
              :close-on-click-modal="false">
-    <el-form :model="form" label-width="90px">
+    <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
         <el-form-item label="计划名称">
           <el-input v-model="form.plan_name" placeholder="与测试系统区分的漏扫基线工单名称" />
@@ -102,7 +102,7 @@
             </el-select>
           </div>
         </el-form-item>
-        <el-form-item label="测试系统" required>
+        <el-form-item label="测试系统" prop="system_name">
           <el-input v-model="form.system_name" placeholder="被测系统名称" />
         </el-form-item>
         <el-form-item label="测试类型">
@@ -126,13 +126,13 @@
         <el-form-item label="工单提起">
           <el-date-picker v-model="form.ticket_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
-        <el-form-item label="需求接收">
+        <el-form-item label="需求接收" prop="receive_time">
           <el-date-picker v-model="form.receive_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
       </div>
       <el-form-item label="测试项">
         <div class="w-full grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div v-for="t in NONPEN_ITEMS" :key="t.key" class="test-item-check" :class="{ checked: form.test_items.includes(t.key) }"
+          <div v-for="t in nonpenItems()" :key="t.key" class="test-item-check" :class="{ checked: form.test_items.includes(t.key) }"
                @click="toggleTestItem(t.key)">
             <div class="tick"><el-icon v-if="form.test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
             <div>
@@ -149,7 +149,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.system_name" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -159,14 +159,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Check, Plus, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
-import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { nonpenItemMeta, nonpenItems, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDate } from '../utils/format'
-import { NONPEN_ITEMS, nonpenItemMeta } from '../constants/nonpen'
 import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
 
@@ -193,6 +193,20 @@ const emptyForm = () => ({
   detail: '',
 })
 const form = ref(emptyForm())
+const formRef = ref<FormInstance>()
+
+// 工单表单校验：测试系统必填；工单ID必须有来源——需求接收日期（自动生成）或手动工单ID二者至少其一（与后端校验一致）
+const requireTicketSource: FormItemRule['validator'] = (_rule, _value, callback) => {
+  if (!form.value.ticket_id_manual && !form.value.receive_time) {
+    callback(new Error('请填写「需求接收日期」（用于自动生成工单ID），或手动指定工单ID'))
+  } else {
+    callback()
+  }
+}
+const formRules: FormRules = {
+  system_name: [{ required: true, whitespace: true, message: '请填写测试系统', trigger: 'blur' }],
+  receive_time: [{ validator: requireTicketSource }],
+}
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
 const testTypeOptions = computed(() =>
@@ -233,7 +247,7 @@ function openDialog(row?: any) {
 // 编辑回显：非忽略（有效）测试项即为已勾选项
 function selectedItems(row: any): string[] {
   const itemsMap = row.items ?? {}
-  return NONPEN_ITEMS
+  return nonpenItems()
     .filter((t) => itemsMap[t.key] && itemsMap[t.key].status !== 'ignored')
     .map((t) => t.key)
 }
@@ -241,11 +255,8 @@ function selectedItems(row: any): string[] {
 const saving = ref(false)
 
 async function save() {
-  // 工单ID必须有来源：需求接收日期（自动生成）或手动工单ID（二者至少其一）
-  if (!form.value.ticket_id_manual && !form.value.receive_time) {
-    ElMessage.warning('请填写「需求接收日期」（用于自动生成工单ID），或手动指定工单ID')
-    return
-  }
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   saving.value = true
   try {
     const body: any = { ...form.value }

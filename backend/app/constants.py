@@ -183,6 +183,92 @@ VUL_LEVEL_REVERSE = {v: k for k, v in VUL_LEVEL.items()}
 VUL_TYPE_REVERSE = {v: k for k, v in VUL_TYPE.items()}
 
 
+# ---------- 界面展示色值与展示名（/meta 下发，前端唯一色源，改此处即全端生效） ----------
+# 屏幕展示口径；Word/PDF 导出的打印色板在 services/report_builder.py 独立维护（打印色与屏幕色语义不同）
+VUL_LEVEL_COLOR = {
+    10: "#A61B29",  # 严重 深红
+    20: "#F56C6C",  # 高危 红
+    30: "#E6A23C",  # 中危 橙
+    40: "#409EFF",  # 低危 蓝
+    50: "#67C23A",  # 安全 绿
+}
+
+VUL_STATUS_COLOR = {
+    VulStatus.UNFIXED: "#F56C6C",    # 未修复 红
+    VulStatus.FIXING: "#E6A23C",     # 修复中 橙
+    VulStatus.RETESTING: "#E6A23C",  # 复测中 橙
+    VulStatus.FIXED: "#67C23A",      # 已修复 绿
+    VulStatus.IGNORED: "#909399",    # 已忽略 灰
+    VulStatus.DEFERRED: "#909399",   # 暂不处理 灰
+}
+
+VUL_TYPE_COLOR = {  # 色相分散便于区分；灰色固定留给「其他」，动态新增类型（code≥1000）由前端兜底灰色
+    10: "#E0442F",   # SQL注入 朱红
+    15: "#E6A23C",   # XSS跨站 橙
+    20: "#8C1D18",   # 命令执行 暗红
+    25: "#8B5CF6",   # 代码执行 紫
+    30: "#6366F1",   # 文件包含 靛蓝
+    35: "#2D7DD2",   # 任意文件操作 蓝
+    40: "#F59E0B",   # 权限绕过 琥珀
+    45: "#0EA5E9",   # 逻辑漏洞 天蓝
+    50: "#DC2626",   # 存在后门 鲜红
+    55: "#059669",   # 信息泄露 翠绿
+    60: "#D97706",   # 文件上传 深橙
+    65: "#7C3AED",   # 弱口令 深紫
+    70: "#0D9488",   # 威胁情报 青
+    75: "#909399",   # 其他 灰
+}
+
+TESTING_PLAN_STATUS_COLOR = {
+    PlanStatus.UNTESTED: "#909399",
+    PlanStatus.TESTING: "#E6A23C",
+    PlanStatus.WAIT_RETEST: "#4F46E5",
+    PlanStatus.RETEST_APPLY: "#F56C6C",
+    PlanStatus.RETESTING: "#E6A23C",
+    PlanStatus.RETEST_DONE: "#67C23A",
+    PlanStatus.PASSED: "#67C23A",
+}
+
+ASSET_STATUS_COLOR = {
+    10: "#67C23A",  # 线上 绿
+    20: "#E6A23C",  # 上线前 橙
+    30: "#909399",  # 下线 灰
+}
+
+URL_TAG_COLOR = {
+    10: "#4F46E5",  # 互联网 靛蓝
+    20: "#909399",  # 办公网 灰
+}
+
+# 报告状态展示（status 字符串 draft/final/completed）
+REPORT_STATUS_NAME = {"draft": "草稿", "final": "已定稿", "completed": "已完成"}
+REPORT_STATUS_COLOR = {"draft": "#909399", "final": "#4F46E5", "completed": "#67C23A"}
+
+# Word 导入批次 / 记录状态展示（imports 与 workers 的状态字符串）
+IMPORT_BATCH_STATUS_NAME = {
+    "pending": "排队中", "parsing": "解析中", "parsed": "待确认",
+    "confirmed": "已入库", "failed": "解析失败",
+}
+IMPORT_BATCH_STATUS_COLOR = {
+    "pending": "#909399", "parsing": "#E6A23C", "parsed": "#4F46E5",
+    "confirmed": "#67C23A", "failed": "#F56C6C",
+}
+IMPORT_RECORD_STATUS_NAME = {
+    "parsed": "待确认", "error": "解析异常", "confirmed": "已入库", "discarded": "已丢弃",
+}
+IMPORT_RECORD_STATUS_COLOR = {
+    "parsed": "#4F46E5", "error": "#E6A23C", "confirmed": "#67C23A", "discarded": "#909399",
+}
+
+# 导出任务状态展示（workers/export_report_task 的状态字符串）
+EXPORT_JOB_STATUS_NAME = {
+    "pending": "生成中", "running": "生成中", "done": "已完成", "failed": "失败",
+}
+EXPORT_JOB_STATUS_COLOR = {
+    "pending": "#E6A23C", "running": "#E6A23C", "done": "#67C23A", "failed": "#F56C6C",
+}
+
+
 # 非渗透测试项（key -> (名称, 说明)）：与测试计划平级的扫描类测试
 NONPEN_ITEMS = {
     "baseline": ("基线扫描", "配置基线 / 安全基线核查"),
@@ -200,14 +286,14 @@ NONPEN_ITEM_STATUS = {
     "ignored": "忽略",
 }
 
-# 测试项状态 → 允许的操作（后端流转校验 + 前端按钮渲染共用）
+# 测试项状态 → 允许的操作（后端流转校验 + 前端按钮渲染共用；元组有序，即前端按钮渲染顺序）
 NONPEN_ITEM_ACTIONS = {
-    "not_started": {"start", "ignore"},                    # 开始初测 / 忽略
-    "testing": {"done", "direct_done", "ignore"},          # 初测完成(→等待复测) / 直接完成(→复测完成) / 忽略
-    "wait_retest": {"start_retest", "ignore"},             # 发起复测 / 忽略
-    "retesting": {"pass", "fail", "ignore"},               # 复测通过 / 复测未通过(退回等待复测) / 忽略
-    "retest_done": {"reset"},                              # 置回未开始
-    "ignored": {"unignore"},                               # 取消忽略（次数清零，回未开始）
+    "not_started": ("start", "ignore"),                    # 开始初测 / 忽略
+    "testing": ("done", "direct_done", "ignore"),          # 初测完成(→等待复测) / 直接完成(→复测完成) / 忽略
+    "wait_retest": ("start_retest", "ignore"),             # 发起复测 / 忽略
+    "retesting": ("pass", "fail", "ignore"),               # 复测通过 / 复测未通过(退回等待复测) / 忽略
+    "retest_done": ("reset",),                             # 置回未开始
+    "ignored": ("unignore",),                              # 取消忽略（次数清零，回未开始）
 }
 
 # 操作名 -> 中文展示（前端按钮文案与后端错误提示共用）

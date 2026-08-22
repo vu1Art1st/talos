@@ -87,7 +87,7 @@ import { areaGradient, chartThemeName, PALETTE } from '../utils/chartTheme'
 const [SERIES_MAIN, SERIES_GREEN, SERIES_AMBER, , , , SERIES_PINK] = PALETTE
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
-import { LEVEL_COLORS_BY_NAME, STATUS_COLORS_BY_NAME, vulTypeColor } from '../utils/colors'
+import { levelColorByName, statusColorByName, vulTypeColor } from '../utils/colors'
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -227,7 +227,7 @@ function renderCharts() {
       itemStyle: { borderRadius: 8, borderColor: theme.dark ? '#161b22' : '#fff', borderWidth: 3 },
       label: { show: false },
       data: data.by_level.map((x: any) => ({
-        name: x.name, value: x.count, itemStyle: { color: LEVEL_COLORS_BY_NAME[x.name] },
+        name: x.name, value: x.count, itemStyle: { color: levelColorByName(x.name) },
       })),
     }],
   })
@@ -241,7 +241,7 @@ function renderCharts() {
       itemStyle: { borderRadius: 8, borderColor: theme.dark ? '#161b22' : '#fff', borderWidth: 3 },
       label: { formatter: '{b} {c}' },
       data: data.by_status.map((x: any) => ({
-        name: x.name, value: x.count, itemStyle: { color: STATUS_COLORS_BY_NAME[x.name] },
+        name: x.name, value: x.count, itemStyle: { color: statusColorByName(x.name) },
       })),
     }],
   })

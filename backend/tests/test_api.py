@@ -32,6 +32,15 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert resp.status_code == 200
     meta = resp.json()
     assert "vul_level" in meta and "vul_status" in meta
+    # 字典单源：色值命名空间、导入/导出状态与 nonpen 命名空间随 /meta 下发
+    assert meta["colors"]["vul_level"]["10"] == "#A61B29"
+    assert meta["import_batch_status"]["parsed"] == "待确认"
+    assert meta["export_job_status"]["done"] == "已完成"
+    assert meta["report_status"]["draft"] == "草稿"
+    nonpen_items = {item["key"] for item in meta["nonpen"]["items"]}
+    assert nonpen_items == {"baseline", "host", "web"}
+    assert meta["nonpen"]["actions"]["not_started"] == ["start", "ignore"]
+    assert meta["nonpen"]["action_names"]["start"] == "开始初测"
 
 
 async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):

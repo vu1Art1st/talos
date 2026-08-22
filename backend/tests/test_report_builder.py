@@ -17,7 +17,7 @@ from docx.text.paragraph import Paragraph
 
 from PIL import Image
 
-from app.api.v1.reports import _affected_urls_html, _vuln_section_html
+from app.services.report_html import affected_urls_html as _affected_urls_html, vuln_section_html as _vuln_section_html
 from app.constants import VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow

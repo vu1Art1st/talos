@@ -2,9 +2,9 @@
   <el-dialog
              :close-on-click-modal="false" :model-value="visible" :title="form.id ? '编辑资产' : '新建资产'" width="640px"
              @update:model-value="emit('update:visible', $event)" @open="onOpen">
-    <el-form :model="form" label-width="90px">
+    <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2">
-        <el-form-item label="系统命名" required>
+        <el-form-item label="系统命名" prop="name">
           <el-input v-model="form.name" placeholder="例如：电商交易系统" />
         </el-form-item>
         <el-form-item label="子系统名称">
@@ -134,6 +134,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -173,6 +174,12 @@ const emptyForm = () => ({
   owners: [] as any[], status: 10, remark: '',
 })
 const form = reactive<any>(emptyForm())
+const formRef = ref<FormInstance>()
+
+// 系统命名必填（whitespace 拦截纯空格），错误内联展示在字段下方
+const rules: FormRules = {
+  name: [{ required: true, whitespace: true, message: '请填写系统命名', trigger: 'blur' }],
+}
 
 function onOpen() {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(props.asset ?? {})))
@@ -227,7 +234,8 @@ async function addSystemType() {
 }
 
 async function save() {
-  if (!form.name.trim()) return ElMessage.warning('请填写系统命名')
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   form.public_urls = form.public_urls.filter((u: any) => u.url.trim())
   form.port_services = form.port_services.filter((p: any) => (p.port ?? '').trim() || (p.service ?? '').trim())
   form.middlewares = form.middlewares.filter((m: any) => (m.name ?? '').trim())

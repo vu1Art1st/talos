@@ -25,6 +25,16 @@ def can_plan_transition(current: int, target: int) -> bool:
     return target in PLAN_TRANSITIONS.get(current, set())
 
 
+async def load_vulns_or_400(session: AsyncSession, vul_ids: list[int]) -> list[Vul]:
+    """按 ID 列表加载漏洞，任一不存在即 400（测试计划/春耕行动关联漏洞共用）。"""
+    if not vul_ids:
+        return []
+    vulns = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
+    if len(vulns) != len(set(vul_ids)):
+        raise HTTPException(400, "部分漏洞不存在")
+    return list(vulns)
+
+
 async def _has_current_round_retest(session: AsyncSession, vul: Vul) -> bool:
     """本轮复测（最近一次进入复测中之后）是否新增了复测记录。
 

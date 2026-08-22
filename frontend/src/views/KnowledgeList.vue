@@ -64,8 +64,8 @@
 
   <el-dialog
              :close-on-click-modal="false" v-model="dialogVisible" :title="editing ? '编辑条目' : '新建条目'" width="800px" top="4vh">
-    <el-form label-width="90px">
-      <el-form-item label="漏洞名称" required>
+    <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
+      <el-form-item label="漏洞名称" prop="vulnerability_name">
         <el-input v-model="form.vulnerability_name" maxlength="255" placeholder="例如 SQL注入、SSRF服务器端请求伪造" class="!w-96" />
       </el-form-item>
       <el-form-item label="漏洞类型" required>
@@ -130,6 +130,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
@@ -169,6 +170,10 @@ const emptyForm = () => ({
   solution_html: '', solution_json: null,
 })
 const form = reactive<any>(emptyForm())
+const formRef = ref<FormInstance>()
+const formRules: FormRules = {
+  vulnerability_name: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
+}
 
 function plainText(html: string) {
   // DOMParser 解析不挂载到页面，仅提取纯文本用于表格预览
@@ -194,10 +199,8 @@ function openDialog(row?: any) {
 }
 
 async function save() {
-  if (!form.vulnerability_name.trim()) {
-    ElMessage.warning('请填写漏洞名称')
-    return
-  }
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   saving.value = true
   try {
     const body = {

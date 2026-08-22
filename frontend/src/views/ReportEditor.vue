@@ -171,7 +171,7 @@
             <span class="uppercase font-mono text-xs text-gray-400">{{ job.fmt }}</span>
             <span class="tl-tag" :style="exportJobSoftStyle(job.status)">{{ exportJobName(job.status) }}</span>
             <el-tooltip v-if="job.status === 'failed'" :content="job.error || '生成失败'">
-              <el-icon :color="EXPORT_JOB_META.failed.color"><WarningFilled /></el-icon>
+              <el-icon :color="exportJobColor('failed')"><WarningFilled /></el-icon>
             </el-tooltip>
             <div class="flex-1" />
             <el-button v-if="job.status === 'done'" size="small" type="primary" link
@@ -213,7 +213,7 @@ import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { useExportJobs } from '../composables/useExportJobs'
 import {
-  EXPORT_JOB_META,
+  exportJobColor,
   exportJobName,
   exportJobSoftStyle,
   levelColor,

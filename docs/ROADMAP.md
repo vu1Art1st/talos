@@ -6,41 +6,7 @@
 - 排期按「近期（重构还债）→ 中期（功能演进）→ 远期（方向）」三档，不承诺具体日期，按迭代节奏推进；
 - 新增条目必须评估对现有口径（漏洞来源、统计口径、工单状态机）的影响，破坏性变更升主版本号。
 
-**现状基线**：2.0.1（2026-08-19）——前后端结构治理已完成一轮：前端列表/CRUD/资产选择/导出任务已收敛为 composables，暗黑模式全站令牌化，后端公共函数（xlsx/人天/查询解析/富文本消毒）已单源化。
-
----
-
-## 近期：v2.1.x —— 重构还债（稳定性与可维护性优先）
-
-### R1 拆分 `backend/app/api/v1/special.py`（1345 行）
-
-按业务域拆为 `remote_testing.py` / `spring_action.py` / `testing_plan.py` 三个路由模块，通用筛选引擎留 `special.py` 或入 core。
-**验收**：单文件 ≤ 600 行；路由路径与权限点零变化；`pytest` 全绿。
-
-### R2 拆分 `backend/app/schemas.py`（约 790 行）
-
-按域拆为 `schemas/` 包（vuln / report / import_ / special / knowledge / common），对外经 `schemas/__init__.py` 重导出，调用方零改动。
-**验收**：`from app.schemas import ...` 全部引用不变；`pytest` 全绿。
-
-### R3 拆解 `imports.py::confirm_batch`（约 260 行单函数）
-
-按「解析校验 → 去重合并 → 建漏洞/关联报告 → 复测轮次」拆为服务层函数（`services/import_service.py`），路由层只做参数编排。
-**验收**：单函数 ≤ 80 行；导入相关测试覆盖等价。
-
-### R4 前端测试覆盖扩展
-
-以 `src/composables/` 与 `src/utils/` 为锚点，覆盖 useAssetSelect / useExportJobs / useCrudDialog / colors / format；关键视图（VulnList、ReportEditor）引入 `@vue/test-utils` 做冒烟测试。
-**验收**：`pnpm test` 用例数 ≥ 30，核心纯逻辑分支覆盖。
-
-### R5 表单校验体系（el-form rules）
-
-当前全站表单为「手动 if + ElMessage.warning」浅校验。统一切换 Element Plus `rules` 校验（必填/格式/长度），错误提示内联到字段。
-**验收**：资产/漏洞/工单三类主表单完成迁移；提交前无 warning 弹窗式校验残留。
-
-### R6 前后端字典单源化
-
-`constants/nonpen.ts` 等前端镜像与 `/meta` 下发的名称/颜色双源问题：`/meta` 接口扩展下发颜色与展示名，前端删除镜像文件，状态标签完全由 meta 驱动。
-**验收**：改后端字典一处即全端生效；前端无字典镜像文件。
+**现状基线**：2.1.0（2026-08-22）——重构还债（R1-R6）已完成：special 路由与 schemas 按域拆分、导入确认服务化、前后端字典单源（名称/色值/nonpen 随 /meta 下发，前端无镜像）、全站表单 el-form rules 校验、前端测试 45 例。
 
 ---
 
@@ -92,6 +58,12 @@
 
 | 条目 | 完成情况 |
 | --- | --- |
+| R1 拆分 special.py | 2.1.0 完成：remote_testing / testing_plan / spring_action 三路由 + core/filters 通用筛选引擎 + services/plan_query / plan_io，单文件 ≤ 600 行，路径与权限零变化 |
+| R2 拆分 schemas.py | 2.1.0 完成：schemas/ 包 8 个域文件经 `__init__.py` 重导出，调用方零改动 |
+| R3 拆解 confirm_batch | 2.1.0 完成：路由约 65 行 + services/import_service（解析校验/报告编排/知识库回填/去重合并/收尾）+ services/report_html |
+| R4 前端测试覆盖 | 2.1.0 完成：9 例 → 45 例（format/colors/useAssetSelect/useDictOptions/useCrudDialog/useExportJobs 单测 + VulnList/ReportEditor 冒烟） |
+| R5 表单校验体系 | 2.1.0 完成：三类主表单 + 7 处轻量表单全部迁移 el-form rules，跨字段规则用自定义 validator，无 warning 弹窗式校验残留 |
+| R6 字典单源化 | 2.1.0 完成：/meta 下发 colors 命名空间 + nonpen 命名空间 + 导入/导出/报告状态字典，前端 colors.ts 改 meta 注册表，constants/nonpen.ts 已删除 |
 | 漏洞知识库 | 已实现（`models/knowledge.py`、`api/v1/knowledge.py`、KnowledgeList 视图、漏洞表单一键套用模板） |
 | 报告导出（docx/PDF）与版本历史 | 已实现（导出任务队列 + 重复导出检测 + TOC 域提示） |
 | 结构治理（composables / 令牌化暗黑 / 公共函数单源） | 2.0.1 后完成，见 RELEASE.md 对应版本段 |

@@ -51,7 +51,7 @@
       </el-card>
 
       <!-- 测试项流转 -->
-      <el-card v-for="t in NONPEN_ITEMS" :key="t.key" shadow="never" class="!rounded-lg"
+      <el-card v-for="t in nonpenItems()" :key="t.key" shadow="never" class="!rounded-lg"
                :class="{ 'item-flow-ignored': isIgnored(t.key) }">
         <div class="flex items-center gap-2 mb-3">
           <el-icon :size="16" style="color: var(--el-color-primary)"><component :is="itemIcon(t.key)" /></el-icon>
@@ -89,7 +89,7 @@
                      :plain="action !== 'ignore' && action !== 'unignore' && action !== 'direct_done' && action !== 'fail'"
                      :disabled="acting === action"
                      @click="doAction(t.key, action)">
-            {{ NONPEN_ACTION_LABELS[action] }}
+            {{ nonpenActionLabel(action) }}
           </el-button>
         </div>
       </el-card>
@@ -102,8 +102,7 @@ import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Check, Connection, Key, Monitor } from '@element-plus/icons-vue'
 import client from '../api/client'
-import { softStyle } from '../utils/colors'
-import { NONPEN_ITEMS, NONPEN_ITEM_ACTIONS, NONPEN_ACTION_LABELS, nonpenItemMeta } from '../constants/nonpen'
+import { nonpenActionLabel, nonpenActions, nonpenItemMeta, nonpenItems, softStyle } from '../utils/colors'
 
 const props = defineProps<{ visible: boolean; planId: number | null }>()
 const emit = defineEmits<{ (e: 'update:visible', v: boolean): void; (e: 'changed'): void }>()
@@ -132,7 +131,7 @@ const isIgnored = (key: string) => statusOf(key) === 'ignored'
 const actionsOf = (key: string) => {
   const st = statusOf(key)
   if (st === 'ignored') return ['unignore']
-  return NONPEN_ITEM_ACTIONS[st] ?? []
+  return nonpenActions(st)
 }
 
 function stepClass(itemKey: string, stateKey: string): string {

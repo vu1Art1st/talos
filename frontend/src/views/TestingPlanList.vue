@@ -232,7 +232,7 @@
 
   <el-dialog
              :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="640px">
-    <el-form :model="form" label-width="90px">
+    <el-form ref="formRef" :model="form" :rules="planRules" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
         <el-form-item label="计划名称">
           <el-input v-model="form.plan_name" placeholder="与测试系统区分的渗透测试工单名称" />
@@ -250,7 +250,7 @@
             </el-button>
           </div>
         </el-form-item>
-        <el-form-item label="测试系统" required>
+        <el-form-item label="测试系统" prop="system_name">
           <el-input v-model="form.system_name" placeholder="影响报告首页名称" />
         </el-form-item>
         <el-form-item label="工单ID">
@@ -289,7 +289,7 @@
         <el-form-item label="工单提起">
           <el-date-picker v-model="form.ticket_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
-        <el-form-item label="需求接收">
+        <el-form-item label="需求接收" prop="receive_time">
           <el-date-picker v-model="form.receive_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
         </el-form-item>
         <el-form-item label="初测完成">
@@ -339,34 +339,37 @@
       <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
         认领该计划后才可修改测试状态
       </div>
-      <!-- 创建漏扫基线工单：勾选后展开测试项；保存时自动同步新增漏扫基线工单（共享工单ID，分开管理/统计） -->
-      <div class="pl-[100px] mb-4">
-        <div class="tp-create-head" :class="{ on: form.create_nonpen }" @click="toggleCreateNonpen">
-          <div class="tp-create-check">
-            <el-icon v-if="form.create_nonpen" :size="14"><Check /></el-icon>
-          </div>
-          <div>
-            <div class="tp-create-title">
-              创建漏扫基线工单
+      <!-- 创建漏扫基线工单：勾选后展开测试项；保存时自动同步新增漏扫基线工单（共享工单ID，分开管理/统计）。
+           挂 prop 以内联展示「至少选择一个测试项」校验 -->
+      <el-form-item label=" " prop="nonpen_test_items" class="!mb-4">
+        <div class="w-full">
+          <div class="tp-create-head" :class="{ on: form.create_nonpen }" @click="toggleCreateNonpen">
+            <div class="tp-create-check">
+              <el-icon v-if="form.create_nonpen" :size="14"><Check /></el-icon>
             </div>
-            <div class="tp-create-desc">
-              {{ form.create_nonpen
-                ? '勾选后展开测试项；保存时自动同步新增漏扫基线工单，与渗透测试分开管理/统计'
-                : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增漏扫基线工单' }}
-            </div>
-          </div>
-        </div>
-        <div v-if="form.create_nonpen" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
-          <div v-for="t in NONPEN_ITEMS" :key="t.key" class="test-item-check"
-               :class="{ checked: form.nonpen_test_items.includes(t.key) }" @click="toggleNonpenItem(t.key)">
-            <div class="tick"><el-icon v-if="form.nonpen_test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
             <div>
-              <div class="ti-name">{{ t.name }}</div>
-              <div class="ti-desc">{{ t.desc }}</div>
+              <div class="tp-create-title">
+                创建漏扫基线工单
+              </div>
+              <div class="tp-create-desc">
+                {{ form.create_nonpen
+                  ? '勾选后展开测试项；保存时自动同步新增漏扫基线工单，与渗透测试分开管理/统计'
+                  : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增漏扫基线工单' }}
+              </div>
+            </div>
+          </div>
+          <div v-if="form.create_nonpen" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
+            <div v-for="t in nonpenItems()" :key="t.key" class="test-item-check"
+                 :class="{ checked: form.nonpen_test_items.includes(t.key) }" @click="toggleNonpenItem(t.key)">
+              <div class="tick"><el-icon v-if="form.nonpen_test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
+              <div>
+                <div class="ti-name">{{ t.name }}</div>
+                <div class="ti-desc">{{ t.desc }}</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </el-form-item>
       <el-form-item label="漏洞简述">
         <el-input v-model="form.brief" type="textarea" :rows="2" placeholder="漏洞情况简述" />
       </el-form-item>
@@ -376,7 +379,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.system_name" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
 
@@ -389,6 +392,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import client from '../api/client'
@@ -397,6 +401,7 @@ import {
   levelBadgeStyle,
   levelName,
   levelSoftStyle,
+  nonpenItems,
   planStatusSoftStyle,
   reportStatusName,
   reportStatusSoftStyle,
@@ -404,7 +409,6 @@ import {
   STAT_CARD_COLORS,
 } from '../utils/colors'
 import { fmtDate, fmtDateTime } from '../utils/format'
-import { NONPEN_ITEMS } from '../constants/nonpen'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -600,6 +604,28 @@ const emptyForm = () => ({
   detail: '',
 })
 const form = ref(emptyForm())
+const formRef = ref<FormInstance>()
+
+// 工单表单校验：测试系统必填；联动创建（仅新增时可勾选）的两条跨字段规则与后端校验口径一致
+const requireNonpenItems: FormItemRule['validator'] = (_rule, value, callback) => {
+  if (!form.value.id && form.value.create_nonpen && !(value ?? []).length) {
+    callback(new Error('已勾选「创建漏扫基线工单」，请至少选择一个非渗透测试项'))
+  } else {
+    callback()
+  }
+}
+const requireTicketSource: FormItemRule['validator'] = (_rule, _value, callback) => {
+  if (!form.value.id && form.value.create_nonpen && !form.value.ticket_id_manual && !form.value.receive_time) {
+    callback(new Error('已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID'))
+  } else {
+    callback()
+  }
+}
+const planRules: FormRules = {
+  system_name: [{ required: true, whitespace: true, message: '请填写测试系统', trigger: 'blur' }],
+  nonpen_test_items: [{ validator: requireNonpenItems }],
+  receive_time: [{ validator: requireTicketSource }],
+}
 
 // ---------- 创建漏扫基线工单（联动） ----------
 function toggleCreateNonpen() {
@@ -769,16 +795,8 @@ function onAssetsChange(ids: number[]) {
 }
 
 async function save() {
-  // 勾选「创建漏扫基线工单」但未选择任何测试项时阻止保存（与后端校验一致）
-  if (!form.value.id && form.value.create_nonpen && !form.value.nonpen_test_items.length) {
-    ElMessage.warning('已勾选「创建漏扫基线工单」，请至少选择一个非渗透测试项')
-    return
-  }
-  // 联动创建需共享工单ID：需求接收日期或手动工单ID必须至少填写其一（与后端校验一致）
-  if (!form.value.id && form.value.create_nonpen && !form.value.ticket_id_manual && !form.value.receive_time) {
-    ElMessage.warning('已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID')
-    return
-  }
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   saving.value = true
   try {
     const body = { ...form.value }

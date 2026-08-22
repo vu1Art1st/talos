@@ -25,6 +25,33 @@
 
 ---
 
+## [2.1.0] - 2026-08-22
+
+重构还债（ROADMAP R1-R6 全量落地）：后端巨石文件按域拆分、导入链路服务化、前后端字典单源化、全站表单校验体系化、前端测试覆盖扩展。
+
+### 重构
+
+- **R1 拆分 `api/v1/special.py`（1319 行 → 6 个文件，单文件 ≤ 600 行）**：按业务域拆为 `remote_testing.py` / `testing_plan.py` / `spring_action.py` 三个路由模块；通用聚合筛选引擎抽至 `core/filters.py`（操作符白名单/区间解析/按字段类型构造表达式），TestingPlan 专属查询（固定筛选/派生字段/统计）下沉 `services/plan_query.py`，Excel 导入导出下沉 `services/plan_io.py`；`_load_vulns` 提级为 `vuln_service.load_vulns_or_400`。路由路径与权限点零变化
+- **R2 拆分 `schemas.py`（775 行 → `schemas/` 包 8 个域文件）**：common（分页/消毒类型/跨域 Brief/字典）/ auth / asset / vuln / knowledge / import_ / report / special，经 `schemas/__init__.py` 显式重导出，全部 `from app.schemas import ...` 调用方零改动
+- **R3 拆解 `imports.py::confirm_batch`（260 行 → 路由约 65 行 + `services/import_service.py`）**：按「解析校验 → 报告编排（计划/资产/报告三段）→ 知识库回填 → 去重合并/建漏洞 → 收尾」拆为服务函数，路由只做参数编排；`_vuln_section_html` / `_affected_urls_html` 提级 `services/report_html.py`，消除跨路由模块引用私有函数
+
+### 变更
+
+- **R6 前后端字典单源化**：`constants.py` 新增各字典展示色值表（等级/状态/计划状态/漏洞类型/资产状态/URL 标签/报告状态/导入与导出任务状态），`/meta` 扩展下发 `colors` 色值命名空间、`report_status` / `import_*_status` / `export_job_status` 名称字典与 `nonpen` 命名空间（测试项/状态/操作/文案，`NONPEN_ITEM_ACTIONS` 改有序元组即按钮渲染顺序）；前端 `colors.ts` 重构为 meta 注册表（`applyDictMeta` 由 `fetchMeta` 注入，函数签名全部不变），删除 `constants/nonpen.ts` 镜像文件——改后端字典一处即全端生效；docx 打印色板（report_builder）独立保留
+- **R5 全站表单校验切换 el-form rules**：资产（AssetFormDialog）、漏洞（VulnFormPanel 外层测试目标 + 每漏洞卡片动态表单）、工单（TestingPlanList / NonpenPlanList，含「联动创建需测试项」与「工单ID二选一」跨字段 validator）三类主表单，以及 Login / MainLayout 改密码 / GroupList / UserList / KnowledgeList / VulnRetestPanel（复测结论↔详情跨字段）全部迁移，错误提示内联到字段，消除提交前 `ElMessage.warning` 弹窗式校验
+
+### 测试
+
+- **R4 前端测试覆盖扩展（9 例 → 45 例）**：新增 `format` / `colors`（meta 注册表/回退/nonpen 助手）/ `useAssetSelect` / `useDictOptions` / `useCrudDialog` / `useExportJobs`（重复导出确认与取消/异常放行）单测与 `VulnList` / `ReportEditor` 冒烟测试（jsdom + stub 重子组件）
+- `backend/tests/test_api.py::test_meta` 扩展断言 colors/nonpen 下发结构；`test_report_builder.py` 章节函数断言改从 `services/report_html` 导入
+
+### 文档
+
+- `docs/ROADMAP.md`：R1-R6 移入已完成归档，现状基线更新为 2.1.0
+- `AGENTS.md`：目录结构（schemas/ 包、api/v1 拆分模块、services 新增）、前端规范（colors.ts 改为 meta 注册表唯一出口、删除字典镜像同步要求）、新增表单校验规范（必须 el-form rules）
+
+---
+
 ## [2.0.2] - 2026-08-22
 
 大规模重构:导出/下载/色彩/消毒统一封装,前端设计系统抽取,迁移 pnpm,补充前端测试。

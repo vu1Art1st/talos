@@ -56,23 +56,27 @@
 
     <el-dialog
              :close-on-click-modal="false" v-model="addVisible" title="新增复测记录" width="640px">
-      <div class="mb-3">
-        <div class="text-sm font-medium text-gray-600 mb-2">复测标题 <span class="text-xs text-gray-400">（选填，留空按创建日期自动生成）</span></div>
-        <el-input v-model="addForm.title" placeholder="如：复测记录250815" maxlength="255" clearable />
-      </div>
-      <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复详情</div>
-      <RichEditor v-model="addForm.content_html"
-                  @update:json="(j: any) => (addForm.content_json = j)" />
-      <div class="mt-3">
-        <div class="text-sm font-medium text-gray-600 mb-2">复测结论</div>
-        <el-select v-model="addForm.status" clearable placeholder="可选：不调整漏洞状态" class="w-full">
-          <el-option label="复测未修复" :value="50" />
-          <el-option label="已修复" :value="60" />
-        </el-select>
-        <div class="text-xs text-gray-400 mt-1">
-          选择结论将同步调整漏洞状态（须处于复测中，且必须先填写复测详情）
+      <el-form ref="addFormRef" :model="addForm" :rules="addRules">
+        <div class="mb-3">
+          <div class="text-sm font-medium text-gray-600 mb-2">复测标题 <span class="text-xs text-gray-400">（选填，留空按创建日期自动生成）</span></div>
+          <el-input v-model="addForm.title" placeholder="如：复测记录250815" maxlength="255" clearable />
         </div>
-      </div>
+        <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复详情</div>
+        <RichEditor v-model="addForm.content_html"
+                    @update:json="(j: any) => (addForm.content_json = j)" />
+        <el-form-item prop="status" class="mt-3">
+          <div class="w-full">
+            <div class="text-sm font-medium text-gray-600 mb-2">复测结论</div>
+            <el-select v-model="addForm.status" clearable placeholder="可选：不调整漏洞状态" class="w-full">
+              <el-option label="复测未修复" :value="50" />
+              <el-option label="已修复" :value="60" />
+            </el-select>
+            <div class="text-xs text-gray-400 mt-1">
+              选择结论将同步调整漏洞状态（须处于复测中，且必须先填写复测详情）
+            </div>
+          </div>
+        </el-form-item>
+      </el-form>
       <template #footer>
         <el-button @click="addVisible = false">取消</el-button>
         <el-button type="primary" :loading="adding" @click="submitAdd">保存</el-button>
@@ -84,6 +88,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { EditPen, Plus } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
@@ -111,6 +116,19 @@ const addForm = reactive<{ title: string; content_html: string; content_json: an
   content_json: null,
   status: null,
 })
+const addFormRef = ref<FormInstance>()
+
+// 复测结论（复测未修复/已修复）强制要求先填写复测详情
+const requireConclusionDetail: FormItemRule['validator'] = (_rule, value, callback) => {
+  if (value !== null && !(addForm.content_html || '').trim()) {
+    callback(new Error('选择复测结论前请先填写复测详情'))
+  } else {
+    callback()
+  }
+}
+const addRules: FormRules = {
+  status: [{ validator: requireConclusionDetail }],
+}
 
 // 标题优先取自定义 title；为空按创建日期生成：复测记录yymmdd，同日多条依次追加 -1、-2 后缀
 const titles = computed(() => {
@@ -145,11 +163,8 @@ watch(() => props.vulId, load, { immediate: true })
 
 // 新增复测记录：填写复测详情并可选择复测结论，一并调整漏洞状态
 async function submitAdd() {
-  // 复测结论（复测未修复/已修复）强制要求先填写复测详情
-  if (addForm.status !== null && !(addForm.content_html || '').trim()) {
-    ElMessage.warning('选择复测结论前请先填写复测详情')
-    return
-  }
+  const valid = await addFormRef.value.validate().catch(() => false)
+  if (!valid) return
   adding.value = true
   try {
     const { data } = await client.post(`/vulns/${props.vulId}/retests`, {

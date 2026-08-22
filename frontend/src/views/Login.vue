@@ -14,11 +14,11 @@
         <div class="text-[22px] font-bold text-white">Talos 漏洞管理平台</div>
         <div class="text-sm mt-1.5" style="color: rgba(255,255,255,.55)">现代化漏洞全生命周期管理</div>
       </div>
-      <el-form :model="form" size="large" @keyup.enter="onLogin">
-        <el-form-item>
+      <el-form ref="formRef" :model="form" :rules="formRules" size="large" @keyup.enter="onLogin">
+        <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="用户名" :prefix-icon="User" />
         </el-form-item>
-        <el-form-item>
+        <el-form-item prop="password">
           <el-input v-model="form.password" type="password" placeholder="密码" show-password :prefix-icon="Key" />
         </el-form-item>
         <el-button class="login-btn w-full" size="large" :loading="loading" @click="onLogin">
@@ -32,7 +32,7 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { Key, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
 
@@ -41,9 +41,15 @@ const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
 const form = reactive({ username: '', password: '' })
+const formRef = ref<FormInstance>()
+const formRules: FormRules = {
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+}
 
 async function onLogin() {
-  if (!form.username || !form.password) return ElMessage.warning('请输入用户名和密码')
+  const valid = await formRef.value.validate().catch(() => false)
+  if (!valid) return
   loading.value = true
   try {
     await auth.login(form.username, form.password)

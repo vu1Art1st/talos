@@ -102,11 +102,11 @@
              :close-on-click-modal="!forcedChange" :close-on-press-escape="!forcedChange" :show-close="!forcedChange">
     <el-alert v-if="forcedChange" type="warning" :closable="false" show-icon class="mb-3"
               title="首次登录或密码已重置，请先修改密码后再使用系统" />
-    <el-form :model="pwdForm" label-width="90px">
-      <el-form-item label="原密码">
+    <el-form ref="pwdFormRef" :model="pwdForm" :rules="pwdRules" label-width="90px">
+      <el-form-item label="原密码" prop="old_password">
         <el-input v-model="pwdForm.old_password" type="password" show-password />
       </el-form-item>
-      <el-form-item label="新密码">
+      <el-form-item label="新密码" prop="new_password">
         <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="至少 8 位" />
       </el-form-item>
     </el-form>
@@ -121,6 +121,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
@@ -148,6 +149,14 @@ const activeMenu = computed(() =>
 )
 const pwdVisible = ref(false)
 const pwdForm = reactive({ old_password: '', new_password: '' })
+const pwdFormRef = ref<FormInstance>()
+const pwdRules: FormRules = {
+  old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
+  new_password: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 8, message: '新密码至少 8 位', trigger: 'blur' },
+  ],
+}
 // 强制改密（首登或被重置）：弹框不可关闭，必须修改后才能继续
 const forcedChange = computed(() => !!auth.user?.must_change_password)
 
@@ -169,7 +178,8 @@ function onCommand(cmd: string) {
 }
 
 async function changePassword() {
-  if (pwdForm.new_password.length < 8) return ElMessage.warning('新密码至少 8 位')
+  const valid = await pwdFormRef.value.validate().catch(() => false)
+  if (!valid) return
   await client.post('/auth/password', pwdForm)
   ElMessage.success('密码修改成功，请重新登录')
   pwdVisible.value = false

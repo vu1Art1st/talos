@@ -39,12 +39,15 @@ pnpm test           # vitest 单测
 
 ```
 backend/
-  app/api/v1/      # 路由（auth, users, vulns, assets, reports, imports, dashboard, knowledge, special, nonpen）
-  app/core/        # config / deps / security / query（分页排序）/ ratelimit / sanitize / timeutil / xlsx
+  app/api/v1/      # 路由（auth, users, vulns, assets, reports, imports, dashboard, knowledge,
+                   #   remote_testing / testing_plan / spring_action（专项三域）, nonpen, misc）
+  app/core/        # config / deps / security / query（分页排序）/ filters（聚合筛选引擎）/ ratelimit / sanitize / timeutil / xlsx
   app/models/      # SQLAlchemy 模型
-  app/schemas.py   # Pydantic 模型（单文件集中）
-  app/services/    # 业务逻辑（状态机、docx 解析、报告构建、导出）
-  app/constants.py # 全部枚举/字典唯一来源
+  app/schemas/     # Pydantic 模型包（common / auth / asset / vuln / knowledge / import_ / report / special，
+                   #   对外经 schemas/__init__.py 统一重导出，调用方一律 from app.schemas import ...）
+  app/services/    # 业务逻辑（状态机、docx 解析、导入入库 import_service、报告章节 report_html、
+                   #   计划查询 plan_query / Excel plan_io、报告构建、导出）
+  app/constants.py # 全部枚举/字典与展示色值唯一来源（经 /meta 下发前端）
   app/workers/     # arq 后台任务
   alembic/         # 迁移（改模型后必须生成迁移）
   scripts/         # 运维/数据脚本（调试脚本放这里或删除，勿散落在 backend 根目录）
@@ -54,15 +57,15 @@ frontend/
   src/composables/ # 组合式函数（useListPage / useCrudDialog / useAssetSelect / useExportJobs / useDictOptions）
   src/components/  # 可复用组件（StatCard / FilterBuilder / VulnFormPanel ...）
   src/views/       # 页面视图
-  src/utils/       # colors（唯一色源）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice
-  src/constants/   # nonpen 字典（镜像自后端 constants.py，改后端必须同步此处）
+  src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice
 docs/              # DEPLOY / RELEASE / ROADMAP
 ```
 
 ## 后端编码规范
 
-- 字典/枚举只写在 `app/constants.py`，禁止在路由/服务内散落定义。
-- 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板。
+- 字典/枚举与其展示色值只写在 `app/constants.py`，禁止在路由/服务内散落定义；改字典即全端生效（/meta 下发）。
+- 请求/响应模型写入 `app/schemas/` 对应域文件并在 `schemas/__init__.py` 重导出，禁止回填单文件或在路由文件内定义业务模型。
+- 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板；聚合筛选（filters JSON）复用 `app/core/filters.py` 引擎。
 - 时间统一 `app/core/timeutil.py` 的 `now()`（UTC+8），禁止散落 `datetime.now()`。
 - 用户输入的富文本入库前必须过 `app/core/sanitize.py` 消毒（schemas 中用 `HtmlStr` 类型别名）。
 - Excel 响应统一 `app/core/xlsx.py` 的 `xlsx_response()`。
@@ -71,7 +74,8 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 ## 前端编码规范
 
 - HTTP 请求只用 `src/api/client.ts` 的 `client`（含 token 刷新与统一错误提示），禁止散落 axios/fetch。
-- 颜色只用 `src/utils/colors.ts`（唯一色源）与 `src/style.css` 的 `--tl-*` 令牌 / `brand` Tailwind 色板，禁止视图内硬编码 `#色值`；图表配色只用 `chartTheme.ts` 的 PALETTE。
+- 字典名称/色值唯一来源是后端 `/meta`，前端唯一出口为 `src/utils/colors.ts` 的 meta 注册表（`applyDictMeta` 由 `fetchMeta` 注入）；禁止建立字典镜像文件、禁止视图内硬编码字典色值。纯 UI 色板（`STAT_CARD_COLORS`）与 `style.css` 的 `--tl-*` 令牌 / `brand` 色板照旧；图表配色只用 `chartTheme.ts` 的 PALETTE。
+- 表单校验统一 Element Plus `rules`（`:model` + `prop` + `formRef.validate()`），错误内联展示在字段下方；跨字段规则用自定义 validator；禁止提交前 `ElMessage.warning` 弹窗式校验。
 - 时间格式化只用 `src/utils/format.ts`，禁止视图内 slice/replace。
 - 文件下载只用 `src/utils/download.ts` 的 `saveBlob()`。
 - 列表页（分页/排序/加载）、CRUD 弹窗、资产选择器、导出任务必须复用 `src/composables/` 对应组合式函数，禁止再复制样板。
@@ -82,7 +86,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 风格：极简商务、信息优先、明暗双模式全覆盖。
 
-- 品牌主色靛蓝 #4F46E5（暗色 #6366F1），风险五级色：严重 #A61B29 / 高危 #F56C6C / 中危 #E6A23C / 低危 #409EFF / 安全 #67C23A——色值以 `colors.ts` 为准，本表仅供理解语义。
+- 品牌主色靛蓝 #4F46E5（暗色 #6366F1），风险五级色：严重 #A61B29 / 高危 #F56C6C / 中危 #E6A23C / 低危 #409EFF / 安全 #67C23A——字典色值以后端 `constants.py`（/meta 下发、前端 colors.ts 注册表消费）为准，本表仅供理解语义。
 - 正文字号 14px，模块标题 16px/600，页面标题 20px/600；间距以 4px 为最小刻度；圆角 4/6/8px 三档，禁止 12px 以上。
 - 文本对比度 ≥ 4.5:1（明暗两态都要达标）；动效仅保留 150-200ms 基础过渡，禁止闪烁/弹跳。
 - 弹窗：宽度三档 S=480 / M=640 / L=800；表单弹窗必须 `:close-on-click-modal="false"`；单场景仅一层弹窗，禁止多层嵌套。

@@ -1,0 +1,92 @@
+"""API 请求/响应模型包：按业务域拆分，统一从此处重导出，调用方保持 `from app.schemas import ...` 不变。"""
+from .common import (
+    DictOptionIn,
+    DictOptionOut,
+    HtmlStr,
+    OptHtmlStr,
+    Page,
+    ReportBrief,
+    T,
+    UserBrief,
+    VulBrief,
+    VulnTypeIn,
+    VulnTypeOut,
+)
+from .auth import (
+    GroupIn,
+    GroupMemberIn,
+    GroupMemberOut,
+    GroupOut,
+    PasswordIn,
+    RefreshIn,
+    RoleIn,
+    RoleOut,
+    TokenOut,
+    UserIn,
+    UserOption,
+    UserOut,
+)
+from .asset import (
+    AssetBrief,
+    AssetImportResultOut,
+    AssetIn,
+    AssetOut,
+    AssetOwnerItem,
+    NameVersionItem,
+    PortServiceItem,
+    PublicUrlItem,
+)
+from .vuln import (
+    VulBatchDeleteIn,
+    VulBatchIn,
+    VulDelayIn,
+    VulFieldsIn,
+    VulIn,
+    VulLogOut,
+    VulOut,
+    VulRetestRecordIn,
+    VulRetestRecordOut,
+    VulTransitionIn,
+    VulUpdateIn,
+)
+from .knowledge import (
+    KnowledgeBatchDeleteIn,
+    KnowledgeBatchIn,
+    KnowledgeIn,
+    KnowledgeOut,
+)
+from .import_ import (
+    ImportBatchOut,
+    ImportConfirmIn,
+    ImportRecordOut,
+    ImportRecordUpdateIn,
+)
+from .report import (
+    ExportCheckIn,
+    ExportCheckOut,
+    ExportJobOut,
+    ReportListOut,
+    ReportMetaIn,
+    ReportOut,
+    ReportSaveIn,
+    ReportSimilarityIn,
+    ReportSimilarityOut,
+    ReportVulnStateOut,
+    SectionIn,
+    SectionOut,
+)
+from .special import (
+    CompleteNoVulnIn,
+    NonpenItemIgnoreIn,
+    NonpenItemTransitionIn,
+    NonpenPlanIn,
+    NonpenPlanOut,
+    PlanImportResultOut,
+    RemoteTestingIn,
+    RemoteTestingOut,
+    RetestRoundOut,
+    SpringActionIn,
+    SpringActionOut,
+    TestingPlanIn,
+    TestingPlanOut,
+)
