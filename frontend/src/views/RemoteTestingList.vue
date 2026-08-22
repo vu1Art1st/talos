@@ -127,6 +127,7 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
