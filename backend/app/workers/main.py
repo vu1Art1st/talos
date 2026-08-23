@@ -203,11 +203,13 @@ async def export_report_task(ctx, job_id: int) -> None:
                             "public_urls": a.public_urls or [],
                             "internal_urls": a.internal_urls or [],
                         })
+            # 工单「被测系统URL」为测试目标表的优先数据源，为空时回退漏洞关联资产聚合
+            plan_urls = [u for u in ((plan.target_urls if plan is not None else None) or []) if u]
 
             export_dir = settings.storage_sub("exports")
             stamp = now().strftime("%Y%m%d%H%M%S")
             docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
-            await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets)
+            await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls)
 
             if job.fmt == "pdf":
                 pdf_path = docx_path.replace(".docx", ".pdf")

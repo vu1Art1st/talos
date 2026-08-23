@@ -620,13 +620,19 @@ def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datet
             _set_cell_text(cell, value)
 
 
-def _fill_target_table(doc: Document, meta: dict, assets: list[dict]) -> None:
+def _fill_target_table(
+    doc: Document, meta: dict, assets: list[dict], plan_urls: list[str] | None = None,
+) -> None:
     table = doc.tables[4]
     urls: list[str] = []
     for a in assets:
         urls.extend(u.get("url", "") for u in a.get("public_urls", []) if isinstance(u, dict))
         urls.extend(a.get("internal_urls", []))
     urls = [u for u in dict.fromkeys(urls) if u]
+    # 工单「被测系统URL」非空时为权威来源（可手动增删，不受资产URL变化影响）；
+    # 为空时回退沿「漏洞→资产」聚合的URL，兼容无计划/未维护工单的报告
+    if plan_urls:
+        urls = [u for u in dict.fromkeys(plan_urls) if u]
     domains = list(dict.fromkeys(
         h for u in urls if (h := urlparse(u if "://" in u else f"http://{u}").hostname)
     ))
@@ -709,11 +715,16 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
     sample = table.rows[1]
     for v in vulns:
         row = _clone_row(table, sample)
+        # 初测报告不展示「修复中」：关联报告后的自动流转仅是内部流程口径，
+        # 对外交付的初测报告统一显示「未修复」（复测报告维持原状态名）
+        status_name = VUL_STATUS.get(v.get("status"), "-")
+        if v.get("status") == VulStatus.FIXING and not meta.get("is_retest"):
+            status_name = "未修复"
         values = [
             VUL_LEVEL_EXPORT.get(v.get("level"), "-"),
             VUL_TYPE.get(v.get("vul_type"), "其他"),
             v.get("title", ""),
-            VUL_STATUS.get(v.get("status"), "-"),
+            status_name,
         ]
         for cell, value in zip(row.cells, values):
             _set_cell_text(cell, value)
@@ -769,7 +780,9 @@ def _apply_field_spacing(doc: Document, start: int) -> None:
             para.paragraph_format.line_spacing = 1.5
 
 
-def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> None:
+def _append_details(
+    doc: Document, vulns: list[dict], sections: list[dict], is_retest_report: bool = False,
+) -> None:
     by_id = {v.get("id"): v for v in vulns}
     if not sections:
         doc.add_paragraph("本次报告未关联漏洞记录。")
@@ -785,10 +798,13 @@ def _append_details(doc: Document, vulns: list[dict], sections: list[dict]) -> N
             # 漏洞等级颜色与风险汇总一致、漏洞链接逐条编号另起一行（需求14）
             content_html = _color_vuln_levels(content_html)
             content_html = _number_vuln_urls(content_html)
-            # 修复中且经历过复测 = 复测未通过打回，展示层区分（状态码不变）
+            # 修复中且经历过复测 = 复测未通过打回，展示层区分（状态码不变）；
+            # 初测报告中的修复中统一显示「未修复」（与汇总表口径一致，状态码不变）
             status_name = VUL_STATUS.get(vul.get("status"), "-")
             if vul.get("status") == VulStatus.FIXING and vul.get("is_retest"):
                 status_name = "复测未通过"
+            elif vul.get("status") == VulStatus.FIXING and not is_retest_report:
+                status_name = "未修复"
             title = f"{title}（{status_name}）"
         doc.add_paragraph(title, style="Heading 3")
         body_start = len(doc.paragraphs)
@@ -923,11 +939,13 @@ def build_report_docx(
     sections: list[dict],
     out_path: str,
     assets: list[dict] | None = None,
+    plan_urls: list[str] | None = None,
 ) -> str:
     """基于模板生成报告 docx。
 
     meta: 报告元信息；vulns: 漏洞数据（含 id/level/status 等）；
-    sections: [{title, content_html, vul_id}] 有序章节；assets: 关联资产聚合。
+    sections: [{title, content_html, vul_id}] 有序章节；assets: 关联资产聚合；
+    plan_urls: 工单维护的被测系统URL，非空时作为「测试目标」表URL的权威来源。
     """
     template = Path(settings.REPORT_TEMPLATE)
     if not template.exists():
@@ -939,11 +957,11 @@ def build_report_docx(
     _fill_cover(doc, meta, now)
     _fill_applicability(doc, meta)
     _fill_version_table(doc, meta, vulns, now)
-    _fill_target_table(doc, meta, assets or [])
+    _fill_target_table(doc, meta, assets or [], plan_urls)
     _fill_schedule_table(doc, meta)
     _fill_summary(doc, meta, vulns)
     _remove_sample_details(doc)
-    _append_details(doc, vulns, sections)
+    _append_details(doc, vulns, sections, bool(meta.get("is_retest")))
     _build_toc_field(doc)
     _normalize_image_width(doc)
     _center_body_images(doc)

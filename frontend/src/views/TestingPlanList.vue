@@ -370,8 +370,13 @@
           </div>
         </div>
       </el-form-item>
-      <el-form-item label="漏洞简述">
-        <el-input v-model="form.brief" type="textarea" :rows="2" placeholder="漏洞情况简述" />
+      <el-form-item label="被测系统URL">
+        <div class="w-full">
+          <el-select v-model="form.target_urls" multiple filterable allow-create default-first-option
+                     :reserve-keyword="false" placeholder="选择关联资产后自动带出，也可输入URL回车添加"
+                     class="w-full" />
+          <div class="text-xs text-gray-400 mt-1">用于报告「测试目标」的被测系统URL/域名；自动带出后可删除，保存后以本列表为准</div>
+        </div>
       </el-form-item>
       <el-form-item label="详细描述">
         <el-input v-model="form.detail" type="textarea" :rows="4" placeholder="数据来源等详细信息" />
@@ -409,6 +414,7 @@ import {
   STAT_CARD_COLORS,
 } from '../utils/colors'
 import { fmtDate, fmtDateTime } from '../utils/format'
+import { assetUrls, cleanUrls, mergeUrls } from '../utils/urls'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -600,7 +606,7 @@ const emptyForm = () => ({
   actual_mandays_override: false,
   create_nonpen: false,
   nonpen_test_items: [] as string[],
-  brief: '',
+  target_urls: [] as string[],
   detail: '',
 })
 const form = ref(emptyForm())
@@ -746,6 +752,7 @@ function openDialog(row?: any) {
   dialogRow.value = row ?? null
   form.value = row ? { ...emptyForm(), ...row } : emptyForm()
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
+  form.value.target_urls = Array.isArray(form.value.target_urls) ? form.value.target_urls : []
   assetOptions.value = []
   if (form.value.asset_ids.length) loadAssetLabels()
   resetBaseline([...form.value.asset_ids])
@@ -780,13 +787,22 @@ function onAssetCreated(asset: any) {
   // 自动填充测试系统与所属部门（资产信息），仅带出纯系统名称（不含系统类型/子系统），用户仍可手动修改/覆盖
   form.value.system_name = asset.name
   form.value.department = asset.department || ''
+  // 新建资产若已带URL，同样并入被测系统URL
+  form.value.target_urls = mergeUrls(form.value.target_urls, assetUrls(asset))
   resetBaseline([...form.value.asset_ids])
 }
 
-// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
+// 点选关联资产后自动带出：被测系统URL（新增/编辑模式均生效，并入所选资产URL，只增不删、可手动删除）；
+// 测试系统/所属部门仍仅新增模式带出（仅带出纯系统名称，不含系统类型/子系统），可手动修改
 function onAssetsChange(ids: number[]) {
-  if (form.value.id) return
   const added = diffIds(ids)
+  if (added.length) {
+    form.value.target_urls = mergeUrls(
+      form.value.target_urls,
+      added.flatMap((id) => assetUrls(assetCache.value[id])),
+    )
+  }
+  if (form.value.id) return
   if (!added.length) return
   const asset = assetCache.value[added[added.length - 1]]
   if (!asset) return
@@ -807,6 +823,7 @@ async function save() {
     delete (body as any).retest_round_count
     delete (body as any).ticket_id
     delete (body as any).ticket_seq
+    body.target_urls = cleanUrls(form.value.target_urls)
     if (form.value.id) {
       delete (body as any).create_nonpen
       delete (body as any).nonpen_test_items

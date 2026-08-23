@@ -132,8 +132,8 @@
               <el-icon v-if="dragIndex !== null" class="shrink-0 text-gray-300" :size="12"><Rank /></el-icon>
               <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
               <span v-if="sec.vul_id && vulnStates[sec.vul_id]" class="tl-tag shrink-0"
-                    :style="statusSoftStyle(vulnStates[sec.vul_id].status)">
-                {{ statusName(vulnStates[sec.vul_id].status) }}
+                    :style="navStatusStyle(vulnStates[sec.vul_id].status)">
+                {{ navStatusLabel(vulnStates[sec.vul_id].status) }}
               </span>
             </div>
           </template>
@@ -243,6 +243,11 @@ const userOptions = ref<{ id: number; name: string }[]>([])
 const authorNames = ref<string[]>([])
 // 关联漏洞状态与复测详情，key 为 vul_id
 const vulnStates = ref<Record<number, any>>({})
+
+// 初测报告（标题不含「复测」）章节导航状态标签：修复中(50)显示为「未修复」（与导出报告口径一致，仅展示层）
+const isRetestReport = computed(() => String(report.value?.title ?? '').includes('复测'))
+const navStatusLabel = (s: number) => (!isRetestReport.value && s === 50 ? statusName(10) : statusName(s))
+const navStatusStyle = (s: number) => (!isRetestReport.value && s === 50 ? statusSoftStyle(10) : statusSoftStyle(s))
 let saveTimer: number | undefined
 let jobTimer: number | undefined
 

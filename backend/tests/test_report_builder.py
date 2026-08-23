@@ -3,6 +3,8 @@
 覆盖计划测试项：
 - 汇总统计仅计入未修复漏洞、已修复状态单元格绿色
 - 详情「测试状态：」按漏洞最新 is_retest 重写
+- 初测报告修复中显示「未修复」（复测报告维持原状态名）
+- 测试目标表URL优先取工单 target_urls，为空回退资产聚合
 - settings 中 w:updateFields 位于 w:hdrShapeDefaults 之前
 - 封面第二行为 project_name（系统名称）
 - _affected_urls_html / _vuln_section_html 多 URL 渲染
@@ -28,10 +30,10 @@ from app.services.report_builder import (
 )
 
 
-def _build(tmp_path, meta=None, vulns=None, sections=None):
+def _build(tmp_path, meta=None, vulns=None, sections=None, assets=None, plan_urls=None):
     meta = {"title": "报告标题", "project_name": "统一门户系统", **(meta or {})}
     out = str(tmp_path / "out.docx")
-    build_report_docx(meta, vulns or [], sections or [], out)
+    build_report_docx(meta, vulns or [], sections or [], out, assets=assets, plan_urls=plan_urls)
     return Document(out)
 
 
@@ -115,6 +117,53 @@ def test_detail_test_state_rewritten_by_is_retest(tmp_path):
     # 修复中 + 复测 = 复测未通过（标题后缀）
     h3 = [p.text for p in doc.paragraphs if p.style.name == "Heading 3"]
     assert any(t.endswith("（复测未通过）") for t in h3), h3
+
+
+# ---------- 初测报告：修复中展示为「未修复」（仅展示层，状态码不变） ----------
+def test_initial_report_fixing_displayed_as_unfixed(tmp_path):
+    # 初测报告（meta 无 is_retest）：关联报告后漏洞自动流转为修复中(50)，
+    # 但对外交付的初测报告中状态列/详情标题统一显示「未修复」
+    vulns = [{"id": 1, "title": "SQL注入", "level": 20, "vul_type": 10,
+              "status": VulStatus.FIXING, "is_retest": False}]
+    sections = [{"title": "SQL注入", "vul_id": 1,
+                 "content_html": "<p><strong>测试状态：</strong>初测</p>"}]
+    doc = _build(tmp_path, vulns=vulns, sections=sections)
+    table = doc.tables[6]
+    assert table.rows[1].cells[3].text.strip() == "未修复"
+    h3 = [p.text for p in doc.paragraphs if p.style.name == "Heading 3"]
+    assert any(t.endswith("（未修复）") for t in h3), h3
+
+
+def test_retest_report_fixing_status_unchanged(tmp_path):
+    # 复测报告（meta.is_retest=True）：修复中且漏洞未经历复测 → 状态名保持「修复中」
+    vulns = [{"id": 1, "title": "SQL注入", "level": 20, "vul_type": 10,
+              "status": VulStatus.FIXING, "is_retest": False}]
+    sections = [{"title": "SQL注入", "vul_id": 1,
+                 "content_html": "<p><strong>测试状态：</strong>复测</p>"}]
+    doc = _build(tmp_path, meta={"is_retest": True}, vulns=vulns, sections=sections)
+    table = doc.tables[6]
+    assert table.rows[1].cells[3].text.strip() == "修复中"
+    h3 = [p.text for p in doc.paragraphs if p.style.name == "Heading 3"]
+    assert any(t.endswith("（修复中）") for t in h3), h3
+
+
+# ---------- 测试目标表：工单「被测系统URL」优先，为空回退资产聚合 ----------
+def test_target_table_plan_urls_priority(tmp_path):
+    assets = [{"name": "资产A",
+               "public_urls": [{"url": "https://asset.example.com", "tag": 10}],
+               "internal_urls": ["http://10.20.1.10:8080"]}]
+    # 工单 target_urls 非空：以工单为准（URL/域名均取自工单列表）
+    doc = _build(tmp_path, assets=assets, plan_urls=["https://plan.example.com/app"])
+    table = doc.tables[4]
+    assert table.rows[1].cells[1].text.strip() == "https://plan.example.com/app"
+    assert table.rows[2].cells[1].text.strip() == "plan.example.com"
+    # 工单 target_urls 为空：回退沿「漏洞→资产」聚合的URL
+    doc2 = _build(tmp_path, assets=assets)
+    table2 = doc2.tables[4]
+    assert table2.rows[1].cells[1].text.strip() == "\n".join(
+        ["https://asset.example.com", "http://10.20.1.10:8080"])
+    # 域名格由全部URL推导 hostname（含内网IP）
+    assert table2.rows[2].cells[1].text.strip() == "asset.example.com\n10.20.1.10"
 
 
 def test_cover_second_line_is_project_name(tmp_path):

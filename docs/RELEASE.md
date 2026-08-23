@@ -25,6 +25,25 @@
 
 ---
 
+## [2.3.0] - 2026-08-23
+
+初测报告状态口径与测试目标URL补全：导出的初测报告漏洞状态显示「未修复」、工单新增「被测系统URL」字段作为报告测试目标数据源。
+
+### 变更
+
+- **初测报告漏洞状态口径（仅展示层）**（`backend/app/services/report_builder.py`）：关联报告后漏洞在系统内照旧自动流转「修复中」（内部流程、打点、状态机均不变），但对外交付的**初测报告**（标题不含「复测」）导出时，风险汇总表状态列与风险详情章节标题中的「修复中」统一显示为「未修复」；复测报告维持原状态名（含「复测未通过」派生态）。报告编辑页章节导航状态标签同步该口径
+- **工单「漏洞简述」替换为「被测系统URL」**（`backend/app/models/special.py` / `frontend/src/views/TestingPlanList.vue`）：`testing_plans.brief` 列删除（该字段全仓无展示/导出消费，已录入文本随迁移丢弃），新增 `target_urls` JSON 数组。编辑渗透测试工单时选择关联资产后自动带出资产公网/内网URL（新增与编辑模式均生效，去重保序、只增不删），支持手动回车录入新增与标签删除；保存后以该列表为准
+
+- **报告「测试目标」URL优先取工单**（`backend/app/workers/main.py` / `report_builder.py`）：导出时工单 `target_urls` 非空则作为「被测系统URL/被测系统域名」的权威来源（域名由URL推导），为空时回退既有「漏洞→资产」聚合链路，解决资产台账未录URL时报告测试目标两格空白的问题
+
+### 测试
+
+- 后端 `test_report_builder.py` 新增：初测报告修复中显示「未修复」（汇总表+详情标题）、复测报告状态名保持「修复中」回归、测试目标表工单URL优先/为空回退资产聚合
+- 后端 `test_api.py` 新增：`test_report_export_target_urls_from_plan` 导出集成用例（资产无URL时工单URL仍带出至测试目标表）；工单CRUD用例改用 `target_urls` 并覆盖编辑增删
+- 前端新增 `src/utils/urls.ts`（mergeUrls/cleanUrls/assetUrls）及 `__tests__/urls.spec.ts` 单测
+
+---
+
 ## [2.2.2] - 2026-08-23
 
 嵌套弹窗与复测联动修复：弹窗定位失效、复测变更未实时刷新父列表。
@@ -607,6 +626,26 @@
 ### 变更
 
 - 忽略并移除测试运行产物 `test_storage/` 与 `test_vp.db`(`fdcdb24`)
+
+---
+
+## [2.3.0] - 2026-08-23
+
+计划「漏洞简述」(brief) 由「被测系统 URL」(target_urls) 取代。
+
+### 新增
+
+- **计划被测系统 URL**（`backend/app/models/special.py`、`schemas/special.py`、`frontend/src/views/TestingPlanList.vue`、`ReportEditor.vue`）：`testing_plans.brief` 删除，改为 `target_urls` JSON 字符串数组；选择关联资产后自动带出（mergeUrls 并入、可手动增删），作为报告导出「测试目标」表被测系统 URL / 域名优先数据源（为空回退资产聚合）
+- **URL 工具**（`frontend/src/utils/urls.ts` + `frontend/src/utils/__tests__/urls.spec.ts`）：新增 `mergeUrls` / `cleanUrls` / `assetUrls` 工具与单测
+- **报告「测试目标」导出**（`backend/app/services/report_builder.py`）：导出优先取 `target_urls`，为空回退资产聚合（沿用既有逻辑）
+
+### 迁移
+
+- 新增 Alembic 迁移 `b8c9d0e1f2a3_plan_target_urls_replace_brief.py`：`testing_plans` 新增 `target_urls` 列、删除 `brief` 列（既有简述文本随迁移丢弃）
+
+### 测试
+
+- `backend/tests/test_api.py`、`backend/tests/test_report_builder.py` 适配 `target_urls`；`backend/scripts/seed_dev_data.py` 种子数据改用 `target_urls`
 
 ---
 

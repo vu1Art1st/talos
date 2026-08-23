@@ -90,7 +90,7 @@ ASSETS = [
     ("API开放平台", "", 0, "DCIT系统", True, "Nginx;Kong/3.4", "PostgreSQL/15", 20, 10),
 ]
 
-# 渗透工单：(计划名, 系统idx, 测试类型idx, 部门idx, 接收日期, 状态, 认领者idx列表, 预估人天, 实际人天, brief)
+# 渗透工单：(计划名, 系统idx, 测试类型idx, 部门idx, 接收日期, 状态, 认领者idx列表, 预估人天, 实际人天, 测试说明)
 PLANS = [
     ("综合办公系统渗透测试", 0, 0, 0, "2025-10-13", PlanStatus.RETEST_DONE, [0, 1], 5, 6,
      "对综合办公系统公文管理子系统开展全量渗透测试，覆盖身份认证、流程审批与文件导出链路"),
@@ -322,15 +322,19 @@ async def reset_and_seed() -> None:
         # ---------- 渗透测试工单 ----------
         plans: list[TestingPlan] = []
         seq_counter: dict[str, int] = {}
-        for pi, (pname, sys_i, tt_i, dept_i, recv, status, tester_idx, est, actual, brief) in enumerate(PLANS):
+        for pi, (pname, sys_i, tt_i, dept_i, recv, status, tester_idx, est, actual, note) in enumerate(PLANS):
             seq = seq_counter.get(recv, 0) + 1
             seq_counter[recv] = seq
+            linked = [assets[sys_i], assets[sys_i + 1]] if sys_i == 0 else [assets[sys_i]]
             plan = TestingPlan(
                 plan_name=pname, system_name=assets[sys_i].name, test_type=TEST_TYPES[tt_i],
                 department=DEPARTMENTS[dept_i], receive_time=recv, ticket_time=recv,
-                ticket_seq=seq, asset_ids=[assets[sys_i].id, assets[sys_i + 1].id] if sys_i == 0 else [assets[sys_i].id],
+                ticket_seq=seq, asset_ids=[a.id for a in linked],
+                # 被测系统URL按「自动带出」口径从关联资产汇总
+                target_urls=[u["url"] for a in linked for u in (a.public_urls or [])]
+                + [u for a in linked for u in (a.internal_urls or [])],
                 status=status, est_mandays=est, actual_mandays=actual if actual else 0,
-                brief=brief, detail=f"测试人员：{'、'.join(testers[i].realname for i in tester_idx) or '待认领'}；数据来源：安全测试需求单",
+                detail=f"测试人员：{'、'.join(testers[i].realname for i in tester_idx) or '待认领'}；数据来源：安全测试需求单；{note}",
                 no_vul_conclusion="经核查未发现安全漏洞，测试通过。" if status == PlanStatus.PASSED else "",
                 creator_id=admin.id, create_time=dt(12 - pi, 9),
             )

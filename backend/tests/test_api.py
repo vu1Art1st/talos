@@ -667,6 +667,49 @@ async def test_report_from_vulns_infer_plan_id(client: AsyncClient, auth: dict):
     assert resp.json()["testing_plan_id"] is None
 
 
+async def test_report_export_target_urls_from_plan(client: AsyncClient, auth: dict):
+    """工单「被测系统URL」为报告测试目标表优先数据源：资产未录URL时导出仍能带出URL/域名。"""
+    from io import BytesIO
+
+    from docx import Document
+
+    # 工单维护被测系统URL；关联资产未录URL
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "目标系统", "test_type": "渗透测试",
+              "target_urls": ["https://target.example.com/app", "http://10.20.1.10:8080"]},
+    )
+    plan_id = resp.json()["id"]
+    await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "无URL资产"})
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [asset_id], "vulns": [{"title": "目标漏洞", "level": 30}]},
+    )
+    vul_id = resp.json()[0]["id"]
+
+    resp = await client.post(
+        "/api/v1/reports/from-vulns", headers=auth,
+        json={"title": "目标URL报告", "vul_ids": [vul_id], "testing_plan_id": plan_id},
+    )
+    report_id = resp.json()["id"]
+
+    resp = await client.post(
+        f"/api/v1/reports/{report_id}/export", headers=auth, json={"fmt": "docx"}
+    )
+    job_id = resp.json()["id"]
+    job = await _wait_job(client, auth, report_id, job_id)
+    assert job["status"] == "done", job
+
+    resp = await client.get(f"/api/v1/reports/exports/{job_id}/download", headers=auth)
+    doc = Document(BytesIO(resp.content))
+    target_tbl = doc.tables[4]
+    # URL格取工单 target_urls，域名格由URL推导
+    assert target_tbl.rows[1].cells[1].text.strip() == "https://target.example.com/app\nhttp://10.20.1.10:8080"
+    assert target_tbl.rows[2].cells[1].text.strip() == "target.example.com\n10.20.1.10"
+
+
 async def test_report_similarity_check(client: AsyncClient, auth: dict):
     """相似性检查：基础信息（标题+归属计划+漏洞集合）与所选漏洞最后编辑时间完全一致才判相似。"""
     resp = await client.post(
@@ -1141,11 +1184,23 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
         json={"system_name": "计划系统", "test_type": "渗透测试", "department": "研发部",
               "receive_time": "2026-01-01", "first_test_done_time": "2026-01-05",
               "status": 20, "stat_critical": 1, "stat_high": 2, "stat_medium": 3,
-              "stat_low": 4, "brief": "共10个漏洞", "detail": "测试人员：张三"},
+              "stat_low": 4, "target_urls": ["https://plan.example.com"],
+              "detail": "测试人员：张三"},
     )
     assert resp.status_code == 200, resp.text
     plan = resp.json()
     assert plan["stat_high"] == 2
+    assert plan["target_urls"] == ["https://plan.example.com"]
+
+    # 编辑：被测系统URL支持增删（替换）
+    resp = await client.put(
+        f"/api/v1/testing-plans/{plan['id']}", headers=auth,
+        json={"system_name": "计划系统", "test_type": "渗透测试", "department": "研发部",
+              "receive_time": "2026-01-01", "status": 20,
+              "target_urls": ["https://a.example.com", "http://10.20.1.10:8080"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["target_urls"] == ["https://a.example.com", "http://10.20.1.10:8080"]
 
     # status 筛选
     resp = await client.get("/api/v1/testing-plans", headers=auth, params={"status": 20})
@@ -1404,7 +1459,7 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     plan_body = {k: plan[k] for k in (
         "system_name", "test_type", "department", "receive_time", "first_test_done_time",
         "status", "retest_notice_time", "retest_done_time",
-        "stat_critical", "stat_high", "stat_medium", "stat_low", "brief", "detail",
+        "stat_critical", "stat_high", "stat_medium", "stat_low", "target_urls", "detail",
     )}
 
     # 未认领：修改状态 403，录入漏洞 403，但基本信息编辑放行
@@ -1598,7 +1653,7 @@ async def test_retest_round_tracking(client: AsyncClient, auth: dict):
     body = {k: plan[k] for k in (
         "system_name", "test_type", "department", "receive_time", "first_test_done_time",
         "status", "retest_notice_time", "retest_done_time",
-        "stat_critical", "stat_high", "stat_medium", "stat_low", "brief", "detail",
+        "stat_critical", "stat_high", "stat_medium", "stat_low", "target_urls", "detail",
     )}
 
     # 手动流转到复测中：记第 1 轮（需经初测完成 30，再进入复测中 50）

@@ -63,7 +63,7 @@ class TestingPlanIn(BaseModel):
     actual_mandays: float = 0  # 实际人天
     actual_mandays_override: bool = False  # 实际人天手动修正标志：修正后不再被初测报告自动覆盖
     asset_ids: list[int] = []  # 关联资产ID，编制计划时前置录入
-    brief: str = ""
+    target_urls: list[str] = []  # 被测系统URL，报告「测试目标」优先数据源；选择关联资产后自动带出，可增删
     no_vul_conclusion: str = ""  # 无漏洞闭环测试结论（确认「测试通过」时记录）
     detail: str = ""
     create_nonpen: bool = False  # 是否勾选「创建漏扫基线工单」：同时生成联动漏扫基线工单（共享工单ID）
@@ -84,10 +84,10 @@ class TestingPlanOut(TestingPlanIn):
     create_time: datetime | None = None
     update_time: datetime | None = None
 
-    @field_validator("asset_ids", mode="before")
+    @field_validator("asset_ids", "target_urls", mode="before")
     @classmethod
-    def _normalize_asset_ids(cls, v):
-        """旧库迁移后 asset_ids 可能为 NULL，归一化为空数组避免序列化失败。"""
+    def _normalize_json_lists(cls, v):
+        """旧库迁移后 JSON 列可能为 NULL，归一化为空数组避免序列化失败。"""
         return v or []
 
 
