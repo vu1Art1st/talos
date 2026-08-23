@@ -298,6 +298,8 @@ watch(fromVulnsVisible, async (v) => {
 })
 
 onMounted(async () => {
+  // 字典注册表注入：直接刷新/直达本页时也保证导出状态等标签有名称与色值（幂等，store 内有缓存）
+  await auth.fetchMeta().catch(() => undefined)
   await load(1)
   // 从测试计划「生成报告」进入：自动打开对话框并预选计划
   const genPlan = Number(route.query.gen_plan)

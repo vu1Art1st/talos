@@ -10,8 +10,11 @@ from app.constants import (
     ASSET_STATUS,
     ASSET_STATUS_COLOR,
     AUDIT_ACTIONS,
+    EXPORT_JOB_STATUS_COLOR,
     EXPORT_JOB_STATUS_NAME,
+    IMPORT_BATCH_STATUS_COLOR,
     IMPORT_BATCH_STATUS_NAME,
+    IMPORT_RECORD_STATUS_COLOR,
     IMPORT_RECORD_STATUS_NAME,
     NONPEN_ITEM_ACTION_NAMES,
     NONPEN_ITEM_ACTIONS,
@@ -107,6 +110,9 @@ async def meta(
             "asset_status": ASSET_STATUS_COLOR,
             "url_tag": URL_TAG_COLOR,
             "nonpen_item": NONPEN_ITEM_COLORS,
+            "import_batch_status": IMPORT_BATCH_STATUS_COLOR,
+            "import_record_status": IMPORT_RECORD_STATUS_COLOR,
+            "export_job_status": EXPORT_JOB_STATUS_COLOR,
         },
         # 漏扫基线工单：测试项 / 状态 / 允许操作（有序，即按钮渲染顺序）与操作文案
         "nonpen": {

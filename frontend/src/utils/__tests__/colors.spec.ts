@@ -2,6 +2,8 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import {
   applyDictMeta,
   assetStatusMeta,
+  exportJobName,
+  exportJobSoftStyle,
   importStatusMeta,
   levelBadgeStyle,
   levelColor,
@@ -75,6 +77,15 @@ describe('colors 字典注册表（meta 单源）', () => {
     })
     expect(levelColor(10)).toBe('#909399')
     expect(levelName(10)).toBe('10')
+  })
+
+  it('meta 漏发任一 key 时兜底为空对象而非 undefined，标签查询不抛错（防报告区域消失回归）', () => {
+    const partial = metaFixture() as any
+    delete partial.export_job_status
+    delete partial.colors.export_job_status
+    applyDictMeta(partial)
+    expect(exportJobSoftStyle('done')).toEqual(softStyle('#909399'))
+    expect(exportJobName('done')).toBe('done')
   })
 
   it('softStyle 生成半透明底 + 同色文字', () => {

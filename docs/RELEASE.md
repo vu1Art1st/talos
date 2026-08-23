@@ -25,6 +25,22 @@
 
 ---
 
+## [2.2.1] - 2026-08-23
+
+缺陷修复：导出历史标签渲染崩溃导致报告区域整页消失。
+
+### 修复
+
+- **导出/导入状态色值未随 /meta 下发（关键修复）**：`/meta` colors 命名空间遗漏 `export_job_status` / `import_batch_status` / `import_record_status` 三个 key（常量在 `constants.py` 已定义但未组装下发）。前端 `applyDictMeta` 无条件赋值将 `undefined` 注入注册表，渲染导出记录状态标签时 `undefined['done']` 抛 TypeError、Vue 渲染中断，表现为：测试流程抽屉点击「导出历史」后报告卡片整体消失、报告中心展开行后表格数据行消失、报告编辑页「导出记录」卡片不渲染。后端补齐三个色值字典下发
+- **前端字典注册表空值兜底（防御加固）**：`applyDictMeta` 全部字段改为 `?? {}` / `?? []` 兜底，后端再漏发任何 key 时色值走 FALLBACK_COLOR 灰色展示，不再出现整页渲染崩溃
+
+### 测试
+
+- 后端 `test_api.py::test_meta` 补 colors 三 key 断言（名称与色值必须同步下发）
+- 前端 `colors.spec.ts` 新增「meta 漏发任一 key 时兜底为空对象、标签查询不抛错」防回归用例
+
+---
+
 ## [2.2.0] - 2026-08-22
 
 功能演进（ROADMAP F3/F4/F6/F7 落地 + 会话令牌空闲滑动过期；F2/F5 取消）。

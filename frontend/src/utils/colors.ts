@@ -76,31 +76,33 @@ const dict = reactive({
   },
 })
 
-/** 把 /meta 响应注入注册表（auth store fetchMeta 调用，全站唯一入口） */
+/** 把 /meta 响应注入注册表（auth store fetchMeta 调用，全站唯一入口）。
+ *  每个字段都带空值兜底：后端漏发任何 key 时字典保持空对象，色值走 FALLBACK_COLOR 灰色，
+ *  绝不注入 undefined（否则 dict.colors.xxx[s] 会 TypeError 导致整页渲染崩溃）。 */
 export function applyDictMeta(meta: DictMetaPayload) {
-  dict.vulLevelNames = meta.vul_level
-  dict.vulStatusNames = meta.vul_status
-  dict.assetStatusNames = meta.asset_status
-  dict.urlTagNames = meta.url_tag
-  dict.reportStatusNames = meta.report_status
-  dict.importBatchStatusNames = meta.import_batch_status
-  dict.importRecordStatusNames = meta.import_record_status
-  dict.exportJobStatusNames = meta.export_job_status
-  dict.colors.vulLevel = meta.colors.vul_level
-  dict.colors.vulStatus = meta.colors.vul_status
-  dict.colors.vulType = meta.colors.vul_type
-  dict.colors.testingPlanStatus = meta.colors.testing_plan_status
-  dict.colors.reportStatus = meta.colors.report_status
-  dict.colors.assetStatus = meta.colors.asset_status
-  dict.colors.urlTag = meta.colors.url_tag
-  dict.colors.nonpenItem = meta.colors.nonpen_item
-  dict.colors.importBatchStatus = meta.colors.import_batch_status
-  dict.colors.importRecordStatus = meta.colors.import_record_status
-  dict.colors.exportJobStatus = meta.colors.export_job_status
-  dict.nonpen.items = meta.nonpen.items
-  dict.nonpen.status = meta.nonpen.status
-  dict.nonpen.actions = meta.nonpen.actions
-  dict.nonpen.actionNames = meta.nonpen.action_names
+  dict.vulLevelNames = meta.vul_level ?? {}
+  dict.vulStatusNames = meta.vul_status ?? {}
+  dict.assetStatusNames = meta.asset_status ?? {}
+  dict.urlTagNames = meta.url_tag ?? {}
+  dict.reportStatusNames = meta.report_status ?? {}
+  dict.importBatchStatusNames = meta.import_batch_status ?? {}
+  dict.importRecordStatusNames = meta.import_record_status ?? {}
+  dict.exportJobStatusNames = meta.export_job_status ?? {}
+  dict.colors.vulLevel = meta.colors.vul_level ?? {}
+  dict.colors.vulStatus = meta.colors.vul_status ?? {}
+  dict.colors.vulType = meta.colors.vul_type ?? {}
+  dict.colors.testingPlanStatus = meta.colors.testing_plan_status ?? {}
+  dict.colors.reportStatus = meta.colors.report_status ?? {}
+  dict.colors.assetStatus = meta.colors.asset_status ?? {}
+  dict.colors.urlTag = meta.colors.url_tag ?? {}
+  dict.colors.nonpenItem = meta.colors.nonpen_item ?? {}
+  dict.colors.importBatchStatus = meta.colors.import_batch_status ?? {}
+  dict.colors.importRecordStatus = meta.colors.import_record_status ?? {}
+  dict.colors.exportJobStatus = meta.colors.export_job_status ?? {}
+  dict.nonpen.items = meta.nonpen.items ?? []
+  dict.nonpen.status = meta.nonpen.status ?? {}
+  dict.nonpen.actions = meta.nonpen.actions ?? {}
+  dict.nonpen.actionNames = meta.nonpen.action_names ?? {}
 }
 
 /* ============================================================

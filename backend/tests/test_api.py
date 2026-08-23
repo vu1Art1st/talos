@@ -37,6 +37,11 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert meta["import_batch_status"]["parsed"] == "待确认"
     assert meta["export_job_status"]["done"] == "已完成"
     assert meta["report_status"]["draft"] == "草稿"
+    # 名称字典对应的色值必须同步下发：前端 applyDictMeta 无条件注入，
+    # 任一 key 缺失会令导出/导入状态标签渲染崩溃（报告区域整体消失）
+    assert meta["colors"]["import_batch_status"]["parsed"] == "#4F46E5"
+    assert meta["colors"]["import_record_status"]["confirmed"] == "#67C23A"
+    assert meta["colors"]["export_job_status"]["done"] == "#67C23A"
     nonpen_items = {item["key"] for item in meta["nonpen"]["items"]}
     assert nonpen_items == {"baseline", "host", "web"}
     assert meta["nonpen"]["actions"]["not_started"] == ["start", "ignore"]

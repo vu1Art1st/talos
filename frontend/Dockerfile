@@ -1,4 +1,4 @@
-FROM node:20-alpine AS build
+FROM node:22-alpine AS build
 
 # 使用国内镜像源加速依赖下载；构建时可通过 --build-arg NPM_REGISTRY=xxx 覆盖
 # 依赖安装统一走 pnpm（与本地开发一致），--frozen-lockfile 保证与 pnpm-lock.yaml 严格对齐
