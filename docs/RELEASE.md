@@ -25,6 +25,21 @@
 
 ---
 
+## [2.2.2] - 2026-08-23
+
+嵌套弹窗与复测联动修复：弹窗定位失效、复测变更未实时刷新父列表。
+
+### 修复
+
+- **嵌套弹窗定位失效**（`frontend/src/components/AssetFormDialog.vue` / `PdfPreviewDialog.vue` / `VulnFormPanel.vue` / `VulnRetestPanel.vue`）：在计划抽屉表格展开行内打开的弹窗因固定定位失效导致页面闪烁、按钮点击失灵；补充 `append-to-body` 使弹窗挂载到 `document.body` 正常显示
+- **复测变更未实时刷新**（`frontend/src/components/PlanWorkflowDrawer.vue`）：复测记录增删改后新增 `onRetestChanged` 处理器，重拉计划与漏洞列表，保证状态列、复测轮数随「已修复 / 复测未修复」结论实时联动（与「流转」行为一致）
+
+### 测试
+
+- **新增前端单测（vitest）**：`frontend/src/components/__tests__/VulnRetestPanel.spec.ts` 回归用例，验证新增复测记录弹窗通过 `append-to-body` 挂载到 `document.body`、脱离组件根节点，防止嵌套弹窗定位回归
+
+---
+
 ## [2.2.1] - 2026-08-23
 
 缺陷修复：导出历史标签渲染崩溃导致报告区域整页消失。

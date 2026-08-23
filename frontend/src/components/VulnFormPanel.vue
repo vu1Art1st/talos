@@ -190,7 +190,7 @@
 
   <!-- 知识库模板选择弹窗 -->
   <el-dialog
-             :close-on-click-modal="false" v-model="templateVisible" title="选择知识库模板" width="640px">
+             :close-on-click-modal="false" v-model="templateVisible" title="选择知识库模板" width="640px" append-to-body>
     <el-input v-model="templateSearch" placeholder="搜索模板名称 / 标签 / 描述" clearable class="mb-3">
       <template #prefix><el-icon><Search /></el-icon></template>
     </el-input>

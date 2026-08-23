@@ -92,7 +92,7 @@
           <el-table-column type="expand">
             <template #default="{ row }">
               <div class="px-6 py-3 bg-gray-50/60">
-                <VulnRetestPanel :vul-id="row.id" @changed="dirty = true" />
+                <VulnRetestPanel :vul-id="row.id" @changed="onRetestChanged" />
               </div>
             </template>
           </el-table-column>
@@ -613,6 +613,13 @@ async function quit() {
 // ---------- 漏洞 ----------
 async function onVulnSaved() {
   vulnFormVisible.value = false
+  dirty.value = true
+  await refresh()
+}
+
+// 复测记录增删改后重拉数据：选择复测结论（已修复/复测未修复）会同步流转漏洞状态，
+// 刷新计划与漏洞列表保证状态列、复测轮数实时联动（与「流转」行为一致）
+async function onRetestChanged() {
   dirty.value = true
   await refresh()
 }

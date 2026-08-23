@@ -1,6 +1,6 @@
 <template>
   <el-dialog
-             :close-on-click-modal="false" v-model="visible" :title="title" width="800px" top="4vh" destroy-on-close @closed="cleanup">
+             :close-on-click-modal="false" v-model="visible" :title="title" width="800px" top="4vh" destroy-on-close append-to-body @closed="cleanup">
     <div v-loading="loading" element-loading-text="正在生成预览…" class="h-[78vh]">
       <iframe v-if="blobUrl" :src="blobUrl" class="w-full h-full border-0" />
     </div>

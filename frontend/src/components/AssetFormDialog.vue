@@ -1,6 +1,6 @@
 <template>
   <el-dialog
-             :close-on-click-modal="false" :model-value="visible" :title="form.id ? '编辑资产' : '新建资产'" width="640px"
+             :close-on-click-modal="false" :model-value="visible" :title="form.id ? '编辑资产' : '新建资产'" width="640px" append-to-body
              @update:model-value="emit('update:visible', $event)" @open="onOpen">
     <el-form ref="formRef" :model="form" :rules="rules" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2">
