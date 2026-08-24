@@ -36,7 +36,8 @@
                 <span class="text-gray-500 truncate">{{ job.title || row.title }}</span>
                 <span class="text-gray-400">{{ fmtDateTime(job.create_time) }}</span>
                 <div class="flex-1" />
-                <el-button v-if="job.status === 'done'" size="small" type="primary" link
+                <!-- has_file=false 为导入报告自动生成的导出记录（无实际文件），不提供下载 -->
+                <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link
                            @click="downloadJob(job)">下载</el-button>
                 <el-popconfirm v-if="job.status !== 'pending' && job.status !== 'running'"
                                title="确认删除该导出记录？文件将一并移除" width="240"

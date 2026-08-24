@@ -50,6 +50,9 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN retest_vul_snapshot JSON"))
         if report_cols and "actual_mandays" not in report_cols:
             await conn.execute(text("ALTER TABLE reports ADD COLUMN actual_mandays REAL NOT NULL DEFAULT 0"))
+        # 被测测试账号（导入报告解析/导出模板测试目标表第5行，Alembic 同步）
+        if report_cols and "test_account" not in report_cols:
+            await conn.execute(text("ALTER TABLE reports ADD COLUMN test_account VARCHAR(255) NOT NULL DEFAULT ''"))
         # 需求6：报告状态机简化为 草稿/已定稿 两态，存量「已闭环 completed」迁移为已定稿 final（幂等）
         await conn.execute(text("UPDATE reports SET status = 'final' WHERE status = 'completed'"))
         plan_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(testing_plans)"))).fetchall()}

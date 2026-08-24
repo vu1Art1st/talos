@@ -1,7 +1,7 @@
 """报告域模型：章节、报告元信息、导出任务与相似性检查。"""
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .common import HtmlStr, ReportBrief
 
@@ -29,6 +29,7 @@ class ReportMetaIn(BaseModel):
     test_start: str = ""
     test_end: str = ""
     target_ip: str = ""
+    test_account: str = ""  # 被测测试账号（导出模板测试目标表第 5 行）
     status: str = "draft"
 
 
@@ -77,6 +78,23 @@ class ExportJobOut(BaseModel):
     toc_auto_updated: bool = False  # 目录域是否已自动更新（当前恒为 False，前端据此提示手动更新域）
     create_time: datetime | None = None
     finish_time: datetime | None = None
+    has_file: bool = False  # 是否存在可下载的导出文件（导入自动生成的记录无实际文件）
+
+    @model_validator(mode="before")
+    @classmethod
+    def _derive_has_file(cls, data):
+        # 兼容 from_attributes 的 ORM 实例与普通 dict 两种输入
+        if isinstance(data, BaseModel):
+            source = data.__dict__
+        elif isinstance(data, dict):
+            source = data
+        else:
+            source = getattr(data, "__dict__", {}) or {}
+        has_file = bool(source.get("file_path"))
+        if isinstance(data, dict):
+            data["has_file"] = has_file
+            return data
+        return {**source, "has_file": has_file}
 
 
 class ExportCheckIn(BaseModel):

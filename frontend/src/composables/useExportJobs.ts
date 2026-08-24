@@ -16,6 +16,8 @@ export interface ExportJob {
   file_size?: number | null
   file_name?: string | null
   create_time?: string
+  finish_time?: string
+  has_file?: boolean
 }
 
 export function useExportJobs() {

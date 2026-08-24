@@ -39,6 +39,9 @@
             <el-form-item label="被测系统IP">
               <el-input v-model="report.target_ip" placeholder="导出时填入测试目标表" @input="markDirty" />
             </el-form-item>
+            <el-form-item label="被测测试账号">
+              <el-input v-model="report.test_account" placeholder="导出时填入测试目标表" @input="markDirty" />
+            </el-form-item>
           </div>
         </el-form>
       </el-card>
@@ -174,9 +177,10 @@
               <el-icon :color="exportJobColor('failed')"><WarningFilled /></el-icon>
             </el-tooltip>
             <div class="flex-1" />
-            <el-button v-if="job.status === 'done'" size="small" type="primary" link
+            <!-- has_file=false 为导入报告自动生成的导出记录（无实际文件），仅展示状态与时间，不提供预览/下载 -->
+            <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link
                        @click="previewRef?.open(`/reports/exports/${job.id}/preview`, job.title || report.title)">预览</el-button>
-            <el-button v-if="job.status === 'done'" size="small" type="primary" link class="!ml-0" @click="download(job)">下载</el-button>
+            <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link class="!ml-0" @click="download(job)">下载</el-button>
             <el-popconfirm v-if="job.status === 'done' || job.status === 'failed'"
                            title="确认删除该导出记录及报告文件？" @confirm="removeJob(job)">
               <template #reference>

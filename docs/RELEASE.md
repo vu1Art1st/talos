@@ -649,6 +649,25 @@
 
 ---
 
+## [2.4.0] - 2026-08-25
+
+报告被测测试账号、测试周期与参测人员解析回填，导入自动生成报告同步导出文件。
+
+### 新增
+
+- **报告被测测试账号**（`backend/app/models/report.py`、`schemas/report.py`、迁移 `d0e1f2a3b4c5_add_report_test_account.py`、`frontend/src/views/ReportEditor.vue`）：`reports` 新增 `test_account` 字段，导入时从「测试目标」表第 5 行解析回填、报告编辑页可展示编辑，导出模板「测试目标」表第 5 行使用；`db.py` 轻量迁移同步加列
+- **测试周期与参测人员解析**（`backend/app/services/docx_parser.py`）：新增 `_parse_schedule_table` 解析「时间与人员」表，回填 `test_start`/`test_end` 与参测人员姓名；`_parse_target_table` 补 `test_account`
+- **参测人员关联工单**（`backend/app/services/import_service.py`）：`sync_plan_testers` 把导入报告参测人员姓名按 realname/username 映射系统账号并关联到工单测试人员（按 id 去重）
+- **导入自动导出文件**（`backend/app/services/import_service.py` + `backend/app/api/v1/imports.py`）：导入自动生成的报告同步生成 docx 文件并记录导出任务（可下载），时间取报告标题日期固定 14:00；导入完成刷新关联工单实际人天（`plan_service.refresh_mandays`）
+- **资产 URL 去重合并**（`backend/app/services/import_service.py`）：被测系统 URL 按换行/分号/逗号/空白拆分，`_is_internal_url` 判定内网后去重合并进资产 `internal_urls`
+- **导出任务可下载标识**（`backend/app/schemas/report.py`）：`ExportJobOut.has_file` 派生字段（存在 `file_path` 为真），前端仅在 `has_file` 时提供预览/下载（`ReportList.vue`、`useExportJobs.ts`）
+
+### 测试
+
+- `backend/tests/test_api.py`、`test_parser.py`、`test_report_builder.py` 适配 `test_account`/时间与人员表解析；`ImportPreview.vue` 适配导入自动导出
+
+---
+
 ## [Unreleased]
 
 ### 新增

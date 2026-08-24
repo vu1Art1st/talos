@@ -1,5 +1,6 @@
 import logging
 import uuid
+from datetime import datetime as _dt, time as _dt_time
 from io import BytesIO
 from urllib.parse import quote
 
@@ -14,7 +15,7 @@ from app.core.config import settings
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import Asset, ImportBatch, ImportRecord, Report, TestingPlan, User
+from app.models import Asset, ExportJob, ImportBatch, ImportRecord, Report, TestingPlan, User
 from app.schemas import (
     ImportBatchOut,
     ImportConfirmIn,
@@ -22,7 +23,7 @@ from app.schemas import (
     ImportRecordUpdateIn,
     Page,
 )
-from app.services import import_service
+from app.services import import_service, plan_service
 from app.services.audit_service import audit
 from app.services.docx_parser import build_import_template
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
@@ -214,6 +215,20 @@ async def confirm_batch(
     await import_service.finalize_confirm(
         session, batch, plan, report, report_auto_created, new_vul_ids, user,
     )
+    # 导入自动生成的报告：同步生成 docx 文件并记录导出任务（可下载），
+    # 时间取报告标题日期固定 14:00（无 report_date 则留 DB default 当前时间）。
+    if report_auto_created and report is not None:
+        auto_time = None
+        report_date = (batch_meta.get("report_date") or "").strip()
+        if report_date:
+            try:
+                auto_time = _dt.combine(_dt.strptime(report_date, "%Y-%m-%d").date(), _dt_time(14, 0))
+            except ValueError:
+                auto_time = None
+        await import_service.auto_export_report(session, report, plan, user, auto_time)
+    # 报告实际人天已按测试周期计算，同步刷新关联工单的实际人天（仅纳入初测报告）
+    if plan is not None and not is_retest:
+        await plan_service.refresh_mandays(session, plan.id)
     await session.commit()
     await audit(session, request, "import_confirm", user, {
         "target": f"imports/{batch_id}", "created": created,

@@ -6,6 +6,7 @@
 """
 import copy
 import html as _html_mod
+import ipaddress
 import re
 from datetime import datetime
 from pathlib import Path
@@ -606,6 +607,15 @@ def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]
     return records
 
 
+def _is_ip_literal(host: str) -> bool:
+    """判断 hostname 是否为纯 IP（IPv4/IPv6）；纯 IP 不计入被测系统域名。"""
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
+
+
 def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datetime) -> None:
     table = doc.tables[1]
     records = _version_records(meta, now, vulns)
@@ -633,8 +643,11 @@ def _fill_target_table(
     # 为空时回退沿「漏洞→资产」聚合的URL，兼容无计划/未维护工单的报告
     if plan_urls:
         urls = [u for u in dict.fromkeys(plan_urls) if u]
+    # 被测系统域名：仅保留真实域名，纯 IP（IPv4/IPv6）的 hostname 不展示
     domains = list(dict.fromkeys(
-        h for u in urls if (h := urlparse(u if "://" in u else f"http://{u}").hostname)
+        h for u in urls
+        if (h := urlparse(u if "://" in u else f"http://{u}").hostname)
+        and not _is_ip_literal(h)
     ))
     system_names = list(dict.fromkeys(a.get("name", "") for a in assets if a.get("name")))
 
@@ -642,7 +655,7 @@ def _fill_target_table(
     _set_cell_text(table.rows[1].cells[1], "\n".join(urls))
     _set_cell_text(table.rows[2].cells[1], "\n".join(domains))
     _set_cell_text(table.rows[3].cells[1], meta.get("target_ip", ""))
-    # rows[4] 被测测试账号：系统无对应数据，留空由人工补充
+    _set_cell_text(table.rows[4].cells[1], meta.get("test_account", ""))
 
 
 def _fill_schedule_table(doc: Document, meta: dict) -> None:
@@ -952,7 +965,8 @@ def build_report_docx(
         raise FileNotFoundError(f"报告模板不存在: {template}")
 
     doc = Document(str(template))
-    now = tznow()
+    # 报告时间：meta.report_time（导入报告=标题日期）优先，缺失时用当前时间（手动导出）
+    now = meta.get("report_time") or tznow()
 
     _fill_cover(doc, meta, now)
     _fill_applicability(doc, meta)

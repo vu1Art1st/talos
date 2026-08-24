@@ -100,6 +100,7 @@ async def export_report_task(ctx, job_id: int) -> None:
                 "test_start": report.test_start,
                 "test_end": report.test_end,
                 "target_ip": report.target_ip,
+                "test_account": report.test_account,
                 "status": report.status,
                 # 复测判定口径与 plan_service.is_retest_report_title 一致：标题含「复测」
                 "is_retest": "复测" in (report.title or ""),
@@ -150,7 +151,9 @@ async def export_report_task(ctx, job_id: int) -> None:
                 export_date_str = now().strftime("%Y-%m-%d")
                 for pr in plan_reports:
                     if pr.id == report.id:
-                        rdate = export_date_str  # 当前报告取本次导出时间
+                        # 当前报告优先取该报告最近一次成功导出的时间（含导入时自动生成的记录，
+                        # 其日期=报告标题日期 14:00），使导入报告的版本记录显示报告自身日期而非本次导出时间
+                        rdate = last_done.get(pr.id) or export_date_str
                     elif pr.id in last_done:
                         rdate = last_done[pr.id]
                     elif pr.create_time is not None:

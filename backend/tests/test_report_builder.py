@@ -162,8 +162,8 @@ def test_target_table_plan_urls_priority(tmp_path):
     table2 = doc2.tables[4]
     assert table2.rows[1].cells[1].text.strip() == "\n".join(
         ["https://asset.example.com", "http://10.20.1.10:8080"])
-    # 域名格由全部URL推导 hostname（含内网IP）
-    assert table2.rows[2].cells[1].text.strip() == "asset.example.com\n10.20.1.10"
+    # 域名格由全部URL推导 hostname；纯 IP（10.20.1.10）不计入域名
+    assert table2.rows[2].cells[1].text.strip() == "asset.example.com"
 
 
 def test_cover_second_line_is_project_name(tmp_path):
@@ -452,3 +452,39 @@ def test_localize_images_keeps_img_tag_and_matches_real_file(tmp_path, monkeypat
     assert out.endswith(">"), out
     local_src = out[out.find('src="') + 5:out.rfind('"')]
     assert Path(local_src).is_file(), out
+
+
+# ---------- 测试目标表：被测系统域名过滤纯 IP ----------
+def test_target_table_domains_filter_ip(tmp_path):
+    """被测系统域名：URL 的 hostname 为纯 IP 时不展示，仅保留真实域名。"""
+    assets = [{
+        "name": "纯IP系统",
+        "public_urls": [],
+        "internal_urls": ["https://www.example.com", "10.20.1.10", "https://oa.example.com"],
+    }]
+    doc = _build(tmp_path, assets=assets)
+    table4 = doc.tables[4]
+    assert "10.20.1.10" in table4.rows[1].cells[1].text  # 被测系统URL仍含 IP
+    assert table4.rows[2].cells[1].text.strip() == "www.example.com\noa.example.com"
+
+
+# ---------- 封面/版本记录日期：优先取报告时间 ----------
+def test_cover_and_version_date_use_report_time(tmp_path):
+    """封面日期与版本变更记录日期：meta.report_time 优先（导入报告=标题日期），而非当前时间。"""
+    from datetime import datetime
+
+    meta = {
+        "project_name": "统一门户系统",
+        "report_time": datetime(2026, 7, 1, 14, 0),
+        "author": "测试作者",
+        "testers": [],
+        "report_records": [{"is_retest": False, "creator_name": "测试作者", "date": "2026-07-01"}],
+    }
+    doc = _build(tmp_path, meta=meta)
+    # 封面日期：2026年07月01日
+    texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    assert any("2026年07月01日" in t for t in texts), texts
+    # 版本变更记录 V1.0 日期
+    table1 = doc.tables[1]
+    cells = [c.text.strip() for c in table1.rows[2].cells]
+    assert cells[0] == "2026-07-01", cells

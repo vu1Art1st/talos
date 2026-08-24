@@ -1,6 +1,7 @@
 <template>
   <div class="space-y-4">
     <el-card shadow="never" class="!rounded-lg">
+      <!-- 第一行：操作行（返回 / 标题 / 批次信息 / 确认按钮） -->
       <div class="flex flex-wrap items-center gap-3">
         <el-button @click="router.push('/reports/imports')">
           <el-icon class="mr-1"><Back /></el-icon>返回
@@ -18,19 +19,24 @@
           <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
         </template>
         <div class="flex-1" />
-        <el-select v-model="planId" filterable clearable placeholder="关联渗透测试工单（可选）" class="!w-52">
-          <el-option v-for="p in plans" :key="p.id"
-                     :label="p.plan_name ? `${p.plan_name}（${p.system_name}）` : p.system_name" :value="p.id" />
-        </el-select>
-        <el-select v-model="assetId" filterable clearable placeholder="入库到已有资产（可选）" class="!w-52">
-          <el-option v-for="a in assets" :key="a.id" :label="a.name" :value="a.id" />
-        </el-select>
-        <el-select v-model="reportId" filterable clearable placeholder="关联到报告（可选）" class="!w-52">
-          <el-option v-for="r in reports" :key="r.id" :label="r.title" :value="r.id" />
-        </el-select>
         <el-button type="primary" :disabled="!selected.length" @click="confirm">
           确认入库（{{ selected.length }} 条）
         </el-button>
+      </div>
+      <!-- 第二行：三个关联选框独立成行（方案A双行布局，14寸屏不串行） -->
+      <div class="flex flex-wrap items-center gap-3 mt-3">
+        <el-select v-model="planId" filterable clearable placeholder="关联渗透测试工单（可选）"
+                   class="flex-1 min-w-40" size="small">
+          <el-option v-for="p in plans" :key="p.id" :label="planLabel(p)" :value="p.id" />
+        </el-select>
+        <el-select v-model="assetId" filterable clearable placeholder="入库到已有资产（可选）"
+                   class="flex-1 min-w-40" size="small">
+          <el-option v-for="a in filteredAssets" :key="a.id" :label="a.name" :value="a.id" />
+        </el-select>
+        <el-select v-model="reportId" filterable clearable placeholder="关联到报告（可选）"
+                   class="flex-1 min-w-40" size="small">
+          <el-option v-for="r in reports" :key="r.id" :label="r.title" :value="r.id" />
+        </el-select>
       </div>
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
         报告格式确认入库时：已选择的渗透测试工单将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
@@ -110,7 +116,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
@@ -136,6 +142,42 @@ const checked = reactive<Record<number, boolean>>({})
 const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
 )
+
+// 工单下拉展示「工单ID-计划名称-测试系统」，空值省略对应段
+function planLabel(p: any) {
+  return [p.ticket_id, p.plan_name, p.system_name].filter(Boolean).join('-')
+}
+
+// 关联工单后资产候选：工单 asset_ids 优先 → system_name 匹配 → 全量（允许手动选）
+const filteredAssets = computed(() => {
+  const plan = plans.value.find((p) => p.id === planId.value)
+  if (plan?.asset_ids?.length) {
+    const ids = new Set(plan.asset_ids)
+    return assets.value.filter((a) => ids.has(a.id))
+  }
+  if (plan?.system_name) {
+    const matched = assets.value.filter((a) => a.name === plan.system_name)
+    if (matched.length) return matched
+  }
+  return assets.value
+})
+
+// 选定工单后自动联动入库资产：工单 asset_ids 首个 → 测试系统名匹配首个 → 置空（不自动新建）
+watch(planId, (val) => {
+  const plan = plans.value.find((p) => p.id === val)
+  if (!plan) {
+    assetId.value = null
+    return
+  }
+  if (plan.asset_ids?.length) {
+    const first = assets.value.find((a) => a.id === plan.asset_ids[0])
+    assetId.value = first ? first.id : (assets.value.find((a) => a.name === plan.system_name)?.id ?? null)
+  } else {
+    assetId.value = plan.system_name
+      ? (assets.value.find((a) => a.name === plan.system_name)?.id ?? null)
+      : null
+  }
+})
 
 async function load() {
   const { data } = await client.get(`/imports/${route.params.id}`)

@@ -4,13 +4,21 @@
 本模块按「解析校验 → 报告编排 → 知识库回填 → 去重合并/建漏洞 → 收尾」承接全部业务逻辑。
 事务统一由路由层 commit，本模块只做 flush（保证自增 ID 可用）。
 """
+import asyncio
+import ipaddress
+import re
+from datetime import datetime as _dt, time as _dt_time
+from urllib.parse import urlparse
+
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.timeutil import now
+from app.core.config import settings
+from app.core.timeutil import mandays_between, now
 from app.models import (
     Asset,
+    ExportJob,
     ImportBatch,
     ImportRecord,
     KnowledgeEntry,
@@ -22,6 +30,7 @@ from app.models import (
     VulLog,
 )
 from app.services import plan_service, vuln_service
+from app.services.report_builder import build_report_docx
 from app.services.report_html import vuln_section_html
 
 
@@ -41,6 +50,28 @@ async def load_parsed_records(
     if not records:
         raise HTTPException(400, "没有可入库的记录（仅解析成功且未入库的记录可确认）")
     return list(records)
+
+
+async def sync_plan_testers(session: AsyncSession, plan: TestingPlan, testers: list[str]) -> None:
+    """把导入报告的参测人员（姓名）映射为系统账号并关联到工单测试人员。
+
+    匹配优先级：真实姓名 realname → 用户名 username；未命中的姓名忽略（保留原文，
+    不影响报告作者拼接，仅无法关联工单认领）。已关联的账号按 id 去重保留。
+    """
+    names = [t.strip() for t in (testers or []) if (t or "").strip()]
+    if not names:
+        return
+    users = (
+        await session.execute(
+            select(User).where(or_(User.realname.in_(names), User.username.in_(names)))
+        )
+    ).scalars().all()
+    if not users:
+        return
+    existing_ids = {u.id for u in plan.testers}
+    new_users = [u for u in users if u.id not in existing_ids]
+    if new_users:
+        plan.testers.extend(new_users)
 
 
 async def resolve_report_plan(
@@ -70,8 +101,10 @@ async def resolve_report_plan(
         return None, None
 
     await session.flush()  # 确保 plan.id 可用于复测轮次与报告关联
-    # 复测轮次为惰性关系，新建计划需显式加载后才能在同步逻辑中访问
-    await session.refresh(plan, attribute_names=["retest_rounds"])
+    # 惰性关系（复测轮次/测试人员）新建计划需显式加载后才能在同步逻辑中访问，否则触发同步 lazy load 抛 MissingGreenlet
+    await session.refresh(plan, attribute_names=["retest_rounds", "testers"])
+    # 参测人员（docx 时间与人员表）→ 系统账号映射，关联为工单测试人员
+    await sync_plan_testers(session, plan, batch_meta.get("testers") or [])
     report_date = batch_meta.get("report_date") or ""
     round_row = None
     if is_retest:
@@ -90,11 +123,30 @@ async def resolve_report_plan(
     return plan, round_row
 
 
+def _split_urls(raw: str) -> list[str]:
+    """拆分被测系统URL字段：按换行 / 分号 / 逗号 / 空白分隔为多条 URL。"""
+    parts = re.split(r"[\n\r;；,，\s]+", raw or "")
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _is_internal_url(url: str) -> bool:
+    """内网判定：主机为内网 / 回环 / 链路本地地址；域名（无法解析为 IP）视为公网。"""
+    host = urlparse(url if "://" in url else f"http://{url}").hostname
+    if not host:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
 async def resolve_report_asset(
     session: AsyncSession, batch: ImportBatch, plan: TestingPlan, asset: Asset | None,
 ) -> Asset | None:
     """报告格式批次的资产编排：按系统名匹配/自动创建（补被测 URL/IP），
-    无系统名但计划已关联资产时默认入库到首个关联资产；最后把资产关联到计划。"""
+    无系统名但计划已关联资产时默认入库到首个关联资产；
+    所有路径都会把被测系统 URL 去重合并进资产 internal_urls；最后把资产关联到计划。"""
     batch_meta = batch.meta_json or {}
     system_name = (batch_meta.get("system_name") or "").strip()
     if asset is None:
@@ -102,7 +154,6 @@ async def resolve_report_asset(
             asset = (
                 await session.execute(select(Asset).where(Asset.name == system_name))
             ).scalars().first()
-            target_url = (batch_meta.get("target_url") or "").strip()
             target_ip = (batch_meta.get("target_ip") or "").strip()
             if asset is None:
                 remark = "导入报告自动创建"
@@ -110,17 +161,26 @@ async def resolve_report_asset(
                     remark += f"；被测IP：{target_ip}"
                 asset = Asset(name=system_name, remark=remark)
                 session.add(asset)
-            if target_url:
-                urls = list(asset.internal_urls or [])
-                if target_url not in urls:
-                    urls.append(target_url)
-                    asset.internal_urls = urls
             await session.flush()
         elif plan.asset_ids:
             # 无系统名但计划已关联资产时，默认入库到首个关联资产
             asset = await session.get(Asset, plan.asset_ids[0])
-    # 本次入库的资产自动关联到计划，保持「资产关联前置至计划」的一致性
+    # 被测系统 URL 自动更新到资产（拆分多条、按公网/内网分类去重）；显式指定资产时同样生效。
+    # 公网域名/公网IP → public_urls（tag=10 互联网）；内网 IP → internal_urls
     if asset is not None:
+        for u in _split_urls(batch_meta.get("target_url") or ""):
+            if _is_internal_url(u):
+                urls = list(asset.internal_urls or [])
+                if u not in urls:
+                    urls.append(u)
+                    asset.internal_urls = urls
+            else:
+                publics = list(asset.public_urls or [])
+                seen = {p.get("url") for p in publics if isinstance(p, dict)}
+                if u not in seen:
+                    publics.append({"url": u, "tag": 10})  # URL_TAG 10=互联网
+                    asset.public_urls = publics
+        # 本次入库的资产自动关联到计划，保持「资产关联前置至计划」的一致性
         plan_asset_ids = list(plan.asset_ids or [])
         if asset.id not in plan_asset_ids:
             plan_asset_ids.append(asset.id)
@@ -138,13 +198,36 @@ async def ensure_report_and_bind_round(
     batch_meta = batch.meta_json or {}
     auto_created = False
     if report is None:
+        # 参测人员优先取 docx「时间与人员」表（meta.testers），无则回退工单测试人员姓名；
+        # 与前端报告编辑多选逻辑「、」拼接一致
+        meta_testers = [t for t in (batch_meta.get("testers") or []) if (t or "").strip()]
+        author = "、".join(meta_testers) if meta_testers else (
+            "、".join(t.realname or t.username for t in plan.testers) if plan.testers else ""
+        )
+        # 报告时间取报告标题日期（report_date），小时固定 14:00；无有效日期时由 DB default 落当前时间
+        create_time = None
+        report_date = (batch_meta.get("report_date") or "").strip()
+        if report_date:
+            try:
+                create_time = _dt.combine(_dt.strptime(report_date, "%Y-%m-%d").date(), _dt_time(14, 0))
+            except ValueError:
+                create_time = None
+        test_start = (batch_meta.get("test_start") or "").strip()
+        test_end = (batch_meta.get("test_end") or "").strip()
+        report_kwargs = {"create_time": create_time} if create_time is not None else {}
         report = Report(
             title=batch.filename.rsplit(".", 1)[0],
             project_name=(batch_meta.get("system_name") or "").strip() or plan.system_name,
             target_ip=(batch_meta.get("target_ip") or ""),
+            test_account=(batch_meta.get("test_account") or "").strip(),
             testing_plan_id=plan.id,
+            author=author,
+            test_start=test_start,
+            test_end=test_end,
+            actual_mandays=mandays_between(test_start, test_end),
             creator_id=user.id,
             status="draft",  # 需求6：新生成报告一律为草稿，定稿由导出 Word 驱动
+            **report_kwargs,
         )
         session.add(report)
         await session.flush()
@@ -326,3 +409,152 @@ async def finalize_confirm(
     ).scalar_one()
     if remaining == 0:
         batch.status = "confirmed"
+
+
+async def auto_export_report(
+    session: AsyncSession, report: Report, plan: TestingPlan | None,
+    user: User, auto_time: _dt | None,
+) -> None:
+    """导入报告确认入库后自动生成 docx 文件并记录导出任务（可下载）。
+
+    构建 meta 与后台导出任务口径一致（版本变更记录 / 参测人员 / 测试账号等），
+    时间取报告标题日期固定 14:00；文件同步生成，不依赖 arq 队列（开发免队列也生效）。
+    导入新报告无实际改动，导出成功不会改变报告指纹以外的内容，仅导出版本号 +1。
+    """
+    meta = {
+        "title": report.title,
+        "project_name": report.project_name,
+        "customer": report.customer,
+        "author": report.author,
+        "test_start": report.test_start,
+        "test_end": report.test_end,
+        "target_ip": report.target_ip,
+        "test_account": report.test_account,
+        "status": report.status,
+        "is_retest": "复测" in (report.title or ""),
+        # 报告时间（导入报告=标题日期 14:00）：封面日期与版本变更记录均以它为基准，而非当前时间
+        "report_time": report.create_time,
+    }
+    if user is not None:
+        meta["generator"] = user.realname or user.username or ""
+    testers: list[str] = []
+    report_records: list[dict] = []
+    plan_urls: list[str] = []
+    if plan is not None:
+        for u in plan.testers:
+            name = (u.realname or u.username or "").strip()
+            if name and name not in testers:
+                testers.append(name)
+        plan_urls = [u for u in (plan.target_urls or []) if u]
+        plan_reports = (
+            (
+                await session.execute(
+                    select(Report)
+                    .where(Report.testing_plan_id == plan.id)
+                    .order_by(Report.create_time, Report.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        report_ids = [pr.id for pr in plan_reports]
+        last_done: dict[int, str] = {}
+        if report_ids:
+            rows = (
+                await session.execute(
+                    select(ExportJob.report_id, func.max(ExportJob.finish_time))
+                    .where(
+                        ExportJob.report_id.in_(report_ids),
+                        ExportJob.status == "done",
+                    )
+                    .group_by(ExportJob.report_id)
+                )
+            ).all()
+            for rid, ft in rows:
+                if ft is not None:
+                    last_done[rid] = ft.strftime("%Y-%m-%d")
+        export_date_str = now().strftime("%Y-%m-%d")
+        for pr in plan_reports:
+            if pr.id == report.id:
+                # 当前报告优先取最近成功导出时间；无则取报告自身日期（导入报告=标题日期），
+                # 保证自动导出的版本记录显示报告日期而非当前时间
+                rdate = last_done.get(pr.id) or (
+                    pr.create_time.strftime("%Y-%m-%d") if pr.create_time is not None else ""
+                ) or export_date_str
+            elif pr.id in last_done:
+                rdate = last_done[pr.id]
+            elif pr.create_time is not None:
+                rdate = pr.create_time.strftime("%Y-%m-%d")
+            else:
+                rdate = ""
+            creator_name = ""
+            if pr.creator_id is not None:
+                cu = await session.get(User, pr.creator_id)
+                if cu is not None:
+                    creator_name = cu.realname or cu.username or ""
+            if not creator_name:
+                creator_name = pr.author or ""
+            report_records.append({
+                "is_retest": "复测" in (pr.title or ""),
+                "creator_name": creator_name,
+                "date": rdate,
+            })
+    meta["testers"] = testers
+    meta["report_records"] = report_records
+
+    # 漏洞章节在新报告上为临时对象，flush 后重查确保导出内容完整
+    await session.flush()
+    await session.refresh(report, attribute_names=["sections"])
+    sections = [
+        {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
+        for s in report.sections
+    ]
+    vul_ids = [s.vul_id for s in report.sections if s.vul_id]
+    vulns: list[dict] = []
+    assets: list[dict] = []
+    if vul_ids:
+        rows = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
+        by_id = {v.id: v for v in rows}
+        vulns = [
+            {
+                "id": v.id, "title": v.title, "vul_type": v.vul_type, "level": v.level,
+                "status": v.status, "affected_url": v.affected_url, "is_retest": v.is_retest,
+                "retest_html": v.retest_html,
+            }
+            for vid in vul_ids if (v := by_id.get(vid))
+        ]
+        seen: set[int] = set()
+        for v in rows:
+            for a in v.assets:
+                if a.id in seen:
+                    continue
+                seen.add(a.id)
+                assets.append({
+                    "name": a.name,
+                    "public_urls": a.public_urls or [],
+                    "internal_urls": a.internal_urls or [],
+                })
+
+    export_dir = settings.storage_sub("exports")
+    stamp = now().strftime("%Y%m%d%H%M%S")
+    docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
+    await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls)
+
+    # 导出版本号 +1（报告状态保持草稿，定稿仍由人工导出 Word 驱动）；
+    # flush+refresh 后以最终状态写指纹，供下次导出去重判断
+    report.version += 1
+    await session.flush()
+    await session.refresh(report)
+    job = ExportJob(
+        report_id=report.id,
+        title=report.title,
+        fmt="docx",
+        status="done",
+        file_path=docx_path,
+        creator_id=user.id,
+        report_snapshot=report.fingerprint(),
+    )
+    if auto_time is not None:
+        job.create_time = auto_time
+        job.finish_time = auto_time
+    session.add(job)

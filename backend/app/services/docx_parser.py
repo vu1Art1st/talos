@@ -247,7 +247,7 @@ def _parse_cover(doc: Document) -> dict:
 
 
 def _parse_target_table(doc: Document) -> dict:
-    """「测试目标」表（首列含 业务系统名称）：系统名 / 被测URL / 被测IP。"""
+    """「测试目标」表（首列含 业务系统名称）：系统名 / 被测URL / 被测IP / 被测测试账号。"""
     for table in doc.tables:
         labels = {}
         for row in table.rows:
@@ -259,8 +259,40 @@ def _parse_target_table(doc: Document) -> dict:
                 "system_name": labels.get("业务系统名称", ""),
                 "target_url": labels.get("被测系统URL", ""),
                 "target_ip": labels.get("被测系统IP", ""),
+                "test_account": labels.get("被测测试账号", ""),
             }
     return {}
+
+
+def _parse_schedule_table(doc: Document) -> dict:
+    """「时间与人员」表（模板表5）：起始/结束时间 + 参测人员姓名。
+
+    模板结构（含导出报告）：row0 测试工作时间段；row1 起始时间|<值>|结束时间|<值>；
+    row3 表头 参测人员|所属部门|人员角色|人员分工；row4+ 各参测人员姓名列。
+    解析结果用于回填报告测试周期与工单测试人员（按姓名映射系统账号）。
+    """
+    meta = {"test_start": "", "test_end": "", "testers": []}
+    for table in doc.tables:
+        rows = table.rows
+        if len(rows) < 5:
+            continue
+        header = [_norm_label(c.text) for c in rows[3].cells]
+        if "参测人员" not in header:
+            continue
+        for row in rows:
+            # 起始/结束时间位于同一行的不同列（如 起始时间|<值>|结束时间|<值>），按标签逐列定位取值
+            cells = [_norm_label(c.text) for c in row.cells]
+            for i, label in enumerate(cells):
+                if label == "起始时间" and i + 1 < len(row.cells):
+                    meta["test_start"] = _cell_text(row.cells[i + 1]).strip()
+                elif label == "结束时间" and i + 1 < len(row.cells):
+                    meta["test_end"] = _cell_text(row.cells[i + 1]).strip()
+        for row in rows[4:]:
+            name = _cell_text(row.cells[0]).strip()
+            if name and name not in meta["testers"]:
+                meta["testers"].append(name)
+        break
+    return meta
 
 
 def _parse_summary_rows(table) -> list[dict]:
@@ -358,13 +390,15 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
     part = doc.part
     img_dir = Path(image_dir)
 
-    # meta：封面优先，文件名兜底，测试目标表补齐系统名与 URL/IP。
+    # meta：封面优先，文件名兜底，测试目标表补齐系统名与 URL/IP，
+    # 时间与人员表补齐测试周期与参测人员。
     # 封面/文件名系统名含乱码（U+FFFD）时视为无效，回退到下一数据源，保证能匹配现有工单
     meta = {"system_name": "", "report_date": "", "is_retest": False, "target_url": "", "target_ip": "",
-            "retest_round_seq": 0}
+            "test_account": "", "retest_round_seq": 0, "test_start": "", "test_end": "", "testers": []}
     from_name = parse_report_filename(filename or Path(file_path).name)
     cover = _parse_cover(doc)
     target = _parse_target_table(doc)
+    schedule = _parse_schedule_table(doc)
 
     def _clean(name: str) -> str:
         name = (name or "").strip()
@@ -378,6 +412,10 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
     meta["retest_round_seq"] = from_name.get("retest_round_seq", 0)
     meta["target_url"] = target.get("target_url", "")
     meta["target_ip"] = target.get("target_ip", "")
+    meta["test_account"] = target.get("test_account", "")
+    meta["test_start"] = schedule.get("test_start", "")
+    meta["test_end"] = schedule.get("test_end", "")
+    meta["testers"] = schedule.get("testers", [])
 
     # 切分「风险问题详情」下的 H3 漏洞章节
     sections: list[tuple[str, list]] = []

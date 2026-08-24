@@ -91,6 +91,8 @@ async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
         return
     if plan.actual_mandays_override:
         return
+    # 同一会话中 plan 可能已存在（复用实例不触发 selectin 预加载），显式刷新 reports 避免 MissingGreenlet
+    await session.refresh(plan, attribute_names=["reports"])
     first_test_reports = [
         r for r in plan.reports if not is_retest_report_title(r.title)
     ]

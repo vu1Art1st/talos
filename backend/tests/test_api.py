@@ -317,20 +317,36 @@ async def test_word_import_flow(client: AsyncClient, auth: dict):
 
 
 def _build_report_docx(system_name: str, target_url: str, target_ip: str, sections: list[tuple[str, str, str, bool]],
-                       status_texts: list[str] | None = None):
-    """构造平台报告格式 docx：测试目标表 + 风险问题汇总表 + 风险问题详情章节。
+                       status_texts: list[str] | None = None,
+                       testers: list[str] | None = None, test_start: str = "", test_end: str = "",
+                       test_account: str = ""):
+    """构造平台报告格式 docx：测试目标表 + 时间与人员表（可选）+ 风险问题汇总表 + 风险问题详情章节。
 
     sections: [(标题, 等级文本, 类型文本, 是否已修复)]
     status_texts: 可选，逐条覆盖汇总表「修复状态」文本（如「部分未修复」），默认已修复/未修复。
+    testers/test_start/test_end/test_account: 可选，构造「时间与人员」表与测试账号，
+        用于验证参测人员/测试周期/测试账号解析回填。
     """
     from docx import Document
 
     doc = Document()
     # 测试目标表
-    t = doc.add_table(rows=3, cols=2)
+    t = doc.add_table(rows=5, cols=2)
     t.rows[0].cells[0].text, t.rows[0].cells[1].text = "业务系统名称", system_name
     t.rows[1].cells[0].text, t.rows[1].cells[1].text = "被测系统URL", target_url
-    t.rows[2].cells[0].text, t.rows[2].cells[1].text = "被测系统IP", target_ip
+    t.rows[2].cells[0].text, t.rows[2].cells[1].text = "被测系统域名", ""
+    t.rows[3].cells[0].text, t.rows[3].cells[1].text = "被测系统IP", target_ip
+    t.rows[4].cells[0].text, t.rows[4].cells[1].text = "被测测试账号", test_account
+    # 时间与人员表（结构与解析器 _parse_schedule_table 匹配：表头在第4行，参测人员从第5行起）
+    if testers:
+        sche = doc.add_table(rows=4 + len(testers), cols=4)
+        sche.rows[0].cells[0].text = "测试工作时间段"
+        sche.rows[1].cells[0].text, sche.rows[1].cells[1].text = "起始时间", test_start
+        sche.rows[1].cells[2].text, sche.rows[1].cells[3].text = "结束时间", test_end
+        for i, h in enumerate(("参测人员", "所属部门", "人员角色", "人员分工")):
+            sche.rows[3].cells[i].text = h
+        for i, name in enumerate(testers):
+            sche.rows[4 + i].cells[0].text = name
     # 风险问题汇总表
     doc.add_heading("风险问题汇总", level=1)
     s = doc.add_table(rows=1 + len(sections), cols=4)
@@ -705,9 +721,9 @@ async def test_report_export_target_urls_from_plan(client: AsyncClient, auth: di
     resp = await client.get(f"/api/v1/reports/exports/{job_id}/download", headers=auth)
     doc = Document(BytesIO(resp.content))
     target_tbl = doc.tables[4]
-    # URL格取工单 target_urls，域名格由URL推导
+    # URL格取工单 target_urls，域名格由URL推导（纯 IP hostname 不计入域名）
     assert target_tbl.rows[1].cells[1].text.strip() == "https://target.example.com/app\nhttp://10.20.1.10:8080"
-    assert target_tbl.rows[2].cells[1].text.strip() == "target.example.com\n10.20.1.10"
+    assert target_tbl.rows[2].cells[1].text.strip() == "target.example.com"
 
 
 async def test_report_similarity_check(client: AsyncClient, auth: dict):
@@ -1132,6 +1148,188 @@ async def test_import_confirm_into_report(client: AsyncClient, auth: dict):
     # 入库漏洞自动进入修复中
     vul = (await client.get(f"/api/v1/vulns/{saved['sections'][0]['vul_id']}", headers=auth)).json()
     assert vul["status"] == 50
+
+
+async def test_import_report_author_from_testers(client: AsyncClient, auth: dict):
+    """显式关联渗透测试工单导入报告：自动创建的报告作者取自工单测试人员姓名。"""
+    system_name = "作者同步系统TA"
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": system_name, "test_type": "渗透测试"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    # admin 认领工单 → testers=[管理员]
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["testers"][0]["realname"] == "管理员"
+
+    doc = _build_report_docx(
+        system_name, "http://10.6.6.6/authorTA", "10.6.6.6",
+        sections=[("报告作者同步漏洞TA", "高危", "逻辑漏洞", False)],
+    )
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": ("20260728作者同步系统TA渗透测试报告.docx", buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    assert detail["batch"]["doc_kind"] == "report", detail
+    rec_ids = [r["id"] for r in detail["records"]]
+
+    resp = await client.post(
+        f"/api/v1/imports/{batch_id}/confirm", headers=auth,
+        json={"record_ids": rec_ids, "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] >= 1
+
+    # 自动创建的报告作者 = 工单测试人员姓名（「、」拼接）
+    resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
+    reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
+    assert reports, "未自动创建报告"
+    report = (await client.get(f"/api/v1/reports/{reports[0]['id']}", headers=auth)).json()
+    assert report["author"] == "管理员"
+    assert report["testing_plan_id"] == plan_id
+
+
+async def test_import_report_fields_and_auto_export(client: AsyncClient, auth: dict):
+    """导入报告含参测人员与测试周期：映射系统账号关联工单、回填报告字段
+    （作者/测试周期/测试账号/实际人天）、被测URL更新资产、报告时间取标题日期、
+    自动生成可下载的导出记录（时间=报告日期 14:00）。"""
+    # 创建参测人员对应系统账号（对应生产环境 admin/xna/xtz 三人场景）
+    for username, realname in (("xna", "许宁安"), ("xtz", "薛田泽")):
+        resp = await client.post(
+            "/api/v1/users", headers=auth,
+            json={"username": username, "password": "Tester@123", "realname": realname,
+                  "email": "", "phone": "", "is_active": True},
+        )
+        assert resp.status_code == 200, resp.text
+
+    system_name = "字段回填系统FB"
+    doc = _build_report_docx(
+        system_name, "http://10.7.7.7/fieldfb", "10.7.7.7",
+        sections=[("字段回填漏洞FB", "中危", "信息泄露", False)],
+        testers=["管理员", "许宁安", "薛田泽"], test_start="2026-06-30", test_end="2026-07-01",
+        test_account="admin/Admin@123",
+    )
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": ("20260701字段回填系统FB渗透测试报告.docx", buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    assert detail["batch"]["doc_kind"] == "report", detail
+    rec_ids = [r["id"] for r in detail["records"]]
+
+    resp = await client.post(
+        f"/api/v1/imports/{batch_id}/confirm", headers=auth,
+        json={"record_ids": rec_ids},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 自动创建的工单已按姓名关联参测人员账号（admin=管理员、xna=许宁安、xtz=薛田泽）
+    resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
+    reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
+    assert reports, "未自动创建报告"
+    report = (await client.get(f"/api/v1/reports/{reports[0]['id']}", headers=auth)).json()
+    plan = (await client.get(f"/api/v1/testing-plans/{report['testing_plan_id']}", headers=auth)).json()
+    assert {u["realname"] for u in plan["testers"]} == {"管理员", "许宁安", "薛田泽"}
+    assert {u["username"] for u in plan["testers"]} >= {"admin", "xna", "xtz"}
+
+    # 报告字段回填：作者 / 测试周期 / 测试账号 / 实际人天 / 报告时间（取标题日期 2026-07-01 14:00）
+    assert report["author"] == "管理员、许宁安、薛田泽"
+    assert report["test_start"] == "2026-06-30"
+    assert report["test_end"] == "2026-07-01"
+    assert report["test_account"] == "admin/Admin@123"
+    assert report["actual_mandays"] == 2  # 2026-06-30 ~ 2026-07-01
+    assert report["create_time"].startswith("2026-07-01T14:00")
+    # 自动导出成功：导出版本 +1；报告保持草稿（定稿仍由人工导出 Word 驱动）
+    assert report["version"] == 2
+    assert report["status"] == "draft"
+
+    # 工单实际人天同步刷新（仅纳入初测报告）
+    assert plan["actual_mandays"] == 2
+
+    # 被测系统 URL 自动更新到资产（internal_urls 去重）
+    resp = await client.get("/api/v1/assets", headers=auth, params={"search": system_name})
+    asset = [a for a in resp.json()["items"] if a["name"] == system_name][0]
+    assert "http://10.7.7.7/fieldfb" in asset["internal_urls"]
+
+    # 自动生成一条导出记录：时间=报告日期 14:00，含实际文件可下载
+    resp = await client.get(f"/api/v1/reports/{report['id']}/exports", headers=auth)
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 1, resp.text
+    job = resp.json()[0]
+    assert job["status"] == "done"
+    assert job["create_time"].startswith("2026-07-01T14:00")
+    assert job["finish_time"].startswith("2026-07-01T14:00")
+    assert job["has_file"] is True
+    dl = await client.get(f"/api/v1/reports/exports/{job['id']}/download", headers=auth)
+    assert dl.status_code == 200, dl.text
+    assert len(dl.content) > 0
+
+
+async def test_import_report_public_urls_and_doc_time(client: AsyncClient, auth: dict):
+    """多条被测系统 URL 分别录入资产（公网→public_urls、内网→internal_urls）；
+    下载的 docx 封面与版本变更记录时间与导入报告时间一致。"""
+    system_name = "多URL分类系统MU"
+    doc = _build_report_docx(
+        system_name, "https://www.a-mu.com\nhttps://www.b-mu.com\n10.30.30.30", "10.30.30.30",
+        sections=[("多URL漏洞MU", "中危", "信息泄露", False)],
+        testers=["管理员"], test_start="2026-07-10", test_end="2026-07-15",
+    )
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": ("20260715多URL分类系统MU渗透测试报告.docx", buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    rec_ids = [r["id"] for r in detail["records"]]
+    resp = await client.post(
+        f"/api/v1/imports/{batch_id}/confirm", headers=auth,
+        json={"record_ids": rec_ids},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 公网 URL 分别录入 public_urls（tag=10 互联网），内网 IP 录入 internal_urls
+    resp = await client.get("/api/v1/assets", headers=auth, params={"search": system_name})
+    asset = [a for a in resp.json()["items"] if a["name"] == system_name][0]
+    pub = {u["url"]: u["tag"] for u in (asset["public_urls"] or [])}
+    assert pub.get("https://www.a-mu.com") == 10
+    assert pub.get("https://www.b-mu.com") == 10
+    assert "10.30.30.30" in (asset["internal_urls"] or [])
+
+    # 下载自动导出的 docx：封面日期与版本变更记录 V1.0 日期均为导入报告时间 2026-07-15
+    resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
+    report = [r for r in resp.json()["items"] if r["project_name"] == system_name][0]
+    jobs = (await client.get(f"/api/v1/reports/{report['id']}/exports", headers=auth)).json()
+    assert len(jobs) == 1, jobs
+    dl = await client.get(f"/api/v1/reports/exports/{jobs[0]['id']}/download", headers=auth)
+    assert dl.status_code == 200, dl.text
+
+    from docx import Document
+
+    docx = Document(BytesIO(dl.content))
+    texts = [p.text.strip() for p in docx.paragraphs if p.text.strip()]
+    assert any("2026年07月15日" in t for t in texts), texts
+    cells = [c.text.strip() for c in docx.tables[1].rows[2].cells]
+    assert cells[0] == "2026-07-15", cells
 
 
 async def test_special_modules_crud(client: AsyncClient, auth: dict):

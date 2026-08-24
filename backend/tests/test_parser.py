@@ -167,6 +167,54 @@ def test_is_report_docx_on_template(tmp_path: Path):
     assert is_report_docx(Document(str(docx_file))) is False
 
 
+def test_parse_schedule_table():
+    """「时间与人员」表：提取测试周期与参测人员；普通文档不误解析。"""
+    from app.services.docx_parser import _parse_schedule_table
+
+    doc = Document()
+    t = doc.add_table(rows=7, cols=4)
+    t.rows[0].cells[0].text = "测试工作时间段"
+    t.rows[1].cells[0].text, t.rows[1].cells[1].text = "起始时间", "2026-06-30"
+    t.rows[1].cells[2].text, t.rows[1].cells[3].text = "结束时间", "2026-07-01"
+    for i, h in enumerate(("参测人员", "所属部门", "人员角色", "人员分工")):
+        t.rows[3].cells[i].text = h
+    for i, name in enumerate(("邢博宇", "许宁安", "薛田泽")):
+        t.rows[4 + i].cells[0].text = name
+    assert _parse_schedule_table(doc) == {
+        "test_start": "2026-06-30",
+        "test_end": "2026-07-01",
+        "testers": ["邢博宇", "许宁安", "薛田泽"],
+    }
+
+    # 无「时间与人员」表的普通文档返回空值
+    plain = Document()
+    plain.add_paragraph("普通文档")
+    assert _parse_schedule_table(plain) == {"test_start": "", "test_end": "", "testers": []}
+
+
+def test_parse_target_table():
+    """「测试目标」表：解析系统名 / 被测URL / 被测IP / 被测测试账号。"""
+    from app.services.docx_parser import _parse_target_table
+
+    doc = Document()
+    t = doc.add_table(rows=5, cols=2)
+    rows = (
+        ("业务系统名称", "综合办公系统"),
+        ("被测系统URL", "https://oa.example.com"),
+        ("被测系统域名", "oa.example.com"),
+        ("被测系统IP", "10.0.0.1"),
+        ("被测测试账号", "admin/Admin@123"),
+    )
+    for i, (label, value) in enumerate(rows):
+        t.rows[i].cells[0].text, t.rows[i].cells[1].text = label, value
+    assert _parse_target_table(doc) == {
+        "system_name": "综合办公系统",
+        "target_url": "https://oa.example.com",
+        "target_ip": "10.0.0.1",
+        "test_account": "admin/Admin@123",
+    }
+
+
 def test_parse_report_docx_sample(tmp_path: Path):
     """样例复测报告：meta 与漏洞记录解析。"""
     if not _SAMPLE_REPORT.exists():

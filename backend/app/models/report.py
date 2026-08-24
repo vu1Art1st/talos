@@ -20,6 +20,7 @@ class Report(Base):
     test_start: Mapped[str] = mapped_column(String(32), default="")
     test_end: Mapped[str] = mapped_column(String(32), default="")
     target_ip: Mapped[str] = mapped_column(String(255), default="")  # 被测系统 IP，导出模板测试目标表使用
+    test_account: Mapped[str] = mapped_column(String(255), default="")  # 被测测试账号（导出模板测试目标表第5行）
     actual_mandays: Mapped[float] = mapped_column(Float, default=0)  # 实际人天（自动计算：结束日期 - 开始日期）
     status: Mapped[str] = mapped_column(String(16), default="draft")  # draft / final / completed
     version: Mapped[int] = mapped_column(Integer, default=1)  # 导出版本：每次导出成功 +1
