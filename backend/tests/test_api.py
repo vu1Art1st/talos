@@ -1261,6 +1261,11 @@ async def test_import_report_fields_and_auto_export(client: AsyncClient, auth: d
     # 工单实际人天同步刷新（仅纳入初测报告）
     assert plan["actual_mandays"] == 2
 
+    # 漏洞提交时间 = 报告时间（标题日期 14:00），保证按月统计口径一致
+    resp = await client.get("/api/v1/vulns", headers=auth, params={"search": "字段回填漏洞FB"})
+    vul = resp.json()["items"][0]
+    assert vul["submit_time"].startswith("2026-07-01T14:00"), vul["submit_time"]
+
     # 被测系统 URL 自动更新到资产（internal_urls 去重）
     resp = await client.get("/api/v1/assets", headers=auth, params={"search": system_name})
     asset = [a for a in resp.json()["items"] if a["name"] == system_name][0]

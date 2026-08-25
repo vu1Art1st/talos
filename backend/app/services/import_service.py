@@ -312,9 +312,12 @@ def update_vul_from_retest(
 def create_vul_from_record(
     rec: ImportRecord, batch: ImportBatch, plan: TestingPlan | None, asset: Asset | None,
     user: User, description_html: str, solution_html: str, is_retest: bool,
+    submit_time: _dt | None = None,
 ) -> Vul:
     """由解析记录新建漏洞：来源固定为「渗透测试工单」（source=0 展示层派生），
-    关联计划/资产并按报告口径设置复测标记与状态。"""
+    关联计划/资产并按报告口径设置复测标记与状态。
+    submit_time：报告格式导入时传报告时间（标题日期 14:00），
+    使渗透工单按月漏洞统计与安全态势按报告月份归口，而非导入当天。"""
     batch_meta = batch.meta_json or {}
     vul = Vul(
         title=rec.title,
@@ -327,6 +330,8 @@ def create_vul_from_record(
         source=0,  # 来源未选择（Word导入不再单列，关联工单时展示为「渗透测试工单」）
         submitter_id=user.id,
     )
+    if submit_time is not None:
+        vul.submit_time = submit_time
     # 显式指定或报告格式自动匹配的测试计划：任何文档格式均关联漏洞
     if plan is not None:
         vul.testing_plan_id = plan.id
@@ -361,7 +366,12 @@ async def confirm_one_record(
         vul = update_vul_from_retest(existing, rec, description_html, solution_html, is_retest)
         is_new = False
     else:
-        vul = create_vul_from_record(rec, batch, plan, asset, user, description_html, solution_html, is_retest)
+        # 报告格式导入：漏洞提交时间取报告时间（标题日期 14:00），保证按月统计口径一致
+        submit_time = report.create_time if report is not None else None
+        vul = create_vul_from_record(
+            rec, batch, plan, asset, user, description_html, solution_html, is_retest,
+            submit_time=submit_time,
+        )
         session.add(vul)
         await session.flush()
         is_new = True

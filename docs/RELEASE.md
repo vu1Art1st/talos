@@ -668,6 +668,24 @@
 
 ---
 
+## [2.4.1] - 2026-08-25
+
+缺陷修复：报告格式导入建漏洞时提交时间按报告月份归口。
+
+### 修复
+
+- **漏洞提交时间口径**（`backend/app/services/import_service.py`）：报告格式导入新建漏洞的 `submit_time` 改为取报告时间（标题日期 14:00），替代原先的导入当天当前时间，使「渗透测试工单按月漏洞统计」与「安全态势」按报告月份归口而非导入当月；`create_vul_from_record` 新增 `submit_time` 入参，`confirm_one_record` 传入 `report.create_time`
+
+### 新增
+
+- **存量回填脚本**（`backend/scripts/backfill_vul_submit_time.py`）：幂等扫描历史已确认的报告导入批次，将其关联漏洞的 `submit_time` 回填为批次 `report_date` 的 14:00（与报告 `create_time` 口径一致）；支持 `--dry-run` 仅统计
+
+### 测试
+
+- `backend/tests/test_api.py` 补充断言：报告导入漏洞 `submit_time` 始于 `2026-07-01T14:00`（按月归口）
+
+---
+
 ## [Unreleased]
 
 ### 新增
