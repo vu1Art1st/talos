@@ -700,3 +700,27 @@
 
 - `backend/tests/test_api.py` 新增 `test_batch_import_confirm`：正常批量确认（统一工单、报告自动生成并挂载）、重复关联跳过（含 `batch_ids` 内重复去重）、部分失败隔离、空批次与非法工单校验、无 `import:manage` 权限 403
 
+---
+
+## [2.6.0] - 2026-08-28
+
+角色（权限）管理：新增独立权限管理页，权限点按功能模块分组目录化下发，菜单按权限点精细分组。
+
+### 新增
+
+- **权限管理页**（`frontend/src/views/RoleList.vue`，`user:manage`）：独立「权限管理」页面，列出全部角色并编辑其权限点勾选；新增用户与权限端点 `GET /users/roles/permissions/catalog` 返回按模块分组的权限目录（含中文名与说明），供分组勾选与说明展示（`backend/app/api/v1/users.py`）
+- **权限目录化**（`backend/app/constants.py`）：`PERMISSIONS` 由扁平列表升级为 `PERMISSION_CATALOG`（每项含 `key`/`label`/`group`/`desc`，按「态势总览 / 资产与组织 / 漏洞管理 / 报告中心 / 专项工作 / 系统管理」分组）；`PERMISSIONS` 改为由目录派生的扁平 key 列表，权限校验与 `/meta` 下发保持兼容。新增响应模型 `PermissionItemOut` / `PermissionGroupOut`（`backend/app/schemas/auth.py`）
+
+### 变更
+
+- **系统管理菜单按权限分组**（`frontend/src/layouts/MainLayout.vue` / `frontend/src/router/index.ts`）：「用户管理」「权限管理」归入 `user:manage` 可见，「审计日志」「通知渠道」归入 `system:manage` 可见；用户与权限页标题由「用户与权限」改为「用户管理」，新增「权限管理」路由
+- **用户管理页重构**（`frontend/src/views/UserList.vue`）：角色分配与权限展示交互整理，与权限管理页职责分离
+- **报告列表交互优化**（`frontend/src/views/ReportList.vue`）：去除独立展开箭头列，改为点击报告标题展开/收起该行导出记录（标题着色提示展开态）；勾选列宽收窄
+- **渗透工单编辑自动带出 URL**（`frontend/src/views/TestingPlanList.vue`）：编辑进入且 `target_urls` 为空时，从关联资产自动带出 URL（与点选资产语义一致，仅空时带出，保存后以本列表为准）
+- **漏洞列表筛选宽度对齐**（`frontend/src/views/VulnList.vue`）：录入时间 daterange 编辑器覆盖 `--el-date-editor-width` 撑满列宽，与其他下拉框同宽
+- 远程检测列表「外部项目」「申诉状态」列宽微调（`frontend/src/views/RemoteTestingList.vue`）
+
+### 测试
+
+- `backend/tests/test_api.py` 适配权限目录：角色权限校验用例改用 `PERMISSION_CATALOG` 语义，补充 `GET /users/roles/permissions/catalog` 分组返回断言
+

@@ -20,11 +20,11 @@
       </el-button>
     </div>
 
-    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
+    <el-table ref="tableRef" v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange" @expand-change="onExpandChange"
-              row-key="id">
-      <el-table-column type="selection" width="50" reserve-selection />
-      <el-table-column type="expand">
+              row-key="id" class="report-table">
+      <el-table-column type="selection" width="40" reserve-selection />
+      <el-table-column type="expand" width="1">
         <template #default="{ row }">
           <div class="px-6 py-2">
             <div v-if="exportJobs[row.id]?.length" class="flex flex-col gap-1">
@@ -57,12 +57,19 @@
       </el-table-column>
       <el-table-column type="index" label="序号" width="70"
                        :index="(i: number) => (page - 1) * size + i + 1" />
-      <el-table-column prop="title" label="报告标题" min-width="220" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="title" label="报告标题" min-width="220" sortable="custom">
+        <template #default="{ row }">
+          <span class="block w-full truncate cursor-pointer"
+                :title="row.title"
+                :style="expandedIds.has(row.id) ? { color: 'var(--el-color-primary)' } : {}"
+                @click.stop="toggleExpand(row)">{{ row.title }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="关联工单" width="180" show-overflow-tooltip>
         <template #default="{ row }">
           <template v-if="row.ticket_id">
-            <span class="font-mono text-xs">{{ row.ticket_id }}</span>
-            <span class="text-gray-400 text-xs"> · {{ row.ticket_system_name || '未填写' }}</span>
+            <span class="font-mono">{{ row.ticket_id }}</span>
+            <span class="text-gray-400"> · {{ row.ticket_system_name || '未填写' }}</span>
           </template>
           <span v-else class="text-gray-400">-</span>
         </template>
@@ -155,6 +162,9 @@ const vulns = ref<any[]>([])
 const plans = ref<any[]>([])
 const selected = ref<any[]>([])
 const batchDownloading = ref(false)
+const tableRef = ref()
+// 当前展开行的 id 集合（用于标题着色提示，弥补无独立展开箭头后的可发现性）
+const expandedIds = ref(new Set<number>())
 // 报告导出版本历史（展开行懒加载）：{reportId: ExportJob[]}
 const exportJobs = ref<Record<number, any[]>>({})
 const exportLoading = ref<Record<number, boolean>>({})
@@ -176,7 +186,13 @@ async function loadExportJobs(reportId: number) {
 }
 
 async function onExpandChange(row: any, expandedRows: any[]) {
+  expandedIds.value = new Set(expandedRows.map((r) => r.id))
   if (expandedRows.some((r) => r.id === row.id)) await loadExportJobs(row.id)
+}
+
+// 点击报告标题展开/收起该行导出记录（替代原独立展开箭头列）
+function toggleExpand(row: any) {
+  tableRef.value?.toggleRowExpansion(row)
 }
 
 async function removeExportJob(row: any, job: any) {
@@ -315,3 +331,10 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+/* 隐藏展开箭头列：改为点击报告标题展开，展开内容仍由 type="expand" 列承载 */
+.report-table :deep(.el-table__expand-column) { padding: 0; }
+.report-table :deep(.el-table__expand-column .cell) { padding: 0; }
+.report-table :deep(.el-table__expand-icon) { display: none; }
+</style>

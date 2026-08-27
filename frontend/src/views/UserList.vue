@@ -1,83 +1,52 @@
 <template>
-  <div class="space-y-4">
-    <el-card shadow="never" class="!rounded-lg">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>用户管理</span>
-          <el-button type="primary" size="small" @click="openUser()">
-            <el-icon class="mr-1"><Plus /></el-icon>新建用户
-          </el-button>
-        </div>
-      </template>
-      <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
-        <el-table-column type="index" label="序号" width="70"
-                         :index="(i: number) => (page - 1) * 20 + i + 1" />
-        <el-table-column prop="username" label="用户名" width="140" sortable="custom" />
-        <el-table-column prop="realname" label="姓名" width="120" sortable="custom" />
-        <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip sortable="custom" />
-        <el-table-column prop="role_name" label="角色" width="130" />
-        <el-table-column prop="is_active" label="状态" width="90" sortable="custom">
-          <template #default="{ row }">
-            <span class="tl-tag" :style="row.is_active ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.red)">
-              {{ row.is_active ? '正常' : '禁用' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="130" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="openUser(row)">编辑</el-button>
-            <el-popconfirm title="确认删除该用户？" @confirm="removeUser(row.id)">
-              <template #reference>
-                <el-button size="small" type="danger" link>删除</el-button>
-              </template>
-            </el-popconfirm>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无用户，点击「新建用户」创建" :image-size="80" />
-        </template>
-      </el-table>
-      <div class="flex justify-end mt-4">
-        <el-pagination background layout="total, prev, pager, next" :total="total"
-                       :page-size="20" :current-page="page" @current-change="loadUsers" />
-      </div>
-    </el-card>
+  <el-card shadow="never" class="!rounded-lg">
+    <div class="flex items-center gap-2 mb-4">
+      <el-input v-model="search" placeholder="搜索用户名 / 姓名" clearable class="!w-64"
+                @keyup.enter="load(1)" @clear="load(1)">
+        <template #prefix><el-icon><Search /></el-icon></template>
+      </el-input>
+      <div class="flex-1" />
+      <el-button type="primary" class="btn-min" @click="openUser()">
+        <el-icon class="mr-1"><Plus /></el-icon>新建用户
+      </el-button>
+    </div>
 
-    <el-card shadow="never" class="!rounded-lg">
-      <template #header>
-        <div class="flex items-center justify-between">
-          <span>角色与权限</span>
-          <el-button type="primary" size="small" @click="openRole()">
-            <el-icon class="mr-1"><Plus /></el-icon>新建角色
-          </el-button>
-        </div>
-      </template>
-      <el-table v-loading="rolesLoading" :data="roles" stripe>
-        <el-table-column prop="name" label="角色名称" width="160" />
-        <el-table-column label="权限">
-          <template #default="{ row }">
-            <span v-if="row.permissions.includes('*')" class="tl-tag mr-1" :style="softStyle(STAT_CARD_COLORS.red)">全部权限</span>
-            <span v-for="p in row.permissions.filter((x: string) => x !== '*')" :key="p"
-                  class="tl-tag mr-1 mb-1" :style="softStyle(STAT_CARD_COLORS.blue)">{{ p }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="remark" label="备注" width="180" show-overflow-tooltip />
-        <el-table-column label="操作" width="130" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="openRole(row)">编辑</el-button>
-            <el-popconfirm title="确认删除该角色？" @confirm="removeRole(row.id)">
-              <template #reference>
-                <el-button size="small" type="danger" link>删除</el-button>
-              </template>
-            </el-popconfirm>
-          </template>
-        </el-table-column>
-        <template #empty>
-          <el-empty description="暂无角色，点击「新建角色」创建" :image-size="80" />
+    <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
+      <el-table-column type="index" label="序号" width="70"
+                       :index="(i: number) => (page - 1) * size + i + 1" />
+      <el-table-column prop="username" label="用户名" width="140" sortable="custom" />
+      <el-table-column prop="realname" label="姓名" width="120" sortable="custom" />
+      <el-table-column prop="email" label="邮箱" min-width="180" show-overflow-tooltip sortable="custom" />
+      <el-table-column prop="role_name" label="角色" width="130" show-overflow-tooltip />
+      <el-table-column prop="is_active" label="状态" width="90" sortable="custom">
+        <template #default="{ row }">
+          <span class="tl-tag" :style="row.is_active ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.red)">
+            {{ row.is_active ? '正常' : '禁用' }}
+          </span>
         </template>
-      </el-table>
-    </el-card>
-  </div>
+      </el-table-column>
+      <el-table-column label="操作" width="200" fixed="right">
+        <template #default="{ row }">
+          <el-button size="small" type="primary" link @click="openPerm(row)">查看权限</el-button>
+          <el-button size="small" type="primary" link @click="openUser(row)">编辑</el-button>
+          <el-popconfirm title="确认删除该用户？" @confirm="removeUser(row.id)">
+            <template #reference>
+              <el-button size="small" type="danger" link>删除</el-button>
+            </template>
+          </el-popconfirm>
+        </template>
+      </el-table-column>
+      <template #empty>
+        <el-empty description="暂无用户，点击「新建用户」创建" :image-size="80" />
+      </template>
+    </el-table>
+
+    <div class="flex justify-end mt-4">
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
+                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
+                     @current-change="load" @size-change="onSizeChange" />
+    </div>
+  </el-card>
 
   <el-dialog
              :close-on-click-modal="false" v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
@@ -96,7 +65,7 @@
         <el-input v-model="userForm.email" />
       </el-form-item>
       <el-form-item label="角色">
-        <el-select v-model="userForm.role_id" class="w-full">
+        <el-select v-model="userForm.role_id" clearable class="w-full" placeholder="未分配角色">
           <el-option v-for="r in roles" :key="r.id" :label="r.name" :value="r.id" />
         </el-select>
       </el-form-item>
@@ -111,23 +80,25 @@
   </el-dialog>
 
   <el-dialog
-             :close-on-click-modal="false" v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="480px">
-    <el-form ref="roleFormRef" :model="roleForm" :rules="roleRules" label-width="90px">
-      <el-form-item label="角色名称" prop="name">
-        <el-input v-model="roleForm.name" />
-      </el-form-item>
-      <el-form-item label="权限">
-        <el-checkbox-group v-model="roleForm.permissions">
-          <el-checkbox v-for="p in allPerms" :key="p" :value="p" class="!mr-4">{{ p }}</el-checkbox>
-        </el-checkbox-group>
-      </el-form-item>
-      <el-form-item label="备注">
-        <el-input v-model="roleForm.remark" />
-      </el-form-item>
-    </el-form>
+             :close-on-click-modal="false" v-model="permDialog"
+             :title="`权限查看 - ${permUser?.username || ''}`" width="560px">
+    <div v-loading="catalogLoading" class="min-h-24">
+      <el-alert v-if="permUser?.permissions?.includes('*')" type="warning" :closable="false" show-icon class="mb-3"
+                title="该用户角色拥有全部权限（*）" />
+      <div v-for="g in catalog" :key="g.group" class="mb-4 last:mb-0">
+        <div class="text-sm font-semibold mb-2" style="color: var(--tl-text-2)">{{ g.group }}</div>
+        <div class="flex flex-wrap gap-2">
+          <el-tooltip v-for="it in g.items" :key="it.key" :content="it.desc" placement="top">
+            <span class="tl-tag"
+                  :style="userHasPerm(permUser, it.key) ? softStyle(STAT_CARD_COLORS.blue) : softStyle(STAT_CARD_COLORS.gray)">
+              {{ it.label }}
+            </span>
+          </el-tooltip>
+        </div>
+      </div>
+    </div>
     <template #footer>
-      <el-button @click="roleDialog = false">取消</el-button>
-      <el-button type="primary" :loading="roleSaving" @click="saveRole">保存</el-button>
+      <el-button type="primary" @click="permDialog = false">关闭</el-button>
     </template>
   </el-dialog>
 </template>
@@ -140,33 +111,36 @@ import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
-const { items: users, total, page, loading, load: loadUsers, onSortChange } = useListPage('/users')
+interface PermItem { key: string; label: string; desc: string }
+interface PermGroup { group: string; items: PermItem[] }
+
+const { items: users, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/users')
+
 const roles = ref<any[]>([])
-const allPerms = ref<string[]>([])
-const rolesLoading = ref(false)
+const catalog = ref<PermGroup[]>([])
+const catalogLoading = ref(false)
 const userDialog = ref(false)
-const roleDialog = ref(false)
+const permDialog = ref(false)
+const permUser = ref<any>(null)
 const userSaving = ref(false)
-const roleSaving = ref(false)
 const userForm = reactive<any>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
 const userFormRef = ref<FormInstance>()
 const userRules: FormRules = {
   username: [{ required: true, whitespace: true, message: '请填写用户名', trigger: 'blur' }],
 }
-const roleForm = reactive<any>({ id: null, name: '', permissions: [], remark: '' })
-const roleFormRef = ref<FormInstance>()
-const roleRules: FormRules = {
-  name: [{ required: true, whitespace: true, message: '请填写角色名称', trigger: 'blur' }],
-}
 
 async function loadRoles() {
-  rolesLoading.value = true
+  const { data } = await client.get('/roles')
+  roles.value = data
+}
+
+async function loadCatalog() {
+  catalogLoading.value = true
   try {
-    const [r, p] = await Promise.all([client.get('/roles'), client.get('/roles/permissions')])
-    roles.value = r.data
-    allPerms.value = p.data
+    const { data } = await client.get('/roles/permissions/catalog')
+    catalog.value = data
   } finally {
-    rolesLoading.value = false
+    catalogLoading.value = false
   }
 }
 
@@ -187,7 +161,7 @@ async function saveUser() {
     else await client.post('/users', body)
     ElMessage.success('保存成功')
     userDialog.value = false
-    await loadUsers()
+    await load()
   } finally {
     userSaving.value = false
   }
@@ -196,38 +170,21 @@ async function saveUser() {
 async function removeUser(id: number) {
   await client.delete(`/users/${id}`)
   ElMessage.success('删除成功')
-  await loadUsers()
+  await load()
 }
 
-function openRole(row?: any) {
-  Object.assign(roleForm, row
-    ? { ...row, permissions: [...row.permissions] }
-    : { id: null, name: '', permissions: [], remark: '' })
-  roleDialog.value = true
+function userHasPerm(user: any, key: string) {
+  const perms = user?.permissions ?? []
+  return perms.includes('*') || perms.includes(key)
 }
 
-async function saveRole() {
-  const valid = await roleFormRef.value.validate().catch(() => false)
-  if (!valid) return
-  roleSaving.value = true
-  try {
-    if (roleForm.id) await client.put(`/roles/${roleForm.id}`, roleForm)
-    else await client.post('/roles', roleForm)
-    ElMessage.success('保存成功')
-    roleDialog.value = false
-    await loadRoles()
-  } finally {
-    roleSaving.value = false
-  }
-}
-
-async function removeRole(id: number) {
-  await client.delete(`/roles/${id}`)
-  ElMessage.success('删除成功')
-  await loadRoles()
+function openPerm(row: any) {
+  permUser.value = row
+  permDialog.value = true
+  if (!catalog.value.length) loadCatalog()
 }
 
 onMounted(async () => {
-  await Promise.all([loadUsers(1), loadRoles()])
+  await Promise.all([load(1), loadRoles(), loadCatalog()])
 })
 </script>

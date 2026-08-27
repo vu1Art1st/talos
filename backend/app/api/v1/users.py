@@ -4,13 +4,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.auth import build_user_out
-from app.constants import PERMISSIONS
+from app.constants import PERMISSION_CATALOG, PERMISSIONS
 from app.core.deps import get_current_user, require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, GroupMember, Role, User
-from app.schemas import GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, RoleIn, RoleOut, UserIn, UserOption, UserOut
+from app.schemas import GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut, PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut
 from app.services.audit_service import audit
 
 router = APIRouter(tags=["用户与权限"])
@@ -139,6 +139,17 @@ async def list_roles(
 @router.get("/roles/permissions", response_model=list[str])
 async def list_permissions(_: User = Depends(get_current_user)):
     return PERMISSIONS
+
+
+@router.get("/roles/permissions/catalog", response_model=list[PermissionGroupOut])
+async def list_permission_catalog(_: User = Depends(get_current_user)):
+    """权限目录（按功能模块分组）：供权限管理页分组勾选与说明展示。"""
+    groups: dict[str, list[PermissionItemOut]] = {}
+    for p in PERMISSION_CATALOG:
+        groups.setdefault(p["group"], []).append(
+            PermissionItemOut(key=p["key"], label=p["label"], desc=p["desc"])
+        )
+    return [PermissionGroupOut(group=g, items=items) for g, items in groups.items()]
 
 
 @router.post("/roles", response_model=RoleOut)

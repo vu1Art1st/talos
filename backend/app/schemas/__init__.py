@@ -18,6 +18,8 @@ from .auth import (
     GroupMemberOut,
     GroupOut,
     PasswordIn,
+    PermissionGroupOut,
+    PermissionItemOut,
     RefreshIn,
     RoleIn,
     RoleOut,

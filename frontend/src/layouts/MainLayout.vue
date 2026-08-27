@@ -46,16 +46,15 @@
           <el-menu-item index="/remote-testings">远程检测</el-menu-item>
           <el-menu-item index="/spring-actions">春耕行动</el-menu-item>
         </el-sub-menu>
-        <el-sub-menu v-if="auth.hasPerm('system:manage')" index="/system">
+        <el-sub-menu v-if="auth.hasPerm('system:manage') || auth.hasPerm('user:manage')" index="/system">
           <template #title>
             <el-icon><Setting /></el-icon><span>系统管理</span>
           </template>
-          <el-menu-item index="/audit">审计日志</el-menu-item>
-          <el-menu-item index="/notify-channels">通知渠道</el-menu-item>
+          <el-menu-item v-if="auth.hasPerm('user:manage')" index="/users">用户管理</el-menu-item>
+          <el-menu-item v-if="auth.hasPerm('user:manage')" index="/roles">权限管理</el-menu-item>
+          <el-menu-item v-if="auth.hasPerm('system:manage')" index="/audit">审计日志</el-menu-item>
+          <el-menu-item v-if="auth.hasPerm('system:manage')" index="/notify-channels">通知渠道</el-menu-item>
         </el-sub-menu>
-        <el-menu-item v-if="auth.hasPerm('user:manage')" index="/users">
-          <el-icon><User /></el-icon><template #title>用户与权限</template>
-        </el-menu-item>
       </el-menu>
       <div class="p-3 border-t flex-none" style="border-color: var(--tl-border)">
         <el-button text class="w-full" @click="collapsed = !collapsed">

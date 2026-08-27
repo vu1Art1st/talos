@@ -425,8 +425,10 @@ onMounted(async () => {
   color: var(--tl-text-3);
   margin-bottom: 4px;
 }
-/* 弹窗内日期范围编辑器撑满列宽 */
-.vuln-filter-panel :deep(.el-date-editor) {
+/* 录入时间（daterange）在 Element Plus 中默认固定 350px（由 --el-date-editor-width 变量驱动），
+   与其他下拉框（w-full 撑满列宽）宽度不一致；覆盖变量使其同宽 */
+.vuln-filter-panel :deep(.el-date-editor--daterange) {
+  --el-date-editor-width: 100%;
   width: 100%;
 }
 </style>

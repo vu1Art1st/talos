@@ -749,13 +749,22 @@ function onImportFileChange(e: Event) {
   input.value = ''
 }
 
-function openDialog(row?: any) {
+async function openDialog(row?: any) {
   dialogRow.value = row ?? null
   form.value = row ? { ...emptyForm(), ...row } : emptyForm()
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
   form.value.target_urls = Array.isArray(form.value.target_urls) ? form.value.target_urls : []
   assetOptions.value = []
-  if (form.value.asset_ids.length) loadAssetLabels()
+  if (form.value.asset_ids.length) {
+    await loadAssetLabels()
+    // 编辑进入：target_urls 为空时从关联资产自动带出 URL（与点选资产「自动带出」语义一致，仅空时带出，保存后以本列表为准）
+    if (!form.value.target_urls.length) {
+      form.value.target_urls = mergeUrls(
+        form.value.target_urls,
+        form.value.asset_ids.flatMap((id) => assetUrls(assetCache.value[id])),
+      )
+    }
+  }
   resetBaseline([...form.value.asset_ids])
   dialogVisible.value = true
 }

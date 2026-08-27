@@ -68,6 +68,21 @@ class RoleIn(BaseModel):
     remark: str = ""
 
 
+class PermissionItemOut(BaseModel):
+    """权限目录单项：key 为权限标识，label 为中文名，desc 说明其控制的菜单 / 操作。"""
+
+    key: str
+    label: str
+    desc: str = ""
+
+
+class PermissionGroupOut(BaseModel):
+    """权限目录分组：按功能模块分组下发给权限管理页。"""
+
+    group: str
+    items: list[PermissionItemOut] = []
+
+
 class GroupOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

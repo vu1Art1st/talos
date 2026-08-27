@@ -18,7 +18,7 @@
       <el-table-column prop="system_name" label="系统名称" width="150" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="资产归属" width="130" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="notified_unit" label="被通报单位" width="150" show-overflow-tooltip />
-      <el-table-column prop="is_external" label="外部项目" width="90" sortable="custom">
+      <el-table-column prop="is_external" label="外部项目" width="110" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="row.is_external ? softStyle(STAT_CARD_COLORS.blue) : softStyle(STAT_CARD_COLORS.gray)">
             {{ row.is_external ? '是' : '否' }}
@@ -27,7 +27,7 @@
       </el-table-column>
       <el-table-column prop="vuln_name" label="漏洞名称" min-width="180" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="vuln_type" label="漏洞类型" width="120" show-overflow-tooltip />
-      <el-table-column prop="appeal_status" label="申诉状态" width="100" sortable="custom">
+      <el-table-column prop="appeal_status" label="申诉状态" width="110" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="appealStatusStyle(row.appeal_status)">
             {{ appealStatusLabel(row.appeal_status) }}

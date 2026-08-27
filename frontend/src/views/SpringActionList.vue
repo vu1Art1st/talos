@@ -41,14 +41,14 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
-      <el-table-column prop="appeal_success" label="申诉结果" width="100" sortable="custom">
+      <el-table-column prop="appeal_success" label="申诉结果" width="110" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="row.appeal_success ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.gray)">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column prop="score_deduction" label="最终扣分" width="100" sortable="custom">
+      <el-table-column prop="score_deduction" label="最终扣分" width="110" sortable="custom">
         <template #default="{ row }">{{ row.score_deduction }}</template>
       </el-table-column>
       <el-table-column prop="doc_no" label="公文文号" width="160" show-overflow-tooltip sortable="custom" />

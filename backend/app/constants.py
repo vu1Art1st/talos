@@ -149,19 +149,22 @@ TESTING_PLAN_STATUS = {
     PlanStatus.PASSED: "测试通过",
 }
 
-# RBAC 权限点
-PERMISSIONS = [
-    "dashboard:view",
-    "asset:manage",
-    "vuln:submit",
-    "vuln:audit",
-    "vuln:manage",
-    "import:manage",
-    "report:manage",
-    "special:manage",
-    "user:manage",
-    "system:manage",
+# RBAC 权限目录：按功能模块分组，label 为中文名，desc 说明其控制的菜单 / 操作。
+# PERMISSIONS 为其扁平化 key 列表（权限校验与 /meta 下发保持兼容）。
+PERMISSION_CATALOG = [
+    {"key": "dashboard:view", "label": "安全态势", "group": "态势总览", "desc": "查看安全态势总览"},
+    {"key": "asset:manage", "label": "资产管理", "group": "资产与组织", "desc": "维护资产台账与组织架构"},
+    {"key": "vuln:submit", "label": "漏洞提交", "group": "漏洞管理", "desc": "提交新漏洞"},
+    {"key": "vuln:audit", "label": "漏洞审核", "group": "漏洞管理", "desc": "审核漏洞状态流转"},
+    {"key": "vuln:manage", "label": "漏洞管理", "group": "漏洞管理", "desc": "漏洞全量增删改查"},
+    {"key": "import:manage", "label": "报告导入", "group": "报告中心", "desc": "Word 报告导入入库"},
+    {"key": "report:manage", "label": "报告管理", "group": "报告中心", "desc": "报告生成、编辑与导出"},
+    {"key": "special:manage", "label": "专项管理", "group": "专项工作", "desc": "渗透/漏扫工单、远程检测、春耕行动"},
+    {"key": "user:manage", "label": "用户与权限", "group": "系统管理", "desc": "管理用户、角色与权限配置"},
+    {"key": "system:manage", "label": "系统管理", "group": "系统管理", "desc": "审计日志与通知渠道"},
 ]
+
+PERMISSIONS = [p["key"] for p in PERMISSION_CATALOG]
 
 # 审计动作（F7 登录与操作审计）：login_ 前缀为登录事件，其余为敏感操作；
 # 经 /meta 下发供审计查询页筛选下拉使用，新增动作必须在此登记

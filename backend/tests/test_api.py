@@ -1772,6 +1772,28 @@ async def test_permission_denied(client: AsyncClient):
     assert resp.status_code == 401
 
 
+async def test_role_permission_catalog(client: AsyncClient, auth: dict):
+    """权限目录接口：按功能模块分组返回，key 与扁平 PERMISSIONS 一致。"""
+    resp = await client.get("/api/v1/roles/permissions/catalog", headers=auth)
+    assert resp.status_code == 200, resp.text
+    groups = resp.json()
+    assert isinstance(groups, list) and groups
+    keys = [it["key"] for g in groups for it in g["items"]]
+    assert keys == [
+        "dashboard:view", "asset:manage", "vuln:submit", "vuln:audit", "vuln:manage",
+        "import:manage", "report:manage", "special:manage", "user:manage", "system:manage",
+    ]
+    for g in groups:
+        assert g["group"]
+        for it in g["items"]:
+            assert it["label"] and "desc" in it
+
+    # 扁平接口保持兼容
+    flat = await client.get("/api/v1/roles/permissions", headers=auth)
+    assert flat.status_code == 200
+    assert flat.json() == keys
+
+
 async def test_dict_options(client: AsyncClient, auth: dict):
     """测试类型字典：预设种子 + 下拉新增持久化 + 重名拒绝。"""
     resp = await client.get("/api/v1/dict/test_type", headers=auth)
