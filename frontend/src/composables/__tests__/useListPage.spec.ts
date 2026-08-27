@@ -78,4 +78,16 @@ describe('useListPage', () => {
     await lp.reload()
     expect(lp.page.value).toBe(1)
   })
+
+  it('onSizeChange 更新 size 并携带新 size 回到第一页', async () => {
+    const lp = useListPage('/vulns')
+    await lp.load(3)
+    lp.onSizeChange(50)
+    await vi.waitFor(() => {
+      expect(get).toHaveBeenLastCalledWith('/vulns', {
+        params: { search: '', page: 1, size: 50, sort: '', order: '' },
+      })
+    })
+    expect(lp.size.value).toBe(50)
+  })
 })

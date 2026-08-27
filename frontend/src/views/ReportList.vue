@@ -23,6 +23,7 @@
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange" @expand-change="onExpandChange"
               row-key="id">
+      <el-table-column type="selection" width="50" reserve-selection />
       <el-table-column type="expand">
         <template #default="{ row }">
           <div class="px-6 py-2">
@@ -55,7 +56,7 @@
         </template>
       </el-table-column>
       <el-table-column type="index" label="序号" width="70"
-                       :index="(i: number) => (page - 1) * 20 + i + 1" />
+                       :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column prop="title" label="报告标题" min-width="220" show-overflow-tooltip sortable="custom" />
       <el-table-column label="关联工单" width="180" show-overflow-tooltip>
         <template #default="{ row }">
@@ -93,8 +94,9 @@
     </el-table>
 
     <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
+                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
+                     @current-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
 
@@ -143,7 +145,7 @@ import { fmtDateTime } from '../utils/format'
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const { items, total, page, search, loading, load, onSortChange } = useListPage('/reports')
+const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/reports')
 const { downloadJob, downloadZip, fetchJobs, removeExportJob: deleteExportJob } = useExportJobs()
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')

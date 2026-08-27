@@ -6,12 +6,14 @@ export interface ListPageState<T> {
   items: Ref<T[]>
   total: Ref<number>
   page: Ref<number>
+  size: Ref<number>
   search: Ref<string>
   sort: { prop: string; order: string }
   loading: Ref<boolean>
   load: (p?: number) => Promise<void>
   reload: () => Promise<void>
   onSortChange: ({ prop, order }: { prop: string; order: string | null }) => void
+  onSizeChange: (n: number) => void
 }
 
 export interface ListPageOptions {
@@ -27,6 +29,7 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
   const items = ref<T[]>([]) as Ref<T[]>
   const total = ref(0)
   const page = ref(1)
+  const size = ref(options.size ?? 20)
   const search = ref('')
   const sort = reactive<{ prop: string; order: string }>(
     options.defaultSort ? { ...options.defaultSort } : { prop: '', order: '' },
@@ -41,7 +44,7 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
         params: {
           search: search.value,
           page: p,
-          size: options.size ?? 20,
+          size: size.value,
           sort: sort.prop,
           order: sort.order,
           ...options.extraParams?.(),
@@ -64,5 +67,10 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
     load(1)
   }
 
-  return { items, total, page, search, sort, loading, load, reload, onSortChange }
+  function onSizeChange(n: number) {
+    size.value = n
+    load(1)
+  }
+
+  return { items, total, page, size, search, sort, loading, load, reload, onSortChange, onSizeChange }
 }

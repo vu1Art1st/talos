@@ -116,10 +116,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import { usePlanAssetLink } from '../composables/usePlanAssetLink'
 import { useAuthStore } from '../stores/auth'
 import { importRecordMeta, levelSoftStyle, softStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
@@ -130,11 +131,9 @@ const router = useRouter()
 const batch = ref<any>(null)
 const records = ref<any[]>([])
 const assets = ref<any[]>([])
-const assetId = ref<number | null>(null)
 const reports = ref<any[]>([])
 const reportId = ref<number | null>(null)
 const plans = ref<any[]>([])
-const planId = ref<number | null>(null)
 const meta = ref<any>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
@@ -143,41 +142,11 @@ const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
 )
 
-// 工单下拉展示「工单ID-计划名称-测试系统」，空值省略对应段
-function planLabel(p: any) {
-  return [p.ticket_id, p.plan_name, p.system_name].filter(Boolean).join('-')
-}
-
-// 关联工单后资产候选：工单 asset_ids 优先 → system_name 匹配 → 全量（允许手动选）
-const filteredAssets = computed(() => {
-  const plan = plans.value.find((p) => p.id === planId.value)
-  if (plan?.asset_ids?.length) {
-    const ids = new Set(plan.asset_ids)
-    return assets.value.filter((a) => ids.has(a.id))
-  }
-  if (plan?.system_name) {
-    const matched = assets.value.filter((a) => a.name === plan.system_name)
-    if (matched.length) return matched
-  }
-  return assets.value
-})
-
-// 选定工单后自动联动入库资产：工单 asset_ids 首个 → 测试系统名匹配首个 → 置空（不自动新建）
-watch(planId, (val) => {
-  const plan = plans.value.find((p) => p.id === val)
-  if (!plan) {
-    assetId.value = null
-    return
-  }
-  if (plan.asset_ids?.length) {
-    const first = assets.value.find((a) => a.id === plan.asset_ids[0])
-    assetId.value = first ? first.id : (assets.value.find((a) => a.name === plan.system_name)?.id ?? null)
-  } else {
-    assetId.value = plan.system_name
-      ? (assets.value.find((a) => a.name === plan.system_name)?.id ?? null)
-      : null
-  }
-})
+// 工单/资产联动（planLabel、filteredAssets、选定工单自动联动资产）：与批量确认对话框共用
+const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
+  () => plans.value,
+  () => assets.value,
+)
 
 async function load() {
   const { data } = await client.get(`/imports/${route.params.id}`)

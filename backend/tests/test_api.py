@@ -401,6 +401,28 @@ async def _import_report(client: AsyncClient, auth: dict, filename: str, doc):
     return detail["records"], resp.json()
 
 
+async def _upload_report_batch(client: AsyncClient, auth: dict, system_name: str, filename: str) -> int:
+    """上传报告格式 docx 并等待解析完成（不确认入库），返回 batch_id。"""
+    doc = _build_report_docx(
+        system_name, f"http://10.9.9.9/{system_name}", "10.9.9.9",
+        sections=[(f"{system_name}漏洞A", "高危", "逻辑漏洞", False)],
+    )
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": (filename, buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    assert detail["batch"]["status"] == "parsed", detail
+    assert detail["batch"]["doc_kind"] == "report", detail
+    return batch_id
+
+
 async def _find_vuln(client: AsyncClient, auth: dict, keyword: str) -> dict:
     resp = await client.get("/api/v1/vulns", headers=auth, params={"search": keyword})
     items = resp.json()["items"]
@@ -3247,6 +3269,144 @@ async def test_pat_rate_limit(client: AsyncClient, auth: dict, monkeypatch):
     codes = [(await client.get("/api/v1/open/stats", headers=headers)).status_code for _ in range(4)]
     assert codes[:3] == [200, 200, 200]
     assert codes[3] == 429
+
+
+async def test_batch_import_confirm(client: AsyncClient, auth: dict):
+    """批量确认入库：多批次统一关联工单 → 逐批确认并返回 report_ids；
+    已确认批次重复关联跳过；单批失败隔离不影响其余批次；权限与参数校验。"""
+    # 创建统一工单
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "批量确认系统", "test_type": "渗透测试"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+
+    # 上传两份报告格式批次
+    b1 = await _upload_report_batch(client, auth, "批量确认系统A", "20260801批量确认A渗透测试报告.docx")
+    b2 = await _upload_report_batch(client, auth, "批量确认系统B", "20260801批量确认B渗透测试报告.docx")
+
+    # 正常批量确认：统一关联工单，两个批次都成功，报告自动生成并挂到该工单
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth,
+        json={"batch_ids": [b1, b2], "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["confirmed"] == 2
+    assert body["skipped"] == 0
+    assert body["failed"] == 0
+    assert len(body["report_ids"]) == 2
+    assert all(d["status"] == "confirmed" for d in body["details"])
+    for rid in body["report_ids"]:
+        report = (await client.get(f"/api/v1/reports/{rid}", headers=auth)).json()
+        assert report["testing_plan_id"] == plan_id
+
+    # 重复关联：已确认批次再批量确认（含 batch_ids 内重复）→ 全部 skipped
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth,
+        json={"batch_ids": [b1, b1, b2, b1]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["confirmed"] == 0
+    assert body["skipped"] == 2
+    assert body["failed"] == 0
+    assert all(d["status"] == "skipped" for d in body["details"])
+
+    # 部分失败隔离：一个有效批次 + 一个不存在批次 → confirmed=1, failed=1，有效批次照常入库
+    b3 = await _upload_report_batch(client, auth, "批量确认系统C", "20260801批量确认C渗透测试报告.docx")
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth,
+        json={"batch_ids": [b3, 999999]},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["confirmed"] == 1
+    assert body["failed"] == 1
+    assert len(body["report_ids"]) == 1
+    failed_detail = next(d for d in body["details"] if d["status"] == "failed")
+    assert failed_detail["batch_id"] == 999999
+    assert failed_detail["detail"] == "导入批次不存在"
+
+    # 空 batch_ids 拒绝
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth, json={"batch_ids": []},
+    )
+    assert resp.status_code == 400
+
+    # 非法工单拒绝
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth,
+        json={"batch_ids": [b1], "testing_plan_id": 999999},
+    )
+    assert resp.status_code == 400
+
+    # 无 import:manage 权限用户 403
+    resp = await client.post(
+        "/api/v1/roles", headers=auth,
+        json={"name": "无导入权限", "permissions": ["vuln:submit"], "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    role_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/users", headers=auth,
+        json={"username": "no_import_perm", "password": "Tester@123", "realname": "无导入",
+              "email": "", "phone": "", "is_active": True, "role_id": role_id},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/auth/login", data={"username": "no_import_perm", "password": "Tester@123"},
+    )
+    auth2 = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth2,
+        json={"batch_ids": [b1]},
+    )
+    assert resp.status_code == 403
+
+
+async def test_batch_confirm_chrono_order(client: AsyncClient, auth: dict):
+    """批量确认时序：同一工单同一漏洞跨多份复测报告去重合并时，
+    必须按报告日期从旧到新处理，保证最新报告的「已修复」最终生效而非被旧报告覆盖。"""
+    system_name = "批量时序系统"
+    target_url = "http://10.9.9.9/chrono"
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+    async def upload(filename: str, fixed: bool) -> int:
+        doc = _build_report_docx(
+            system_name, target_url, "10.9.9.9",
+            sections=[("XSS时序漏洞", "中危", "XSS跨站", fixed)],
+        )
+        buf = BytesIO()
+        doc.save(buf)
+        buf.seek(0)
+        resp = await client.post(
+            "/api/v1/imports", headers=auth,
+            files={"file": (filename, buf, docx_mime)},
+        )
+        assert resp.status_code == 200, resp.text
+        bid = resp.json()["id"]
+        detail = await _wait_batch(client, auth, bid)
+        assert detail["batch"]["status"] == "parsed", detail
+        assert detail["batch"]["doc_kind"] == "report", detail
+        return bid
+
+    # 旧复测报告 XSS 未修复，新复测报告 XSS 已修复
+    older = await upload("20260723批量时序系统渗透测试复测报告.docx", False)
+    newer = await upload("20260731批量时序系统渗透测试复测报告.docx", True)
+
+    # 以「新→旧」倒序批量确认（复现列表 newest-first 选中提交的顺序）
+    resp = await client.post(
+        "/api/v1/imports/batch-confirm", headers=auth,
+        json={"batch_ids": [newer, older]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["confirmed"] == 2
+
+    # 同一工单同一标题应去重合并为一条漏洞，最终状态为「已修复」(60)
+    vul = await _find_vuln(client, auth, "XSS时序漏洞")
+    assert vul["status"] == 60, f"期望已修复(60)，实际 {vul['status']}"
 
 
 # ---------- F3 通知渠道 ----------

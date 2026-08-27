@@ -182,7 +182,7 @@
                 class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
                 @sort-change="onSortChange">
         <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="42" />
-        <el-table-column type="index" label="序号" width="70" :index="(i: number) => (page - 1) * 20 + i + 1" />
+        <el-table-column type="index" label="序号" width="70" :index="(i: number) => (page - 1) * size + i + 1" />
         <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="level" label="等级" width="90" sortable="custom">
           <template #default="{ row }">
@@ -225,9 +225,9 @@
       </el-table>
 
       <div class="flex justify-end mt-4">
-        <el-pagination background layout="total, prev, pager, next" :total="total"
-                       :page-size="20" :current-page="page"
-                       @current-change="load" />
+        <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
+                       :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
+                       @current-change="load" @size-change="onSizeChange" />
       </div>
     </el-card>
   </div>
@@ -254,7 +254,7 @@ const query = reactive({
   asset_ids: [], departments: [], dateRange: [],
   mine: false,
 })
-const { items, total, page, search, loading, load, onSortChange } = useListPage('/vulns', { extraParams: filterParams })
+const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/vulns', { extraParams: filterParams })
 
 // 已启用的筛选维度数（用于「筛选」按钮徽标）
 const activeFilterCount = computed(() => {
@@ -407,9 +407,9 @@ async function batchRemove() {
   await client.post('/vulns/batch-delete', { ids })
   ElMessage.success(`已删除 ${ids.length} 个漏洞`)
   // 当前页被删空时回退一页
-  const remainPages = Math.max(1, Math.ceil((total.value - ids.length) / 20))
+  const remainPages = Math.max(1, Math.ceil((total.value - ids.length) / size.value))
   await reload()
-  await load(Math.min(query.page, remainPages))
+  await load(Math.min(page.value, remainPages))
 }
 
 onMounted(async () => {

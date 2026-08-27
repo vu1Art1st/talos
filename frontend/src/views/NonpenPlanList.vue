@@ -31,7 +31,7 @@
                   :description="actionable || search ? '未找到符合条件（可进行 / 搜索）的漏扫基线工单' : '暂无漏扫基线工单，点击右上角「新增漏扫基线工单」开始'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
-                       :index="(i: number) => (page - 1) * 20 + i + 1" />
+                       :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column label="工单ID" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="font-mono" style="color: var(--el-color-primary); font-weight: 600">{{ row.ticket_id || '-' }}</span>
@@ -79,8 +79,9 @@
     </el-table>
 
     <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
+                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
+                     @current-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
 
@@ -171,7 +172,7 @@ import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue
 import StatCard from '../components/StatCard.vue'
 
 const actionable = ref(false)
-const { items, total, page, search, sort, loading, load, onSortChange } = useListPage('/nonpen-plans', {
+const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/nonpen-plans', {
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: () => (actionable.value ? { actionable: true } : {}),
 })

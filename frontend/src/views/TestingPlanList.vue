@@ -95,7 +95,7 @@
                     : '暂无符合条件的渗透测试工单，请调整筛选条件'" />
       </template>
       <el-table-column type="index" label="序号" width="60"
-                       :index="(i: number) => (page - 1) * 20 + i + 1" />
+                       :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column label="工单ID" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="font-mono">{{ row.ticket_id || '-' }}</span>
@@ -225,8 +225,9 @@
     </el-table>
 
     <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
+      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
+                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
+                     @current-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
 
@@ -426,7 +427,7 @@ import type { FilterFieldDef, FilterRule } from '../components/FilterBuilder.vue
 
 const auth = useAuthStore()
 const router = useRouter()
-const { items, total, page, search, sort, loading, load, onSortChange } = useListPage('/testing-plans', {
+const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/testing-plans', {
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: filterParams,
 })

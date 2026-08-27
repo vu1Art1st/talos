@@ -51,7 +51,28 @@ class ImportBatchOut(BaseModel):
 
 
 class ImportConfirmIn(BaseModel):
-    record_ids: list[int]
+    record_ids: list[int] | None = None  # None 表示该批次全部解析成功记录（批量确认场景）
     asset_id: int | None = None  # 入库到已有资产
     report_id: int | None = None  # 入库后自动追加为该报告的漏洞章节
     testing_plan_id: int | None = None  # 显式关联测试计划；报告格式未指定时按系统名自动匹配/创建
+
+
+class BatchConfirmIn(BaseModel):
+    batch_ids: list[int]  # 待批量确认的导入批次（服务端去重）
+    testing_plan_id: int | None = None  # 统一关联的渗透测试工单
+    asset_id: int | None = None  # 统一入库到已有资产（随工单联动默认，可覆盖）
+
+
+class BatchConfirmItemOut(BaseModel):
+    batch_id: int
+    filename: str = ""
+    status: str = "confirmed"  # confirmed | skipped | failed
+    detail: str = ""
+
+
+class BatchConfirmOut(BaseModel):
+    confirmed: int
+    skipped: int
+    failed: int
+    report_ids: list[int] = []  # 本次生成/关联的报告，前端据此调批量导出
+    details: list[BatchConfirmItemOut] = []

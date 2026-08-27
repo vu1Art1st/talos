@@ -686,9 +686,17 @@
 
 ---
 
-## [Unreleased]
+## [2.5.0] - 2026-08-26
+
+导入报告批量关联工单并确认导出：多批次一键入库，复用现有单批确认逻辑与报告批量导出链路。
 
 ### 新增
 
+- **导入列表批量关联工单并确认**（`backend/app/api/v1/imports.py` / `backend/app/services/import_service.py` / `frontend/src/views/ImportList.vue` / `frontend/src/components/ImportBatchConfirmDialog.vue`）：导入列表新增多选与「批量关联工单并确认」入口，勾选多个待确认批次后统一选择渗透测试工单（资产随工单联动，可覆盖），一次确认全部入库；报告格式批次自动生成报告，并复用 `/reports/batch-export` 批量导出打包下载
+- **批量确认端点**（`POST /imports/batch-confirm`，`import:manage`）：逐批次复用单批确认逻辑（抽取为 `import_service.confirm_batch_internal` 结构化返回），单批次失败仅回滚该批次不影响其余；已确认 / 无待入库记录的批次计入跳过；返回各批次明细与生成报告 id 列表供前端触发导出
+- **工单 / 资产联动逻辑抽取**（`frontend/src/composables/usePlanAssetLink.ts`）：预览确认页与批量对话框共用（工单下拉文案、资产候选过滤、选定工单自动联动默认资产），消除两处复制
 
+### 测试
+
+- `backend/tests/test_api.py` 新增 `test_batch_import_confirm`：正常批量确认（统一工单、报告自动生成并挂载）、重复关联跳过（含 `batch_ids` 内重复去重）、部分失败隔离、空批次与非法工单校验、无 `import:manage` 权限 403
 

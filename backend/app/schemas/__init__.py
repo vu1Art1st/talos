@@ -56,6 +56,9 @@ from .knowledge import (
     KnowledgeOut,
 )
 from .import_ import (
+    BatchConfirmIn,
+    BatchConfirmItemOut,
+    BatchConfirmOut,
     ImportBatchOut,
     ImportConfirmIn,
     ImportRecordOut,

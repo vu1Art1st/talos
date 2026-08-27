@@ -1,12 +1,11 @@
 import logging
 import uuid
-from datetime import datetime as _dt, time as _dt_time
 from io import BytesIO
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,13 +16,16 @@ from app.core.deps import require_perm
 from app.db import get_session
 from app.models import Asset, ExportJob, ImportBatch, ImportRecord, Report, TestingPlan, User
 from app.schemas import (
+    BatchConfirmIn,
+    BatchConfirmItemOut,
+    BatchConfirmOut,
     ImportBatchOut,
     ImportConfirmIn,
     ImportRecordOut,
     ImportRecordUpdateIn,
     Page,
 )
-from app.services import import_service, plan_service
+from app.services import import_service
 from app.services.audit_service import audit
 from app.services.docx_parser import build_import_template
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
@@ -32,6 +34,20 @@ from app.workers.dispatch import dispatch
 router = APIRouter(prefix="/imports", tags=["Word导入"])
 
 logger = logging.getLogger(__name__)
+
+
+def _batch_chrono_key(batch: ImportBatch) -> tuple:
+    """批量确认时序排序键：报告日期(旧→新) → 复测轮次 → 批次 id。
+
+    同一工单下相同名称的漏洞会跨报告去重合并，必须按「旧报告 → 新报告」顺序处理，
+    否则较新复测报告的「已修复」会被较旧报告（修复中/未修复）覆盖，
+    导致最终漏洞状态与最新报告不一致（批量确认时序 bug）。
+    """
+    meta = batch.meta_json or {}
+    date = (meta.get("report_date") or "").strip()
+    seq = int(meta.get("retest_round_seq") or 0)
+    return (date, seq, batch.id)
+
 
 # .docx 本质是 ZIP 包，ZIP 文件头魔术字节为 PK\x03\x04
 DOCX_MAGIC = b"PK\x03\x04"
@@ -79,6 +95,96 @@ async def upload_docx(
 
     await dispatch(request.app, "parse_import_task", batch.id)
     return batch
+
+
+@router.post("/batch-confirm", response_model=BatchConfirmOut)
+async def batch_confirm_batches(
+    body: BatchConfirmIn,
+    request: Request,
+    user: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量确认入库：勾选多个导入批次，统一指定工单/资产，逐批次复用单批确认逻辑。
+
+    单批次失败只回滚该批次，不影响其余批次；无待入库记录（已确认/解析失败等）计入 skipped；
+    返回各批次明细与本次生成/关联的报告 id 列表，前端据此调用批量导出。
+    """
+    batch_ids = list(dict.fromkeys(body.batch_ids))  # 去重保序
+    if not batch_ids:
+        raise HTTPException(400, "未选择任何导入批次")
+    # 前置校验统一工单/资产，避免逐批次重复查询
+    if body.testing_plan_id is not None:
+        plan = await session.get(TestingPlan, body.testing_plan_id)
+        if plan is None:
+            raise HTTPException(400, "指定的渗透测试工单不存在")
+    if body.asset_id is not None:
+        asset = await session.get(Asset, body.asset_id)
+        if asset is None:
+            raise HTTPException(400, "指定的资产不存在")
+
+    details: list[BatchConfirmItemOut] = []
+    confirmed = skipped = failed = 0
+    report_ids: list[int] = []
+    # 预加载全部批次并按报告时序排序（旧→新）：同一工单下相同名称漏洞会跨报告去重合并，
+    # 必须从旧到新处理，确保最新报告的「已修复」最终生效而非被较旧报告覆盖
+    batches: list[tuple[int, ImportBatch | None]] = [
+        (bid, await session.get(ImportBatch, bid)) for bid in batch_ids
+    ]
+    batches.sort(key=lambda item: _batch_chrono_key(item[1]) if item[1] is not None else ("", 0, 0))
+    for bid, batch in batches:
+        if batch is None:
+            failed += 1
+            details.append(BatchConfirmItemOut(
+                batch_id=bid, filename="", status="failed", detail="导入批次不存在",
+            ))
+            continue
+        # 预检查是否有待入库记录：无则跳过（已确认 / 部分确认后剩余为空 / 解析失败）
+        has_parsed = (
+            await session.execute(
+                select(func.count(ImportRecord.id)).where(
+                    ImportRecord.batch_id == bid, ImportRecord.status == "parsed",
+                )
+            )
+        ).scalar_one()
+        if not has_parsed:
+            skipped += 1
+            details.append(BatchConfirmItemOut(
+                batch_id=bid, filename=batch.filename, status="skipped",
+                detail="没有可入库的记录（可能已全部确认）",
+            ))
+            continue
+        try:
+            result = await import_service.confirm_batch_internal(
+                session, batch, user,
+                None, body.asset_id, None, body.testing_plan_id,
+            )
+            await audit(session, request, "import_confirm", user, {
+                "target": f"imports/{bid}", "created": result.created,
+            })
+            confirmed += 1
+            details.append(BatchConfirmItemOut(
+                batch_id=bid, filename=batch.filename, status="confirmed", detail=result.msg,
+            ))
+            if result.report_id is not None:
+                report_ids.append(result.report_id)
+        except HTTPException as exc:
+            await session.rollback()
+            failed += 1
+            details.append(BatchConfirmItemOut(
+                batch_id=bid, filename=batch.filename, status="failed", detail=str(exc.detail),
+            ))
+        except Exception:
+            await session.rollback()
+            logger.exception("批量确认批次 %s 失败", bid)
+            failed += 1
+            details.append(BatchConfirmItemOut(
+                batch_id=bid, filename=batch.filename, status="failed",
+                detail="确认失败，请重试或进入预览逐批处理",
+            ))
+    return BatchConfirmOut(
+        confirmed=confirmed, skipped=skipped, failed=failed,
+        report_ids=report_ids, details=details,
+    )
 
 
 @router.get("", response_model=Page[ImportBatchOut])
@@ -164,81 +270,14 @@ async def confirm_batch(
 ):
     """确认入库：解析记录经知识库回填后建漏洞并去重合并，报告格式批次自动编排计划/资产/报告。"""
     batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
-    records = await import_service.load_parsed_records(session, batch_id, body.record_ids)
-
-    asset = None
-    if body.asset_id is not None:
-        asset = await session.get(Asset, body.asset_id)
-        if asset is None:
-            raise HTTPException(400, "指定的资产不存在")
-
-    report = None
-    if body.report_id is not None:
-        report = await session.get(Report, body.report_id)
-        if report is None:
-            raise HTTPException(400, "指定的报告不存在")
-
-    # 显式关联的测试计划（任何文档格式均可指定）
-    plan = None
-    if body.testing_plan_id is not None:
-        plan = await session.get(TestingPlan, body.testing_plan_id)
-        if plan is None:
-            raise HTTPException(400, "指定的渗透测试工单不存在")
-
-    batch_meta = batch.meta_json or {}
-    is_retest = batch.doc_kind == "report" and bool(batch_meta.get("is_retest"))
-    all_fixed = all(rec.fixed for rec in records)  # records 恒非空（上方已校验）
-
-    # 报告格式批次：确认入库时自动创建/关联测试计划、资产与报告
-    report_auto_created = False
-    if batch.doc_kind == "report":
-        plan, round_row = await import_service.resolve_report_plan(
-            session, batch, user, plan, is_retest, all_fixed,
-        )
-        if plan is not None:
-            asset = await import_service.resolve_report_asset(session, batch, plan, asset)
-            report, report_auto_created = await import_service.ensure_report_and_bind_round(
-                session, batch, plan, user, report, round_row,
-            )
-
-    kb_map = await import_service.load_knowledge_map(session, records)
-    created = 0
-    new_vul_ids: list[int] = []
-    for rec in records:
-        vul, is_new = await import_service.confirm_one_record(
-            session, batch, rec, plan, asset, report, user, kb_map, is_retest, created,
-        )
-        if is_new:
-            new_vul_ids.append(vul.id)
-        created += 1
-
-    await import_service.finalize_confirm(
-        session, batch, plan, report, report_auto_created, new_vul_ids, user,
+    result = await import_service.confirm_batch_internal(
+        session, batch, user,
+        body.record_ids, body.asset_id, body.report_id, body.testing_plan_id,
     )
-    # 导入自动生成的报告：同步生成 docx 文件并记录导出任务（可下载），
-    # 时间取报告标题日期固定 14:00（无 report_date 则留 DB default 当前时间）。
-    if report_auto_created and report is not None:
-        auto_time = None
-        report_date = (batch_meta.get("report_date") or "").strip()
-        if report_date:
-            try:
-                auto_time = _dt.combine(_dt.strptime(report_date, "%Y-%m-%d").date(), _dt_time(14, 0))
-            except ValueError:
-                auto_time = None
-        await import_service.auto_export_report(session, report, plan, user, auto_time)
-    # 报告实际人天已按测试周期计算，同步刷新关联工单的实际人天（仅纳入初测报告）
-    if plan is not None and not is_retest:
-        await plan_service.refresh_mandays(session, plan.id)
-    await session.commit()
     await audit(session, request, "import_confirm", user, {
-        "target": f"imports/{batch_id}", "created": created,
+        "target": f"imports/{batch_id}", "created": result.created,
     })
-    msg = f"成功处理 {created} 条漏洞记录"
-    if plan is not None:
-        msg += f"，已关联测试计划「{plan.system_name}」"
-    if report_auto_created and report is not None:
-        msg += f"，已生成报告「{report.title}」"
-    return {"msg": msg, "created": created}
+    return {"msg": result.msg, "created": result.created}
 
 
 @router.get("/{batch_id}/preview")

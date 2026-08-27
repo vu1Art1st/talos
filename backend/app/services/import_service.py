@@ -1,12 +1,13 @@
 """Word 导入确认入库：解析校验、报告批次编排、知识库回填、去重合并与收尾。
 
-路由层（api/v1/imports.py::confirm_batch）只做参数编排与消息汇总，
+路由层（api/v1/imports.py::confirm_batch / batch_confirm）只做参数编排、消息汇总与审计，
 本模块按「解析校验 → 报告编排 → 知识库回填 → 去重合并/建漏洞 → 收尾」承接全部业务逻辑。
-事务统一由路由层 commit，本模块只做 flush（保证自增 ID 可用）。
+单批次事务由本模块统一 commit（confirm_batch_internal），批量场景按批次独立提交/回滚。
 """
 import asyncio
 import ipaddress
 import re
+from dataclasses import dataclass
 from datetime import datetime as _dt, time as _dt_time
 from urllib.parse import urlparse
 
@@ -35,18 +36,19 @@ from app.services.report_html import vuln_section_html
 
 
 async def load_parsed_records(
-    session: AsyncSession, batch_id: int, record_ids: list[int]
+    session: AsyncSession, batch_id: int, record_ids: list[int] | None
 ) -> list[ImportRecord]:
-    """加载本次待入库的解析成功记录，无可入库记录直接 400。"""
-    records = (
-        await session.execute(
-            select(ImportRecord).where(
-                ImportRecord.batch_id == batch_id,
-                ImportRecord.id.in_(record_ids),
-                ImportRecord.status == "parsed",
-            )
-        )
-    ).scalars().all()
+    """加载本次待入库的解析成功记录，无可入库记录直接 400。
+
+    record_ids 为 None 时取该批次全部解析成功记录（批量确认场景）。
+    """
+    stmt = select(ImportRecord).where(
+        ImportRecord.batch_id == batch_id,
+        ImportRecord.status == "parsed",
+    )
+    if record_ids:
+        stmt = stmt.where(ImportRecord.id.in_(record_ids))
+    records = (await session.execute(stmt)).scalars().all()
     if not records:
         raise HTTPException(400, "没有可入库的记录（仅解析成功且未入库的记录可确认）")
     return list(records)
@@ -568,3 +570,113 @@ async def auto_export_report(
         job.create_time = auto_time
         job.finish_time = auto_time
     session.add(job)
+
+
+@dataclass
+class ConfirmResult:
+    """单批次确认入库的结果（单批 / 批量端点共用）。
+
+    - created: 本次入库的漏洞记录条数
+    - report_id: 报告格式批次生成/关联的报告（未产生报告时为 None）
+    - msg: 面向用户的摘要（含计划 / 报告关联信息）
+    """
+
+    batch_id: int
+    created: int
+    report_id: int | None
+    msg: str
+
+
+async def confirm_batch_internal(
+    session: AsyncSession,
+    batch: ImportBatch,
+    user: User,
+    record_ids: list[int] | None,
+    asset_id: int | None,
+    report_id: int | None,
+    testing_plan_id: int | None,
+) -> ConfirmResult:
+    """单批次确认入库（单批 / 批量端点共用，逻辑与原 confirm_batch 完全一致）。
+
+    承担：记录校验 → 报告格式批次编排计划/资产/报告 → 知识库回填与去重合并 →
+    收尾 → 自动导出报告 → 刷新工单人天 → 单批次 commit。
+    审计由调用方在返回后记录（audit 独立提交，不影响业务事务）。
+    校验失败抛 HTTPException；调用方（批量端点）负责捕获并按批次回滚隔离。
+    """
+    records = await load_parsed_records(session, batch.id, record_ids)
+
+    asset = None
+    if asset_id is not None:
+        asset = await session.get(Asset, asset_id)
+        if asset is None:
+            raise HTTPException(400, "指定的资产不存在")
+
+    report = None
+    if report_id is not None:
+        report = await session.get(Report, report_id)
+        if report is None:
+            raise HTTPException(400, "指定的报告不存在")
+
+    # 显式关联的测试计划（任何文档格式均可指定）
+    plan = None
+    if testing_plan_id is not None:
+        plan = await session.get(TestingPlan, testing_plan_id)
+        if plan is None:
+            raise HTTPException(400, "指定的渗透测试工单不存在")
+
+    batch_meta = batch.meta_json or {}
+    is_retest = batch.doc_kind == "report" and bool(batch_meta.get("is_retest"))
+    all_fixed = all(rec.fixed for rec in records)  # records 恒非空（load_parsed_records 已校验）
+
+    # 报告格式批次：确认入库时自动创建/关联测试计划、资产与报告
+    report_auto_created = False
+    if batch.doc_kind == "report":
+        plan, round_row = await resolve_report_plan(
+            session, batch, user, plan, is_retest, all_fixed,
+        )
+        if plan is not None:
+            asset = await resolve_report_asset(session, batch, plan, asset)
+            report, report_auto_created = await ensure_report_and_bind_round(
+                session, batch, plan, user, report, round_row,
+            )
+
+    kb_map = await load_knowledge_map(session, records)
+    created = 0
+    new_vul_ids: list[int] = []
+    for rec in records:
+        vul, is_new = await confirm_one_record(
+            session, batch, rec, plan, asset, report, user, kb_map, is_retest, created,
+        )
+        if is_new:
+            new_vul_ids.append(vul.id)
+        created += 1
+
+    await finalize_confirm(
+        session, batch, plan, report, report_auto_created, new_vul_ids, user,
+    )
+    # 导入自动生成的报告：同步生成 docx 文件并记录导出任务（可下载），
+    # 时间取报告标题日期固定 14:00（无 report_date 则留 DB default 当前时间）。
+    if report_auto_created and report is not None:
+        auto_time = None
+        report_date = (batch_meta.get("report_date") or "").strip()
+        if report_date:
+            try:
+                auto_time = _dt.combine(_dt.strptime(report_date, "%Y-%m-%d").date(), _dt_time(14, 0))
+            except ValueError:
+                auto_time = None
+        await auto_export_report(session, report, plan, user, auto_time)
+    # 报告实际人天已按测试周期计算，同步刷新关联工单的实际人天（仅纳入初测报告）
+    if plan is not None and not is_retest:
+        await plan_service.refresh_mandays(session, plan.id)
+    await session.commit()
+    msg = f"成功处理 {created} 条漏洞记录"
+    if plan is not None:
+        msg += f"，已关联测试计划「{plan.system_name}」"
+    if report_auto_created and report is not None:
+        msg += f"，已生成报告「{report.title}」"
+    return ConfirmResult(
+        batch_id=batch.id,
+        created=created,
+        report_id=report.id if report is not None else None,
+        msg=msg,
+    )
