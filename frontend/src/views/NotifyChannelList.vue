@@ -1,11 +1,11 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg" v-loading="loading">
+  <el-card shadow="never" v-loading="loading">
     <template #header>
       <div class="flex items-center gap-2">
-        <span class="text-base font-semibold">通知渠道</span>
-        <span class="text-sm text-gray-400">漏洞创建 / 工单认领 / 状态流转 / 复测完成事件推送到企业微信、钉钉或邮箱</span>
+        <span class="text-sm font-semibold">通知渠道</span>
+        <span class="text-xs text-gray-400">漏洞创建 / 工单认领 / 状态流转 / 复测完成事件推送到企业微信、钉钉或邮箱</span>
         <div class="flex-1" />
-        <el-button type="primary" @click="openDialog()">
+        <el-button type="primary" class="btn-min" @click="openDialog()">
           <el-icon class="mr-1"><Plus /></el-icon>新建渠道
         </el-button>
       </div>
@@ -15,17 +15,23 @@
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column label="类型" width="110">
         <template #default="{ row }">
-          <span class="tl-tag" :style="softStyle(typeColor(row.type))">{{ typeName(row.type) }}</span>
+          <span class="ktag">{{ typeName(row.type) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="订阅事件" min-width="220">
         <template #default="{ row }">
-          <div class="flex flex-wrap gap-1">
-            <span v-for="e in row.events" :key="e" class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">
-              {{ eventName(e) }}
-            </span>
-            <span v-if="!row.events?.length" class="text-gray-400">未订阅</span>
+          <div v-if="row.events?.length" class="flex items-center flex-wrap gap-1">
+            <span v-for="e in row.events.slice(0, 2)" :key="e" class="ktag">{{ eventName(e) }}</span>
+            <el-popover v-if="row.events.length > 2" placement="left" :width="240" trigger="hover">
+              <template #reference>
+                <el-button size="small" type="primary" link class="!p-0">+{{ row.events.length - 2 }}</el-button>
+              </template>
+              <div class="flex flex-wrap gap-1">
+                <span v-for="e in row.events" :key="e" class="ktag">{{ eventName(e) }}</span>
+              </div>
+            </el-popover>
           </div>
+          <span v-else class="text-gray-400">未订阅</span>
         </template>
       </el-table-column>
       <el-table-column label="配置" min-width="200" show-overflow-tooltip>
@@ -38,7 +44,7 @@
           <el-switch :model-value="row.is_active" @change="(v: any) => toggleActive(row, v)" />
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="170" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="testSend(row)">测试发送</el-button>
           <el-button size="small" link @click="openDialog(row)">编辑</el-button>
@@ -54,10 +60,8 @@
       </template>
     </el-table>
 
-    <div class="mt-4 flex justify-end">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
-    </div>
+    <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                  @page-change="load" @size-change="onSizeChange" />
   </el-card>
 
   <el-dialog :close-on-click-modal="false" v-model="dialogVisible"
@@ -100,10 +104,11 @@ import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
-import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { STAT_CARD_COLORS } from '../utils/colors'
+import TlPagination from '../components/TlPagination.vue'
 
 const auth = useAuthStore()
-const { items, total, page, loading, load } = useListPage('/notify-channels')
+const { items, total, page, size, loading, load, onSizeChange } = useListPage('/notify-channels')
 
 const channelTypes = computed<Record<string, string>>(() => (auth.meta as any)?.notify_channel_types ?? {})
 const eventDict = computed<Record<string, string>>(() => (auth.meta as any)?.notify_events ?? {})

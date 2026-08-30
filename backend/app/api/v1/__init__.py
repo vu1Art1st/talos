@@ -14,6 +14,7 @@ from app.api.v1 import (
     pats,
     remote_testing,
     reports,
+    search,
     spring_action,
     testing_plan,
     users,
@@ -28,6 +29,7 @@ api_router.include_router(vulns.router)
 api_router.include_router(knowledge.router)
 api_router.include_router(imports.router)
 api_router.include_router(reports.router)
+api_router.include_router(search.router)
 api_router.include_router(remote_testing.router)
 api_router.include_router(testing_plan.router)
 api_router.include_router(spring_action.router)

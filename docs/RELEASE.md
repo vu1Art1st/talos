@@ -726,6 +726,36 @@
 
 ---
 
+## [2.8.0] - 2026-08-31
+
+前端 UI 按 demo-2（Linear Dark）全面重写：令牌层换薄荷绿/绿调近黑、全局框架与 15 个视图统一骨架、新增 ⌘K 命令面板与全局搜索接口。
+
+### 新增
+
+- **⌘K 命令面板**（`frontend/src/components/CmdPalette.vue`，挂载于 `MainLayout`）：Ctrl/Cmd+K 全局唤起，↑↓↵esc 键盘导航；支持页面跳转（与侧边栏同源、按权限显隐）、动作（明暗切换）与全局搜索（防抖调用后端接口，无权限分区静默为空）；顶栏新增搜索入口按钮（含 ⌘K 键位提示）
+- **全局搜索接口**（`backend/app/api/v1/search.py`，`GET /api/v1/search?q=`）：跨漏洞/资产/渗透测试工单/漏扫基线工单/报告标题模糊聚合，分组各返回最近 5 条；资产/工单/报告分区跟随 `asset:manage` / `special:manage` / `report:manage` 权限（或通配符）
+- **组件层**（`frontend/src/components/`）：`StatCard v2`（语义点标 + meta 行 + 出血式迷你趋势线插槽，统一原 Dashboard 内联自绘与 3 处旧版并存）；`SparkLine`（Catmull-Rom 平滑 SVG 迷你趋势线，替代 Dashboard 曾用的 9 个 ECharts spark 实例）；`TlPagination`（统一分页 layout [20,50,100]，替换全站两种流派共 18 处）；`FilterToolbar`（列表筛选工具栏容器：弹性搜索框 + 等宽字典筛选 + 右侧按钮组）
+- **colors.ts 主题感知 tone 映射层**：后端 `/meta` 下发浅色版字典色（导出文档同为浅色口径），`html.dark` 时前端自动映射 demo-2 降饱和变体（五级/状态约 11 码精确映射，未收录色值走通用提亮），`MutationObserver` 保证切换主题后已渲染标签实时重渲染；新增 `dotStyle()` 点标助手
+
+### 变更
+
+- **设计令牌全面替换**（`frontend/src/style.css` / `tailwind.config.js`）：品牌主色靛蓝→薄荷绿（亮 #059669 / 暗 #34D399，主按钮薄荷底+深墨字）；暗色底 GitHub 系→绿调近黑（#0A0E0C 系）；圆角体系 EP 控件 7px / 卡片 10px / 浮层 12px，全站 35 处 `!rounded-lg` 覆盖清零；基准字号 13.5px + 语义阶梯（11/12/13.5/14/16/26），数字统一等宽字体；删除全局 `.el-card:hover` 上浮+靛蓝光晕；删除假 Inter 字体声明改系统栈；新增滚动条 / `::selection` / `.dot-tag` / `.ktag` / `.kbd` / `.num` 全局类；`.tl-tag` 胶囊改方角 5px
+- **全局框架**（`frontend/src/layouts/MainLayout.vue`）：侧边栏 224px 平铺分组（漏洞运营/资产管理/专项管理/系统管理 10.5px 分组标签）+ 紧凑导航项 + 底部用户信息块；顶栏 50px 毛玻璃（面包屑 + 工具栏式标题 + ⌘K 入口）；主区 20/28/48 内边距 + 最大 1400px 居中；折叠持久化键迁移 `sidebarCollapsed`（兼容读旧键）
+- **15 个视图统一骨架**：工具栏独立（FilterToolbar）+ 表格卡片 + TlPagination 三段式；selection 列统一 40、序号列 64、操作列收敛 120/160 两档并全局套 `.op-col` 紧凑样式；表格行内等级/状态改「色点+文字」dot-tag、漏洞类型改 ktag 中性方角签（`AGENTS.md` 新规范）；搜索框统一弹性 175-250px；5 个缺 flex-wrap 的工具栏补齐
+- **换行混乱治理**：资产 URL 列「等 N 条」改 +N popover 全量展开、角色权限列/通知订阅事件列/春耕网络层级与危害程度列「前 N 个 + +N popover」、导入预览 URL 补 `min-w-0` 截断保护、报告标题列补 tooltip
+- **弹窗宽度归档三档 480/640/800**：用户权限查看与令牌展示 560→640、渗透测试工单 22 项大表单 640→800、漏洞详情动态宽 720→800
+- **字典展示色切换 demo-2 浅色版**（`backend/app/constants.py`）：五级风险/漏洞状态/工单状态/资产/报告/导入导出/非渗透测试项全部色值更新（导出 docx/xlsx 同源生效）
+- **图表主题**（`frontend/src/utils/chartTheme.ts`）：PALETTE 薄荷绿打头、明暗轴/网格/tooltip 对齐令牌、删除无引用的 `barGradient`；Dashboard 布局改 2fr/1fr 非对称、状态分布饼图改堆叠条+图例、类型 Top10 改 CSS 横条、图表内 6 处写死色改令牌
+- **登录页薄荷绿重写**（`frontend/src/views/Login.vue`）：绿调近黑底 + 薄荷光晕 + 玻璃卡，登录按钮薄荷底深墨字（≥4.5:1）
+
+### 测试
+
+- `backend/tests/test_api.py`：`/meta` 色值断言更新为新色板；新增 `test_global_search`（空关键字空分组、漏洞标题命中、资产名命中）
+- `frontend/src/utils/__tests__/colors.spec.ts`：色板夹具与断言更新；新增 `dotStyle` 输出与暗色 tone 映射（精确映射 + 通用提亮）用例
+- 全量验证：后端 `pytest` 109 passed；前端 `vitest` 69 passed；`vite build` 通过
+
+---
+
 ## [2.7.0] - 2026-08-30
 
 春耕行动增强与英文文档：工单表单内联录入漏洞、新增预估扣分/资产认定原因字段、原始报告附件上传解析入库，漏洞搜索支持系统名称，README 双语化。

@@ -1,7 +1,7 @@
 <template>
   <div>
     <!-- 无记录但漏洞存在历史复测内容（报告「复测处理」直接写入 retest_html）时只读展示 -->
-    <el-card v-if="!records.length && fallbackHtml" shadow="never" class="!rounded-lg mb-4">
+    <el-card v-if="!records.length && fallbackHtml" shadow="never" class="mb-4">
       <template #header>
         <div class="flex items-center gap-2">
           <span class="font-medium">复测详情</span>
@@ -13,7 +13,7 @@
 
     <el-empty v-if="!records.length && !fallbackHtml" description="暂无复测记录，点击下方按钮新增" :image-size="80" />
 
-    <el-card v-for="(rec, i) in records" :key="rec.id" shadow="never" class="!rounded-lg mb-4">
+    <el-card v-for="(rec, i) in records" :key="rec.id" shadow="never" class="mb-4">
       <template #header>
         <div class="flex items-center gap-2">
           <el-input

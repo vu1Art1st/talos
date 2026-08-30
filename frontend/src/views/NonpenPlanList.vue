@@ -1,22 +1,25 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center flex-wrap gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索计划名称 / 系统 / 部门 / 工单ID" clearable class="!w-64"
-                @keyup.enter="reload" @clear="reload">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索计划名称 / 系统 / 部门 / 工单ID" clearable
+                  @keyup.enter="reload" @clear="reload">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
       <el-select v-model="actionable" class="!w-36" @change="reload">
         <el-option label="全部" :value="false" />
         <el-option label="仅可进行" :value="true" />
       </el-select>
-      <div class="flex-1" />
-      <el-button type="primary" class="btn-min" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
-      </el-button>
-    </div>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openDialog()">
+          <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
+        </el-button>
+      </template>
+    </FilterToolbar>
 
     <!-- 统计概览：总数 / 复测完成 / 三类扫描次数 -->
-    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-4">
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
       <StatCard label="漏扫基线工单总数" :color="STAT_CARD_COLORS.blue" :value="stats.total ?? 0" />
       <StatCard label="复测完成数" :color="STAT_CARD_COLORS.green" :value="stats.retest_done ?? 0" />
       <StatCard label="基线扫描次数" :color="STAT_CARD_COLORS.orange" :value="stats.baseline_times ?? 0" />
@@ -24,13 +27,14 @@
       <StatCard label="Web扫描次数" :color="STAT_CARD_COLORS.gray" :value="stats.web_times ?? 0" />
     </div>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
         <el-empty :image-size="80"
                   :description="actionable || search ? '未找到符合条件（可进行 / 搜索）的漏扫基线工单' : '暂无漏扫基线工单，点击右上角「新增漏扫基线工单」开始'" />
       </template>
-      <el-table-column type="index" label="序号" width="60"
+      <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column label="工单ID" min-width="150" show-overflow-tooltip>
         <template #default="{ row }">
@@ -57,9 +61,9 @@
       </el-table-column>
       <el-table-column v-for="t in nonpenItems()" :key="t.key" :label="t.name" width="100">
         <template #default="{ row }">
-          <span v-if="row.items?.[t.key]" class="tl-tag" :class="{ 'ignored-tag': row.items[t.key].status === 'ignored' }"
-                :style="softStyle(nonpenItemMeta(row.items[t.key].status).color)">
-            {{ nonpenItemMeta(row.items[t.key].status).label }}
+          <span v-if="row.items?.[t.key]" class="dot-tag" :class="{ 'ignored-tag': row.items[t.key].status === 'ignored' }"
+                :style="dotStyle(nonpenItemMeta(row.items[t.key].status).color)">
+            <i></i>{{ nonpenItemMeta(row.items[t.key].status).label }}
           </span>
           <span v-else style="color: var(--tl-text-3)">-</span>
         </template>
@@ -78,12 +82,12 @@
       </el-table-column>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                     @current-change="load" @size-change="onSizeChange" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
+  </div>
 
   <!-- 新增 / 编辑弹窗 -->
   <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="800px"
@@ -163,10 +167,12 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Check, Plus, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
-import { nonpenItemMeta, nonpenItems, softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { dotStyle, nonpenItemMeta, nonpenItems, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDate } from '../utils/format'
 import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'

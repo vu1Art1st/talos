@@ -65,9 +65,9 @@ const result = computed(() => {
 
 // 严重度色：复用平台等级色板（严重/高危/中危/低危），无风险用灰
 const severityColor = computed(() => {
-  if (!result.value) return '#909399'
+  if (!result.value) return '#8a968f'
   const lv = scoreToLevel(result.value.score)
-  return lv !== null ? levelColor(lv) : '#909399'
+  return lv !== null ? levelColor(lv) : '#8a968f'
 })
 
 watch(result, (r) => {

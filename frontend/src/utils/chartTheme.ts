@@ -2,22 +2,22 @@ import * as echarts from 'echarts'
 
 // ECharts 明 / 暗双主题（唯一图表主题源），与 style.css 令牌层视觉对齐
 // 图表系列色唯一色源：视图内自定义系列色时必须引用 PALETTE，禁止散落硬编码
-export const PALETTE = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#8b5cf6', '#ec4899', '#84cc16']
+export const PALETTE = ['#10b981', '#38bdf8', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7', '#ec4899', '#84cc16']
 
 function makeTheme(dark: boolean) {
-  const axis = dark ? '#6e7681' : '#9ca3af'
-  const split = dark ? '#262c33' : '#f0f1f3'
-  const text = dark ? '#9da7b3' : '#4b5563'
+  const axis = dark ? '#5f716b' : '#8a968f'
+  const split = dark ? '#232b27' : '#e5e8e6'
+  const text = dark ? '#9db0a9' : '#5c6b65'
   return {
     color: PALETTE,
     textStyle: { color: text },
     legend: { textStyle: { color: text }, icon: 'circle', itemWidth: 8, itemHeight: 8 },
     tooltip: {
-      backgroundColor: dark ? '#1c2128' : '#ffffff',
+      backgroundColor: dark ? '#161c19' : '#ffffff',
       borderWidth: 0,
       padding: [10, 14],
-      textStyle: { color: dark ? '#e6edf3' : '#111827', fontSize: 13 },
-      extraCssText: 'box-shadow: 0 8px 24px rgba(0,0,0,.18); border-radius: 10px;',
+      textStyle: { color: dark ? '#e8efec' : '#1c2622', fontSize: 12.5 },
+      extraCssText: 'box-shadow: 0 8px 24px rgba(15,23,20,.16); border-radius: 10px;',
     },
     categoryAxis: {
       axisLine: { lineStyle: { color: split } },
@@ -49,13 +49,5 @@ export function areaGradient(hex: string) {
   return new echarts.graphic.LinearGradient(0, 0, 0, 1, [
     { offset: 0, color: hex + '40' },
     { offset: 1, color: hex + '00' },
-  ])
-}
-
-// 横向柱状渐变（浅色到主色）
-export function barGradient(from = '#818cf8', to = '#6366f1') {
-  return new echarts.graphic.LinearGradient(0, 0, 1, 0, [
-    { offset: 0, color: from },
-    { offset: 1, color: to },
   ])
 }

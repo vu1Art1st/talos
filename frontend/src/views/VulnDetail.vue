@@ -1,7 +1,7 @@
 <template>
   <div v-if="vul" class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
     <div class="space-y-4">
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <div class="flex items-start justify-between gap-4">
           <div>
             <div class="text-xl font-semibold text-gray-800">{{ vul.title }}</div>
@@ -54,14 +54,14 @@
         </el-descriptions>
       </el-card>
 
-      <el-card v-for="sec in richSections" :key="sec.title" shadow="never" class="!rounded-lg">
+      <el-card v-for="sec in richSections" :key="sec.title" shadow="never">
         <template #header>{{ sec.title }}</template>
         <div class="rich-content" v-html="safeHtml(sec.html)" />
       </el-card>
     </div>
 
     <div class="space-y-4">
-      <el-card v-if="auth.hasPerm('vuln:audit')" shadow="never" class="!rounded-lg">
+      <el-card v-if="auth.hasPerm('vuln:audit')" shadow="never">
         <template #header>状态流转</template>
         <el-empty v-if="!transitions.length" description="当前状态没有可执行的流转" :image-size="80" />
         <div v-else class="space-y-2">
@@ -76,7 +76,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>操作日志</template>
         <el-timeline class="!pl-1">
           <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmtDateTime(log.create_time)" size="small">

@@ -1,27 +1,33 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索系统 / 资产归属 / 被通报单位 / 漏洞名称" clearable class="!w-72"
-                @keyup.enter="load(1)" @clear="load(1)">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
-      <div class="flex-1" />
-      <el-button type="primary" class="btn-min" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增远程检测
-      </el-button>
-    </div>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索系统 / 资产归属 / 被通报单位 / 漏洞名称" clearable
+                  @keyup.enter="load(1)" @clear="load(1)">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openDialog()">
+          <el-icon class="mr-1"><Plus /></el-icon>新增远程检测
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column type="index" label="序号" width="70"
-                       :index="(i: number) => (page - 1) * 20 + i + 1" />
-      <el-table-column prop="notice_time" label="通报时间" width="110" sortable="custom" />
+      <el-table-column type="index" label="序号" width="64"
+                       :index="(i: number) => (page - 1) * size + i + 1" />
+      <el-table-column prop="notice_time" label="通报时间" width="110" sortable="custom">
+        <template #default="{ row }"><span class="num">{{ row.notice_time }}</span></template>
+      </el-table-column>
       <el-table-column prop="system_name" label="系统名称" width="150" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="department" label="资产归属" width="130" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="notified_unit" label="被通报单位" width="150" show-overflow-tooltip />
       <el-table-column prop="is_external" label="外部项目" width="110" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="row.is_external ? softStyle(STAT_CARD_COLORS.blue) : softStyle(STAT_CARD_COLORS.gray)">
-            {{ row.is_external ? '是' : '否' }}
+          <span class="dot-tag" :style="dotStyle(row.is_external ? STAT_CARD_COLORS.blue : STAT_CARD_COLORS.gray)">
+            <i></i>{{ row.is_external ? '是' : '否' }}
           </span>
         </template>
       </el-table-column>
@@ -29,8 +35,8 @@
       <el-table-column prop="vuln_type" label="漏洞类型" width="120" show-overflow-tooltip />
       <el-table-column prop="appeal_status" label="申诉状态" width="110" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="appealStatusStyle(row.appeal_status)">
-            {{ appealStatusLabel(row.appeal_status) }}
+          <span class="dot-tag" :style="dotStyle(appealStatusColor(row.appeal_status))">
+            <i></i>{{ appealStatusLabel(row.appeal_status) }}
           </span>
         </template>
       </el-table-column>
@@ -43,7 +49,7 @@
         </template>
       </el-table-column>
       <el-table-column prop="appeal_method" label="申诉方式" width="130" show-overflow-tooltip />
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该记录？" @confirm="remove(row)">
@@ -58,11 +64,12 @@
       </template>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
+  </div>
 
   <el-dialog
              :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'" width="640px">
@@ -131,12 +138,14 @@ import { onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useCrudDialog } from '../composables/useCrudDialog'
 import { useListPage } from '../composables/useListPage'
 import { saveBlob } from '../utils/download'
-import { STAT_CARD_COLORS, softStyle } from '../utils/colors'
+import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
 
-const { items, total, page, search, loading, load, onSortChange } = useListPage('/remote-testings')
+const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage('/remote-testings')
 
 const emptyForm = () => ({
   id: null as number | null,
@@ -167,9 +176,9 @@ const { dialogVisible, saving, form, openDialog, submit: save } = useCrudDialog(
 
 const appealStatusLabel = (s: string) =>
   s === 'success' ? '申诉成功' : s === 'fail' ? '申诉失败' : '未申诉'
-const appealStatusStyle = (s: string) =>
-  s === 'success' ? softStyle(STAT_CARD_COLORS.green)
-    : s === 'fail' ? softStyle(STAT_CARD_COLORS.red) : softStyle(STAT_CARD_COLORS.gray)
+const appealStatusColor = (s: string) =>
+  s === 'success' ? STAT_CARD_COLORS.green
+    : s === 'fail' ? STAT_CARD_COLORS.red : STAT_CARD_COLORS.gray
 
 async function uploadAppeal(options: any) {
   const fd = new FormData()

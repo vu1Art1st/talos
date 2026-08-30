@@ -1,15 +1,16 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
+  <div class="space-y-3">
+    <el-card shadow="never">
+    <div class="flex items-center gap-2 mb-1">
       <span class="text-gray-400 text-sm">组织（组）用于资产归属与用户分组管理</span>
       <div class="flex-1" />
-      <el-button v-if="auth.hasPerm('user:manage')" type="primary" @click="openDialog()">
+      <el-button v-if="auth.hasPerm('user:manage')" type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新建组织
       </el-button>
     </div>
 
     <el-table v-loading="loading" :data="items" stripe>
-      <el-table-column type="index" label="序号" width="80" />
+      <el-table-column type="index" label="序号" width="64" />
       <el-table-column prop="name" label="组织名称" min-width="160" sortable />
       <el-table-column label="成员数" width="100">
         <template #default="{ row }">{{ row.member_count ?? '-' }}</template>
@@ -17,7 +18,7 @@
       <el-table-column label="备注" min-width="200" show-overflow-tooltip>
         <template #default="{ row }">{{ row.remark || '-' }}</template>
       </el-table-column>
-      <el-table-column v-if="auth.hasPerm('user:manage')" label="操作" width="220" fixed="right">
+      <el-table-column v-if="auth.hasPerm('user:manage')" label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openMembers(row)">人员录入</el-button>
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
@@ -33,6 +34,7 @@
       </template>
     </el-table>
   </el-card>
+  </div>
 
   <!-- 组织编辑 -->
   <el-dialog

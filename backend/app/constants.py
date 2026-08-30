@@ -229,28 +229,28 @@ VUL_TYPE_REVERSE = {v: k for k, v in VUL_TYPE.items()}
 # ---------- 界面展示色值与展示名（/meta 下发，前端唯一色源，改此处即全端生效） ----------
 # 屏幕展示口径；Word/PDF 导出的打印色板在 services/report_builder.py 独立维护（打印色与屏幕色语义不同）
 VUL_LEVEL_COLOR = {
-    10: "#A61B29",  # 严重 深红
-    20: "#F56C6C",  # 高危 红
-    30: "#E6A23C",  # 中危 橙
-    40: "#409EFF",  # 低危 蓝
-    50: "#67C23A",  # 安全 绿
+    10: "#DC2626",  # 严重 红
+    20: "#EA580C",  # 高危 橙
+    30: "#D97706",  # 中危 琥珀
+    40: "#0284C7",  # 低危 蓝
+    50: "#059669",  # 安全 薄荷绿
 }
 
 VUL_STATUS_COLOR = {
-    VulStatus.UNFIXED: "#F56C6C",    # 未修复 红
-    VulStatus.FIXING: "#E6A23C",     # 修复中 橙
-    VulStatus.RETESTING: "#E6A23C",  # 复测中 橙
-    VulStatus.FIXED: "#67C23A",      # 已修复 绿
-    VulStatus.IGNORED: "#909399",    # 已忽略 灰
-    VulStatus.DEFERRED: "#909399",   # 暂不处理 灰
+    VulStatus.UNFIXED: "#DC2626",    # 未修复 红
+    VulStatus.FIXING: "#D97706",     # 修复中 琥珀
+    VulStatus.RETESTING: "#0284C7",  # 复测中 蓝
+    VulStatus.FIXED: "#059669",      # 已修复 薄荷绿
+    VulStatus.IGNORED: "#8A968F",    # 已忽略 灰
+    VulStatus.DEFERRED: "#8A968F",   # 暂不处理 灰
 }
 
 VUL_TYPE_COLOR = {  # 色相分散便于区分；灰色固定留给「其他」，动态新增类型（code≥1000）由前端兜底灰色
     10: "#E0442F",   # SQL注入 朱红
-    15: "#E6A23C",   # XSS跨站 橙
+    15: "#D97706",   # XSS跨站 琥珀
     20: "#8C1D18",   # 命令执行 暗红
-    25: "#8B5CF6",   # 代码执行 紫
-    30: "#6366F1",   # 文件包含 靛蓝
+    25: "#9333EA",   # 代码执行 紫
+    30: "#DB2777",   # 文件包含 品红
     35: "#2D7DD2",   # 任意文件操作 蓝
     40: "#F59E0B",   # 权限绕过 琥珀
     45: "#0EA5E9",   # 逻辑漏洞 天蓝
@@ -259,33 +259,33 @@ VUL_TYPE_COLOR = {  # 色相分散便于区分；灰色固定留给「其他」�
     60: "#D97706",   # 文件上传 深橙
     65: "#7C3AED",   # 弱口令 深紫
     70: "#0D9488",   # 威胁情报 青
-    75: "#909399",   # 其他 灰
+    75: "#8A968F",   # 其他 灰
 }
 
 TESTING_PLAN_STATUS_COLOR = {
-    PlanStatus.UNTESTED: "#909399",
-    PlanStatus.TESTING: "#E6A23C",
-    PlanStatus.WAIT_RETEST: "#4F46E5",
-    PlanStatus.RETEST_APPLY: "#F56C6C",
-    PlanStatus.RETESTING: "#E6A23C",
-    PlanStatus.RETEST_DONE: "#67C23A",
-    PlanStatus.PASSED: "#67C23A",
+    PlanStatus.UNTESTED: "#8A968F",
+    PlanStatus.TESTING: "#D97706",
+    PlanStatus.WAIT_RETEST: "#0284C7",
+    PlanStatus.RETEST_APPLY: "#DC2626",
+    PlanStatus.RETESTING: "#D97706",
+    PlanStatus.RETEST_DONE: "#059669",
+    PlanStatus.PASSED: "#059669",
 }
 
 ASSET_STATUS_COLOR = {
-    10: "#67C23A",  # 线上 绿
-    20: "#E6A23C",  # 上线前 橙
-    30: "#909399",  # 下线 灰
+    10: "#059669",  # 线上 薄荷绿
+    20: "#D97706",  # 上线前 琥珀
+    30: "#8A968F",  # 下线 灰
 }
 
 URL_TAG_COLOR = {
-    10: "#4F46E5",  # 互联网 靛蓝
-    20: "#909399",  # 办公网 灰
+    10: "#0284C7",  # 互联网 蓝
+    20: "#8A968F",  # 办公网 灰
 }
 
 # 报告状态展示（status 字符串 draft/final/completed）
 REPORT_STATUS_NAME = {"draft": "草稿", "final": "已定稿", "completed": "已完成"}
-REPORT_STATUS_COLOR = {"draft": "#909399", "final": "#4F46E5", "completed": "#67C23A"}
+REPORT_STATUS_COLOR = {"draft": "#8A968F", "final": "#0284C7", "completed": "#059669"}
 
 # Word 导入批次 / 记录状态展示（imports 与 workers 的状态字符串）
 IMPORT_BATCH_STATUS_NAME = {
@@ -293,14 +293,14 @@ IMPORT_BATCH_STATUS_NAME = {
     "confirmed": "已入库", "failed": "解析失败",
 }
 IMPORT_BATCH_STATUS_COLOR = {
-    "pending": "#909399", "parsing": "#E6A23C", "parsed": "#4F46E5",
-    "confirmed": "#67C23A", "failed": "#F56C6C",
+    "pending": "#8A968F", "parsing": "#D97706", "parsed": "#0284C7",
+    "confirmed": "#059669", "failed": "#DC2626",
 }
 IMPORT_RECORD_STATUS_NAME = {
     "parsed": "待确认", "error": "解析异常", "confirmed": "已入库", "discarded": "已丢弃",
 }
 IMPORT_RECORD_STATUS_COLOR = {
-    "parsed": "#4F46E5", "error": "#E6A23C", "confirmed": "#67C23A", "discarded": "#909399",
+    "parsed": "#0284C7", "error": "#D97706", "confirmed": "#059669", "discarded": "#8A968F",
 }
 
 # 导出任务状态展示（workers/export_report_task 的状态字符串）
@@ -308,7 +308,7 @@ EXPORT_JOB_STATUS_NAME = {
     "pending": "生成中", "running": "生成中", "done": "已完成", "failed": "失败",
 }
 EXPORT_JOB_STATUS_COLOR = {
-    "pending": "#E6A23C", "running": "#E6A23C", "done": "#67C23A", "failed": "#F56C6C",
+    "pending": "#D97706", "running": "#D97706", "done": "#059669", "failed": "#DC2626",
 }
 
 
@@ -354,10 +354,10 @@ NONPEN_ITEM_ACTION_NAMES = {
 
 # 状态 -> 展示色值（明/暗双主题通用；「未开始」正常灰需关注，「忽略」更浅灰弱化）
 NONPEN_ITEM_COLORS = {
-    "not_started": "#909399",
-    "testing": "#409EFF",
-    "wait_retest": "#E6A23C",
-    "retesting": "#E6A23C",
-    "retest_done": "#67C23A",
-    "ignored": "#c0c4cc",
+    "not_started": "#8A968F",
+    "testing": "#0284C7",
+    "wait_retest": "#D97706",
+    "retesting": "#D97706",
+    "retest_done": "#059669",
+    "ignored": "#A6B1AB",
 }

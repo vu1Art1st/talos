@@ -1,96 +1,97 @@
 <template>
-  <div class="space-y-4">
-    <!-- 筛选工具栏 -->
-    <el-card shadow="never" class="!rounded-lg">
-      <div class="flex flex-wrap items-center gap-2">
-        <el-input v-model="search" placeholder="搜索标题 / 系统 / URL" clearable class="!w-64"
+  <div class="space-y-3">
+    <!-- 筛选工具栏（FilterToolbar 统一容器：弹性搜索 + 右侧按钮组） -->
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索标题 / 系统 / URL" clearable
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <!-- 筛选：多组筛选条件收纳为单个下拉弹窗，勾选后实时联动列表与统计 -->
-        <el-popover trigger="click" placement="bottom-start" :width="680">
-          <template #reference>
-            <el-button :type="activeFilterCount ? 'primary' : 'default'">
-              <el-icon class="mr-1"><Filter /></el-icon>筛选
-              <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
-            </el-button>
-          </template>
-          <div class="vuln-filter-panel">
-            <div class="grid grid-cols-2 gap-x-4 gap-y-3">
-              <div>
-                <div class="filter-label">状态</div>
-                <el-select v-model="query.statuses" placeholder="全部" clearable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">等级</div>
-                <el-select v-model="query.levels" placeholder="全部" clearable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">类型</div>
-                <el-select v-model="query.vul_types" placeholder="全部" clearable filterable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">系统类型</div>
-                <el-select v-model="query.system_types" placeholder="全部" clearable filterable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="st in (meta?.system_type ?? [])" :key="st" :label="st" :value="st" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">测试类型</div>
-                <el-select v-model="query.test_types" placeholder="全部" clearable filterable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">选择资产</div>
-                <el-select v-model="query.asset_ids" placeholder="全部" clearable filterable remote multiple collapse-tags
-                           :remote-method="searchAssets" :loading="assetLoading" class="w-full" @change="reload">
-                  <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">归属部门</div>
-                <el-select v-model="query.departments" placeholder="全部" clearable filterable multiple collapse-tags
-                           class="w-full" @change="reload">
-                  <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
-                </el-select>
-              </div>
-              <div>
-                <div class="filter-label">录入时间</div>
-                <el-date-picker v-model="query.dateRange" type="daterange" unlink-panels
-                                range-separator="至" start-placeholder="开始" end-placeholder="结束"
-                                value-format="YYYY-MM-DD" class="w-full" @change="reload" />
-              </div>
+      </div>
+      <!-- 筛选：多组筛选条件收纳为单个下拉弹窗，勾选后实时联动列表与统计 -->
+      <el-popover trigger="click" placement="bottom-start" :width="680">
+        <template #reference>
+          <el-button :type="activeFilterCount ? 'primary' : 'default'">
+            <el-icon class="mr-1"><Filter /></el-icon>筛选
+            <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+          </el-button>
+        </template>
+        <div class="vuln-filter-panel">
+          <div class="grid grid-cols-2 gap-x-4 gap-y-3">
+            <div>
+              <div class="filter-label">状态</div>
+              <el-select v-model="query.statuses" placeholder="全部" clearable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
             </div>
-            <div class="flex items-center justify-between mt-3 pt-3" style="border-top: 1px solid var(--tl-border)">
-              <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
-              <el-button size="small" text type="primary" @click="resetFilters">重置筛选</el-button>
+            <div>
+              <div class="filter-label">等级</div>
+              <el-select v-model="query.levels" placeholder="全部" clearable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">类型</div>
+              <el-select v-model="query.vul_types" placeholder="全部" clearable filterable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="(name, code) in meta?.vul_type" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">系统类型</div>
+              <el-select v-model="query.system_types" placeholder="全部" clearable filterable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="st in (meta?.system_type ?? [])" :key="st" :label="st" :value="st" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">测试类型</div>
+              <el-select v-model="query.test_types" placeholder="全部" clearable filterable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="t in testTypes" :key="t" :label="t" :value="t" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">选择资产</div>
+              <el-select v-model="query.asset_ids" placeholder="全部" clearable filterable remote multiple collapse-tags
+                         :remote-method="searchAssets" :loading="assetLoading" class="w-full" @change="reload">
+                <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">归属部门</div>
+              <el-select v-model="query.departments" placeholder="全部" clearable filterable multiple collapse-tags
+                         class="w-full" @change="reload">
+                <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
+              </el-select>
+            </div>
+            <div>
+              <div class="filter-label">录入时间</div>
+              <el-date-picker v-model="query.dateRange" type="daterange" unlink-panels
+                              range-separator="至" start-placeholder="开始" end-placeholder="结束"
+                              value-format="YYYY-MM-DD" class="w-full" @change="reload" />
             </div>
           </div>
-        </el-popover>
-        <div class="flex-1" />
+          <div class="flex items-center justify-between mt-3 pt-3" style="border-top: 1px solid var(--tl-border)">
+            <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
+            <el-button size="small" text type="primary" @click="resetFilters">重置筛选</el-button>
+          </div>
+        </div>
+      </el-popover>
+      <template #actions>
         <el-button v-if="auth.hasPerm('vuln:manage') && selected.length" type="danger" class="btn-min" @click="batchRemove">
           <el-icon class="mr-1"><Delete /></el-icon>删除选中 ({{ selected.length }})
         </el-button>
         <el-button v-if="auth.hasPerm('vuln:submit')" type="primary" class="btn-min" @click="router.push('/vulns/new')">
           <el-icon class="mr-1"><Plus /></el-icon>提交漏洞
         </el-button>
-      </div>
-    </el-card>
+      </template>
+    </FilterToolbar>
 
     <!-- 统计概览（可折叠，与筛选联动） -->
-    <el-collapse v-model="statsOpen" class="!border-0">
+    <el-collapse v-model="statsOpen" class="tl-collapse mb-3">
       <el-collapse-item name="stats">
         <template #title>
           <span class="tl-collapse-title">
@@ -98,9 +99,9 @@
             <span class="tl-collapse-title__sub">（与筛选条件联动实时更新）</span>
           </span>
         </template>
-        <div v-loading="statsLoading">
-          <!-- 数据卡片：总数 / 4 等级 / 已修复 / 修复率（StatCard 统一风格，色源走 colors.ts） -->
-          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-4 mb-4 max-w-7xl mx-auto">
+        <div v-loading="statsLoading" class="px-2">
+          <!-- 数据卡片：总数 / 4 等级 / 已修复 / 修复率（StatCard v2，色源走 colors.ts） -->
+          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mb-4">
             <StatCard label="漏洞总数" :color="STAT_CARD_COLORS.blue" :value="stats?.total ?? 0" />
             <StatCard v-for="lv in levelCards" :key="lv.code" :label="lv.label" :color="lv.color" :value="levelCount(lv.code)" />
             <StatCard label="已修复" :color="STAT_CARD_COLORS.green" :value="fixedCount" />
@@ -108,29 +109,20 @@
           </div>
 
           <!-- Excel 风格交叉透视表：行=部门→系统，列=等级×修复状态 -->
-          <el-card shadow="never" class="!rounded-lg">
-            <template #header>
-              <div class="flex flex-wrap items-center gap-2 w-full">
-                <span class="font-medium">漏洞统计透视表</span>
-                <span class="text-xs" style="color: var(--tl-text-3)">
-                  （与上方筛选条件联动；按部门→系统分行，按等级×修复状态分列）
-                </span>
-                <div class="flex flex-wrap items-center gap-1 ml-auto">
-                  <el-tag v-if="query.test_types.length" size="small" type="primary" effect="plain">
-                    测试类型：{{ query.test_types.join('、') }}
-                  </el-tag>
-                  <el-tag v-if="query.departments.length" size="small" effect="plain">
-                    部门：{{ query.departments.join('、') }}
-                  </el-tag>
-                  <el-tag v-if="query.levels.length" size="small" effect="plain">
-                    等级：{{ query.levels.map(String).join('、') }}
-                  </el-tag>
-                  <el-tag v-if="query.dateRange && query.dateRange.length === 2" size="small" effect="plain">
-                    录入：{{ query.dateRange[0] }} ~ {{ query.dateRange[1] }}
-                  </el-tag>
-                </div>
-              </div>
-            </template>
+          <div class="flex flex-wrap items-center gap-2 mb-2">
+            <span class="text-sm font-semibold">漏洞统计透视表</span>
+            <span class="text-xs text-gray-400">
+              （与上方筛选条件联动；按部门→系统分行，按等级×修复状态分列）
+            </span>
+            <div class="flex flex-wrap items-center gap-1 ml-auto">
+              <span v-if="query.test_types.length" class="ktag">测试类型：{{ query.test_types.join('、') }}</span>
+              <span v-if="query.departments.length" class="ktag">部门：{{ query.departments.join('、') }}</span>
+              <span v-if="query.levels.length" class="ktag">等级：{{ query.levels.map(l => levelName(l)).join('、') }}</span>
+              <span v-if="query.dateRange && query.dateRange.length === 2" class="ktag">
+                录入：{{ query.dateRange[0] }} ~ {{ query.dateRange[1] }}
+              </span>
+            </div>
+          </div>
             <div class="max-w-[1300px] mx-auto">
             <el-table :data="pivotTableData" stripe border :max-height="520" :fit="false"
                       :span-method="pivotSpanMethod" show-summary
@@ -142,28 +134,28 @@
               <el-table-column prop="system_type" label="系统类型" width="120" show-overflow-tooltip />
               <!-- 合计列 -->
               <el-table-column label="漏洞总数" width="80" align="center">
-                <template #default="{ row }"><span class="tabular-nums font-medium">{{ row.total }}</span></template>
+                <template #default="{ row }"><span class="num font-medium">{{ row.total }}</span></template>
               </el-table-column>
               <el-table-column label="已修复总数" width="90" align="center">
-                <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.green }">{{ row.fixed_total }}</span></template>
+                <template #default="{ row }"><span class="num" :style="{ color: STAT_CARD_COLORS.green }">{{ row.fixed_total }}</span></template>
               </el-table-column>
               <el-table-column label="总修复率" width="80" align="center">
-                <template #default="{ row }"><span class="tabular-nums">{{ row.fix_rate }}%</span></template>
+                <template #default="{ row }"><span class="num">{{ row.fix_rate }}%</span></template>
               </el-table-column>
               <!-- 等级 × 修复状态 子列组 -->
               <el-table-column v-for="lv in levelPivotCols" :key="lv.code" :label="lv.label">
                 <el-table-column :label="'数量'" width="56" align="center">
                   <template #default="{ row }">
-                    <span class="tabular-nums" :style="{ color: lv.color, fontWeight: row.levels[lv.code]?.count ? 600 : 400 }">
+                    <span class="num" :style="{ color: lv.color, fontWeight: row.levels[lv.code]?.count ? 600 : 400 }">
                       {{ row.levels[lv.code]?.count ?? 0 }}
                     </span>
                   </template>
                 </el-table-column>
                 <el-table-column label="已修复" width="58" align="center">
-                  <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.green }">{{ row.levels[lv.code]?.fixed ?? 0 }}</span></template>
+                  <template #default="{ row }"><span class="num" :style="{ color: STAT_CARD_COLORS.green }">{{ row.levels[lv.code]?.fixed ?? 0 }}</span></template>
                 </el-table-column>
                 <el-table-column label="未修复" width="58" align="center">
-                  <template #default="{ row }"><span class="tabular-nums" :style="{ color: STAT_CARD_COLORS.red }">{{ row.levels[lv.code]?.unfixed ?? 0 }}</span></template>
+                  <template #default="{ row }"><span class="num" :style="{ color: STAT_CARD_COLORS.red }">{{ row.levels[lv.code]?.unfixed ?? 0 }}</span></template>
                 </el-table-column>
               </el-table-column>
               <template #empty>
@@ -171,35 +163,30 @@
               </template>
             </el-table>
             </div>
-          </el-card>
         </div>
       </el-collapse-item>
     </el-collapse>
 
     <!-- 漏洞列表 -->
-    <el-card shadow="never" class="!rounded-lg">
+    <el-card shadow="never" body-style="padding: 0 0 12px">
       <el-table v-loading="loading" :data="items" stripe @row-click="(row: any) => router.push(`/vulns/${row.id}`)"
                 class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
                 @sort-change="onSortChange">
-        <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="42" />
-        <el-table-column type="index" label="序号" width="70" :index="(i: number) => (page - 1) * size + i + 1" />
+        <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
+        <el-table-column type="index" label="序号" width="64" :index="(i: number) => (page - 1) * size + i + 1" />
         <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="level" label="等级" width="90" sortable="custom">
           <template #default="{ row }">
-            <span class="tl-tag" :style="levelSoftStyle(row.level)">
-              {{ meta?.vul_level?.[row.level] ?? row.level }}
-            </span>
+            <span class="dot-tag" :style="levelDotStyle(row.level)"><i></i>{{ meta?.vul_level?.[row.level] ?? row.level }}</span>
           </template>
         </el-table-column>
         <el-table-column prop="vul_type" label="类型" width="150" sortable="custom">
-          <template #default="{ row }">
-            <span class="tl-tag" :style="vulTypeSoftStyle(row.vul_type)">{{ meta?.vul_type?.[row.vul_type] ?? '-' }}</span>
-          </template>
+          <template #default="{ row }"><span class="ktag">{{ meta?.vul_type?.[row.vul_type] ?? '-' }}</span></template>
         </el-table-column>
         <el-table-column prop="status" label="状态" width="100" sortable="custom">
           <template #default="{ row }">
-            <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
-              {{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
+            <span class="dot-tag" :style="statusDotStyle(row.status, row.is_retest)">
+              <i></i>{{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
             </span>
           </template>
         </el-table-column>
@@ -217,17 +204,16 @@
           <template #default="{ row }">{{ row.department || '-' }}</template>
         </el-table-column>
         <el-table-column prop="submit_time" label="提交时间" width="170" sortable="custom">
-          <template #default="{ row }">{{ fmtDateTime(row.submit_time) }}</template>
+          <template #default="{ row }"><span class="num">{{ fmtDateTime(row.submit_time) }}</span></template>
         </el-table-column>
         <template #empty>
           <el-empty description="暂无漏洞记录，点击「提交漏洞」开始录入" :image-size="80" />
         </template>
       </el-table>
 
-      <div class="flex justify-end mt-4">
-        <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                       :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                       @current-change="load" @size-change="onSizeChange" />
+      <div class="px-4">
+        <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                      @page-change="load" @size-change="onSizeChange" />
       </div>
     </el-card>
   </div>
@@ -238,11 +224,16 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import StatCard from '../components/StatCard.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusLabel, statusSoftStyleEx, levelColor, vulTypeSoftStyle, STAT_CARD_COLORS } from '../utils/colors'
+import {
+  levelColor, levelDotStyle, levelName, STAT_CARD_COLORS, statusDotStyle, statusLabel,
+} from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()

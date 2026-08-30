@@ -1,22 +1,18 @@
 <template>
-  <div class="space-y-4">
-    <el-card shadow="never" class="!rounded-lg">
+  <div v-loading="loading" class="space-y-3">
+    <el-card shadow="never">
       <!-- 第一行：操作行（返回 / 标题 / 批次信息 / 确认按钮） -->
       <div class="flex flex-wrap items-center gap-3">
         <el-button @click="router.push('/reports/imports')">
           <el-icon class="mr-1"><Back /></el-icon>返回
         </el-button>
-        <div class="font-medium">报告导入确认</div>
-        <el-tag v-if="batch" size="small">{{ batch.filename }}</el-tag>
+        <div class="font-medium text-sm">报告导入确认</div>
+        <span v-if="batch" class="ktag">{{ batch.filename }}</span>
         <template v-if="batch?.doc_kind === 'report'">
-          <el-tag type="warning" size="small" effect="plain">报告格式</el-tag>
-          <el-tag v-if="batch.meta_json?.system_name" size="small" effect="plain">
-            {{ batch.meta_json.system_name }}
-          </el-tag>
-          <el-tag v-if="batch.meta_json?.report_date" size="small" effect="plain">
-            {{ batch.meta_json.report_date }}
-          </el-tag>
-          <el-tag v-if="batch.meta_json?.is_retest" type="success" size="small" effect="plain">复测</el-tag>
+          <span class="ktag">报告格式</span>
+          <span v-if="batch.meta_json?.system_name" class="ktag">{{ batch.meta_json.system_name }}</span>
+          <span v-if="batch.meta_json?.report_date" class="ktag">{{ batch.meta_json.report_date }}</span>
+          <span v-if="batch.meta_json?.is_retest" class="ktag">复测</span>
         </template>
         <div class="flex-1" />
         <el-button type="primary" :disabled="!selected.length" @click="confirm">
@@ -43,12 +39,14 @@
       </div>
     </el-card>
 
-    <el-card v-for="rec in records" :key="rec.id" shadow="never" class="!rounded-lg"
+    <el-card v-for="rec in records" :key="rec.id" shadow="never"
              :class="{ 'opacity-50': rec.status === 'discarded' }">
       <div class="flex items-center gap-2 mb-3">
         <el-checkbox v-model="checked[rec.id]" :disabled="rec.status !== 'parsed'" />
-        <span class="tl-tag" :style="softStyle(importRecordMeta(rec.status).color)">{{ importRecordMeta(rec.status).label }}</span>
-        <el-tag v-if="rec.parse_error" type="warning" size="small" effect="plain">{{ rec.parse_error }}</el-tag>
+        <span class="dot-tag" :style="dotStyle(importRecordMeta(rec.status).color)">
+          <i></i>{{ importRecordMeta(rec.status).label }}
+        </span>
+        <span v-if="rec.parse_error" class="ktag">{{ rec.parse_error }}</span>
         <div class="flex-1" />
         <el-button v-if="rec.status !== 'confirmed' && rec.status !== 'discarded'" size="small"
                    @click="editing = editing === rec.id ? null : rec.id">
@@ -86,13 +84,11 @@
         </el-form>
       </template>
       <template v-else>
-        <div class="font-semibold text-gray-800">{{ rec.title || '（未识别标题）' }}</div>
-        <div class="flex gap-2 mt-1 text-sm text-gray-500">
-          <span class="tl-tag" :style="levelSoftStyle(rec.level)">
-            {{ meta?.vul_level?.[rec.level] }}
-          </span>
-          <span>{{ meta?.vul_type?.[rec.vul_type] }}</span>
-          <span v-if="rec.affected_url" class="truncate">{{ rec.affected_url }}</span>
+        <div class="font-semibold" style="color: var(--tl-text-1)">{{ rec.title || '（未识别标题）' }}</div>
+        <div class="flex gap-2 mt-1 text-sm text-gray-500 items-center min-w-0">
+          <span class="dot-tag flex-none" :style="levelDotStyle(rec.level)"><i></i>{{ meta?.vul_level?.[rec.level] }}</span>
+          <span class="flex-none">{{ meta?.vul_type?.[rec.vul_type] }}</span>
+          <span v-if="rec.affected_url" class="truncate min-w-0 flex-1" :title="rec.affected_url">{{ rec.affected_url }}</span>
         </div>
         <el-collapse class="mt-2">
           <el-collapse-item title="内容预览">
@@ -122,7 +118,7 @@ import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import { usePlanAssetLink } from '../composables/usePlanAssetLink'
 import { useAuthStore } from '../stores/auth'
-import { importRecordMeta, levelSoftStyle, softStyle } from '../utils/colors'
+import { dotStyle, importRecordMeta, levelDotStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 
 const auth = useAuthStore()
@@ -137,6 +133,7 @@ const plans = ref<any[]>([])
 const meta = ref<any>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
+const loading = ref(false)
 
 const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
@@ -149,10 +146,15 @@ const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
 )
 
 async function load() {
-  const { data } = await client.get(`/imports/${route.params.id}`)
-  batch.value = data.batch
-  records.value = data.records
-  for (const r of data.records) if (r.status === 'parsed' && checked[r.id] === undefined) checked[r.id] = true
+  loading.value = true
+  try {
+    const { data } = await client.get(`/imports/${route.params.id}`)
+    batch.value = data.batch
+    records.value = data.records
+    for (const r of data.records) if (r.status === 'parsed' && checked[r.id] === undefined) checked[r.id] = true
+  } finally {
+    loading.value = false
+  }
 }
 
 async function saveRecord(rec: any) {

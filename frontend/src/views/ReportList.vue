@@ -1,25 +1,29 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索报告标题 / 测试系统" clearable class="!w-64"
-                @keyup.enter="load(1)" @clear="load(1)">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
-      <div class="flex-1" />
-      <el-button :disabled="!selected.length" :loading="batchDownloading" class="btn-min" @click="batchDownload">
-        <el-icon class="mr-1"><Download /></el-icon>批量下载（{{ selected.length }}）
-      </el-button>
-      <el-button v-if="auth.hasPerm('import:manage')" class="btn-min" @click="router.push('/reports/imports')">
-        <el-icon class="mr-1"><Upload /></el-icon>Word 导入
-      </el-button>
-      <el-button type="primary" class="btn-min" @click="fromVulnsVisible = true">
-        <el-icon class="mr-1"><MagicStick /></el-icon>从漏洞生成
-      </el-button>
-      <el-button class="btn-min" @click="createBlank">
-        <el-icon class="mr-1"><Plus /></el-icon>新建空白报告
-      </el-button>
-    </div>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索报告标题 / 测试系统" clearable
+                  @keyup.enter="load(1)" @clear="load(1)">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
+      <template #actions>
+        <el-button :disabled="!selected.length" :loading="batchDownloading" class="btn-min" @click="batchDownload">
+          <el-icon class="mr-1"><Download /></el-icon>批量下载（{{ selected.length }}）
+        </el-button>
+        <el-button v-if="auth.hasPerm('import:manage')" class="btn-min" @click="router.push('/reports/imports')">
+          <el-icon class="mr-1"><Upload /></el-icon>Word 导入
+        </el-button>
+        <el-button type="primary" class="btn-min" @click="fromVulnsVisible = true">
+          <el-icon class="mr-1"><MagicStick /></el-icon>从漏洞生成
+        </el-button>
+        <el-button class="btn-min" @click="createBlank">
+          <el-icon class="mr-1"><Plus /></el-icon>新建空白报告
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table ref="tableRef" v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange" @expand-change="onExpandChange"
               row-key="id" class="report-table">
@@ -55,9 +59,9 @@
           </div>
         </template>
       </el-table-column>
-      <el-table-column type="index" label="序号" width="70"
+      <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
-      <el-table-column prop="title" label="报告标题" min-width="220" sortable="custom">
+      <el-table-column prop="title" label="报告标题" min-width="220" sortable="custom" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="block w-full truncate cursor-pointer"
                 :title="row.title"
@@ -82,7 +86,7 @@
       <el-table-column prop="update_time" label="更新时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmtDateTime(row.update_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="190" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="router.push(`/reports/${row.id}`)">编辑</el-button>
           <el-button size="small" type="warning" link @click="retest(row.id)">
@@ -100,12 +104,12 @@
       </template>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                     @current-change="load" @size-change="onSizeChange" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
+  </div>
 
   <el-dialog
              :close-on-click-modal="false" v-model="fromVulnsVisible" title="从漏洞记录生成报告" width="640px">
@@ -138,6 +142,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useExportJobs } from '../composables/useExportJobs'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'

@@ -1,10 +1,12 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索用户名 / 姓名" clearable class="!w-64"
-                @keyup.enter="load(1)" @clear="load(1)">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
+  <el-card shadow="never">
+    <div class="flex items-center flex-wrap gap-2 mb-3">
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索用户名 / 姓名" clearable
+                  @keyup.enter="load(1)" @clear="load(1)">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
       <div class="flex-1" />
       <el-button type="primary" class="btn-min" @click="openUser()">
         <el-icon class="mr-1"><Plus /></el-icon>新建用户
@@ -12,7 +14,7 @@
     </div>
 
     <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
-      <el-table-column type="index" label="序号" width="70"
+      <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column prop="username" label="用户名" width="140" sortable="custom" />
       <el-table-column prop="realname" label="姓名" width="120" sortable="custom" />
@@ -20,12 +22,12 @@
       <el-table-column prop="role_name" label="角色" width="130" show-overflow-tooltip />
       <el-table-column prop="is_active" label="状态" width="90" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="row.is_active ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.red)">
-            {{ row.is_active ? '正常' : '禁用' }}
+          <span class="dot-tag" :style="dotStyle(row.is_active ? STAT_CARD_COLORS.green : STAT_CARD_COLORS.red)">
+            <i></i>{{ row.is_active ? '正常' : '禁用' }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openPerm(row)">查看权限</el-button>
           <el-button size="small" type="primary" link @click="openUser(row)">编辑</el-button>
@@ -41,11 +43,8 @@
       </template>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                     @current-change="load" @size-change="onSizeChange" />
-    </div>
+    <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                  @page-change="load" @size-change="onSizeChange" />
   </el-card>
 
   <el-dialog
@@ -81,7 +80,7 @@
 
   <el-dialog
              :close-on-click-modal="false" v-model="permDialog"
-             :title="`权限查看 - ${permUser?.username || ''}`" width="560px">
+             :title="`权限查看 - ${permUser?.username || ''}`" width="640px">
     <div v-loading="catalogLoading" class="min-h-24">
       <el-alert v-if="permUser?.permissions?.includes('*')" type="warning" :closable="false" show-icon class="mb-3"
                 title="该用户角色拥有全部权限（*）" />
@@ -109,7 +108,8 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
-import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { dotStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import TlPagination from '../components/TlPagination.vue'
 
 interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }

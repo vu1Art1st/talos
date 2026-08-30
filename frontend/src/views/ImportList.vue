@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
+  <el-card shadow="never">
     <div class="flex items-center gap-2 mb-3">
       <el-upload ref="uploadRef" :auto-upload="false" multiple accept=".docx" :on-change="onFileChange"
                  :on-remove="onFileRemove" :on-exceed="onFileExceed" :limit="20" :file-list="fileList"
@@ -22,13 +22,15 @@
     </div>
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange">
-      <el-table-column type="selection" width="50" :selectable="(row: any) => row.status === 'parsed'" />
-      <el-table-column type="index" label="序号" width="80"
+      <el-table-column type="selection" width="40" :selectable="(row: any) => row.status === 'parsed'" />
+      <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="status" label="状态" width="120" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="softStyle(importStatusMeta(row.status).color)">{{ importStatusMeta(row.status).label }}</span>
+          <span class="dot-tag" :style="dotStyle(importStatusMeta(row.status).color)">
+            <i></i>{{ importStatusMeta(row.status).label }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column prop="total" label="解析条数" width="120" sortable="custom" />
@@ -38,7 +40,7 @@
       <el-table-column prop="create_time" label="上传时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="200" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link :disabled="row.status === 'parsing' || row.status === 'pending'"
                      @click="router.push(`/reports/imports/${row.id}`)">预览确认</el-button>
@@ -55,10 +57,9 @@
       </template>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                     @current-change="load" @size-change="onSizeChange" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
 
@@ -74,9 +75,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import ImportBatchConfirmDialog, { type BatchConfirmResult } from '../components/ImportBatchConfirmDialog.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useListPage } from '../composables/useListPage'
 import { saveBlob } from '../utils/download'
-import { importStatusMeta, softStyle } from '../utils/colors'
+import { dotStyle, importStatusMeta } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const router = useRouter()

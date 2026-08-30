@@ -4,9 +4,9 @@
       <!-- 计划关联提示：渲染在左侧内容区顶部 -->
       <template #notice>
         <div v-if="planId" class="mb-3">
-          <el-tag type="warning" effect="plain">
+          <span class="ktag">
             本次录入将关联渗透测试工单{{ planName ? `「${planName}」` : '' }}
-          </el-tag>
+          </span>
         </div>
       </template>
       <template #actions-left>

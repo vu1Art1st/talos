@@ -13,7 +13,7 @@
 
     <div v-if="plan" v-loading="loading" class="flex flex-col gap-4">
       <!-- 基本信息区 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-2 text-sm">
           <div>
             <div class="text-xs mb-1" style="color: var(--tl-text-3)">计划名称</div>
@@ -51,7 +51,7 @@
       </el-card>
 
       <!-- 测试项流转 -->
-      <el-card v-for="t in nonpenItems()" :key="t.key" shadow="never" class="!rounded-lg"
+      <el-card v-for="t in nonpenItems()" :key="t.key" shadow="never"
                :class="{ 'item-flow-ignored': isIgnored(t.key) }">
         <div class="flex items-center gap-2 mb-3">
           <el-icon :size="16" style="color: var(--el-color-primary)"><component :is="itemIcon(t.key)" /></el-icon>

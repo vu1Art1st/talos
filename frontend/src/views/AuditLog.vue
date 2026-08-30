@@ -1,13 +1,13 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg" v-loading="loading">
+  <el-card shadow="never" v-loading="loading">
     <template #header>
       <div class="flex items-center gap-2">
-        <span class="text-base font-semibold">审计日志</span>
-        <span class="text-sm text-gray-400">登录事件与敏感操作记录</span>
+        <span class="text-sm font-semibold">审计日志</span>
+        <span class="text-xs text-gray-400">登录事件与敏感操作记录</span>
       </div>
     </template>
 
-    <div class="flex flex-wrap items-center gap-2 mb-4">
+    <div class="flex flex-wrap items-center gap-2 mb-3">
       <el-input v-model="filters.username" placeholder="用户名" clearable class="!w-40" />
       <el-select v-model="filters.action" placeholder="动作" clearable filterable class="!w-44">
         <el-option v-for="(name, code) in actionOptions" :key="code" :label="name" :value="code" />
@@ -26,21 +26,21 @@
 
     <el-table :data="items" stripe @sort-change="onSortChange">
       <el-table-column prop="create_time" label="时间" width="170" sortable="custom">
-        <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
+        <template #default="{ row }"><span class="num">{{ fmtDateTime(row.create_time) }}</span></template>
       </el-table-column>
       <el-table-column prop="username" label="用户" width="120">
         <template #default="{ row }">{{ row.username || '-' }}</template>
       </el-table-column>
       <el-table-column prop="action" label="动作" width="130" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="softStyle(actionColor(row.action))">{{ actionName(row.action) }}</span>
+          <span class="dot-tag" :style="dotStyle(actionColor(row.action))"><i></i>{{ actionName(row.action) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="详情" min-width="220" show-overflow-tooltip>
         <template #default="{ row }">{{ detailText(row.detail) || '-' }}</template>
       </el-table-column>
       <el-table-column prop="ip" label="IP" width="130">
-        <template #default="{ row }">{{ row.ip || '-' }}</template>
+        <template #default="{ row }"><span class="num">{{ row.ip || '-' }}</span></template>
       </el-table-column>
       <el-table-column label="User-Agent" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">{{ row.user_agent || '-' }}</template>
@@ -50,18 +50,17 @@
       </template>
     </el-table>
 
-    <div class="mt-4 flex justify-end">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
-    </div>
+    <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                  @page-change="load" @size-change="onSizeChange" />
   </el-card>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
-import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 
 const auth = useAuthStore()
@@ -69,7 +68,7 @@ const activeTab = ref<'login' | 'operation' | 'all'>('login')
 const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({ username: '', action: '', ip: '' })
 
-const { items, total, page, loading, load, reload, onSortChange } = useListPage('/audit/logs', {
+const { items, total, page, size, loading, load, reload, onSizeChange, onSortChange } = useListPage('/audit/logs', {
   defaultSort: { prop: 'create_time', order: 'descending' },
   extraParams: () => ({
     category: activeTab.value,

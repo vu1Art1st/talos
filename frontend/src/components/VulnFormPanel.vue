@@ -4,7 +4,7 @@
     <div :class="asideActions ? 'flex-1 min-h-0 overflow-y-auto space-y-4 pr-1' : ''">
       <slot name="notice" />
 
-      <el-card shadow="never" class="!rounded-lg" :class="asideActions ? '' : 'mb-4'">
+      <el-card shadow="never" :class="asideActions ? '' : 'mb-4'">
         <el-form ref="targetFormRef" :model="targetForm" :rules="targetRules" label-width="90px">
           <el-form-item label="测试目标" prop="assetIds">
             <div class="w-full flex items-start gap-2">
@@ -57,7 +57,7 @@
         </el-form>
       </el-card>
 
-      <el-card v-for="(vul, idx) in vulns" :key="idx" shadow="never" class="!rounded-lg"
+      <el-card v-for="(vul, idx) in vulns" :key="idx" shadow="never"
                :class="asideActions ? '' : 'mb-4'">
         <template #header>
           <div class="flex items-center">
@@ -156,7 +156,7 @@
 
     <!-- 操作栏：独立编辑页渲染为右侧固定卡片（与报告编辑页一致），弹窗/抽屉保持底部横排 -->
     <div v-if="asideActions" class="xl:w-[300px] xl:shrink-0 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>操作</template>
         <div class="space-y-2">
           <el-button type="primary" class="w-full !ml-0" :loading="saving" @click="save">

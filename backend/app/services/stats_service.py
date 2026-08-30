@@ -118,43 +118,58 @@ async def build_stats(
                 TestingPlan.department,
                 TestingPlan.stat_critical + TestingPlan.stat_high
                 + TestingPlan.stat_medium + TestingPlan.stat_low,
+                TestingPlan.stat_critical + TestingPlan.stat_high,
+                TestingPlan.actual_mandays,
             ).where(*plan_cond)
         )
     ).all()
     linked_rows = (
         await session.execute(
-            select(Vul.testing_plan_id, Vul.status).where(Vul.testing_plan_id.is_not(None), *vul_cond)
+            select(Vul.testing_plan_id, Vul.status, Vul.level).where(Vul.testing_plan_id.is_not(None), *vul_cond)
         )
     ).all()
     linked: dict[int, dict[str, int]] = {}
-    for plan_id, vul_status in linked_rows:
-        agg = linked.setdefault(plan_id, {"total": 0, "fixed": 0})
+    for plan_id, vul_status, vul_level in linked_rows:
+        agg = linked.setdefault(plan_id, {"total": 0, "fixed": 0, "ignored": 0, "high": 0})
         agg["total"] += 1
         if vul_status == 60:
             agg["fixed"] += 1
-    dept_map: dict[str, dict[str, int]] = {}
-    for plan_id, department, stat_sum in plan_rows:
+        if vul_status == 20:
+            agg["ignored"] += 1
+        if vul_level in (10, 20):
+            agg["high"] += 1
+    dept_map: dict[str, dict[str, int | float]] = {}
+    for plan_id, department, stat_sum, high_sum, actual_mandays in plan_rows:
         dept = dept_map.setdefault(
-            department or "未填写", {"plans": 0, "vulns": 0, "linked": 0, "fixed": 0}
+            department or "未填写",
+            {"plans": 0, "vulns": 0, "linked": 0, "fixed": 0, "ignored": 0, "high": 0, "mandays": 0.0},
         )
         dept["plans"] += 1
+        dept["mandays"] += actual_mandays or 0
         agg = linked.get(plan_id)
         if agg:
             # 有关联漏洞时以真实漏洞记录为准
             dept["vulns"] += agg["total"]
             dept["linked"] += agg["total"]
             dept["fixed"] += agg["fixed"]
+            dept["ignored"] += agg["ignored"]
+            dept["high"] += agg["high"]
         else:
-            # 无关联漏洞时用计划手填统计补充发现数
+            # 无关联漏洞时用计划手填统计补充发现数（高危及以上取严重+高危两项）
             dept["vulns"] += stat_sum or 0
+            dept["high"] += high_sum or 0
     by_department = sorted(
         (
             {
                 "department": name,
                 "plans": d["plans"],
                 "vulns": d["vulns"],
+                "high": d["high"],
                 "fixed": d["fixed"],
+                # 未闭环 = 发现数 − 已修复 − 已忽略（已忽略视同闭环；手填统计无状态概念，全算未闭环）
+                "open": d["vulns"] - d["fixed"] - d["ignored"],
                 "fix_rate": round(d["fixed"] / d["linked"] * 100, 1) if d["linked"] else None,
+                "mandays": round(d["mandays"], 1),
             }
             for name, d in dept_map.items()
         ),

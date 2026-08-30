@@ -1,11 +1,11 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg" v-loading="loading">
+  <el-card shadow="never" v-loading="loading">
     <template #header>
       <div class="flex items-center gap-2">
-        <span class="text-base font-semibold">个人访问令牌</span>
-        <span class="text-sm text-gray-400">供内部看板与脚本调用开放只读 API（/api/v1/open/*）</span>
+        <span class="text-sm font-semibold">个人访问令牌</span>
+        <span class="text-xs text-gray-400">供内部看板与脚本调用开放只读 API（/api/v1/open/*）</span>
         <div class="flex-1" />
-        <el-button type="primary" @click="openCreate">
+        <el-button type="primary" class="btn-min" @click="openCreate">
           <el-icon class="mr-1"><Plus /></el-icon>新建令牌
         </el-button>
       </div>
@@ -24,19 +24,19 @@
         </template>
       </el-table-column>
       <el-table-column label="最近使用" width="170">
-        <template #default="{ row }">{{ row.last_used_at ? fmtDateTime(row.last_used_at) : '从未使用' }}</template>
+        <template #default="{ row }"><span class="num">{{ row.last_used_at ? fmtDateTime(row.last_used_at) : '从未使用' }}</span></template>
       </el-table-column>
       <el-table-column label="状态" width="90">
         <template #default="{ row }">
-          <span class="tl-tag" :style="softStyle(isExpired(row) ? STAT_CARD_COLORS.gray : STAT_CARD_COLORS.green)">
-            {{ isExpired(row) ? '已过期' : '有效' }}
+          <span class="dot-tag" :style="dotStyle(isExpired(row) ? STAT_CARD_COLORS.gray : STAT_CARD_COLORS.green)">
+            <i></i>{{ isExpired(row) ? '已过期' : '有效' }}
           </span>
         </template>
       </el-table-column>
       <el-table-column label="创建时间" width="170" sortable>
-        <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
+        <template #default="{ row }"><span class="num">{{ fmtDateTime(row.create_time) }}</span></template>
       </el-table-column>
-      <el-table-column label="操作" width="90" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-popconfirm title="吊销后无法恢复，确认吊销？" @confirm="revoke(row.id)">
             <template #reference>
@@ -50,10 +50,8 @@
       </template>
     </el-table>
 
-    <div class="mt-4 flex justify-end">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
-    </div>
+    <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                  @page-change="load" @size-change="onSizeChange" />
   </el-card>
 
   <!-- 新建令牌 -->
@@ -75,7 +73,7 @@
   </el-dialog>
 
   <!-- 明文令牌仅展示一次 -->
-  <el-dialog :close-on-click-modal="false" v-model="tokenVisible" title="令牌已创建" width="560px">
+  <el-dialog :close-on-click-modal="false" v-model="tokenVisible" title="令牌已创建" width="640px">
     <el-alert type="warning" :closable="false" show-icon class="mb-3"
               title="请立即复制保存：明文令牌仅此一次展示，关闭后无法再查看。" />
     <el-input :model-value="createdToken" readonly type="textarea" :rows="3" class="font-mono" />
@@ -92,10 +90,11 @@ import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
-import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
+import TlPagination from '../components/TlPagination.vue'
 import { fmtDateTime } from '../utils/format'
 
-const { items, total, page, loading, load } = useListPage('/pats')
+const { items, total, page, size, loading, load, onSizeChange } = useListPage('/pats')
 
 const createVisible = ref(false)
 const creating = ref(false)

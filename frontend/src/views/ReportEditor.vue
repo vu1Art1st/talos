@@ -2,7 +2,7 @@
   <!-- 需求4：小屏内容滚动与页面滚动分离 —— 页面整体不滚动，内容区/侧栏各自滚动 -->
   <div v-if="report" class="flex h-full min-h-0 flex-col xl:flex-row gap-4">
     <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>
           <div class="flex items-center justify-between">
             <span>报告信息</span>
@@ -47,12 +47,12 @@
       </el-card>
 
       <el-card v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`" :id="`section-${i}`"
-               shadow="never" class="!rounded-lg scroll-mt-4">
+               shadow="never" class="scroll-mt-4">
         <template #header>
           <div class="flex items-center gap-2">
             <span class="text-gray-400">{{ i + 1 }}.</span>
             <el-input v-model="sec.title" placeholder="章节标题" class="!w-80" size="small" @input="markDirty" />
-            <el-tag v-if="sec.vul_id" size="small" type="info" effect="plain">关联漏洞</el-tag>
+            <span v-if="sec.vul_id" class="ktag">关联漏洞</span>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
             <el-button size="small" :disabled="i === report.sections.length - 1" @click="move(i, 1)">下移</el-button>
@@ -109,7 +109,7 @@
     <!-- 侧栏：小屏时置于底部且独立滚动，大屏固定右侧随内容区独立滚动 -->
     <div class="xl:w-[300px] xl:shrink-0 space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
       <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>章节导航</template>
         <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="80" />
         <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
@@ -144,7 +144,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>操作</template>
         <div class="space-y-2">
           <el-button type="primary" class="w-full" :loading="saving" @click="save()">保存报告</el-button>
@@ -163,7 +163,7 @@
         </div>
       </el-card>
 
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>导出记录</template>
         <el-empty v-if="!jobs.length" description="暂无导出" :image-size="80" />
         <div v-for="job in jobs" :key="job.id" class="py-2 text-sm border-b border-gray-100 last:border-0">

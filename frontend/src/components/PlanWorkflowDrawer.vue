@@ -12,7 +12,7 @@
 
     <div v-if="plan" v-loading="loading" class="flex flex-col gap-4">
       <!-- 步骤条：按计划状态与数据推导当前阶段 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <el-steps :active="stepActive" align-center finish-status="success" process-status="process">
           <el-step title="认领" />
           <el-step title="录入漏洞" />
@@ -33,7 +33,7 @@
       </el-alert>
 
       <!-- 信息区 + 认领区 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <div class="flex items-center flex-wrap gap-x-6 gap-y-2 text-sm">
           <span><span class="text-gray-400 mr-1">测试类型</span>{{ plan.test_type || '-' }}</span>
           <span><span class="text-gray-400 mr-1">所属部门</span>{{ plan.department || '-' }}</span>
@@ -59,7 +59,7 @@
       </el-card>
 
       <!-- 漏洞区 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>
           <div class="flex items-center">
             <span class="font-medium">漏洞（{{ vulns.length }}）</span>
@@ -245,7 +245,7 @@
       </el-dialog>
 
       <!-- 报告区 -->
-      <el-card shadow="never" class="!rounded-lg">
+      <el-card shadow="never">
         <template #header>
           <div class="flex items-center">
             <span class="font-medium">报告（{{ plan.reports?.length ?? 0 }}）</span>
@@ -466,9 +466,9 @@ const detailSections = computed(() =>
     { title: '复现步骤', html: detailVuln.value?.reproduce_html },
     { title: '修复建议', html: detailVuln.value?.solution_html },
   ].filter((s) => s.html || s.title === '漏洞描述'))
-// 移动端单列、桌面端双列（响应式）
+// 移动端单列、桌面端双列（响应式）；弹窗宽度归档 L=800
 const detailDialogWidth = computed(() =>
-  typeof window !== 'undefined' && window.innerWidth < 640 ? '92%' : '720px')
+  typeof window !== 'undefined' && window.innerWidth < 640 ? '92%' : '800px')
 const detailCols = computed(() =>
   typeof window !== 'undefined' && window.innerWidth < 640 ? 1 : 2)
 

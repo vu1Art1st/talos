@@ -1,5 +1,5 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
+  <el-card shadow="never">
     <div class="flex items-center gap-2 mb-4">
       <span class="text-gray-400 text-sm">基于角色的权限配置，权限按功能模块分组，控制菜单显示与操作范围</span>
       <div class="flex-1" />
@@ -9,7 +9,7 @@
     </div>
 
     <el-table v-loading="loading" :data="roles" stripe>
-      <el-table-column type="index" label="序号" width="70" />
+      <el-table-column type="index" label="序号" width="64" />
       <el-table-column prop="name" label="角色名称" width="160" show-overflow-tooltip />
       <el-table-column label="权限" min-width="300">
         <template #default="{ row }">
@@ -17,14 +17,23 @@
             <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.red)">全部权限</span>
           </template>
           <template v-else-if="row.permissions.length">
-            <span v-for="p in permLabels(row.permissions)" :key="p"
-                  class="tl-tag mr-1 mb-1" :style="softStyle(STAT_CARD_COLORS.blue)">{{ p }}</span>
+            <span v-for="p in permLabels(row.permissions).slice(0, 3)" :key="p"
+                  class="tl-tag mr-1" :style="softStyle(STAT_CARD_COLORS.blue)">{{ p }}</span>
+            <el-popover v-if="row.permissions.length > 3" placement="left" :width="280" trigger="hover">
+              <template #reference>
+                <el-button size="small" type="primary" link class="!p-0">+{{ row.permissions.length - 3 }}</el-button>
+              </template>
+              <div class="flex flex-wrap gap-1">
+                <span v-for="p in permLabels(row.permissions)" :key="p"
+                      class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">{{ p }}</span>
+              </div>
+            </el-popover>
           </template>
           <span v-else class="text-gray-400">未分配权限</span>
         </template>
       </el-table-column>
       <el-table-column prop="remark" label="备注" min-width="180" show-overflow-tooltip />
-      <el-table-column label="操作" width="150" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openRole(row)">配置权限</el-button>
           <el-popconfirm title="确认删除该角色？" @confirm="removeRole(row.id)">

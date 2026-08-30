@@ -1,19 +1,23 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索报告编号 / 系统 / 公文文号" clearable class="!w-64"
-                @keyup.enter="load(1)" @clear="load(1)">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
-      <div class="flex-1" />
-      <el-button type="primary" class="btn-min" @click="openDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新增春耕行动
-      </el-button>
-    </div>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索报告编号 / 系统 / 公文文号" clearable
+                  @keyup.enter="load(1)" @clear="load(1)">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openDialog()">
+          <el-icon class="mr-1"><Plus /></el-icon>新增春耕行动
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
-      <el-table-column type="index" label="序号" width="70"
-                       :index="(i: number) => (page - 1) * 20 + i + 1" />
+      <el-table-column type="index" label="序号" width="64"
+                       :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column label="原始报告" width="90">
         <template #default="{ row }">
@@ -29,11 +33,18 @@
       <el-table-column prop="phase" label="阶段" width="110" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.phase || '-' }}</template>
       </el-table-column>
-      <el-table-column label="网络层级" width="100">
+      <el-table-column label="网络层级" width="130">
         <template #default="{ row }">
           <template v-if="row.vuls?.length">
-            <span v-for="code in uniqVulValues(row, 'layer')" :key="code" class="tl-tag mr-1"
-                  :style="softStyle(STAT_CARD_COLORS.gray)">{{ layerName(code) }}</span>
+            <span v-for="code in uniqVulValues(row, 'layer').slice(0, 1)" :key="code" class="ktag mr-1">{{ layerName(code) }}</span>
+            <el-popover v-if="uniqVulValues(row, 'layer').length > 1" placement="left" :width="220" trigger="hover">
+              <template #reference>
+                <el-button size="small" type="primary" link class="!p-0">+{{ uniqVulValues(row, 'layer').length - 1 }}</el-button>
+              </template>
+              <div class="flex flex-wrap gap-1">
+                <span v-for="code in uniqVulValues(row, 'layer')" :key="code" class="ktag">{{ layerName(code) }}</span>
+              </div>
+            </el-popover>
           </template>
           <span v-else class="text-gray-400">-</span>
         </template>
@@ -41,8 +52,17 @@
       <el-table-column label="危害程度" width="120">
         <template #default="{ row }">
           <template v-if="row.vuls?.length">
-            <span v-for="code in uniqVulValues(row, 'level')" :key="code" class="tl-tag mr-1"
-                  :style="levelSoftStyle(code)">{{ levelName(code) }}</span>
+            <span v-for="code in uniqVulValues(row, 'level').slice(0, 2)" :key="code" class="dot-tag mr-2"
+                  :style="levelDotStyle(code)"><i></i>{{ levelName(code) }}</span>
+            <el-popover v-if="uniqVulValues(row, 'level').length > 2" placement="left" :width="220" trigger="hover">
+              <template #reference>
+                <el-button size="small" type="primary" link class="!p-0">+{{ uniqVulValues(row, 'level').length - 2 }}</el-button>
+              </template>
+              <div class="flex flex-col gap-1">
+                <span v-for="code in uniqVulValues(row, 'level')" :key="code" class="dot-tag"
+                      :style="levelDotStyle(code)"><i></i>{{ levelName(code) }}</span>
+              </div>
+            </el-popover>
           </template>
           <span v-else class="text-gray-400">-</span>
         </template>
@@ -69,8 +89,8 @@
       <el-table-column prop="asset_reason" label="资产认定原因" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="appeal_success" label="申诉结果" width="110" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="row.appeal_success ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.gray)">
-            {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
+          <span class="dot-tag" :style="dotStyle(row.appeal_success ? STAT_CARD_COLORS.green : STAT_CARD_COLORS.gray)">
+            <i></i>{{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
           </span>
         </template>
       </el-table-column>
@@ -81,7 +101,7 @@
         <template #default="{ row }">{{ row.score_deduction }}</template>
       </el-table-column>
       <el-table-column prop="doc_no" label="公文文号" width="160" show-overflow-tooltip sortable="custom" />
-      <el-table-column label="操作" width="130" fixed="right">
+      <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该记录？" @confirm="remove(row.id)">
@@ -96,11 +116,12 @@
       </template>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, prev, pager, next" :total="total"
-                     :page-size="20" :current-page="page" @current-change="load" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
+  </div>
 
   <el-dialog
              :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'" width="640px">
@@ -225,15 +246,17 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { useRouter } from 'vue-router'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useCrudDialog } from '../composables/useCrudDialog'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
-import { levelName, levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { levelName, levelSoftStyle, levelDotStyle, dotStyle, STAT_CARD_COLORS } from '../utils/colors'
 
 const router = useRouter()
 const auth = useAuthStore()
-const { items, total, page, search, loading, load, onSortChange } = useListPage('/spring-actions')
+const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage('/spring-actions')
 const vulns = ref<any[]>([])
 
 const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useCrudDialog({

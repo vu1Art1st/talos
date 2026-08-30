@@ -4,99 +4,146 @@
 
 /* ============================================================
    设计令牌层：明 / 暗两套 CSS 变量 + Element Plus 主题覆盖
+   基准：design-demos/demo-2-linear-dark.html（薄荷绿 × 淡蓝）
    ============================================================ */
 :root {
-  --tl-bg: #f6f7f9;
+  --tl-bg: #fafaf9;
   --tl-surface: #ffffff;
-  --tl-surface-2: #f9fafb;
-  --tl-border: #e5e7eb;
-  --tl-text-1: #111827;
-  --tl-text-2: #4b5563;
-  --tl-text-3: #9ca3af;
+  --tl-surface-2: #f4f5f4;
+  --tl-surface-3: #eceeed;
+  --tl-border: #e5e8e6;
+  --tl-border-strong: #d5dad7;
+  --tl-text-1: #1c2622;
+  --tl-text-2: #5c6b65;
+  --tl-text-3: #8a968f;
+
+  --tl-primary: #059669;          /* 交互 / 描边 */
+  --tl-on-primary: #ffffff;       /* 主色底上的文字/图标（仅图标级对比要求） */
+  --tl-accent: #0284c7;           /* 淡蓝信息色（亮） */
+
+  /* 语义色：五级风险 + 状态（亮色版，与 constants.py /meta 下发一致） */
+  --sev-crit: #dc2626;
+  --sev-high: #ea580c;
+  --sev-med: #d97706;
+  --sev-low: #0284c7;
+  --sev-safe: #059669;
+  --st-open: #dc2626;
+  --st-fixing: #d97706;
+  --st-retest: #0284c7;
+  --st-fixed: #059669;
+  --st-fail: #e11d48;
+  --st-defer: #8a968f;
 
   /* Tailwind 灰阶映射（RGB 三元组，支持 / 透明度修饰符）：
      text-gray-* / bg-gray-* / border-gray-* 经 tailwind.config.js 指向此处，
      暗黑模式自动翻转，视图内禁止再写死浅色灰阶类 */
   --tl-gray-0: 255 255 255;      /* surface */
-  --tl-gray-50: 249 250 251;
-  --tl-gray-100: 243 244 246;
-  --tl-gray-200: 229 231 235;    /* border */
-  --tl-gray-300: 209 213 219;
-  --tl-gray-400: 156 163 175;    /* text-3 */
-  --tl-gray-500: 107 114 128;
-  --tl-gray-600: 75 85 99;       /* text-2 */
-  --tl-gray-700: 55 65 81;
-  --tl-gray-800: 17 24 39;       /* text-1 */
-  --tl-gray-900: 3 7 18;
+  --tl-gray-50: 250 250 249;
+  --tl-gray-100: 244 245 244;
+  --tl-gray-200: 229 232 230;    /* border */
+  --tl-gray-300: 213 218 215;    /* border-strong */
+  --tl-gray-400: 138 150 143;    /* text-3 */
+  --tl-gray-500: 106 120 113;
+  --tl-gray-600: 92 107 101;     /* text-2 */
+  --tl-gray-700: 64 79 73;
+  --tl-gray-800: 28 38 34;       /* text-1 */
+  --tl-gray-900: 16 22 20;
 
   /* 功能色令牌（与 utils/colors.ts 对齐，供纯 CSS 场景引用） */
-  --tl-success: #67c23a;
-  --tl-warning: #e6a23c;
-  --tl-danger: #f56c6c;
-  --tl-error: #a61b29;
-  --tl-info: #909399;
-  --tl-blue: #409eff;
-  --tl-primary: #4f46e5;
+  --tl-success: #059669;
+  --tl-warning: #d97706;
+  --tl-danger: #dc2626;
+  --tl-error: #b91c1c;
+  --tl-info: #8a968f;
+  --tl-blue: #0284c7;
+  --tl-primary: #059669;
 
-  /* Element Plus 品牌主色覆盖：靛蓝 #4F46E5 */
-  --el-color-primary: #4f46e5;
-  --el-color-primary-light-1: #6159e8;
-  --el-color-primary-light-2: #726bea;
-  --el-color-primary-light-3: #847eed;
-  --el-color-primary-light-4: #9590ef;
-  --el-color-primary-light-5: #a7a2f2;
-  --el-color-primary-light-6: #b9b5f5;
-  --el-color-primary-light-7: #cac7f7;
-  --el-color-primary-light-8: #dcdafa;
-  --el-color-primary-light-9: #edecfc;
-  --el-color-primary-dark-2: #3f38b7;
-  --el-border-radius-base: 8px;
+  --tl-mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, monospace;
+
+  /* 品牌副标薄荷绿（「漏洞管理平台」副标题）：亮色白底用深一档保证可读 */
+  --tl-brand-mint: #10b981;
+
+  /* Element Plus 品牌主色覆盖：薄荷绿 #059669（亮） */
+  --el-color-primary: #059669;
+  --el-color-primary-light-1: #1da078;
+  --el-color-primary-light-2: #37ab87;
+  --el-color-primary-light-3: #50b696;
+  --el-color-primary-light-4: #69c0a5;
+  --el-color-primary-light-5: #82cab4;
+  --el-color-primary-light-6: #9bd5c3;
+  --el-color-primary-light-7: #b4dfd2;
+  --el-color-primary-light-8: #cdeae1;
+  --el-color-primary-light-9: #e6f4f0;
+  --el-color-primary-dark-2: #047854;
+  --el-border-radius-base: 7px;
   --el-border-radius-small: 6px;
+  --el-font-size-base: 13px;
 }
 
 html.dark {
-  --tl-bg: #0d1117;
-  --tl-surface: #161b22;
-  --tl-surface-2: #1c2128;
-  --tl-border: #30363d;
-  --tl-text-1: #e6edf3;
-  --tl-text-2: #9da7b3;
-  --tl-text-3: #6e7681;
+  --tl-bg: #0a0e0c;
+  --tl-surface: #101513;
+  --tl-surface-2: #161c19;
+  --tl-surface-3: #1c2320;
+  --tl-border: #232b27;
+  --tl-border-strong: #2e3833;
+  --tl-text-1: #e8efec;
+  --tl-text-2: #9db0a9;
+  --tl-text-3: #5f716b;
+
+  --tl-primary: #34d399;
+  --tl-on-primary: #05261a;       /* 暗色主按钮：薄荷底 + 深墨字（≥4.5:1） */
+  --tl-accent: #7dd3fc;
+  --tl-brand-mint: #6ee7b7;       /* 品牌副标：暗色下浅薄荷绿 */
+
+  --sev-crit: #f87171;
+  --sev-high: #fb923c;
+  --sev-med: #fbbf24;
+  --sev-low: #7dd3fc;
+  --sev-safe: #34d399;
+  --st-open: #f87171;
+  --st-fixing: #fbbf24;
+  --st-retest: #7dd3fc;
+  --st-fixed: #34d399;
+  --st-fail: #fb7185;
+  --st-defer: #6b7f78;
 
   /* 暗色灰阶：浅背景变深、深文字变浅，与上方亮色语义一一对应 */
-  --tl-gray-0: 22 27 34;         /* surface */
-  --tl-gray-50: 28 33 40;
-  --tl-gray-100: 33 38 45;
-  --tl-gray-200: 48 54 61;       /* border */
-  --tl-gray-300: 61 68 77;
-  --tl-gray-400: 110 118 129;    /* text-3 */
-  --tl-gray-500: 139 148 158;
-  --tl-gray-600: 157 167 179;    /* text-2 */
-  --tl-gray-700: 182 190 200;
-  --tl-gray-800: 230 237 243;    /* text-1 */
-  --tl-gray-900: 240 246 252;
+  --tl-gray-0: 16 21 19;         /* surface */
+  --tl-gray-50: 22 28 25;
+  --tl-gray-100: 28 35 32;
+  --tl-gray-200: 35 43 39;       /* border */
+  --tl-gray-300: 46 56 51;       /* border-strong */
+  --tl-gray-400: 95 113 107;     /* text-3 */
+  --tl-gray-500: 118 133 127;
+  --tl-gray-600: 157 176 169;    /* text-2 */
+  --tl-gray-700: 182 197 191;
+  --tl-gray-800: 232 239 236;    /* text-1 */
+  --tl-gray-900: 240 246 243;
 
-  --el-color-primary: #6366f1;
-  --el-color-primary-light-1: #5a5edb;
-  --el-color-primary-light-2: #5255c5;
-  --el-color-primary-light-3: #494cb0;
-  --el-color-primary-light-4: #41449a;
-  --el-color-primary-light-5: #383c84;
-  --el-color-primary-light-6: #2f336e;
-  --el-color-primary-light-7: #272b58;
-  --el-color-primary-light-8: #1e2243;
-  --el-color-primary-light-9: #16192d;
-  --el-color-primary-dark-2: #8285f4;
+  /* Element Plus 品牌主色覆盖（暗色下 light-x 向底色压暗） */
+  --el-color-primary: #34d399;
+  --el-color-primary-light-1: #30bf8c;
+  --el-color-primary-light-2: #2dae7e;
+  --el-color-primary-light-3: #299b71;
+  --el-color-primary-light-4: #268963;
+  --el-color-primary-light-5: #227856;
+  --el-color-primary-light-6: #1e6649;
+  --el-color-primary-light-7: #1b543b;
+  --el-color-primary-light-8: #17432e;
+  --el-color-primary-light-9: #143120;
+  --el-color-primary-dark-2: #5ddbad;
 
-  --el-bg-color: #161b22;
-  --el-bg-color-page: #0d1117;
-  --el-bg-color-overlay: #1c2128;
-  --el-fill-color-blank: #161b22;
-  --el-border-color: #30363d;
-  --el-border-color-light: #30363d;
-  --el-border-color-lighter: #262c33;
-  --el-text-color-primary: #e6edf3;
-  --el-text-color-regular: #9da7b3;
+  --el-bg-color: #101513;
+  --el-bg-color-page: #0a0e0c;
+  --el-bg-color-overlay: #161c19;
+  --el-fill-color-blank: #101513;
+  --el-border-color: #2e3833;
+  --el-border-color-light: #2e3833;
+  --el-border-color-lighter: #232b27;
+  --el-text-color-primary: #e8efec;
+  --el-text-color-regular: #9db0a9;
+  --el-text-color-secondary: #5f716b;
 }
 
 html,
@@ -106,9 +153,21 @@ body,
   margin: 0;
   background: var(--tl-bg);
   color: var(--tl-text-1);
-  font-family: 'Inter', 'Helvetica Neue', Helvetica, 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+  font-size: 13.5px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', sans-serif;
   transition: background-color .25s ease, color .25s ease;
 }
+
+::selection { background: color-mix(in srgb, var(--tl-primary) 25%, transparent); }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--tl-border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
 
 /* ============ 页面路由过渡 ============ */
 .fade-slide-enter-active,
@@ -118,28 +177,28 @@ body,
 .fade-slide-enter-from { opacity: 0; transform: translateY(8px); }
 .fade-slide-leave-to { opacity: 0; transform: translateY(-8px); }
 
-/* ============ 卡片现代化：细边框替代重阴影 ============ */
+/* ============ 卡片：细边框分层，无 hover 上浮无光晕 ============ */
 .el-card {
   border: 1px solid var(--tl-border);
-  border-radius: 12px;
-  transition: box-shadow .25s ease, transform .25s ease, background-color .25s ease;
+  border-radius: 10px;
 }
-.el-card:hover,
-.el-card.is-hover-shadow:hover,
-.el-card.tl-hover:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, .08), 0 12px 32px rgba(79, 70, 229, .10);
-  transform: translateY(-2px);
-}
-.el-card__header { font-weight: 600; }
+.el-card__header { font-weight: 600; font-size: 13.5px; }
 
-/* ============ 表格现代化 ============ */
+/* ============ 浮层统一 12px 圆角（弹窗/确认框），气泡 10px ============ */
+.el-dialog,
+.el-message-box { border-radius: 12px; }
+.el-popper { border-radius: 10px; }
+
+/* ============ 表格：紧凑表头 + 行 hover 用次表面色 ============ */
 .el-table th.el-table__cell {
   background: var(--tl-surface-2) !important;
-  color: var(--tl-text-2);
+  color: var(--tl-text-3);
   font-weight: 600;
+  font-size: 11.5px;
+  letter-spacing: .02em;
 }
 .el-table {
-  --el-table-row-hover-bg-color: var(--el-color-primary-light-9);
+  --el-table-row-hover-bg-color: var(--tl-surface-2);
   --el-table-border-color: var(--tl-border);
 }
 
@@ -149,21 +208,76 @@ body,
   text-overflow: ellipsis;
 }
 
-/* ============ 柔和标签（等级 / 状态） ============ */
+/* ============ 柔和标签（筛选 / 详情 / 抽屉场景；表格行内请用 .dot-tag） ============ */
 .tl-tag {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 20px;
+  padding: 1px 8px;
+  border-radius: 5px;
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 18px;
   white-space: nowrap;
 }
 
-/* ============ 品牌渐变（Logo/头像底，全站统一，替代散落 inline 渐变） ============ */
+/* ============ 点标标签（表格行内等级 / 状态：色点 + 文字，不只靠颜色传义） ============ */
+.dot-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--tl-text-1);
+  white-space: nowrap;
+}
+.dot-tag i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--c, var(--tl-text-3));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--c, var(--tl-text-3)) 55%, transparent);
+}
+html:not(.dark) .dot-tag i { box-shadow: none; }
+
+/* ============ 中性方角小签（漏洞类型等弱分类字段） ============ */
+.ktag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--tl-text-2);
+  background: var(--tl-surface-2);
+  border: 1px solid var(--tl-border);
+  white-space: nowrap;
+}
+
+/* ============ 键位提示 ============ */
+.kbd {
+  font-family: var(--tl-mono);
+  font-size: 10.5px;
+  color: var(--tl-text-3);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--tl-surface-2);
+  border: 1px solid var(--tl-border);
+  border-bottom-width: 2px;
+  line-height: 1.5;
+}
+
+/* ============ 等宽数字（指标 / 时间戳） ============ */
+.num {
+  font-family: var(--tl-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.2px;
+}
+
+/* ============ 主色底块（Logo / 头像，实心薄荷绿，替代旧渐变） ============ */
 .tl-brand-gradient {
-  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  background: var(--tl-primary);
+  color: var(--tl-on-primary);
 }
 
 /* ============ 联动角标（全站统一，替代各视图散落的 .linked-badge 样式） ============ */
@@ -174,9 +288,9 @@ body,
   font-size: 11px;
   line-height: 18px;
   border-radius: 4px;
-  background: #67c23a1f;
-  color: #67c23a;
-  border: 1px solid #67c23a66;
+  background: color-mix(in srgb, var(--tl-success) 12%, transparent);
+  color: var(--tl-success);
+  border: 1px solid color-mix(in srgb, var(--tl-success) 40%, transparent);
   vertical-align: 1px;
 }
 
@@ -186,7 +300,7 @@ body,
 }
 .el-empty__description p {
   color: var(--tl-text-3);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 /* ============ 弹窗 footer 统一间距 ============ */
@@ -220,8 +334,9 @@ body,
   padding: 6px 10px;
 }
 .rich-content pre {
-  background: #282c34;
-  color: #abb2bf;
+  background: var(--tl-surface-2);
+  border: 1px solid var(--tl-border);
+  color: var(--tl-text-1);
   padding: 12px;
   border-radius: 6px;
   overflow: auto;
@@ -244,7 +359,7 @@ body,
   padding: 12px 16px;
 }
 .tiptap p.is-editor-empty:first-child::before {
-  color: #a8abb2;
+  color: var(--tl-text-3);
   content: attr(data-placeholder);
   float: left;
   height: 0;
@@ -258,13 +373,12 @@ body,
   justify-content: center;
 }
 
-/* ============ 统计卡片留白优化（仅样式增强，卡片数量 / 内容 / 折叠逻辑不变） ============ */
-/* 统一统计卡片内边距，提升呼吸感；不影响数据展示与交互 */
+/* ============ 统计卡片（配合 StatCard v2 紧凑密度） ============ */
 .tl-stat-card {
-  padding: 16px 20px;
+  padding: 14px 16px;
 }
 
-/* ============ 统计概览折叠标题（统计概览区块共用，两侧渐变装饰线） ============ */
+/* ============ 统计概览折叠标题（统计概览区块共用，两侧渐隐装饰线） ============ */
 .tl-collapse-title {
   flex: 1;
   display: flex;
@@ -280,9 +394,9 @@ body,
   flex: none;
   width: 100px;
 }
-.tl-collapse-title::before { background: linear-gradient(to right, transparent, #c7c9ff); }
-.tl-collapse-title::after { background: linear-gradient(to left, transparent, #c7c9ff); }
-.tl-collapse-title__main { font-size: 15px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
+.tl-collapse-title::before { background: linear-gradient(to right, transparent, color-mix(in srgb, var(--tl-primary) 35%, transparent)); }
+.tl-collapse-title::after { background: linear-gradient(to left, transparent, color-mix(in srgb, var(--tl-primary) 35%, transparent)); }
+.tl-collapse-title__main { font-size: 13.5px; font-weight: 600; color: var(--tl-text-1); white-space: nowrap; }
 .tl-collapse-title__sub { font-size: 12px; color: var(--tl-text-3); white-space: nowrap; }
 
 /* ============ 筛选按钮徽标（主色按钮上的已启用条件数） ============ */
@@ -299,6 +413,45 @@ body,
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.28);
 }
+html.dark .filter-count { background: rgba(0, 0, 0, 0.22); }
+
+/* ============ 统计概览折叠卡（圆角卡化：标题条 + 内容同一张圆角卡） ============ */
+.tl-collapse {
+  --el-collapse-border-color: transparent;
+  border: 1px solid var(--tl-border);
+  border-radius: 10px;
+  background: var(--tl-surface);
+  overflow: hidden;
+}
+.tl-collapse .el-collapse-item__header {
+  background: var(--tl-surface);
+  padding: 0 16px;
+  border-bottom-color: transparent;
+}
+.tl-collapse .el-collapse-item__header:hover { color: var(--tl-text-1); }
+.tl-collapse .el-collapse-item__wrap {
+  background: var(--tl-surface);
+  border-bottom: 0;
+}
+.tl-collapse .el-collapse-item__content { padding-bottom: 16px; }
+
+/* ============ 列表筛选工具栏（FilterToolbar 容器 + 弹性搜索框 + 等宽字典筛选） ============ */
+.tl-filterbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--tl-surface);
+  border: 1px solid var(--tl-border);
+  border-radius: 10px;
+  margin-bottom: 12px;
+}
+.tl-search-field { flex: 1 1 190px; min-width: 175px; max-width: 250px; }
+.tl-search-field .el-input { width: 100%; }
+/* 字典筛选等宽：三个 select 统一宽度（选中「数智事业部远程检测」等最长项不裁字） */
+.tl-filterbar .sel-dict { width: 156px; }
+.tl-filterbar .sel-dict .el-select { width: 100%; }
 
 /* ============ 测试项勾选卡（测试计划 / 漏扫基线工单表单共用） ============ */
 .test-item-check {
@@ -309,7 +462,7 @@ body,
   border: 1px solid var(--tl-border);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   background: var(--tl-surface);
 }
 .test-item-check:hover { border-color: var(--el-color-primary); }
@@ -327,12 +480,12 @@ body,
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
 }
 .test-item-check.checked .tick {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary);
-  color: #fff;
+  color: var(--tl-on-primary);
 }
 .test-item-check .ti-name { font-size: 13px; font-weight: 500; }
 .test-item-check .ti-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }

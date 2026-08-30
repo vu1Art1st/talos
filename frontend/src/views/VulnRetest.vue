@@ -1,6 +1,6 @@
 <template>
   <div v-if="vul" class="max-w-5xl space-y-4 pb-6">
-    <el-card shadow="never" class="!rounded-lg">
+    <el-card shadow="never">
       <div class="flex items-start justify-between gap-4">
         <div>
           <div class="text-xl font-semibold text-gray-800">{{ vul.title }}</div>

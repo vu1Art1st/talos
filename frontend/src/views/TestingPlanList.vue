@@ -1,10 +1,12 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center flex-wrap gap-2 mb-4">
-      <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门" clearable class="!w-64"
-                @keyup.enter="reload" @clear="reload">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <div class="tl-search-field">
+        <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门" clearable
+                  @keyup.enter="reload" @clear="reload">
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
       <el-popover
         :visible="filterVisible"
         trigger="manual"
@@ -42,7 +44,7 @@
           </el-checkbox-group>
         </div>
       </el-popover>
-      <div class="flex-1" />
+      <template #actions>
       <!-- 导入导出：三操作收纳为下拉，分别对应原「导入模板下载 / 导入 Excel / 导出 Excel」 -->
       <el-dropdown trigger="click" @command="onImportExport">
         <el-button>
@@ -66,9 +68,10 @@
       <el-button type="primary" class="btn-min" @click="openDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试工单
       </el-button>
-    </div>
+      </template>
+    </FilterToolbar>
 
-    <el-collapse v-model="statsPanel" class="mb-4">
+    <el-collapse v-model="statsPanel" class="tl-collapse mb-3">
       <el-collapse-item name="stats">
         <template #title>
           <span class="tl-collapse-title">
@@ -76,16 +79,20 @@
             <span class="tl-collapse-title__sub">（与筛选条件联动实时更新）</span>
           </span>
         </template>
-        <el-checkbox-group v-model="dims" class="mb-3">
-          <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
-        </el-checkbox-group>
-        <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 max-w-7xl mx-auto">
-          <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="stats[d.key] ?? 0" />
+        <div class="px-2">
+          <!-- 维度勾选：可换行，避免条件过多时溢出边界 -->
+          <el-checkbox-group v-model="dims" class="mb-3 flex flex-wrap gap-x-4 gap-y-1">
+            <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
+          </el-checkbox-group>
+          <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="stats[d.key] ?? 0" />
+          </div>
+          <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-3" />
         </div>
-        <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-4" />
       </el-collapse-item>
     </el-collapse>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
@@ -94,7 +101,7 @@
                     ? '暂无待办流程，所有渗透测试工单均已进入终态'
                     : '暂无符合条件的渗透测试工单，请调整筛选条件'" />
       </template>
-      <el-table-column type="index" label="序号" width="60"
+      <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column label="工单ID" min-width="130" show-overflow-tooltip>
         <template #default="{ row }">
@@ -116,7 +123,9 @@
       </el-table-column>
       <el-table-column prop="status" label="状态" width="85" sortable="custom">
         <template #default="{ row }">
-          <span class="tl-tag" :style="planStatusSoftStyle(row.status)">{{ statusMap[row.status] ?? row.status }}</span>
+          <span class="dot-tag" :style="planStatusDotStyle(row.status)">
+            <i></i>{{ statusMap[row.status] ?? row.status }}
+          </span>
         </template>
       </el-table-column>
       <el-table-column prop="first_test_done_time" label="初测完成" width="115" sortable="custom">
@@ -224,15 +233,15 @@
       </el-table-column>
     </el-table>
 
-    <div class="flex justify-end mt-4">
-      <el-pagination background layout="total, sizes, prev, pager, next, jumper" :total="total"
-                     :page-sizes="[20, 50, 100]" :page-size="size" :current-page="page"
-                     @current-change="load" @size-change="onSizeChange" />
+    <div class="px-4">
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
   </el-card>
+  </div>
 
   <el-dialog
-             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="640px">
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑渗透测试工单' : '新增渗透测试工单'" width="800px">
     <el-form ref="formRef" :model="form" :rules="planRules" label-width="90px">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-x-4">
         <el-form-item label="计划名称">
@@ -403,11 +412,14 @@ import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import * as echarts from 'echarts'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import { useThemeStore } from '../stores/theme'
+import { chartThemeName } from '../utils/chartTheme'
 import {
   levelBadgeStyle,
   levelName,
   levelSoftStyle,
   nonpenItems,
+  planStatusDotStyle,
   planStatusSoftStyle,
   reportStatusName,
   reportStatusSoftStyle,
@@ -420,6 +432,8 @@ import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
 import FilterBuilder from '../components/FilterBuilder.vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
@@ -512,14 +526,14 @@ const filterFields = computed<FilterFieldDef[]>(() => [
 
 // ---------- 统计面板 ----------
 const DIMENSIONS = [
-  { key: 'total_plans', label: '渗透测试工单总数', color: STAT_CARD_COLORS.blue },
+  { key: 'total_plans', label: '工单总数', color: STAT_CARD_COLORS.blue },
   { key: 'retest_done_plans', label: '复测完成数', color: STAT_CARD_COLORS.green },
   { key: 'first_test_count', label: '初测次数', color: STAT_CARD_COLORS.orange },
   { key: 'retest_count', label: '复测次数', color: STAT_CARD_COLORS.red },
   { key: 'total_test_count', label: '总测试次数', color: STAT_CARD_COLORS.gray },
   { key: 'est_mandays_total', label: '预估人天总计', color: STAT_CARD_COLORS.blue },
   { key: 'actual_mandays_total', label: '实际人天总计', color: STAT_CARD_COLORS.green },
-  { key: 'remaining_est_mandays', label: '剩余预估人天（未测试）', color: STAT_CARD_COLORS.orange },
+  { key: 'remaining_est_mandays', label: '剩余预估人天', color: STAT_CARD_COLORS.orange },
   { key: 'vulns_by_month', label: '按月漏洞数', color: STAT_CARD_COLORS.blue },
 ] as const
 const STATS_DIMS_KEY = 'testing_plan_stats_dims'
@@ -529,6 +543,7 @@ const stats = ref<Record<string, number>>({})
 const statsLoading = ref(false)
 const monthChartRef = ref<HTMLElement>()
 let monthChart: echarts.ECharts | null = null
+let monthChartTheme = ''
 
 function loadDims(): string[] {
   try {
@@ -545,6 +560,17 @@ const cardDims = computed(() =>
 watch(dims, (v) => {
   localStorage.setItem(STATS_DIMS_KEY, JSON.stringify(v))
   if (v.includes('vulns_by_month')) nextTick(renderMonthChart)
+})
+
+// 折叠面板展开 / 明暗切换时，按新主题重建月度图表（隐藏态 init 会得到 0 尺寸，需在可见后渲染；
+// 展开动画约 300ms，动画结束后再 resize 一次兜底）
+const theme = useThemeStore()
+watch([statsPanel, () => theme.dark], async ([panel]) => {
+  if (panel.includes('stats') && dims.value.includes('vulns_by_month')) {
+    await nextTick()
+    renderMonthChart()
+    setTimeout(() => monthChart?.resize(), 320)
+  }
 })
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
@@ -679,13 +705,24 @@ async function loadStats() {
 
 function renderMonthChart() {
   if (!monthChartRef.value) return
-  if (!monthChart) monthChart = echarts.init(monthChartRef.value)
+  const themeName = chartThemeName(theme.dark)
+  if (monthChart && monthChartTheme !== themeName) {
+    monthChart.dispose()
+    monthChart = null
+  }
+  if (!monthChart) {
+    monthChart = echarts.init(monthChartRef.value, themeName)
+    monthChartTheme = themeName
+  }
   const rows = (stats.value as any).vulns_by_month ?? []
   monthChart.setOption({
     tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 30, bottom: 40 },
-    title: { text: '按月漏洞数', textStyle: { fontSize: 13, fontWeight: 'normal', color: STAT_CARD_COLORS.gray } },
-    xAxis: { type: 'category', data: rows.map((r: any) => r.month), axisLabel: { rotate: 45 } },
+    grid: { left: 40, right: 16, top: 30, bottom: 72 },
+    title: { text: '按月漏洞数', textStyle: { fontSize: 12.5, fontWeight: 'normal', color: STAT_CARD_COLORS.gray } },
+    xAxis: {
+      type: 'category', data: rows.map((r: any) => r.month),
+      axisLabel: { rotate: 45, fontSize: 10.5, hideOverlap: true },
+    },
     yAxis: { type: 'value', minInterval: 1 },
     series: [{ type: 'bar', data: rows.map((r: any) => r.count), itemStyle: { color: STAT_CARD_COLORS.blue }, barMaxWidth: 32 }],
   })

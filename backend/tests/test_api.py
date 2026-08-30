@@ -33,15 +33,15 @@ async def test_meta(client: AsyncClient, auth: dict):
     meta = resp.json()
     assert "vul_level" in meta and "vul_status" in meta
     # 字典单源：色值命名空间、导入/导出状态与 nonpen 命名空间随 /meta 下发
-    assert meta["colors"]["vul_level"]["10"] == "#A61B29"
+    assert meta["colors"]["vul_level"]["10"] == "#DC2626"
     assert meta["import_batch_status"]["parsed"] == "待确认"
     assert meta["export_job_status"]["done"] == "已完成"
     assert meta["report_status"]["draft"] == "草稿"
     # 名称字典对应的色值必须同步下发：前端 applyDictMeta 无条件注入，
     # 任一 key 缺失会令导出/导入状态标签渲染崩溃（报告区域整体消失）
-    assert meta["colors"]["import_batch_status"]["parsed"] == "#4F46E5"
-    assert meta["colors"]["import_record_status"]["confirmed"] == "#67C23A"
-    assert meta["colors"]["export_job_status"]["done"] == "#67C23A"
+    assert meta["colors"]["import_batch_status"]["parsed"] == "#0284C7"
+    assert meta["colors"]["import_record_status"]["confirmed"] == "#059669"
+    assert meta["colors"]["export_job_status"]["done"] == "#059669"
     nonpen_items = {item["key"] for item in meta["nonpen"]["items"]}
     assert nonpen_items == {"baseline", "host", "web"}
     assert meta["nonpen"]["actions"]["not_started"] == ["start", "ignore"]
@@ -2097,11 +2097,12 @@ async def test_delete_retest_report_rolls_back_round(client: AsyncClient, auth: 
 
 
 async def test_dashboard_by_department(client: AsyncClient, auth: dict):
-    """安全态势部门维度：提测次数 / 发现漏洞（含手填补充） / 修复率。"""
-    # 无关联漏洞的计划：发现数取手填统计，修复率为空
+    """安全态势部门维度：提测次数 / 发现漏洞（含手填补充） / 修复率 / 占用人天（实际人天求和）。"""
+    # 无关联漏洞的计划：发现数取手填统计，修复率为空；占用人天取实际人天
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth,
-        json={"system_name": "看板系统", "department": "看板部门", "stat_high": 2, "stat_low": 1},
+        json={"system_name": "看板系统", "department": "看板部门",
+              "stat_high": 2, "stat_low": 1, "actual_mandays": 3.5},
     )
     assert resp.status_code == 200, resp.text
 
@@ -2112,13 +2113,21 @@ async def test_dashboard_by_department(client: AsyncClient, auth: dict):
     assert dept["vulns"] == 3
     assert dept["fixed"] == 0
     assert dept["fix_rate"] is None
+    assert dept["mandays"] == 3.5
+    # 高危及以上取手填严重(0)+高危(2)；手填统计无状态概念，全部计为未闭环
+    assert dept["high"] == 2
+    assert dept["open"] == 3
 
-    # 有关联漏洞的计划（test_retest_round_tracking：1 已修复 + 1 已忽略）
+    # 有关联漏洞的计划（test_retest_round_tracking：高危A 已修复 + 中危B 已忽略）
     dept2 = next(d for d in stats["by_department"] if d["department"] == "轮次部门")
     assert dept2["plans"] == 1
     assert dept2["vulns"] == 2
     assert dept2["fixed"] == 1
     assert dept2["fix_rate"] == 50.0
+    assert isinstance(dept2["mandays"], (int, float))
+    # 高危及以上仅高危A；未闭环 = 2 − 已修复1 − 已忽略1 = 0
+    assert dept2["high"] == 1
+    assert dept2["open"] == 0
 
 
 async def test_vuln_stats_by_asset(client: AsyncClient, auth: dict):
@@ -3646,3 +3655,36 @@ async def test_vuln_search_by_system_name(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 200, resp.text
     assert vul_id in [v["id"] for v in resp.json()["items"]]
+
+
+async def test_global_search(client: AsyncClient, auth: dict):
+    """⌘K 全局搜索：空关键字返回空分组；按标题/名称模糊命中漏洞与资产。"""
+    resp = await client.get("/api/v1/search", headers=auth, params={"q": "  "})
+    assert resp.status_code == 200
+    assert resp.json() == {"vulns": [], "assets": [], "plans": [], "reports": []}
+
+    # 造数据：资产 + 挂在其上的漏洞
+    resp = await client.post("/api/v1/assets", headers=auth, json={"name": "搜索目标系统Alpha"})
+    assert resp.status_code == 200, resp.text
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={
+            "asset_ids": [asset_id],
+            "vulns": [{"title": "搜索专用SQL注入漏洞XYZ", "level": 20, "vul_type": 10}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/api/v1/search", headers=auth, params={"q": "XYZ"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [v["title"] for v in body["vulns"]] == ["搜索专用SQL注入漏洞XYZ"]
+    assert body["assets"] == []
+
+    # 按资产名搜索命中资产分区
+    resp = await client.get("/api/v1/search", headers=auth, params={"q": "Alpha"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert any(a["name"] == "搜索目标系统Alpha" for a in body["assets"])
+    assert body["vulns"] == []

@@ -1,10 +1,12 @@
 <template>
-  <el-card shadow="never" class="!rounded-lg">
-    <div class="flex items-center gap-2 mb-4">
-      <el-input v-model="keyword" placeholder="搜索漏洞名称 / 类型" clearable class="!w-64">
-        <template #prefix><el-icon><Search /></el-icon></template>
-      </el-input>
-      <span class="text-gray-400 text-sm">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
+  <el-card shadow="never">
+    <div class="flex items-center flex-wrap gap-2 mb-3">
+      <div class="tl-search-field">
+        <el-input v-model="keyword" placeholder="搜索漏洞名称 / 类型" clearable>
+          <template #prefix><el-icon><Search /></el-icon></template>
+        </el-input>
+      </div>
+      <span class="text-gray-400 text-xs">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
       <div class="flex-1" />
       <template v-if="auth.hasPerm('vuln:manage')">
         <el-button type="danger" plain :disabled="!selected.length" class="btn-min" @click="removeBatch">
@@ -20,17 +22,17 @@
     </div>
 
     <el-table v-loading="loading" :data="filteredItems" stripe @selection-change="(rows: any[]) => (selected = rows)">
-      <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="44" />
+      <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
       <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
         <template #default="{ row }">
-          <span class="tl-tag" :style="vulTypeSoftStyle(row.vul_type)">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
+          <span class="ktag">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
         </template>
       </el-table-column>
       <el-table-column prop="severity_level" label="危害等级" width="90" sortable>
         <template #default="{ row }">
-          <span class="tl-tag" :style="levelSoftStyle(row.severity_level)">
-            {{ meta?.vul_level?.[row.severity_level] ?? row.severity_level }}
+          <span class="dot-tag" :style="levelDotStyle(row.severity_level)">
+            <i></i>{{ meta?.vul_level?.[row.severity_level] ?? row.severity_level }}
           </span>
         </template>
       </el-table-column>
@@ -46,7 +48,7 @@
       <el-table-column prop="update_time" label="更新时间" width="170" sortable>
         <template #default="{ row }">{{ fmtDateTime(row.update_time) }}</template>
       </el-table-column>
-      <el-table-column v-if="auth.hasPerm('vuln:manage')" label="操作" width="140" fixed="right">
+      <el-table-column v-if="auth.hasPerm('vuln:manage')" label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该条目？" @confirm="remove(row.id)">
@@ -147,7 +149,7 @@ import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, softStyle, vulTypeSoftStyle } from '../utils/colors'
+import { levelDotStyle, softStyle } from '../utils/colors'
 import { scoreFromVector, scoreToLevel } from '../utils/cvss'
 import { levelColor } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
@@ -189,9 +191,9 @@ const form = reactive<any>(emptyForm())
 // CVSS 向量评分预览：合法向量实时展示评分与等级色
 const cvssPreview = computed(() => scoreFromVector(form.cvss_vector))
 const cvssPreviewColor = computed(() => {
-  if (!cvssPreview.value) return '#909399'
+  if (!cvssPreview.value) return '#8a968f'
   const lv = scoreToLevel(cvssPreview.value.score)
-  return lv !== null ? levelColor(lv) : '#909399'
+  return lv !== null ? levelColor(lv) : '#8a968f'
 })
 const formRef = ref<FormInstance>()
 const formRules: FormRules = {
