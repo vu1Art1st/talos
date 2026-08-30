@@ -3,7 +3,7 @@
     <!-- 筛选工具栏 -->
     <el-card shadow="never" class="!rounded-lg">
       <div class="flex flex-wrap items-center gap-2">
-        <el-input v-model="search" placeholder="搜索标题 / URL" clearable class="!w-64"
+        <el-input v-model="search" placeholder="搜索标题 / 系统 / URL" clearable class="!w-64"
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
@@ -426,9 +426,12 @@ onMounted(async () => {
   margin-bottom: 4px;
 }
 /* 录入时间（daterange）在 Element Plus 中默认固定 350px（由 --el-date-editor-width 变量驱动），
-   与其他下拉框（w-full 撑满列宽）宽度不一致；覆盖变量使其同宽 */
+   与其他下拉框（w-full 撑满列宽）宽度不一致；覆盖变量使其同宽。
+   项目关闭了 Tailwind preflight，日期框保持浏览器默认 content-box，左右 10px 内边距会
+   在 width:100% 之外再撑出 20px 溢出面板，必须显式回归 border-box */
 .vuln-filter-panel :deep(.el-date-editor--daterange) {
   --el-date-editor-width: 100%;
+  box-sizing: border-box;
   width: 100%;
 }
 </style>

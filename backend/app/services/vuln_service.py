@@ -35,6 +35,36 @@ async def load_vulns_or_400(session: AsyncSession, vul_ids: list[int]) -> list[V
     return list(vulns)
 
 
+async def create_draft_vulns(
+    session: AsyncSession, drafts: list, user: User, source: int,
+) -> list[Vul]:
+    """按草稿批量创建漏洞（春耕行动原始报告导入/快捷录入共用）。
+
+    草稿不关联资产与测试工单，来源固定为调用方给定的专项口径；富文本
+    消毒由草稿 schema 的 HtmlStr 类型完成。返回持久化后的漏洞列表。
+    """
+    vulns: list[Vul] = []
+    for d in drafts:
+        vul = Vul(
+            title=d.title,
+            level=d.level,
+            vul_type=d.vul_type,
+            source=source,
+            affected_url=d.affected_url,
+            description_html=d.description_html,
+            reproduce_html=d.reproduce_html,
+            solution_html=d.solution_html,
+            submitter_id=user.id,
+        )
+        session.add(vul)
+        vulns.append(vul)
+    if vulns:
+        await session.flush()
+        for vul in vulns:
+            add_log(session, vul, user, "创建漏洞")
+    return vulns
+
+
 async def _has_current_round_retest(session: AsyncSession, vul: Vul) -> bool:
     """本轮复测（最近一次进入复测中之后）是否新增了复测记录。
 

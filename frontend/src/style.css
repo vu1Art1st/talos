@@ -143,6 +143,12 @@ body,
   --el-table-border-color: var(--tl-border);
 }
 
+/* ============ 输入框文本/占位文字超出宽度时省略（Chromium 忽略 ::placeholder 上的
+   text-overflow，需作用在输入框本体；各列表页搜索框占位文案较长时截断为 …） ============ */
+.el-input__inner {
+  text-overflow: ellipsis;
+}
+
 /* ============ 柔和标签（等级 / 状态） ============ */
 .tl-tag {
   display: inline-flex;

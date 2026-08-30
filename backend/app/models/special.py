@@ -223,9 +223,14 @@ class SpringAction(Base):
     system_name: Mapped[str] = mapped_column(String(128), default="")
     year: Mapped[str] = mapped_column(String(8), default="")  # 年度，如 2026
     phase: Mapped[str] = mapped_column(String(64), default="")  # 阶段，如 第一阶段
+    asset_reason: Mapped[str] = mapped_column(String(255), default="")  # 资产认定原因
     appeal_success: Mapped[bool] = mapped_column(Boolean, default=False)
+    est_score_deduction: Mapped[float] = mapped_column(Float, default=0)  # 预估扣分数值
     score_deduction: Mapped[float] = mapped_column(Float, default=0)  # 最终扣分数值
     doc_no: Mapped[str] = mapped_column(String(128), default="")  # 对应公文文号
+    report_file_name: Mapped[str] = mapped_column(String(255), default="")  # 原始报告附件原始文件名
+    report_file_path: Mapped[str] = mapped_column(String(512), default="")  # 原始报告附件存储相对路径（storage/ 下）
+    report_file_size: Mapped[int] = mapped_column(Integer, default=0)  # 原始报告附件大小（字节）
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

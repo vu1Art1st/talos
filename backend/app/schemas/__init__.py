@@ -92,6 +92,8 @@ from .special import (
     RetestRoundOut,
     SpringActionIn,
     SpringActionOut,
+    SpringActionVulDraft,
+    SpringReportParseOut,
     TestingPlanIn,
     TestingPlanOut,
 )

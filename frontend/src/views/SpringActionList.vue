@@ -15,12 +15,37 @@
       <el-table-column type="index" label="序号" width="70"
                        :index="(i: number) => (page - 1) * 20 + i + 1" />
       <el-table-column prop="report_no" label="报告编号" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column label="原始报告" width="90">
+        <template #default="{ row }">
+          <el-button v-if="row.report_file_name" size="small" type="primary" link
+                     @click="downloadReport(row)">下载</el-button>
+          <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="system_name" label="对应系统" min-width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="year" label="年度" width="90" sortable="custom">
         <template #default="{ row }">{{ row.year || '-' }}</template>
       </el-table-column>
       <el-table-column prop="phase" label="阶段" width="110" show-overflow-tooltip sortable="custom">
         <template #default="{ row }">{{ row.phase || '-' }}</template>
+      </el-table-column>
+      <el-table-column label="网络层级" width="100">
+        <template #default="{ row }">
+          <template v-if="row.vuls?.length">
+            <span v-for="code in uniqVulValues(row, 'layer')" :key="code" class="tl-tag mr-1"
+                  :style="softStyle(STAT_CARD_COLORS.gray)">{{ layerName(code) }}</span>
+          </template>
+          <span v-else class="text-gray-400">-</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="危害程度" width="120">
+        <template #default="{ row }">
+          <template v-if="row.vuls?.length">
+            <span v-for="code in uniqVulValues(row, 'level')" :key="code" class="tl-tag mr-1"
+                  :style="levelSoftStyle(code)">{{ levelName(code) }}</span>
+          </template>
+          <span v-else class="text-gray-400">-</span>
+        </template>
       </el-table-column>
       <el-table-column label="涉及漏洞" width="110">
         <template #default="{ row }">
@@ -41,12 +66,16 @@
           <span v-else class="text-gray-400">-</span>
         </template>
       </el-table-column>
+      <el-table-column prop="asset_reason" label="资产认定原因" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column prop="appeal_success" label="申诉结果" width="110" sortable="custom">
         <template #default="{ row }">
           <span class="tl-tag" :style="row.appeal_success ? softStyle(STAT_CARD_COLORS.green) : softStyle(STAT_CARD_COLORS.gray)">
             {{ row.appeal_success ? '申诉成功' : '未申诉/失败' }}
           </span>
         </template>
+      </el-table-column>
+      <el-table-column prop="est_score_deduction" label="预估扣分" width="110" sortable="custom">
+        <template #default="{ row }">{{ row.est_score_deduction }}</template>
       </el-table-column>
       <el-table-column prop="score_deduction" label="最终扣分" width="110" sortable="custom">
         <template #default="{ row }">{{ row.score_deduction }}</template>
@@ -79,6 +108,39 @@
       <el-form-item label="报告编号" required>
         <el-input v-model="form.report_no" placeholder="原始报告编号" />
       </el-form-item>
+      <el-form-item label="原始报告">
+        <div class="w-full flex flex-col gap-2">
+          <div v-if="form.report_file_name" class="flex items-center gap-2">
+            <el-button v-if="form.id" size="small" type="primary" link @click="downloadReport(form)">
+              <el-icon class="mr-1"><Document /></el-icon>{{ form.report_file_name }}
+            </el-button>
+            <span v-else class="text-sm">{{ form.report_file_name }}</span>
+            <el-button size="small" type="danger" link @click="clearReport">移除</el-button>
+          </div>
+          <el-upload :http-request="uploadReport" :show-file-list="false" accept=".docx">
+            <el-button size="small" plain :loading="uploading">
+              <el-icon class="mr-1"><Upload /></el-icon>上传原始报告
+            </el-button>
+          </el-upload>
+          <span class="text-xs text-gray-400">
+            上传原始报告 Word 文档（.docx，不超过 50MB），自动解析系统名称、年度与漏洞供勾选导入
+          </span>
+          <div v-if="parsedVuls.length" class="rounded border border-gray-200 p-3">
+            <div class="text-xs text-gray-500 mb-2">
+              报告解析到 {{ parsedVuls.length }} 个漏洞，勾选后将随保存导入并关联：
+            </div>
+            <el-checkbox v-model="importAll" :indeterminate="importIndeterminate" class="mb-1">全选</el-checkbox>
+            <el-checkbox-group v-model="importIdx">
+              <div v-for="(v, i) in parsedVuls" :key="i" class="flex items-center">
+                <el-checkbox :value="i">
+                  <span class="tl-tag" :style="levelSoftStyle(v.level)">{{ levelName(v.level) }}</span>
+                  {{ v.title }}
+                </el-checkbox>
+              </div>
+            </el-checkbox-group>
+          </div>
+        </div>
+      </el-form-item>
       <el-form-item label="对应系统">
         <el-input v-model="form.system_name" />
       </el-form-item>
@@ -91,16 +153,61 @@
         </el-form-item>
       </div>
       <el-form-item label="涉及漏洞">
-        <el-select v-model="form.vul_ids" multiple filterable class="w-full" placeholder="可多选">
-          <el-option v-for="v in vulns" :key="v.id" :label="v.title" :value="v.id" />
-        </el-select>
+        <div class="w-full">
+          <el-select v-model="form.vul_ids" multiple filterable class="w-full"
+                     placeholder="可多选，或直接新增漏洞">
+            <el-option v-for="v in vulns" :key="v.id" :label="v.title" :value="v.id" />
+          </el-select>
+          <div class="mt-2">
+            <el-button size="small" plain @click="toggleQuickAdd">
+              <el-icon class="mr-1"><Plus /></el-icon>直接新增漏洞
+            </el-button>
+            <el-card v-if="quickAddVisible" shadow="never" class="!rounded-md mt-2">
+              <el-form ref="quickFormRef" :model="quickForm" :rules="quickRules" label-width="80px">
+                <el-form-item label="漏洞名称" prop="title">
+                  <el-input v-model="quickForm.title" placeholder="例如：后台登录接口存在SQL注入" />
+                </el-form-item>
+                <div class="grid grid-cols-1 md:grid-cols-2">
+                  <el-form-item label="漏洞等级">
+                    <el-select v-model="quickForm.level" class="w-full">
+                      <el-option v-for="(name, code) in quickMeta?.vul_level" :key="code"
+                                 :label="name" :value="Number(code)" />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item label="漏洞类型">
+                    <el-select v-model="quickForm.vul_type" filterable class="w-full">
+                      <el-option v-for="(name, code) in quickMeta?.vul_type" :key="code"
+                                 :label="name" :value="Number(code)" />
+                    </el-select>
+                  </el-form-item>
+                </div>
+                <el-form-item label=" ">
+                  <div class="w-full flex justify-end">
+                    <el-button size="small" @click="quickAddVisible = false">取消</el-button>
+                    <el-button size="small" type="primary" :loading="quickSaving" @click="createVul">
+                      新增并关联
+                    </el-button>
+                  </div>
+                </el-form-item>
+              </el-form>
+            </el-card>
+          </div>
+        </div>
+      </el-form-item>
+      <el-form-item label="资产认定原因">
+        <el-input v-model="form.asset_reason" maxlength="255" placeholder="记录对应系统资产归属的认定依据" />
       </el-form-item>
       <el-form-item label="申诉成功">
         <el-switch v-model="form.appeal_success" />
       </el-form-item>
-      <el-form-item label="最终扣分">
-        <el-input-number v-model="form.score_deduction" :min="0" :step="0.5" class="!w-full" />
-      </el-form-item>
+      <div class="grid grid-cols-1 md:grid-cols-2">
+        <el-form-item label="预估扣分">
+          <el-input-number v-model="form.est_score_deduction" :min="0" :step="0.5" class="!w-full" />
+        </el-form-item>
+        <el-form-item label="最终扣分">
+          <el-input-number v-model="form.score_deduction" :min="0" :step="0.5" class="!w-full" />
+        </el-form-item>
+      </div>
       <el-form-item label="公文文号">
         <el-input v-model="form.doc_no" />
       </el-form-item>
@@ -113,14 +220,19 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import { useRouter } from 'vue-router'
 import client from '../api/client'
 import { useCrudDialog } from '../composables/useCrudDialog'
 import { useListPage } from '../composables/useListPage'
+import { useAuthStore } from '../stores/auth'
+import { saveBlob } from '../utils/download'
 import { levelName, levelSoftStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 
 const router = useRouter()
+const auth = useAuthStore()
 const { items, total, page, search, loading, load, onSortChange } = useListPage('/spring-actions')
 const vulns = ref<any[]>([])
 
@@ -131,29 +243,130 @@ const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useC
     system_name: '',
     year: '',
     phase: '',
+    asset_reason: '',
     appeal_success: false,
+    est_score_deduction: 0,
     score_deduction: 0,
     doc_no: '',
     vul_ids: [] as number[],
+    report_file_name: '',
+    report_file_path: '',
+    report_file_size: 0,
   }),
   save: async (f) => {
     const body = { ...f }
     delete (body as any).vuls
+    // 勾选的报告漏洞草稿随保存提交，由后端创建并关联
+    ;(body as any).new_vuls = parsedVuls.value.filter((_, i) => importIdx.value.includes(i))
     if (f.id) {
       await client.put(`/spring-actions/${f.id}`, body)
     } else {
       await client.post('/spring-actions', body)
     }
+    // 保存成功后清理解析态，避免重复导入
+    parsedVuls.value = []
+    importIdx.value = []
   },
   afterSave: () => load(),
 })
 
 async function openDialog(row?: any) {
   openCrud(row ? { ...row, vul_ids: row.vuls?.map((v: any) => v.id) ?? [] } : null)
+  parsedVuls.value = []
+  importIdx.value = []
   if (!vulns.value.length) {
     const { data } = await client.get('/vulns', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
     vulns.value = data.items
   }
+}
+
+// ---------- 原始报告上传导入：解析回填系统/年度，漏洞草稿勾选后随保存创建 ----------
+const uploading = ref(false)
+const parsedVuls = ref<any[]>([])
+const importIdx = ref<number[]>([])
+
+const importAll = computed({
+  get: () => parsedVuls.value.length > 0 && importIdx.value.length === parsedVuls.value.length,
+  set: (v: boolean) => { importIdx.value = v ? parsedVuls.value.map((_, i) => i) : [] },
+})
+const importIndeterminate = computed(() =>
+  importIdx.value.length > 0 && importIdx.value.length < parsedVuls.value.length)
+
+async function uploadReport(options: any) {
+  const fd = new FormData()
+  fd.append('file', options.file)
+  uploading.value = true
+  try {
+    const { data } = await client.post('/spring-actions/upload-report', fd)
+    form.value.report_file_name = data.name
+    form.value.report_file_path = data.path
+    form.value.report_file_size = data.size
+    // 已填字段不覆盖，仅回填空缺项
+    if (!form.value.system_name && data.system_name) form.value.system_name = data.system_name
+    if (!form.value.year && data.report_date) form.value.year = data.report_date.slice(0, 4)
+    parsedVuls.value = data.vuls ?? []
+    importIdx.value = parsedVuls.value.map((_, i) => i)
+    ElMessage.success(parsedVuls.value.length
+      ? `解析完成，报告含 ${parsedVuls.value.length} 个漏洞`
+      : '附件上传成功，未解析到漏洞')
+  } finally {
+    uploading.value = false
+  }
+}
+
+function clearReport() {
+  form.value.report_file_name = ''
+  form.value.report_file_path = ''
+  form.value.report_file_size = 0
+  parsedVuls.value = []
+  importIdx.value = []
+}
+
+async function downloadReport(row: any) {
+  const { data } = await client.get(`/spring-actions/${row.id}/report`, { responseType: 'blob' })
+  saveBlob(data, row.report_file_name || '原始报告.docx')
+}
+
+// ---------- 涉及漏洞：内联直接新增（避免弹窗嵌套，保存后自动选中） ----------
+const quickAddVisible = ref(false)
+const quickSaving = ref(false)
+const quickFormRef = ref<FormInstance>()
+const quickMeta = ref<Record<string, Record<string, string>>>({})
+const quickForm = reactive({ title: '', level: 30, vul_type: 75 })
+const quickRules: FormRules = {
+  title: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
+}
+
+async function toggleQuickAdd() {
+  quickAddVisible.value = !quickAddVisible.value
+  if (quickAddVisible.value && !Object.keys(quickMeta.value).length) {
+    quickMeta.value = await auth.fetchMeta()
+  }
+}
+
+async function createVul() {
+  const valid = await quickFormRef.value?.validate().catch(() => false)
+  if (!valid) return
+  quickSaving.value = true
+  try {
+    // 单独录入且来自春耕行动：来源固定为「春耕行动」（VUL_SOURCE 20）
+    const { data } = await client.post('/vulns', { ...quickForm, source: 20 })
+    vulns.value = [data, ...vulns.value]
+    form.value.vul_ids = [...form.value.vul_ids, data.id]
+    ElMessage.success('漏洞已新增并关联')
+    quickForm.title = ''
+    quickAddVisible.value = false
+  } finally {
+    quickSaving.value = false
+  }
+}
+
+// ---------- 网络层级 / 危害程度：按关联漏洞聚合去重展示 ----------
+const layerMap = ref<Record<string, string>>({})
+const layerName = (code: number) => layerMap.value[code] ?? String(code)
+
+function uniqVulValues(row: any, field: 'layer' | 'level'): number[] {
+  return [...new Set((row.vuls ?? []).map((v: any) => v[field]))].sort((a, b) => a - b)
 }
 
 async function remove(id: number) {
@@ -161,5 +374,8 @@ async function remove(id: number) {
   await load()
 }
 
-onMounted(() => load(1))
+onMounted(async () => {
+  load(1)
+  layerMap.value = (await auth.fetchMeta()).vul_layer ?? {}
+})
 </script>

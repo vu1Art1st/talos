@@ -5,7 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.constants import NONPEN_ITEMS
 
-from .common import ReportBrief, UserBrief, VulBrief
+from .common import ReportBrief, UserBrief, VulBrief, HtmlStr
 
 
 class RemoteTestingIn(BaseModel):
@@ -168,15 +168,44 @@ class NonpenItemIgnoreIn(BaseModel):
     ignored: bool = True
 
 
+class SpringActionVulDraft(BaseModel):
+    """春耕行动保存时待创建的漏洞草稿（原始报告导入/表单快捷录入共用），无资产与工单关联。"""
+
+    title: str = Field(min_length=1, max_length=255)
+    level: int = 30
+    vul_type: int = 75
+    affected_url: str = ""
+    description_html: HtmlStr = ""
+    reproduce_html: HtmlStr = ""
+    solution_html: HtmlStr = ""
+
+
+class SpringReportParseOut(BaseModel):
+    """原始报告上传解析结果：附件元信息 + 解析出的系统名称/报告日期/漏洞草稿。"""
+
+    name: str  # 附件原始文件名
+    path: str  # 附件存储相对路径（storage/ 下）
+    size: int  # 附件大小（字节）
+    system_name: str = ""
+    report_date: str = ""  # 报告日期（YYYY-MM-DD），可推导年度
+    vuls: list[SpringActionVulDraft] = []
+
+
 class SpringActionIn(BaseModel):
     report_no: str = Field(min_length=1, max_length=128)
     system_name: str = ""
     year: str = ""  # 年度，如 2026
     phase: str = ""  # 阶段，如 第一阶段
+    asset_reason: str = ""  # 资产认定原因
     appeal_success: bool = False
-    score_deduction: float = 0
+    est_score_deduction: float = 0  # 预估扣分
+    score_deduction: float = 0  # 最终扣分
     doc_no: str = ""
     vul_ids: list[int] = []
+    report_file_name: str = ""  # 原始报告附件原始文件名
+    report_file_path: str = ""  # 原始报告附件存储相对路径
+    report_file_size: int = 0  # 原始报告附件大小（字节）
+    new_vuls: list[SpringActionVulDraft] = []  # 保存时创建并关联的漏洞草稿
 
 
 class SpringActionOut(SpringActionIn):

@@ -166,7 +166,12 @@ def _build_vuln_conditions(
     """
     cond = []
     if search:
-        cond.append(Vul.title.ilike(f"%{search}%") | Vul.affected_url.ilike(f"%{search}%"))
+        # 关键词同时匹配漏洞标题 / 受影响 URL / 关联资产（系统）名称
+        cond.append(
+            Vul.title.ilike(f"%{search}%")
+            | Vul.affected_url.ilike(f"%{search}%")
+            | Vul.assets.any(Asset.name.ilike(f"%{search}%"))
+        )
     if levels:
         cond.append(Vul.level.in_(levels))
     elif level is not None:

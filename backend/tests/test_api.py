@@ -1454,20 +1454,24 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     resp = await client.post(
         "/api/v1/spring-actions", headers=auth,
         json={"report_no": "RPT-2026-001", "system_name": "春耕系统",
-              "appeal_success": True, "score_deduction": 2.5,
+              "asset_reason": "备案归属本单位", "appeal_success": True,
+              "est_score_deduction": 4, "score_deduction": 2.5,
               "doc_no": "公文〔2026〕1号", "vul_ids": [vul_id]},
     )
     assert resp.status_code == 200, resp.text
     sa = resp.json()
     assert sa["vul_ids"] == [vul_id]
     assert sa["vuls"][0]["title"] == "春耕漏洞"
+    assert sa["asset_reason"] == "备案归属本单位"
+    assert sa["est_score_deduction"] == 4
     assert sa["score_deduction"] == 2.5
 
     # 更新：清空漏洞关联
     resp = await client.put(
         f"/api/v1/spring-actions/{sa['id']}", headers=auth,
         json={"report_no": "RPT-2026-001", "system_name": "春耕系统",
-              "appeal_success": False, "score_deduction": 0,
+              "asset_reason": "", "appeal_success": False,
+              "est_score_deduction": 0, "score_deduction": 0,
               "doc_no": "", "vul_ids": []},
     )
     assert resp.status_code == 200
@@ -1477,10 +1481,62 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     resp = await client.get("/api/v1/spring-actions", headers=auth, params={"search": "RPT-2026"})
     assert len(resp.json()["items"]) == 1
 
+    # ---- 原始报告上传导入 ----
+    from docx import Document as _Docx
+
+    # 非 docx 被拒绝
+    resp = await client.post(
+        "/api/v1/spring-actions/upload-report", headers=auth,
+        files={"file": ("原始报告.txt", b"not a docx", "text/plain")},
+    )
+    assert resp.status_code == 400
+
+    # 无漏洞表的 docx 也可上传留档，解析返回空草稿
+    buf = BytesIO()
+    _Docx().save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/spring-actions/upload-report", headers=auth,
+        files={"file": ("原始报告.docx", buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    upload = resp.json()
+    assert upload["name"] == "原始报告.docx"
+    assert upload["path"].startswith("uploads/spring_report/")
+    assert upload["size"] > 0
+    assert upload["vuls"] == []
+
+    # 保存：附件绑定 + 漏洞草稿随保存创建并关联（来源固定为春耕行动）
+    resp = await client.post(
+        "/api/v1/spring-actions", headers=auth,
+        json={"report_no": "SA-2026-009", "system_name": "春耕附件系统",
+              "report_file_name": upload["name"], "report_file_path": upload["path"],
+              "report_file_size": upload["size"],
+              "new_vuls": [{"title": "报告导入漏洞", "level": 20,
+                            "description_html": "<p>报告描述内容</p>"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    sa2 = resp.json()
+    assert sa2["report_file_name"] == "原始报告.docx"
+    assert [v["title"] for v in sa2["vuls"]] == ["报告导入漏洞"]
+    # 漏洞摘要带所在层（网络层级列聚合展示依赖该字段）
+    assert sa2["vuls"][0]["layer"] == 10
+
+    # 附件下载
+    resp = await client.get(f"/api/v1/spring-actions/{sa2['id']}/report", headers=auth)
+    assert resp.status_code == 200
+
+    # 收尾清理导入的漏洞（source=20 会污染后续 dashboard 来源筛选计数）
+    imported_id = sa2["vuls"][0]["id"]
+    resp = await client.post("/api/v1/vulns/batch-delete", headers=auth, json={"ids": [imported_id]})
+    assert resp.status_code == 200
+
     # ---- 删除 ----
     for path in (f"/api/v1/remote-testings/{rt_id}",
                  f"/api/v1/testing-plans/{plan['id']}",
-                 f"/api/v1/spring-actions/{sa['id']}"):
+                 f"/api/v1/spring-actions/{sa['id']}",
+                 f"/api/v1/spring-actions/{sa2['id']}"):
         resp = await client.delete(path, headers=auth)
         assert resp.status_code == 200
 
@@ -3556,3 +3612,37 @@ async def test_knowledge_cvss_vector(client: AsyncClient, auth: dict):
 
 
 
+
+
+async def test_vuln_search_by_system_name(client: AsyncClient, auth: dict):
+    """关键词搜索支持系统名称：标题/URL 命中之外，还应命中关联资产（系统）的名称。"""
+    resp = await client.post(
+        "/api/v1/assets", headers=auth, json={"name": "检索定位专用系统XQ"},
+    )
+    assert resp.status_code == 200, resp.text
+    asset_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={
+            "title": "与系统名毫无关联的标题XQ", "level": 30, "vul_type": 30,
+            "affected_url": "http://xq.example.com/api",
+            "description_html": "<p>xq</p>",
+            "asset_ids": [asset_id],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    vul_id = resp.json()["id"]
+
+    # 系统名称命中
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"search": "检索定位专用系统XQ"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert vul_id in [v["id"] for v in resp.json()["items"]]
+
+    # 标题命中依旧可用（回归确认）
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"search": "与系统名毫无关联的标题XQ"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert vul_id in [v["id"] for v in resp.json()["items"]]

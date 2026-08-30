@@ -724,3 +724,31 @@
 
 - `backend/tests/test_api.py` 适配权限目录：角色权限校验用例改用 `PERMISSION_CATALOG` 语义，补充 `GET /users/roles/permissions/catalog` 分组返回断言
 
+---
+
+## [2.7.0] - 2026-08-30
+
+春耕行动增强与英文文档：工单表单内联录入漏洞、新增预估扣分/资产认定原因字段、原始报告附件上传解析入库，漏洞搜索支持系统名称，README 双语化。
+
+### 新增
+
+- **春耕行动「涉及漏洞」内联新增**（`backend/app/services/vuln_service.py` / `frontend/src/views/SpringActionList.vue`）：表单内直接快速录入新漏洞（名称/等级/类型），来源固定为「春耕行动」，保存时创建并自动关联选中（`create_vul_drafts`）
+- **春耕行动「预估扣分」字段**（`est_score_deduction`，迁移 `b3c4d5e6f7a8_add_spring_action_est_score_deduction.py`）：列表与表单中位于「最终扣分」前一列，便于比对申诉/复核前后的扣分差异
+- **春耕行动「资产认定原因」字段**（`asset_reason`，迁移 `c5d6e7f8a9b0_add_spring_action_asset_reason.py`）：列表与表单中位于「申诉结果」前一列，记录对应系统资产归属的认定依据
+- **原始报告附件上传解析入库**（`backend/app/api/v1/spring_action.py`，迁移 `d6e7f8a9b0c1_add_spring_action_report_file.py`）：`POST /spring-actions/upload-report` 上传原始报告（.docx ≤ 50MB）解析回填系统名称/年度、勾选导入报告漏洞（保存时创建并关联，来源固定为「春耕行动」），附件留档；`GET /spring-actions/{id}/report` 下载附件
+- **春耕行动列表新增「网络层级」「危害程度」两列**（`frontend/src/views/SpringActionList.vue`）：位于「涉及漏洞」前，按关联漏洞聚合去重展示（所在层/漏洞等级）
+- **漏洞搜索支持系统名称**（`backend/app/services/vuln_service.py` / `backend/app/api/v1/vulns.py` / `frontend/src/views/VulnList.vue`）：关键词除标题/URL 外命中关联资产（系统）名称，搜索框占位改「搜索标题 / 系统 / URL」
+- **英文 README**（`README_EN.md` 新增，`README.md` 重写）：项目双语说明，含平台命名由来、功能清单与快速开始
+
+### 变更
+
+- **UI 设计规范升级**（`AGENTS.md`）：风格改为 Linear 式暗色优先极简（视觉基准 `design-demos/demo-2`，本地设计稿不入库）；品牌主色由靛蓝改为薄荷绿（浅色 #059669 / 暗色 #34D399）；密度双档（正文 14px / 紧凑 13.5px）；表格行内等级/状态改用「色点 + 文字」dot-tag 变体；新增命令面板（⌘K/Ctrl+K）与 StatCard 迷你趋势线约定
+- **输入框占位文字省略号**（`frontend/src/style.css`）：`.el-input__inner` 加 `text-overflow: ellipsis`，长占位文案截断为 …
+- **漏洞筛选日期框溢出修复**（`frontend/src/views/VulnList.vue`）：daterange 编辑器补 `box-sizing: border-box`，修复 width:100% 下左右内边距撑出 20px 溢出面板
+- `.gitignore` 忽略 `design-demos/`（本地 UI 设计稿，勿入库）
+
+### 测试
+
+- `backend/tests/test_api.py` 扩展 `test_special_modules_crud`：`asset_reason`/`est_score_deduction` 断言、原始报告非 docx 拒绝、无漏洞表 docx 留档解析空草稿、附件绑定+漏洞草稿保存创建（`source=20`）与下载、收尾清理导入漏洞
+- `backend/tests/test_api.py` 新增 `test_vuln_search_by_system_name`：系统名称命中关联漏洞、标题命中回归
+
