@@ -459,6 +459,7 @@ async def vuln_stats(
                 Asset.department,
                 Asset.id.label("asset_id"),
                 Asset.name.label("asset_name"),
+                Asset.sub_system,
                 Asset.system_type,
                 Vul.level,
                 _fix_case,
@@ -470,7 +471,7 @@ async def vuln_stats(
             .where(*cond)
             .group_by(
                 Asset.department, Asset.id, Asset.name,
-                Asset.system_type, Vul.level,
+                Asset.sub_system, Asset.system_type, Vul.level,
                 _fix_case,
             )
             .order_by(Asset.department, Asset.name, Vul.level)
@@ -480,12 +481,13 @@ async def vuln_stats(
     # 聚合为前端可消费的透视表行
     _LEVELS = [10, 20, 30, 40]
     _row_map: dict[int, dict] = {}  # asset_id → row dict
-    for d, aid, aname, stype, lv, fk, cnt in pivot_raw:
+    for d, aid, aname, sub, stype, lv, fk, cnt in pivot_raw:
         if aid not in _row_map:
             _row_map[aid] = {
                 "department": d or "未填写",
                 "asset_id": aid,
-                "asset_name": aname or "未命名",
+                # 实际测试为子系统时，系统列展示「系统-子系统」
+                "asset_name": (f"{aname}-{sub}" if aname and sub else (aname or "未命名")),
                 "system_type": stype or "未填写",
                 "total": 0,
                 "fixed_total": 0,

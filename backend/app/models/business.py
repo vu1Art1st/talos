@@ -36,7 +36,7 @@ class Asset(Base):
     name: Mapped[str] = mapped_column(String(128), index=True)
     sub_system: Mapped[str] = mapped_column(String(128), default="")
     department: Mapped[str] = mapped_column(String(128), default="")
-    system_type: Mapped[str] = mapped_column(String(64), default="")  # 系统类型：自有系统（正式）/自有系统（测试）/DCIT系统等
+    system_type: Mapped[str] = mapped_column(String(64), default="")  # 系统类型：自有系统（正式）/自有系统（测试）/DICT系统等
     public_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     internal_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     ports: Mapped[list | None] = mapped_column(JSON, default=list)  # 历史字段

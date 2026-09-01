@@ -422,7 +422,7 @@ async def init_db() -> None:
             )
         ).scalar_one_or_none()
         if has_system_type is None:
-            for i, name in enumerate(["自有系统（正式）", "自有系统（测试）", "DCIT系统"]):
+            for i, name in enumerate(["自有系统（正式）", "自有系统（测试）", "DICT系统"]):
                 session.add(DictOption(category="system_type", name=name, sort=i))
 
         # 漏洞类型字典预置（表为空时从 VUL_TYPE 常量一次性写入内置类型）

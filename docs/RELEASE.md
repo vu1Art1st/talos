@@ -25,6 +25,21 @@
 
 ---
 
+## [2.10.2] - 2026-09-01
+
+系统类型拼写修正与漏洞统计子系统展示。
+
+### 修复
+
+- **系统类型「DCIT」拼写修正为「DICT」**（`backend/app/db.py` / `backend/app/models/business.py` / `backend/app/schemas/asset.py` / `backend/scripts/seed_dev_data.py`）：字典预置、模型/入参注释与开发种子数据统一为「DICT系统」
+
+### 变更
+
+- **漏洞统计透视表子系统列**（`backend/app/api/v1/vulns.py` / `frontend/src/views/VulnList.vue`）：按资产聚合时取 `sub_system`，系统列展示「系统-子系统」（如「营销活动平台-优惠券中心」，子系统为空则仅系统名）
+- **漏洞统计概览默认闭合**（`frontend/src/views/VulnList.vue`）：顶部统计概览默认收起（与渗透/漏扫工单统计概览一致），移除 localStorage 展开态记忆
+
+---
+
 ## [2.10.1] - 2026-09-01
 
 登录页版本号构建期注入与登出跳转收敛。

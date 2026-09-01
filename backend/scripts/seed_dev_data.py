@@ -78,16 +78,16 @@ ASSETS = [
     ("统一身份认证平台", "", 7, "自有系统（正式）", True, "Nginx;OpenResty/1.21", "MySQL/8.0", 10, 10),
     ("营销活动平台", "优惠券中心", 5, "自有系统（正式）", True, "Nginx;SpringCloud Gateway", "MySQL/8.0;Redis", 30, 10),
     ("智能客服系统", "在线坐席", 5, "自有系统（正式）", True, "Nginx;Node.js/18", "MongoDB/6.0", 30, 10),
-    ("数据中台", "数据服务网关", 0, "DCIT系统", False, "Nginx;Flink/1.17", "ClickHouse/23", 20, 10),
+    ("数据中台", "数据服务网关", 0, "DICT系统", False, "Nginx;Flink/1.17", "ClickHouse/23", 20, 10),
     ("合同管理系统", "电子签章", 1, "自有系统（正式）", False, "Nginx;Tomcat/9.0", "MySQL/8.0", 30, 10),
     ("移动办公App", "消息推送", 0, "自有系统（正式）", True, "SpringBoot/3.1", "MySQL/8.0;Redis", 30, 20),
     ("采购管理平台", "供应商门户", 1, "自有系统（正式）", True, "Nginx;Tomcat/8.5", "MySQL/5.7", 30, 10),
     ("项目管理平台", "", 1, "自有系统（测试）", False, "Nginx", "PostgreSQL/15", 40, 20),
     ("知识库系统", "文档检索", 0, "自有系统（正式）", False, "Nginx;ElasticSearch/8", "MySQL/8.0", 40, 10),
     ("运维监控平台", "告警中心", 7, "自有系统（正式）", False, "Nginx;Grafana/10", "Prometheus", 30, 10),
-    ("日志审计系统", "", 7, "DCIT系统", False, "Nginx", "ClickHouse/23", 20, 10),
+    ("日志审计系统", "", 7, "DICT系统", False, "Nginx", "ClickHouse/23", 20, 10),
     ("短信网关", "", 7, "自有系统（正式）", True, "Nginx;Tomcat/8.5", "MySQL/5.7", 30, 30),
-    ("API开放平台", "", 0, "DCIT系统", True, "Nginx;Kong/3.4", "PostgreSQL/15", 20, 10),
+    ("API开放平台", "", 0, "DICT系统", True, "Nginx;Kong/3.4", "PostgreSQL/15", 20, 10),
 ]
 
 # 渗透工单：(计划名, 系统idx, 测试类型idx, 部门idx, 接收日期, 状态, 认领者idx列表, 预估人天, 实际人天, 测试说明)

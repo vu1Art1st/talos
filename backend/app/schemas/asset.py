@@ -33,7 +33,7 @@ class AssetIn(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     sub_system: str = ""
     department: str = ""
-    system_type: str = ""  # 系统类型：自有系统（正式）/自有系统（测试）/DCIT系统 等
+    system_type: str = ""  # 系统类型：自有系统（正式）/自有系统（测试）/DICT系统 等
     public_urls: list[PublicUrlItem] = []
     internal_urls: list[str] = []
     port_services: list[PortServiceItem] = []

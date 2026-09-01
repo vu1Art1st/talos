@@ -220,7 +220,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
@@ -286,8 +286,8 @@ function searchAssets(keyword = '') {
 }
 
 // ---------- 统计概览（顶部 7 张数据卡片） ----------
-const statsOpen = ref<string[]>(localStorage.getItem('vuln_stats_open') === '1' ? ['stats'] : [])
-watch(statsOpen, (v) => localStorage.setItem('vuln_stats_open', v.length ? '1' : '0'))
+// 默认闭合（与渗透测试工单/漏扫基线工单的统计概览一致），用户可手动展开
+const statsOpen = ref<string[]>([])
 
 const stats = ref<any>(null)
 const statsLoading = ref(false)
