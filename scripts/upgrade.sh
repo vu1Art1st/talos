@@ -5,6 +5,7 @@
 # 选项：
 #   --no-backup   跳过升级前自动备份（默认会先备份，除非当前没有运行中的数据库）
 #   --no-pull     跳过 git pull（用于已手动拉好代码、仅想走后续升级流程的场景）
+#   --anchor      升级前生成全量迁移锚点（默认生成差异快照；MAJOR 发版建议加此参数）
 #
 # 顺序说明：数据库迁移在 api 服务启动【之前】用一次性容器执行，确保 Alembic 先于
 # 后端的 create_all 应用结构变更，避免「新增表被 create_all 抢先建好导致迁移冲突」。
@@ -14,13 +15,15 @@ cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处�
 
 DO_BACKUP=1
 DO_PULL=1
+DO_ANCHOR=0
 for arg in "$@"; do
   case "$arg" in
   --no-backup) DO_BACKUP=0 ;;
   --no-pull) DO_PULL=0 ;;
+  --anchor) DO_ANCHOR=1 ;;
   *)
     echo "未知参数：$arg"
-    echo "用法： bash scripts/upgrade.sh [--no-backup] [--no-pull]"
+    echo "用法： bash scripts/upgrade.sh [--no-backup] [--no-pull] [--anchor]"
     exit 2
     ;;
   esac
@@ -40,13 +43,21 @@ OLD_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "========== Talos 升级开始（当前版本 ${OLD_COMMIT}）=========="
 
 # [1/5] 升级前备份（仅当 postgres 与 api 容器都在运行时）
-# backup.sh 同时需要 postgres（导出数据）与 api（打包 storage 卷），缺一不可；
-# 两者未同时运行就跳过备份，避免备份半途失败反而中断升级。
+# 备份放入后台，与 [3/5] 重建镜像并行，缩短升级总耗时（fail-open：失败不阻断升级）。
+# 默认差异快照（秒级）；--anchor 则生成全量迁移锚点（MAJOR 发版用）。
+BACKUP_PID=""
 if [ "${DO_BACKUP}" -eq 1 ]; then
   if [ -n "$(sudo docker compose ps -q postgres 2>/dev/null)" ] \
     && [ -n "$(sudo docker compose ps -q api 2>/dev/null)" ]; then
-    echo "[1/5] 升级前备份"
-    sudo bash scripts/backup.sh
+    sudo mkdir -p backups
+    if [ "${DO_ANCHOR}" -eq 1 ]; then
+      echo "[1/5] 升级前生成迁移锚点（后台，与镜像重建并行）"
+      sudo bash scripts/backup.sh >backups/upgrade-backup.log 2>&1 &
+    else
+      echo "[1/5] 升级前生成差异快照（后台，与镜像重建并行）"
+      sudo bash scripts/backup-incremental.sh >backups/upgrade-backup.log 2>&1 &
+    fi
+    BACKUP_PID=$!
   else
     echo "[1/5] postgres 或 api 容器未运行，跳过升级前备份（首次部署无需备份）"
     echo "     如需强制备份，请先执行: sudo docker compose up -d 再重试"
@@ -77,6 +88,17 @@ sudo docker compose build
 echo "[3.5/5] 清理过期构建缓存（保留最近 7 天）"
 sudo docker builder prune --filter "until=168h" -f \
   || echo "（构建缓存清理失败，可稍后手动执行：sudo docker builder prune -af）"
+
+# [3.6/5] 回收升级前备份 job（fail-open：失败告警但不阻断升级，因有每日差异快照兜底）
+if [ -n "${BACKUP_PID}" ]; then
+  echo "[3.6/5] 等待升级前备份完成"
+  if wait "${BACKUP_PID}"; then
+    echo "升级前备份完成"
+  else
+    echo "（升级前备份失败，请检查 backups/upgrade-backup.log；已由每日差异快照兜底）"
+    sudo bash scripts/notify.sh "升级前备份失败，请检查 backups/upgrade-backup.log" || true
+  fi
+fi
 
 # [4/5] 先迁移数据库结构（api 服务尚未启动，Alembic 先行）
 echo "[4/5] 数据库结构迁移"

@@ -17,7 +17,7 @@
 发布约定:
 
 - 每次发布需同步更新三处版本号:本文档、`backend/app/core/config.py` 的 `APP_VERSION`、`frontend/package.json` 的 `version`
-- 发布后在 git 上打注解标签:`git tag -a v x.y.z -m "release x.y.z"`
+- 发布后在 git 上打注解标签:`git tag -a vX.Y.Z -m "release x.y.z"`
 - 变更条目按类型分组:`新增(Added)` / `变更(Changed)` / `修复(Fixed)` / `移除(Removed)` / `安全(Security)`
 - 未发布的改动先记入「Unreleased」,发布时移入对应版本段落
 
@@ -25,22 +25,228 @@
 
 ---
 
+## [2.10.0] - 2026-09-01
+
+备份提速与容灾优化：多线程压缩 + 差异快照 + 迁移锚点，升级备份提速 60%+、磁盘稳态 ≤8GB。
+
+### 新增
+
+- **差异快照备份**（`scripts/backup-incremental.sh` 新增）：基于最近迁移锚点的硬链接差异（`rsync --link-dest`），只存变化文件，秒级完成；无基线时自动降级为锚点
+- **迁移锚点**（`scripts/backup.sh` 改造）：自包含全量备份，zstd 多线程压缩 + db/storage 并行，解包差异基线，保留最近 3 份
+- **备份公共库与告警**（`scripts/backup-common.sh` / `scripts/notify.sh` 新增）：flock 互斥锁、zstd 优先/gzip 回退、SHA256 校验、MANIFEST 完成标记、webhook 告警
+- **升级异步备份**（`scripts/upgrade.sh`）：升级前备份后台执行，与镜像重建并行；新增 `--anchor` 参数（MAJOR 发版生成全量锚点）
+- **cron 一键安装**（`scripts/install-cron.sh` 新增）：幂等安装每日差异快照 + 每月锚点定时任务
+- **备份优化设计文档**（`docs/BACKUP_OPTIMIZATION.md` 新增）
+
+### 变更
+
+- **恢复脚本兼容 zstd**（`scripts/restore.sh`）：支持 .zst/.gz 双格式，兼容历史平铺备份目录与锚点/快照两种源
+
+### 修复
+
+- **备份压缩瓶颈**：storage 上传文件由容器内 gzip 单线程改为宿主机 zstd 多线程，1.7GB 备份提速约 3~5 倍
+
+---
+
+## [2.9.0] - 2026-09-01
+
+渗透测试工单「初测完成时间」筛选与「结论输出」：按时间范围筛工单，一键生成通报结论文字与整改情况附件。
+
+### 新增
+
+- **初测完成时间筛选**（`backend/app/api/v1/testing_plan.py` / `backend/app/services/plan_query.py`）：列表 / 统计 / 导出接口新增 `first_test_from` / `first_test_to` 参数，`plan_conditions` 支持按「初测完成时间」区间过滤
+- **结论输出（通报汇总）**（`backend/app/services/plan_query.py` `compute_conclusion` / `plan_io.py` `build_conclusion_workbook`）：`GET /testing-plans/conclusion` 按筛选条件聚合生成结论文字（N 个部门 N 个系统、存在漏洞/未发现风险、已整改/整改中统计）与附件行数据；`GET /testing-plans/conclusion/export` 下载「整改情况附件.xlsx」（工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 / 整改完成情况）
+- **时间范围快捷项**（`frontend/src/utils/dateRange.ts` + `__tests__/dateRange.spec.ts`）：今天 / 本周 / 上周 / 本月 / 上月 / 自定义六档，周一起始口径（`mondayOf`），`computeDateRange` 计算起止日期
+- **工单列表时间范围与结论面板**（`frontend/src/views/TestingPlanList.vue`）：工具栏新增时间范围下拉 + 自定义日期选择器（初测完成起/止）；新增「结论输出」折叠面板（结论文字卡片 + 部门/系统/漏洞/整改 7 张 StatCard + 复制结论 / 下载附件）
+
+### 修复
+
+- **前端镜像构建 corepack 超时**（`frontend/Dockerfile`）：corepack 下载 pnpm 本体默认走 registry.npmjs.org，海外源不可达导致 `ETIMEDOUT`；构建时指定 `COREPACK_NPM_REGISTRY` 走国内镜像，与依赖源一致
+
+---
+
+## [2.8.2] - 2026-09-01
+
+备份保留策略与升级缓存清理：响应 VPS 磁盘空间告警，防止 BuildKit 缓存无限累积与备份冗余。
+
+### 变更
+
+- **备份保留策略**（`scripts/backup.sh`）：备份后自动每日去重（每天保留最新一份）+ 保留最近 `BACKUP_KEEP_DAYS` 天（默认 30）；目录名即时间戳（YYYYmmdd_HHMMSS），字符串排序即时间排序
+- **升级构建缓存清理**（`scripts/upgrade.sh`）：重建镜像后清理过期 BuildKit 缓存（`docker builder prune --filter "until=168h"`，保留最近 7 天），清理失败不阻断升级
+- **事故复盘文档**（`docs/INCIDENT-20260831-disk-space.md`）：VPS 磁盘空间告警排查复盘，根因为 BuildKit 构建缓存无限累积（12.95GB，可回收 12.47GB）
+
+---
+
+## [2.8.1] - 2026-08-31
+
+favicon 品牌色对齐与运维脚本补充。
+
+### 变更
+
+- **favicon 品牌色对齐**（`frontend/public/favicon.svg`）：图标由旧靛蓝盾牌改为薄荷绿几何图标，与 2.8.0 demo-2 品牌主色（#10b981）一致
+- **运维脚本**（`scripts/`）：新增 `disk-usage.sh`（磁盘占用分析：按占用降序输出前 N 大目录/文件，另列大于阈值的大文件，结果写终端与日志）、`swap-manager.sh`（一键开启/关闭 4GB swap，含状态查询与开机自动挂载管理）
+
+---
+
+## [2.8.0] - 2026-08-31
+
+前端 UI 按 demo-2（Linear Dark）全面重写：令牌层换薄荷绿/绿调近黑、全局框架与 15 个视图统一骨架、新增 ⌘K 命令面板与全局搜索接口。
+
+### 新增
+
+- **⌘K 命令面板**（`frontend/src/components/CmdPalette.vue`，挂载于 `MainLayout`）：Ctrl/Cmd+K 全局唤起，↑↓↵esc 键盘导航；支持页面跳转（与侧边栏同源、按权限显隐）、动作（明暗切换）与全局搜索（防抖调用后端接口，无权限分区静默为空）；顶栏新增搜索入口按钮（含 ⌘K 键位提示）
+- **全局搜索接口**（`backend/app/api/v1/search.py`，`GET /api/v1/search?q=`）：跨漏洞/资产/渗透测试工单/漏扫基线工单/报告标题模糊聚合，分组各返回最近 5 条；资产/工单/报告分区跟随 `asset:manage` / `special:manage` / `report:manage` 权限（或通配符）
+- **组件层**（`frontend/src/components/`）：`StatCard v2`（语义点标 + meta 行 + 出血式迷你趋势线插槽，统一原 Dashboard 内联自绘与 3 处旧版并存）；`SparkLine`（Catmull-Rom 平滑 SVG 迷你趋势线，替代 Dashboard 曾用的 9 个 ECharts spark 实例）；`TlPagination`（统一分页 layout [20,50,100]，替换全站两种流派共 18 处）；`FilterToolbar`（列表筛选工具栏容器：弹性搜索框 + 等宽字典筛选 + 右侧按钮组）
+- **colors.ts 主题感知 tone 映射层**：后端 `/meta` 下发浅色版字典色（导出文档同为浅色口径），`html.dark` 时前端自动映射 demo-2 降饱和变体（五级/状态约 11 码精确映射，未收录色值走通用提亮），`MutationObserver` 保证切换主题后已渲染标签实时重渲染；新增 `dotStyle()` 点标助手
+
+### 变更
+
+- **设计令牌全面替换**（`frontend/src/style.css` / `tailwind.config.js`）：品牌主色靛蓝→薄荷绿（亮 #059669 / 暗 #34D399，主按钮薄荷底+深墨字）；暗色底 GitHub 系→绿调近黑（#0A0E0C 系）；圆角体系 EP 控件 7px / 卡片 10px / 浮层 12px，全站 35 处 `!rounded-lg` 覆盖清零；基准字号 13.5px + 语义阶梯（11/12/13.5/14/16/26），数字统一等宽字体；删除全局 `.el-card:hover` 上浮+靛蓝光晕；删除假 Inter 字体声明改系统栈；新增滚动条 / `::selection` / `.dot-tag` / `.ktag` / `.kbd` / `.num` 全局类；`.tl-tag` 胶囊改方角 5px
+- **全局框架**（`frontend/src/layouts/MainLayout.vue`）：侧边栏 224px 平铺分组（漏洞运营/资产管理/专项管理/系统管理 10.5px 分组标签）+ 紧凑导航项 + 底部用户信息块；顶栏 50px 毛玻璃（面包屑 + 工具栏式标题 + ⌘K 入口）；主区 20/28/48 内边距 + 最大 1400px 居中；折叠持久化键迁移 `sidebarCollapsed`（兼容读旧键）
+- **15 个视图统一骨架**：工具栏独立（FilterToolbar）+ 表格卡片 + TlPagination 三段式；selection 列统一 40、序号列 64、操作列收敛 120/160 两档并全局套 `.op-col` 紧凑样式；表格行内等级/状态改「色点+文字」dot-tag、漏洞类型改 ktag 中性方角签（`AGENTS.md` 新规范）；搜索框统一弹性 175-250px；5 个缺 flex-wrap 的工具栏补齐
+- **换行混乱治理**：资产 URL 列「等 N 条」改 +N popover 全量展开、角色权限列/通知订阅事件列/春耕网络层级与危害程度列「前 N 个 + +N popover」、导入预览 URL 补 `min-w-0` 截断保护、报告标题列补 tooltip
+- **弹窗宽度归档三档 480/640/800**：用户权限查看与令牌展示 560→640、渗透测试工单 22 项大表单 640→800、漏洞详情动态宽 720→800
+- **字典展示色切换 demo-2 浅色版**（`backend/app/constants.py`）：五级风险/漏洞状态/工单状态/资产/报告/导入导出/非渗透测试项全部色值更新（导出 docx/xlsx 同源生效）
+- **图表主题**（`frontend/src/utils/chartTheme.ts`）：PALETTE 薄荷绿打头、明暗轴/网格/tooltip 对齐令牌、删除无引用的 `barGradient`；Dashboard 布局改 2fr/1fr 非对称、状态分布饼图改堆叠条+图例、类型 Top10 改 CSS 横条、图表内 6 处写死色改令牌
+- **登录页薄荷绿重写**（`frontend/src/views/Login.vue`）：绿调近黑底 + 薄荷光晕 + 玻璃卡，登录按钮薄荷底深墨字（≥4.5:1）
+
+### 测试
+
+- `backend/tests/test_api.py`：`/meta` 色值断言更新为新色板；新增 `test_global_search`（空关键字空分组、漏洞标题命中、资产名命中）
+- `frontend/src/utils/__tests__/colors.spec.ts`：色板夹具与断言更新；新增 `dotStyle` 输出与暗色 tone 映射（精确映射 + 通用提亮）用例
+- 全量验证：后端 `pytest` 109 passed；前端 `vitest` 69 passed；`vite build` 通过
+
+---
+
+## [2.7.0] - 2026-08-30
+
+春耕行动增强与英文文档：工单表单内联录入漏洞、新增预估扣分/资产认定原因字段、原始报告附件上传解析入库，漏洞搜索支持系统名称，README 双语化。
+
+### 新增
+
+- **春耕行动「涉及漏洞」内联新增**（`backend/app/services/vuln_service.py` / `frontend/src/views/SpringActionList.vue`）：表单内直接快速录入新漏洞（名称/等级/类型），来源固定为「春耕行动」，保存时创建并自动关联选中（`create_vul_drafts`）
+- **春耕行动「预估扣分」字段**（`est_score_deduction`，迁移 `b3c4d5e6f7a8_add_spring_action_est_score_deduction.py`）：列表与表单中位于「最终扣分」前一列，便于比对申诉/复核前后的扣分差异
+- **春耕行动「资产认定原因」字段**（`asset_reason`，迁移 `c5d6e7f8a9b0_add_spring_action_asset_reason.py`）：列表与表单中位于「申诉结果」前一列，记录对应系统资产归属的认定依据
+- **原始报告附件上传解析入库**（`backend/app/api/v1/spring_action.py`，迁移 `d6e7f8a9b0c1_add_spring_action_report_file.py`）：`POST /spring-actions/upload-report` 上传原始报告（.docx ≤ 50MB）解析回填系统名称/年度、勾选导入报告漏洞（保存时创建并关联，来源固定为「春耕行动」），附件留档；`GET /spring-actions/{id}/report` 下载附件
+- **春耕行动列表新增「网络层级」「危害程度」两列**（`frontend/src/views/SpringActionList.vue`）：位于「涉及漏洞」前，按关联漏洞聚合去重展示（所在层/漏洞等级）
+- **漏洞搜索支持系统名称**（`backend/app/services/vuln_service.py` / `backend/app/api/v1/vulns.py` / `frontend/src/views/VulnList.vue`）：关键词除标题/URL 外命中关联资产（系统）名称，搜索框占位改「搜索标题 / 系统 / URL」
+- **英文 README**（`README_EN.md` 新增，`README.md` 重写）：项目双语说明，含平台命名由来、功能清单与快速开始
+
+### 变更
+
+- **UI 设计规范升级**（`AGENTS.md`）：风格改为 Linear 式暗色优先极简（视觉基准 `design-demos/demo-2`，本地设计稿不入库）；品牌主色由靛蓝改为薄荷绿（浅色 #059669 / 暗色 #34D399）；密度双档（正文 14px / 紧凑 13.5px）；表格行内等级/状态改用「色点 + 文字」dot-tag 变体；新增命令面板（⌘K/Ctrl+K）与 StatCard 迷你趋势线约定
+- **输入框占位文字省略号**（`frontend/src/style.css`）：`.el-input__inner` 加 `text-overflow: ellipsis`，长占位文案截断为 …
+- **漏洞筛选日期框溢出修复**（`frontend/src/views/VulnList.vue`）：daterange 编辑器补 `box-sizing: border-box`，修复 width:100% 下左右内边距撑出 20px 溢出面板
+- `.gitignore` 忽略 `design-demos/`（本地 UI 设计稿，勿入库）
+
+### 测试
+
+- `backend/tests/test_api.py` 扩展 `test_special_modules_crud`：`asset_reason`/`est_score_deduction` 断言、原始报告非 docx 拒绝、无漏洞表 docx 留档解析空草稿、附件绑定+漏洞草稿保存创建（`source=20`）与下载、收尾清理导入漏洞
+- `backend/tests/test_api.py` 新增 `test_vuln_search_by_system_name`：系统名称命中关联漏洞、标题命中回归
+
+---
+
+## [2.6.0] - 2026-08-28
+
+角色（权限）管理：新增独立权限管理页，权限点按功能模块分组目录化下发，菜单按权限点精细分组。
+
+### 新增
+
+- **权限管理页**（`frontend/src/views/RoleList.vue`，`user:manage`）：独立「权限管理」页面，列出全部角色并编辑其权限点勾选；新增用户与权限端点 `GET /users/roles/permissions/catalog` 返回按模块分组的权限目录（含中文名与说明），供分组勾选与说明展示（`backend/app/api/v1/users.py`）
+- **权限目录化**（`backend/app/constants.py`）：`PERMISSIONS` 由扁平列表升级为 `PERMISSION_CATALOG`（每项含 `key`/`label`/`group`/`desc`，按「态势总览 / 资产与组织 / 漏洞管理 / 报告中心 / 专项工作 / 系统管理」分组）；`PERMISSIONS` 改为由目录派生的扁平 key 列表，权限校验与 `/meta` 下发保持兼容。新增响应模型 `PermissionItemOut` / `PermissionGroupOut`（`backend/app/schemas/auth.py`）
+
+### 变更
+
+- **系统管理菜单按权限分组**（`frontend/src/layouts/MainLayout.vue` / `frontend/src/router/index.ts`）：「用户管理」「权限管理」归入 `user:manage` 可见，「审计日志」「通知渠道」归入 `system:manage` 可见；用户与权限页标题由「用户与权限」改为「用户管理」，新增「权限管理」路由
+- **用户管理页重构**（`frontend/src/views/UserList.vue`）：角色分配与权限展示交互整理，与权限管理页职责分离
+- **报告列表交互优化**（`frontend/src/views/ReportList.vue`）：去除独立展开箭头列，改为点击报告标题展开/收起该行导出记录（标题着色提示展开态）；勾选列宽收窄
+- **渗透工单编辑自动带出 URL**（`frontend/src/views/TestingPlanList.vue`）：编辑进入且 `target_urls` 为空时，从关联资产自动带出 URL（与点选资产语义一致，仅空时带出，保存后以本列表为准）
+- **漏洞列表筛选宽度对齐**（`frontend/src/views/VulnList.vue`）：录入时间 daterange 编辑器覆盖 `--el-date-editor-width` 撑满列宽，与其他下拉框同宽
+- 远程检测列表「外部项目」「申诉状态」列宽微调（`frontend/src/views/RemoteTestingList.vue`）
+
+### 测试
+
+- `backend/tests/test_api.py` 适配权限目录：角色权限校验用例改用 `PERMISSION_CATALOG` 语义，补充 `GET /users/roles/permissions/catalog` 分组返回断言
+
+---
+
+## [2.5.0] - 2026-08-26
+
+导入报告批量关联工单并确认导出：多批次一键入库，复用现有单批确认逻辑与报告批量导出链路。
+
+### 新增
+
+- **导入列表批量关联工单并确认**（`backend/app/api/v1/imports.py` / `backend/app/services/import_service.py` / `frontend/src/views/ImportList.vue` / `frontend/src/components/ImportBatchConfirmDialog.vue`）：导入列表新增多选与「批量关联工单并确认」入口，勾选多个待确认批次后统一选择渗透测试工单（资产随工单联动，可覆盖），一次确认全部入库；报告格式批次自动生成报告，并复用 `/reports/batch-export` 批量导出打包下载
+- **批量确认端点**（`POST /imports/batch-confirm`，`import:manage`）：逐批次复用单批确认逻辑（抽取为 `import_service.confirm_batch_internal` 结构化返回），单批次失败仅回滚该批次不影响其余；已确认 / 无待入库记录的批次计入跳过；返回各批次明细与生成报告 id 列表供前端触发导出
+- **工单 / 资产联动逻辑抽取**（`frontend/src/composables/usePlanAssetLink.ts`）：预览确认页与批量对话框共用（工单下拉文案、资产候选过滤、选定工单自动联动默认资产），消除两处复制
+
+### 测试
+
+- `backend/tests/test_api.py` 新增 `test_batch_import_confirm`：正常批量确认（统一工单、报告自动生成并挂载）、重复关联跳过（含 `batch_ids` 内重复去重）、部分失败隔离、空批次与非法工单校验、无 `import:manage` 权限 403
+
+---
+
+## [2.4.1] - 2026-08-25
+
+缺陷修复：报告格式导入建漏洞时提交时间按报告月份归口。
+
+### 修复
+
+- **漏洞提交时间口径**（`backend/app/services/import_service.py`）：报告格式导入新建漏洞的 `submit_time` 改为取报告时间（标题日期 14:00），替代原先的导入当天当前时间，使「渗透测试工单按月漏洞统计」与「安全态势」按报告月份归口而非导入当月；`create_vul_from_record` 新增 `submit_time` 入参，`confirm_one_record` 传入 `report.create_time`
+
+### 新增
+
+- **存量回填脚本**（`backend/scripts/backfill_vul_submit_time.py`）：幂等扫描历史已确认的报告导入批次，将其关联漏洞的 `submit_time` 回填为批次 `report_date` 的 14:00（与报告 `create_time` 口径一致）；支持 `--dry-run` 仅统计
+
+### 测试
+
+- `backend/tests/test_api.py` 补充断言：报告导入漏洞 `submit_time` 始于 `2026-07-01T14:00`（按月归口）
+
+---
+
+## [2.4.0] - 2026-08-25
+
+报告被测测试账号、测试周期与参测人员解析回填，导入自动生成报告同步导出文件。
+
+### 新增
+
+- **报告被测测试账号**（`backend/app/models/report.py`、`schemas/report.py`、迁移 `d0e1f2a3b4c5_add_report_test_account.py`、`frontend/src/views/ReportEditor.vue`）：`reports` 新增 `test_account` 字段，导入时从「测试目标」表第 5 行解析回填、报告编辑页可展示编辑，导出模板「测试目标」表第 5 行使用；`db.py` 轻量迁移同步加列
+- **测试周期与参测人员解析**（`backend/app/services/docx_parser.py`）：新增 `_parse_schedule_table` 解析「时间与人员」表，回填 `test_start`/`test_end` 与参测人员姓名；`_parse_target_table` 补 `test_account`
+- **参测人员关联工单**（`backend/app/services/import_service.py`）：`sync_plan_testers` 把导入报告参测人员姓名按 realname/username 映射系统账号并关联到工单测试人员（按 id 去重）
+- **导入自动导出文件**（`backend/app/services/import_service.py` + `backend/app/api/v1/imports.py`）：导入自动生成的报告同步生成 docx 文件并记录导出任务（可下载），时间取报告标题日期固定 14:00；导入完成刷新关联工单实际人天（`plan_service.refresh_mandays`）
+- **资产 URL 去重合并**（`backend/app/services/import_service.py`）：被测系统 URL 按换行/分号/逗号/空白拆分，`_is_internal_url` 判定内网后去重合并进资产 `internal_urls`
+- **导出任务可下载标识**（`backend/app/schemas/report.py`）：`ExportJobOut.has_file` 派生字段（存在 `file_path` 为真），前端仅在 `has_file` 时提供预览/下载（`ReportList.vue`、`useExportJobs.ts`）
+
+### 测试
+
+- `backend/tests/test_api.py`、`test_parser.py`、`test_report_builder.py` 适配 `test_account`/时间与人员表解析；`ImportPreview.vue` 适配导入自动导出
+
+---
+
 ## [2.3.0] - 2026-08-23
 
 初测报告状态口径与测试目标URL补全：导出的初测报告漏洞状态显示「未修复」、工单新增「被测系统URL」字段作为报告测试目标数据源。
 
+### 新增
+
+- **URL 工具**（`frontend/src/utils/urls.ts` + `frontend/src/utils/__tests__/urls.spec.ts`）：新增 `mergeUrls` / `cleanUrls` / `assetUrls` 工具与单测
+
 ### 变更
 
 - **初测报告漏洞状态口径（仅展示层）**（`backend/app/services/report_builder.py`）：关联报告后漏洞在系统内照旧自动流转「修复中」（内部流程、打点、状态机均不变），但对外交付的**初测报告**（标题不含「复测」）导出时，风险汇总表状态列与风险详情章节标题中的「修复中」统一显示为「未修复」；复测报告维持原状态名（含「复测未通过」派生态）。报告编辑页章节导航状态标签同步该口径
-- **工单「漏洞简述」替换为「被测系统URL」**（`backend/app/models/special.py` / `frontend/src/views/TestingPlanList.vue`）：`testing_plans.brief` 列删除（该字段全仓无展示/导出消费，已录入文本随迁移丢弃），新增 `target_urls` JSON 数组。编辑渗透测试工单时选择关联资产后自动带出资产公网/内网URL（新增与编辑模式均生效，去重保序、只增不删），支持手动回车录入新增与标签删除；保存后以该列表为准
+- **工单「漏洞简述」替换为「被测系统URL」**（`backend/app/models/special.py` / `schemas/special.py` / `frontend/src/views/TestingPlanList.vue` / `ReportEditor.vue`）：`testing_plans.brief` 列删除（该字段全仓无展示/导出消费，已录入文本随迁移丢弃），新增 `target_urls` JSON 字符串数组；编辑渗透测试工单时选择关联资产后自动带出资产公网/内网URL（`mergeUrls` 并入，新增与编辑模式均生效，去重保序、只增不删），支持手动回车录入新增与标签删除；保存后以该列表为准
+- **报告「测试目标」URL优先取工单**（`backend/app/workers/main.py` / `backend/app/services/report_builder.py`）：导出时工单 `target_urls` 非空则作为「被测系统URL/被测系统域名」的权威来源（域名由URL推导），为空时回退既有「漏洞→资产」聚合链路，解决资产台账未录URL时报告测试目标两格空白的问题
 
-- **报告「测试目标」URL优先取工单**（`backend/app/workers/main.py` / `report_builder.py`）：导出时工单 `target_urls` 非空则作为「被测系统URL/被测系统域名」的权威来源（域名由URL推导），为空时回退既有「漏洞→资产」聚合链路，解决资产台账未录URL时报告测试目标两格空白的问题
+### 迁移
+
+- 新增 Alembic 迁移 `b8c9d0e1f2a3_plan_target_urls_replace_brief.py`：`testing_plans` 新增 `target_urls` 列、删除 `brief` 列（既有简述文本随迁移丢弃）
 
 ### 测试
 
 - 后端 `test_report_builder.py` 新增：初测报告修复中显示「未修复」（汇总表+详情标题）、复测报告状态名保持「修复中」回归、测试目标表工单URL优先/为空回退资产聚合
 - 后端 `test_api.py` 新增：`test_report_export_target_urls_from_plan` 导出集成用例（资产无URL时工单URL仍带出至测试目标表）；工单CRUD用例改用 `target_urls` 并覆盖编辑增删
 - 前端新增 `src/utils/urls.ts`（mergeUrls/cleanUrls/assetUrls）及 `__tests__/urls.spec.ts` 单测
+- `backend/scripts/seed_dev_data.py` 种子数据改用 `target_urls`
 
 ---
 
@@ -626,199 +832,3 @@
 ### 变更
 
 - 忽略并移除测试运行产物 `test_storage/` 与 `test_vp.db`(`fdcdb24`)
-
----
-
-## [2.3.0] - 2026-08-23
-
-计划「漏洞简述」(brief) 由「被测系统 URL」(target_urls) 取代。
-
-### 新增
-
-- **计划被测系统 URL**（`backend/app/models/special.py`、`schemas/special.py`、`frontend/src/views/TestingPlanList.vue`、`ReportEditor.vue`）：`testing_plans.brief` 删除，改为 `target_urls` JSON 字符串数组；选择关联资产后自动带出（mergeUrls 并入、可手动增删），作为报告导出「测试目标」表被测系统 URL / 域名优先数据源（为空回退资产聚合）
-- **URL 工具**（`frontend/src/utils/urls.ts` + `frontend/src/utils/__tests__/urls.spec.ts`）：新增 `mergeUrls` / `cleanUrls` / `assetUrls` 工具与单测
-- **报告「测试目标」导出**（`backend/app/services/report_builder.py`）：导出优先取 `target_urls`，为空回退资产聚合（沿用既有逻辑）
-
-### 迁移
-
-- 新增 Alembic 迁移 `b8c9d0e1f2a3_plan_target_urls_replace_brief.py`：`testing_plans` 新增 `target_urls` 列、删除 `brief` 列（既有简述文本随迁移丢弃）
-
-### 测试
-
-- `backend/tests/test_api.py`、`backend/tests/test_report_builder.py` 适配 `target_urls`；`backend/scripts/seed_dev_data.py` 种子数据改用 `target_urls`
-
----
-
-## [2.4.0] - 2026-08-25
-
-报告被测测试账号、测试周期与参测人员解析回填，导入自动生成报告同步导出文件。
-
-### 新增
-
-- **报告被测测试账号**（`backend/app/models/report.py`、`schemas/report.py`、迁移 `d0e1f2a3b4c5_add_report_test_account.py`、`frontend/src/views/ReportEditor.vue`）：`reports` 新增 `test_account` 字段，导入时从「测试目标」表第 5 行解析回填、报告编辑页可展示编辑，导出模板「测试目标」表第 5 行使用；`db.py` 轻量迁移同步加列
-- **测试周期与参测人员解析**（`backend/app/services/docx_parser.py`）：新增 `_parse_schedule_table` 解析「时间与人员」表，回填 `test_start`/`test_end` 与参测人员姓名；`_parse_target_table` 补 `test_account`
-- **参测人员关联工单**（`backend/app/services/import_service.py`）：`sync_plan_testers` 把导入报告参测人员姓名按 realname/username 映射系统账号并关联到工单测试人员（按 id 去重）
-- **导入自动导出文件**（`backend/app/services/import_service.py` + `backend/app/api/v1/imports.py`）：导入自动生成的报告同步生成 docx 文件并记录导出任务（可下载），时间取报告标题日期固定 14:00；导入完成刷新关联工单实际人天（`plan_service.refresh_mandays`）
-- **资产 URL 去重合并**（`backend/app/services/import_service.py`）：被测系统 URL 按换行/分号/逗号/空白拆分，`_is_internal_url` 判定内网后去重合并进资产 `internal_urls`
-- **导出任务可下载标识**（`backend/app/schemas/report.py`）：`ExportJobOut.has_file` 派生字段（存在 `file_path` 为真），前端仅在 `has_file` 时提供预览/下载（`ReportList.vue`、`useExportJobs.ts`）
-
-### 测试
-
-- `backend/tests/test_api.py`、`test_parser.py`、`test_report_builder.py` 适配 `test_account`/时间与人员表解析；`ImportPreview.vue` 适配导入自动导出
-
----
-
-## [2.4.1] - 2026-08-25
-
-缺陷修复：报告格式导入建漏洞时提交时间按报告月份归口。
-
-### 修复
-
-- **漏洞提交时间口径**（`backend/app/services/import_service.py`）：报告格式导入新建漏洞的 `submit_time` 改为取报告时间（标题日期 14:00），替代原先的导入当天当前时间，使「渗透测试工单按月漏洞统计」与「安全态势」按报告月份归口而非导入当月；`create_vul_from_record` 新增 `submit_time` 入参，`confirm_one_record` 传入 `report.create_time`
-
-### 新增
-
-- **存量回填脚本**（`backend/scripts/backfill_vul_submit_time.py`）：幂等扫描历史已确认的报告导入批次，将其关联漏洞的 `submit_time` 回填为批次 `report_date` 的 14:00（与报告 `create_time` 口径一致）；支持 `--dry-run` 仅统计
-
-### 测试
-
-- `backend/tests/test_api.py` 补充断言：报告导入漏洞 `submit_time` 始于 `2026-07-01T14:00`（按月归口）
-
----
-
-## [2.5.0] - 2026-08-26
-
-导入报告批量关联工单并确认导出：多批次一键入库，复用现有单批确认逻辑与报告批量导出链路。
-
-### 新增
-
-- **导入列表批量关联工单并确认**（`backend/app/api/v1/imports.py` / `backend/app/services/import_service.py` / `frontend/src/views/ImportList.vue` / `frontend/src/components/ImportBatchConfirmDialog.vue`）：导入列表新增多选与「批量关联工单并确认」入口，勾选多个待确认批次后统一选择渗透测试工单（资产随工单联动，可覆盖），一次确认全部入库；报告格式批次自动生成报告，并复用 `/reports/batch-export` 批量导出打包下载
-- **批量确认端点**（`POST /imports/batch-confirm`，`import:manage`）：逐批次复用单批确认逻辑（抽取为 `import_service.confirm_batch_internal` 结构化返回），单批次失败仅回滚该批次不影响其余；已确认 / 无待入库记录的批次计入跳过；返回各批次明细与生成报告 id 列表供前端触发导出
-- **工单 / 资产联动逻辑抽取**（`frontend/src/composables/usePlanAssetLink.ts`）：预览确认页与批量对话框共用（工单下拉文案、资产候选过滤、选定工单自动联动默认资产），消除两处复制
-
-### 测试
-
-- `backend/tests/test_api.py` 新增 `test_batch_import_confirm`：正常批量确认（统一工单、报告自动生成并挂载）、重复关联跳过（含 `batch_ids` 内重复去重）、部分失败隔离、空批次与非法工单校验、无 `import:manage` 权限 403
-
----
-
-## [2.6.0] - 2026-08-28
-
-角色（权限）管理：新增独立权限管理页，权限点按功能模块分组目录化下发，菜单按权限点精细分组。
-
-### 新增
-
-- **权限管理页**（`frontend/src/views/RoleList.vue`，`user:manage`）：独立「权限管理」页面，列出全部角色并编辑其权限点勾选；新增用户与权限端点 `GET /users/roles/permissions/catalog` 返回按模块分组的权限目录（含中文名与说明），供分组勾选与说明展示（`backend/app/api/v1/users.py`）
-- **权限目录化**（`backend/app/constants.py`）：`PERMISSIONS` 由扁平列表升级为 `PERMISSION_CATALOG`（每项含 `key`/`label`/`group`/`desc`，按「态势总览 / 资产与组织 / 漏洞管理 / 报告中心 / 专项工作 / 系统管理」分组）；`PERMISSIONS` 改为由目录派生的扁平 key 列表，权限校验与 `/meta` 下发保持兼容。新增响应模型 `PermissionItemOut` / `PermissionGroupOut`（`backend/app/schemas/auth.py`）
-
-### 变更
-
-- **系统管理菜单按权限分组**（`frontend/src/layouts/MainLayout.vue` / `frontend/src/router/index.ts`）：「用户管理」「权限管理」归入 `user:manage` 可见，「审计日志」「通知渠道」归入 `system:manage` 可见；用户与权限页标题由「用户与权限」改为「用户管理」，新增「权限管理」路由
-- **用户管理页重构**（`frontend/src/views/UserList.vue`）：角色分配与权限展示交互整理，与权限管理页职责分离
-- **报告列表交互优化**（`frontend/src/views/ReportList.vue`）：去除独立展开箭头列，改为点击报告标题展开/收起该行导出记录（标题着色提示展开态）；勾选列宽收窄
-- **渗透工单编辑自动带出 URL**（`frontend/src/views/TestingPlanList.vue`）：编辑进入且 `target_urls` 为空时，从关联资产自动带出 URL（与点选资产语义一致，仅空时带出，保存后以本列表为准）
-- **漏洞列表筛选宽度对齐**（`frontend/src/views/VulnList.vue`）：录入时间 daterange 编辑器覆盖 `--el-date-editor-width` 撑满列宽，与其他下拉框同宽
-- 远程检测列表「外部项目」「申诉状态」列宽微调（`frontend/src/views/RemoteTestingList.vue`）
-
-### 测试
-
-- `backend/tests/test_api.py` 适配权限目录：角色权限校验用例改用 `PERMISSION_CATALOG` 语义，补充 `GET /users/roles/permissions/catalog` 分组返回断言
-
----
-
-## [2.9.0] - 2026-09-01
-
-渗透测试工单「初测完成时间」筛选与「结论输出」：按时间范围筛工单，一键生成通报结论文字与整改情况附件。
-
-### 新增
-
-- **初测完成时间筛选**（`backend/app/api/v1/testing_plan.py` / `backend/app/services/plan_query.py`）：列表 / 统计 / 导出接口新增 `first_test_from` / `first_test_to` 参数，`plan_conditions` 支持按「初测完成时间」区间过滤
-- **结论输出（通报汇总）**（`backend/app/services/plan_query.py` `compute_conclusion` / `plan_io.py` `build_conclusion_workbook`）：`GET /testing-plans/conclusion` 按筛选条件聚合生成结论文字（N 个部门 N 个系统、存在漏洞/未发现风险、已整改/整改中统计）与附件行数据；`GET /testing-plans/conclusion/export` 下载「整改情况附件.xlsx」（工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 / 整改完成情况）
-- **时间范围快捷项**（`frontend/src/utils/dateRange.ts` + `__tests__/dateRange.spec.ts`）：今天 / 本周 / 上周 / 本月 / 上月 / 自定义六档，周一起始口径（`mondayOf`），`computeDateRange` 计算起止日期
-- **工单列表时间范围与结论面板**（`frontend/src/views/TestingPlanList.vue`）：工具栏新增时间范围下拉 + 自定义日期选择器（初测完成起/止）；新增「结论输出」折叠面板（结论文字卡片 + 部门/系统/漏洞/整改 7 张 StatCard + 复制结论 / 下载附件）
-
-### 修复
-
-- **前端镜像构建 corepack 超时**（`frontend/Dockerfile`）：corepack 下载 pnpm 本体默认走 registry.npmjs.org，海外源不可达导致 `ETIMEDOUT`；构建时指定 `COREPACK_NPM_REGISTRY` 走国内镜像，与依赖源一致
-
----
-
-## [2.8.2] - 2026-09-01
-
-备份保留策略与升级缓存清理：响应 VPS 磁盘空间告警，防止 BuildKit 缓存无限累积与备份冗余。
-
-### 变更
-
-- **备份保留策略**（`scripts/backup.sh`）：备份后自动每日去重（每天保留最新一份）+ 保留最近 `BACKUP_KEEP_DAYS` 天（默认 30）；目录名即时间戳（YYYYmmdd_HHMMSS），字符串排序即时间排序
-- **升级构建缓存清理**（`scripts/upgrade.sh`）：重建镜像后清理过期 BuildKit 缓存（`docker builder prune --filter "until=168h"`，保留最近 7 天），清理失败不阻断升级
-- **事故复盘文档**（`docs/INCIDENT-20260831-disk-space.md`）：VPS 磁盘空间告警排查复盘，根因为 BuildKit 构建缓存无限累积（12.95GB，可回收 12.47GB）
-
----
-
-## [2.8.1] - 2026-08-31
-
-favicon 品牌色对齐与运维脚本补充。
-
-### 变更
-
-- **favicon 品牌色对齐**（`frontend/public/favicon.svg`）：图标由旧靛蓝盾牌改为薄荷绿几何图标，与 2.8.0 demo-2 品牌主色（#10b981）一致
-- **运维脚本**（`scripts/`）：新增 `disk-usage.sh`（磁盘占用分析：按占用降序输出前 N 大目录/文件，另列大于阈值的大文件，结果写终端与日志）、`swap-manager.sh`（一键开启/关闭 4GB swap，含状态查询与开机自动挂载管理）
-
----
-
-## [2.8.0] - 2026-08-31
-
-前端 UI 按 demo-2（Linear Dark）全面重写：令牌层换薄荷绿/绿调近黑、全局框架与 15 个视图统一骨架、新增 ⌘K 命令面板与全局搜索接口。
-
-### 新增
-
-- **⌘K 命令面板**（`frontend/src/components/CmdPalette.vue`，挂载于 `MainLayout`）：Ctrl/Cmd+K 全局唤起，↑↓↵esc 键盘导航；支持页面跳转（与侧边栏同源、按权限显隐）、动作（明暗切换）与全局搜索（防抖调用后端接口，无权限分区静默为空）；顶栏新增搜索入口按钮（含 ⌘K 键位提示）
-- **全局搜索接口**（`backend/app/api/v1/search.py`，`GET /api/v1/search?q=`）：跨漏洞/资产/渗透测试工单/漏扫基线工单/报告标题模糊聚合，分组各返回最近 5 条；资产/工单/报告分区跟随 `asset:manage` / `special:manage` / `report:manage` 权限（或通配符）
-- **组件层**（`frontend/src/components/`）：`StatCard v2`（语义点标 + meta 行 + 出血式迷你趋势线插槽，统一原 Dashboard 内联自绘与 3 处旧版并存）；`SparkLine`（Catmull-Rom 平滑 SVG 迷你趋势线，替代 Dashboard 曾用的 9 个 ECharts spark 实例）；`TlPagination`（统一分页 layout [20,50,100]，替换全站两种流派共 18 处）；`FilterToolbar`（列表筛选工具栏容器：弹性搜索框 + 等宽字典筛选 + 右侧按钮组）
-- **colors.ts 主题感知 tone 映射层**：后端 `/meta` 下发浅色版字典色（导出文档同为浅色口径），`html.dark` 时前端自动映射 demo-2 降饱和变体（五级/状态约 11 码精确映射，未收录色值走通用提亮），`MutationObserver` 保证切换主题后已渲染标签实时重渲染；新增 `dotStyle()` 点标助手
-
-### 变更
-
-- **设计令牌全面替换**（`frontend/src/style.css` / `tailwind.config.js`）：品牌主色靛蓝→薄荷绿（亮 #059669 / 暗 #34D399，主按钮薄荷底+深墨字）；暗色底 GitHub 系→绿调近黑（#0A0E0C 系）；圆角体系 EP 控件 7px / 卡片 10px / 浮层 12px，全站 35 处 `!rounded-lg` 覆盖清零；基准字号 13.5px + 语义阶梯（11/12/13.5/14/16/26），数字统一等宽字体；删除全局 `.el-card:hover` 上浮+靛蓝光晕；删除假 Inter 字体声明改系统栈；新增滚动条 / `::selection` / `.dot-tag` / `.ktag` / `.kbd` / `.num` 全局类；`.tl-tag` 胶囊改方角 5px
-- **全局框架**（`frontend/src/layouts/MainLayout.vue`）：侧边栏 224px 平铺分组（漏洞运营/资产管理/专项管理/系统管理 10.5px 分组标签）+ 紧凑导航项 + 底部用户信息块；顶栏 50px 毛玻璃（面包屑 + 工具栏式标题 + ⌘K 入口）；主区 20/28/48 内边距 + 最大 1400px 居中；折叠持久化键迁移 `sidebarCollapsed`（兼容读旧键）
-- **15 个视图统一骨架**：工具栏独立（FilterToolbar）+ 表格卡片 + TlPagination 三段式；selection 列统一 40、序号列 64、操作列收敛 120/160 两档并全局套 `.op-col` 紧凑样式；表格行内等级/状态改「色点+文字」dot-tag、漏洞类型改 ktag 中性方角签（`AGENTS.md` 新规范）；搜索框统一弹性 175-250px；5 个缺 flex-wrap 的工具栏补齐
-- **换行混乱治理**：资产 URL 列「等 N 条」改 +N popover 全量展开、角色权限列/通知订阅事件列/春耕网络层级与危害程度列「前 N 个 + +N popover」、导入预览 URL 补 `min-w-0` 截断保护、报告标题列补 tooltip
-- **弹窗宽度归档三档 480/640/800**：用户权限查看与令牌展示 560→640、渗透测试工单 22 项大表单 640→800、漏洞详情动态宽 720→800
-- **字典展示色切换 demo-2 浅色版**（`backend/app/constants.py`）：五级风险/漏洞状态/工单状态/资产/报告/导入导出/非渗透测试项全部色值更新（导出 docx/xlsx 同源生效）
-- **图表主题**（`frontend/src/utils/chartTheme.ts`）：PALETTE 薄荷绿打头、明暗轴/网格/tooltip 对齐令牌、删除无引用的 `barGradient`；Dashboard 布局改 2fr/1fr 非对称、状态分布饼图改堆叠条+图例、类型 Top10 改 CSS 横条、图表内 6 处写死色改令牌
-- **登录页薄荷绿重写**（`frontend/src/views/Login.vue`）：绿调近黑底 + 薄荷光晕 + 玻璃卡，登录按钮薄荷底深墨字（≥4.5:1）
-
-### 测试
-
-- `backend/tests/test_api.py`：`/meta` 色值断言更新为新色板；新增 `test_global_search`（空关键字空分组、漏洞标题命中、资产名命中）
-- `frontend/src/utils/__tests__/colors.spec.ts`：色板夹具与断言更新；新增 `dotStyle` 输出与暗色 tone 映射（精确映射 + 通用提亮）用例
-- 全量验证：后端 `pytest` 109 passed；前端 `vitest` 69 passed；`vite build` 通过
-
----
-
-## [2.7.0] - 2026-08-30
-
-春耕行动增强与英文文档：工单表单内联录入漏洞、新增预估扣分/资产认定原因字段、原始报告附件上传解析入库，漏洞搜索支持系统名称，README 双语化。
-
-### 新增
-
-- **春耕行动「涉及漏洞」内联新增**（`backend/app/services/vuln_service.py` / `frontend/src/views/SpringActionList.vue`）：表单内直接快速录入新漏洞（名称/等级/类型），来源固定为「春耕行动」，保存时创建并自动关联选中（`create_vul_drafts`）
-- **春耕行动「预估扣分」字段**（`est_score_deduction`，迁移 `b3c4d5e6f7a8_add_spring_action_est_score_deduction.py`）：列表与表单中位于「最终扣分」前一列，便于比对申诉/复核前后的扣分差异
-- **春耕行动「资产认定原因」字段**（`asset_reason`，迁移 `c5d6e7f8a9b0_add_spring_action_asset_reason.py`）：列表与表单中位于「申诉结果」前一列，记录对应系统资产归属的认定依据
-- **原始报告附件上传解析入库**（`backend/app/api/v1/spring_action.py`，迁移 `d6e7f8a9b0c1_add_spring_action_report_file.py`）：`POST /spring-actions/upload-report` 上传原始报告（.docx ≤ 50MB）解析回填系统名称/年度、勾选导入报告漏洞（保存时创建并关联，来源固定为「春耕行动」），附件留档；`GET /spring-actions/{id}/report` 下载附件
-- **春耕行动列表新增「网络层级」「危害程度」两列**（`frontend/src/views/SpringActionList.vue`）：位于「涉及漏洞」前，按关联漏洞聚合去重展示（所在层/漏洞等级）
-- **漏洞搜索支持系统名称**（`backend/app/services/vuln_service.py` / `backend/app/api/v1/vulns.py` / `frontend/src/views/VulnList.vue`）：关键词除标题/URL 外命中关联资产（系统）名称，搜索框占位改「搜索标题 / 系统 / URL」
-- **英文 README**（`README_EN.md` 新增，`README.md` 重写）：项目双语说明，含平台命名由来、功能清单与快速开始
-
-### 变更
-
-- **UI 设计规范升级**（`AGENTS.md`）：风格改为 Linear 式暗色优先极简（视觉基准 `design-demos/demo-2`，本地设计稿不入库）；品牌主色由靛蓝改为薄荷绿（浅色 #059669 / 暗色 #34D399）；密度双档（正文 14px / 紧凑 13.5px）；表格行内等级/状态改用「色点 + 文字」dot-tag 变体；新增命令面板（⌘K/Ctrl+K）与 StatCard 迷你趋势线约定
-- **输入框占位文字省略号**（`frontend/src/style.css`）：`.el-input__inner` 加 `text-overflow: ellipsis`，长占位文案截断为 …
-- **漏洞筛选日期框溢出修复**（`frontend/src/views/VulnList.vue`）：daterange 编辑器补 `box-sizing: border-box`，修复 width:100% 下左右内边距撑出 20px 溢出面板
-- `.gitignore` 忽略 `design-demos/`（本地 UI 设计稿，勿入库）
-
-### 测试
-
-- `backend/tests/test_api.py` 扩展 `test_special_modules_crud`：`asset_reason`/`est_score_deduction` 断言、原始报告非 docx 拒绝、无漏洞表 docx 留档解析空草稿、附件绑定+漏洞草稿保存创建（`source=20`）与下载、收尾清理导入漏洞
-- `backend/tests/test_api.py` 新增 `test_vuln_search_by_system_name`：系统名称命中关联漏洞、标题命中回归
-

@@ -1,55 +1,98 @@
 #!/usr/bin/env bash
-# Talos 生产数据备份：导出 PostgreSQL 逻辑备份 + 打包 storage 上传文件。
-# 在运行着 docker compose 的服务器上、仓库根目录执行： bash scripts/backup.sh
-# 产物： backups/<时间戳>/db.sql.gz 与 storage.tar.gz （与镜像/DB 版本无关，可跨机恢复）
-# 备份后自动应用保留策略：每日去重 + 保留最近 BACKUP_KEEP_DAYS 天（默认 30）。
+# Talos 迁移锚点备份：生成自包含全量备份（zstd 多线程 + db/storage 并行），
+# 并解包差异基线、清空旧差异快照、裁剪锚点到最近 3 份（全量 + 差异模型）。
+# 用法（仓库根目录）： bash scripts/backup.sh   （非 root 会自动 sudo 重新执行）
+# 产物： backups/anchors/<年>/<月>/<时间戳>/{db.sql.zst, storage.tar.zst, MANIFEST.json}
 set -euo pipefail
 
-cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处）
-
-ts="$(date +%Y%m%d_%H%M%S)"
-out="backups/${ts}"
-sudo mkdir -p "${out}"
-
-echo "[1/2] 备份数据库 -> ${out}/db.sql.gz"
-# 在 postgres 容器内用其自带凭证做 pg_dump，无需知道卷名/密码
-# --clean --if-exists: 生成的 SQL 以 DROP ... IF EXISTS 开头，支持重复导入到有数据的库（幂等恢复）
-sudo docker compose exec -T postgres sh -c 'pg_dump --clean --if-exists -U "$POSTGRES_USER" "$POSTGRES_DB"' | sudo gzip >"${out}/db.sql.gz"
-
-echo "[2/2] 备份上传文件 -> ${out}/storage.tar.gz"
-# api 容器把 storage_data 卷挂在 /app/storage，直接打包免去卷名依赖
-sudo docker compose exec -T api sh -c 'tar czf - -C /app/storage .' >"${out}/storage.tar.gz"
-
-# [3/3] 备份保留策略：每日去重 + 保留最近 N 天（默认 30，可用 BACKUP_KEEP_DAYS 覆盖）
-# 目录名即时间戳（YYYYmmdd_HHMMSS），字符串排序 = 时间排序，因此无需解析日期。
-echo "[3/3] 应用备份保留策略（每日去重 + 保留最近 ${BACKUP_KEEP_DAYS:-30} 天）"
-KEEP_DAYS="${BACKUP_KEEP_DAYS:-30}"
-
-# 第一步：每日去重 —— 降序遍历，每天第一份（最新）保留，其余删除
-last_day=""
-while IFS= read -r d; do
-  day="$(basename "${d}" | cut -c1-8)"
-  if [ "${day}" = "${last_day}" ]; then
-    echo "  删除当日重复备份：${d}"
-    sudo rm -rf "${d}"
-  else
-    last_day="${day}"
-  fi
-done < <(find backups -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | sort -r)
-
-# 第二步：保留期 —— 删除早于截止日（今天 - KEEP_DAYS 天）的备份
-cutoff="$(date -d "-${KEEP_DAYS} days" +%Y%m%d 2>/dev/null || true)"
-if [ -n "${cutoff}" ]; then
-  while IFS= read -r d; do
-    day="$(basename "${d}" | cut -c1-8)"
-    if [[ "${day}" < "${cutoff}" || "${day}" == "${cutoff}" ]]; then
-      echo "  删除超过保留期的备份：${d}"
-      sudo rm -rf "${d}"
-    fi
-  done < <(find backups -mindepth 1 -maxdepth 1 -type d -name '[0-9]*' 2>/dev/null | sort -r)
-else
-  echo "  （无法计算保留期截止日，跳过保留期清理）"
+# 需要 root（访问 docker 卷宿主机路径、写 backups/）；非 root 用 sudo 重新执行自身
+if [ "$(id -u)" -ne 0 ]; then
+  exec sudo bash "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" "$@"
 fi
 
-echo "完成：${out}"
-echo "提示：迁移新机器时，请同时手动复制仓库代码与 .env（含密钥，勿入库/勿随意外传）。"
+cd "$(dirname "$0")/.."   # 切到仓库根目录
+
+# shellcheck source=backup-common.sh
+source "$(dirname "$0")/backup-common.sh"
+
+require_cmd docker "需已安装 docker"
+require_cmd rsync
+require_cmd sha256sum
+pick_compressor
+acquire_lock
+
+# 校验容器在运行（锚点同时需要 postgres 与 api，缺一不可）
+[ -n "$($DOCKER compose ps -q postgres 2>/dev/null)" ] || die "postgres 容器未运行，无法备份"
+[ -n "$($DOCKER compose ps -q api 2>/dev/null)" ]       || die "api 容器未运行，无法打包 storage"
+
+VOL_PATH="$(storage_volume_path)"
+[ -n "$VOL_PATH" ] || die "无法解析 storage 卷宿主机路径"
+
+ts="$(now_ts)"
+ym="$(date +%Y/%m)"
+ANCHOR_TMP="backups/anchors/.tmp-${ts}"
+ANCHOR_DIR="backups/anchors/${ym}/${ts}"
+BASE_TMP="backups/baseline/.storage.tmp"
+BASE_DIR="backups/baseline"
+
+mkdir -p "${ANCHOR_TMP}" "$(dirname "${ANCHOR_DIR}")" "${BASE_DIR}"
+
+log "生成迁移锚点 -> ${ANCHOR_DIR}"
+
+# [1/4] 并行：db 逻辑备份 + storage 归档压缩（zstd 多线程）
+log "[1/4] 备份数据库 -> db.sql.${ZEXT}"
+dump_db "${ANCHOR_TMP}/db.sql.${ZEXT}" &
+DB_PID=$!
+
+log "[2/4] 打包 storage -> storage.tar.${ZEXT}"
+$DOCKER compose exec -T api sh -c 'tar cf - -C /app/storage .' \
+  | $COMPRESS >"${ANCHOR_TMP}/storage.tar.${ZEXT}" &
+STORAGE_PID=$!
+
+wait "$DB_PID"
+wait "$STORAGE_PID"
+
+# [3/4] 解包差异基线（后续差异快照以此为 hardlink 源）
+log "[3/4] 解包差异基线 -> ${BASE_DIR}/storage"
+rm -rf "${BASE_TMP}"
+mkdir -p "${BASE_TMP}"
+$DECOMPRESS "${ANCHOR_TMP}/storage.tar.${ZEXT}" | tar xf - -C "${BASE_TMP}"
+
+# [4/4] 校验 + 原子切换 + 清空/裁剪（先建新、再拆旧）
+log "[4/4] 校验并切换"
+db_sha="$(file_sha256 "${ANCHOR_TMP}/db.sql.${ZEXT}")"
+st_sha="$(file_sha256 "${ANCHOR_TMP}/storage.tar.${ZEXT}")"
+git_c="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+# 原子 mv 锚点目录
+mv "${ANCHOR_TMP}" "${ANCHOR_DIR}"
+
+# 原子切换 baseline：旧目录先挪开，新目录就位，再删旧
+rm -rf "${BASE_DIR}.old"
+if [ -d "${BASE_DIR}/storage" ]; then mv "${BASE_DIR}/storage" "${BASE_DIR}.old"; fi
+mv "${BASE_TMP}" "${BASE_DIR}/storage"
+rm -rf "${BASE_DIR}.old"
+
+write_manifest "${ANCHOR_DIR}/MANIFEST.json" \
+  "type=anchor" "created_at=${ts}" "git_commit=${git_c}" \
+  "db_sha256=${db_sha}" "storage_sha256=${st_sha}" \
+  "status=complete" "completed_at=$(now_ts)"
+write_manifest "${BASE_DIR}/MANIFEST.json" \
+  "source_anchor=${ts}" "status=complete" "completed_at=$(now_ts)"
+
+# 清空旧差异快照（新锚点 + 新基线已就绪才执行）
+log "清空旧差异快照 backups/snapshots/"
+rm -rf backups/snapshots/*
+mkdir -p backups/snapshots
+ln -sfn "anchors/${ym}/${ts}" backups/latest
+
+# 裁剪锚点：保留最近 3 份
+log "裁剪迁移锚点：保留最近 3 份"
+find backups/anchors -mindepth 3 -maxdepth 3 -type d -name '[0-9]*' 2>/dev/null \
+  | sort -r | tail -n +4 | while IFS= read -r d; do
+      log "  删除旧锚点：${d}"
+      rm -rf "${d}"
+    done
+
+log "锚点完成：${ANCHOR_DIR}"
+notify "迁移锚点备份完成 ${ts}"
