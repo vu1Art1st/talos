@@ -726,6 +726,18 @@
 
 ---
 
+## [2.8.2] - 2026-09-01
+
+备份保留策略与升级缓存清理：响应 VPS 磁盘空间告警，防止 BuildKit 缓存无限累积与备份冗余。
+
+### 变更
+
+- **备份保留策略**（`scripts/backup.sh`）：备份后自动每日去重（每天保留最新一份）+ 保留最近 `BACKUP_KEEP_DAYS` 天（默认 30）；目录名即时间戳（YYYYmmdd_HHMMSS），字符串排序即时间排序
+- **升级构建缓存清理**（`scripts/upgrade.sh`）：重建镜像后清理过期 BuildKit 缓存（`docker builder prune --filter "until=168h"`，保留最近 7 天），清理失败不阻断升级
+- **事故复盘文档**（`docs/INCIDENT-20260831-disk-space.md`）：VPS 磁盘空间告警排查复盘，根因为 BuildKit 构建缓存无限累积（12.95GB，可回收 12.47GB）
+
+---
+
 ## [2.8.1] - 2026-08-31
 
 favicon 品牌色对齐与运维脚本补充。

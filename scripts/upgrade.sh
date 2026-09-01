@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Talos 一键升级：拉取代码 → 备份 → 重建镜像 → 迁移数据库结构 → 重启服务。
+# Talos 一键升级：拉取代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库结构 → 重启服务。
 # 在运行着 docker compose 的服务器、仓库根目录执行： bash scripts/upgrade.sh
 #
 # 选项：
@@ -71,6 +71,12 @@ fi
 # [3/5] 重建镜像
 echo "[3/5] 重建镜像 docker compose build"
 sudo docker compose build
+
+# [3.5/5] 清理过期构建缓存：BuildKit 构建缓存只增不减会撑爆磁盘（见 docs/INCIDENT-20260831-disk-space.md）。
+# 保留最近 7 天（168h）缓存，兼顾构建加速与磁盘占用；清理失败不阻断升级。
+echo "[3.5/5] 清理过期构建缓存（保留最近 7 天）"
+sudo docker builder prune --filter "until=168h" -f \
+  || echo "（构建缓存清理失败，可稍后手动执行：sudo docker builder prune -af）"
 
 # [4/5] 先迁移数据库结构（api 服务尚未启动，Alembic 先行）
 echo "[4/5] 数据库结构迁移"
