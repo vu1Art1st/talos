@@ -13,7 +13,8 @@ class Settings(BaseSettings):
 
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
-    APP_VERSION: str = "2.10.0"
+    # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
+    APP_VERSION: str = "2.10.1"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"

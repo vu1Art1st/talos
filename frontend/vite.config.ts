@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
@@ -5,8 +6,14 @@ import vue from '@vitejs/plugin-vue'
 const frontendPort = Number(process.env.VP_FRONTEND_PORT || 27014)
 const backendPort = Number(process.env.VP_BACKEND_PORT || 27015)
 
+// 登录页右下角版本号：构建时从 package.json 注入，随前端版本号自动同步
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
+
 export default defineConfig({
   plugins: [vue()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   // 单测（vitest）：纯逻辑测试用 node 环境即可，无需 jsdom
   test: {
     environment: 'node',

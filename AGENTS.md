@@ -115,6 +115,6 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 ## 发布约定
 
-版本号遵循 SemVer，三处必须同步修改：`backend/app/core/config.py` 的 `APP_VERSION`、`frontend/package.json` 的 `version`、`docs/RELEASE.md`（唯一版本记录真相源，Keep a Changelog 风格）。
+版本号遵循 SemVer，三处必须同步修改：`backend/app/core/config.py` 的 `APP_VERSION`、`frontend/package.json` 的 `version`、`docs/RELEASE.md`（唯一版本记录真相源，Keep a Changelog 风格）。登录页右下角版本号由 Vite 构建时从 `frontend/package.json` 注入（`vite.config.ts` 的 `__APP_VERSION__`），随前端版本号自动同步，无需单独维护。
 
 路线与规划见 `docs/ROADMAP.md`；部署手册见 `docs/DEPLOY.md`。

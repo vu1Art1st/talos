@@ -230,7 +230,6 @@ onMounted(async () => {
 function onCommand(cmd: string) {
   if (cmd === 'logout') {
     auth.logout()
-    router.push('/login')
   } else if (cmd === 'password') {
     pwdVisible.value = true
   } else if (cmd === 'tokens') {
@@ -245,7 +244,6 @@ async function changePassword() {
   ElMessage.success('密码修改成功，请重新登录')
   pwdVisible.value = false
   auth.logout()
-  router.push('/login')
 }
 </script>
 

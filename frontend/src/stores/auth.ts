@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import client from '../api/client'
+import router from '../router'
 import { applyDictMeta } from '../utils/colors'
 
 export interface UserInfo {
@@ -49,6 +50,7 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       this.user = null
+      router.replace('/login')
     },
   },
 })

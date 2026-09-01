@@ -16,12 +16,25 @@
 
 发布约定:
 
-- 每次发布需同步更新三处版本号:本文档、`backend/app/core/config.py` 的 `APP_VERSION`、`frontend/package.json` 的 `version`
+- 每次发布需同步更新三处版本号:本文档、`backend/app/core/config.py` 的 `APP_VERSION`、`frontend/package.json` 的 `version`；登录页右下角版本号由前端构建时从 `package.json` 注入（`vite.config.ts` 的 `__APP_VERSION__`），随 `version` 自动同步，无需单独修改
 - 发布后在 git 上打注解标签:`git tag -a vX.Y.Z -m "release x.y.z"`
 - 变更条目按类型分组:`新增(Added)` / `变更(Changed)` / `修复(Fixed)` / `移除(Removed)` / `安全(Security)`
 - 未发布的改动先记入「Unreleased」,发布时移入对应版本段落
 
 > **Tag 管理说明（2026-08-13）**：版本号体系重构时,旧的 `v0.5.0`~`v1.1.1` 共 11 个标签编号与本文档重算后的版本（`1.0.0`~`1.11.1`）已完全错位,已全部清理（本地 + 远程）。本文档为唯一版本真相源,**历史版本不再追溯打标签**；仅未来新发布时按上述约定打 `vX.Y.Z` 注解标签（从 `1.11.1` 之后继续）。
+
+---
+
+## [2.10.1] - 2026-09-01
+
+登录页版本号构建期注入与登出跳转收敛。
+
+### 变更
+
+- **登录页版本号构建期注入**（`frontend/vite.config.ts` / `frontend/src/vite-env.d.ts` / `frontend/src/views/Login.vue`）：右下角版本号由硬编码 `v2.8.0` 改为构建期从 `package.json` 注入（`__APP_VERSION__`），随前端版本号自动同步；footer 文案去除「内置 admin 登录」
+- **登出跳转收敛到 store**（`frontend/src/stores/auth.ts` / `frontend/src/layouts/MainLayout.vue`）：`logout()` 统一在 store 内 `router.replace('/login')`，移除 MainLayout 两处手动 `router.push('/login')`，避免重复跳转
+- **结论面板默认收起**（`frontend/src/views/TestingPlanList.vue`）：「结论输出」折叠面板默认收起（`conclusionPanel` 默认 `[]`）
+- **发布约定补充**（`AGENTS.md` / `docs/RELEASE.md` / `backend/app/core/config.py`）：登录页版本号由前端构建时注入，随 `package.json` 的 `version` 自动同步，无需单独维护
 
 ---
 

@@ -45,11 +45,11 @@
         <span class="chip"><span class="chip-dot" style="background: var(--tl-warning)"></span>报告与态势</span>
       </div>
 
-      <div class="footer">Talos Vulnerability Management<span class="sep">|</span>内置 admin 登录</div>
+      <div class="footer">Talos Vulnerability Management</div>
     </div>
 
     <div class="slogan">🛡️ <b>Talos</b> · 漏洞收录、验证、复测、报告与安全态势一站式管理</div>
-    <div class="ver-chip">Talos v2.8.0 · Lovely UI</div>
+    <div class="ver-chip">Talos v{{ version }} · Lovely UI</div>
   </div>
 </template>
 
@@ -66,6 +66,7 @@ const REMEMBER_KEY = 'tl_login_username'
 const auth = useAuthStore()
 const router = useRouter()
 const route = useRoute()
+const version = __APP_VERSION__
 const loading = ref(false)
 const remember = ref(false)
 const form = reactive({ username: '', password: '' })

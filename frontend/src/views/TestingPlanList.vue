@@ -507,7 +507,7 @@ function onRangeChange() {
 }
 
 // ---------- 结论输出 ----------
-const conclusionPanel = ref<string[]>(['conclusion'])
+const conclusionPanel = ref<string[]>([])
 const conclusion = ref<Record<string, any>>({})
 const conclusionLoading = ref(false)
 
