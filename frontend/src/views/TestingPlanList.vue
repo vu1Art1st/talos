@@ -7,6 +7,12 @@
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
+      <el-select v-model="rangeKind" placeholder="时间范围" class="!w-28" clearable @change="onRangeChange">
+        <el-option v-for="o in DATE_RANGE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
+      </el-select>
+      <el-date-picker v-if="rangeKind === 'custom'" v-model="customRange" type="daterange"
+                      value-format="YYYY-MM-DD" class="!w-64" start-placeholder="初测完成起"
+                      end-placeholder="初测完成止" @change="reload" />
       <el-popover
         :visible="filterVisible"
         trigger="manual"
@@ -88,6 +94,35 @@
             <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="stats[d.key] ?? 0" />
           </div>
           <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-3" />
+        </div>
+      </el-collapse-item>
+    </el-collapse>
+
+    <el-collapse v-model="conclusionPanel" class="tl-collapse mb-3">
+      <el-collapse-item name="conclusion">
+        <template #title>
+          <span class="tl-collapse-title">
+            <span class="tl-collapse-title__main">结论输出</span>
+            <span class="tl-collapse-title__sub">（按初测完成时间筛选后生成，可复制 / 下载附件）</span>
+          </span>
+        </template>
+        <div v-loading="conclusionLoading" class="px-2 py-1">
+          <div class="conclusion-box">
+            <p class="conclusion-text">{{ conclusion.summary || '暂无符合条件的渗透测试工单，请先调整筛选条件' }}</p>
+          </div>
+          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mt-3">
+            <StatCard label="部门数" :color="STAT_CARD_COLORS.blue" :value="conclusion.departments ?? 0" />
+            <StatCard label="系统数" :color="STAT_CARD_COLORS.green" :value="conclusion.systems ?? 0" />
+            <StatCard label="存在漏洞系统" :color="STAT_CARD_COLORS.red" :value="conclusion.vuln_systems ?? 0" />
+            <StatCard label="漏洞数" :color="STAT_CARD_COLORS.red" :value="conclusion.vulns ?? 0" />
+            <StatCard label="未发现安全风险" :color="STAT_CARD_COLORS.green" :value="conclusion.safe_systems ?? 0" />
+            <StatCard label="已完成整改" :color="STAT_CARD_COLORS.green" :value="conclusion.fixed_systems ?? 0" />
+            <StatCard label="整改中" :color="STAT_CARD_COLORS.orange" :value="conclusion.fixing_systems ?? 0" />
+          </div>
+          <div class="flex gap-2 mt-3">
+            <el-button type="primary" :disabled="!conclusion.summary" @click="copyConclusion">复制结论</el-button>
+            <el-button :disabled="!conclusion.summary" @click="downloadConclusion">下载附件</el-button>
+          </div>
         </div>
       </el-collapse-item>
     </el-collapse>
@@ -427,6 +462,8 @@ import {
   STAT_CARD_COLORS,
 } from '../utils/colors'
 import { fmtDate, fmtDateTime } from '../utils/format'
+import { saveBlob } from '../utils/download'
+import { DATE_RANGE_OPTIONS, computeDateRange } from '../utils/dateRange'
 import { assetUrls, cleanUrls, mergeUrls } from '../utils/urls'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
@@ -459,6 +496,48 @@ const saving = ref(false)
 const statusMap = ref<Record<number, string>>({})
 const dialogRow = ref<any>(null)
 const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
+
+// ---------- 时间范围筛选（按初测完成时间） ----------
+const rangeKind = ref<string>('')
+const customRange = ref<[string, string] | null>(null)
+
+function onRangeChange() {
+  if (rangeKind.value !== 'custom') customRange.value = null
+  reload()
+}
+
+// ---------- 结论输出 ----------
+const conclusionPanel = ref<string[]>(['conclusion'])
+const conclusion = ref<Record<string, any>>({})
+const conclusionLoading = ref(false)
+
+async function loadConclusion() {
+  conclusionLoading.value = true
+  try {
+    const { data } = await client.get('/testing-plans/conclusion', { params: filterParams() })
+    conclusion.value = data
+  } finally {
+    conclusionLoading.value = false
+  }
+}
+
+async function copyConclusion() {
+  const text = conclusion.value?.summary ?? ''
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('结论已复制')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择复制')
+  }
+}
+
+async function downloadConclusion() {
+  const { data } = await client.get('/testing-plans/conclusion/export', {
+    params: filterParams(), responseType: 'blob',
+  })
+  saveBlob(data, '整改情况附件.xlsx')
+}
 
 // ---------- 聚合筛选 ----------
 const filterVisible = ref(false)
@@ -537,7 +616,7 @@ const DIMENSIONS = [
   { key: 'vulns_by_month', label: '按月漏洞数', color: STAT_CARD_COLORS.blue },
 ] as const
 const STATS_DIMS_KEY = 'testing_plan_stats_dims'
-const statsPanel = ref<string[]>(['stats'])
+const statsPanel = ref<string[]>([])
 const dims = ref<string[]>(loadDims())
 const stats = ref<Record<string, number>>({})
 const statsLoading = ref(false)
@@ -674,6 +753,11 @@ function toggleNonpenItem(key: string) {
 
 function filterParams(): Record<string, any> {
   const params: Record<string, any> = { search: search.value }
+  const range = computeDateRange(rangeKind.value, customRange.value)
+  if (range) {
+    params.first_test_from = range[0]
+    params.first_test_to = range[1]
+  }
   const validRules = rules.value.filter(isRuleComplete)
   if (validRules.length) {
     params.filters = JSON.stringify({
@@ -731,7 +815,7 @@ function renderMonthChart() {
 
 // 筛选变化：列表回到首页并同步刷新统计
 async function reload() {
-  await Promise.all([load(1), loadStats()])
+  await Promise.all([load(1), loadStats(), loadConclusion()])
 }
 
 async function exportExcel() {
@@ -936,7 +1020,7 @@ onMounted(async () => {
   const meta = await auth.fetchMeta()
   statusMap.value = meta?.testing_plan_status ?? {}
   window.addEventListener('resize', onResize)
-  await Promise.all([load(1), loadStats(), loadTestTypes(), loadDepartments()])
+  await Promise.all([load(1), loadStats(), loadConclusion(), loadTestTypes(), loadDepartments()])
 })
 
 onBeforeUnmount(() => {
@@ -1012,6 +1096,20 @@ onBeforeUnmount(() => {
 .tp-create-title { font-size: 13px; font-weight: 500; }
 /* 渐变注释：品牌视觉渐变统一色源见 style.css .tl-brand-gradient */
 .tp-create-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
+
+/* 结论输出：结论文字卡片 */
+.conclusion-box {
+  padding: 12px 14px;
+  border: 1px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.conclusion-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--tl-text-1);
+}
 
 /* 统计卡 / 勾选卡 / 折叠标题样式已上提 style.css 全局共用 */</style>
 

@@ -39,6 +39,8 @@ async def list_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
     filters: str = "",
     my_tests: bool = False,
     unclaimed: bool = False,
@@ -56,6 +58,7 @@ async def list_testing_plans(
     """
     cond = plan_query.plan_conditions(
         search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to,
         tester_id=user.id if my_tests else None,
         unclaimed=unclaimed,
         pending=pending,
@@ -81,13 +84,18 @@ async def testing_plan_stats(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
     filters: str = "",
     pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """测试计划多维度统计：总数/复测完成数/初测次数/复测次数/总测试次数/状态分布/按月漏洞数。"""
-    cond = plan_query.plan_conditions(search, status, test_type, department, receive_from, receive_to, pending=pending)
+    cond = plan_query.plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
+    )
     cond += plan_query.plan_filters_condition(filters)
     return await plan_query.compute_plan_stats(session, cond, receive_from, receive_to)
 
@@ -100,13 +108,18 @@ async def export_testing_plans(
     department: str = "",
     receive_from: str = "",
     receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
     filters: str = "",
     pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     """导出筛选后的渗透测试工单明细与统计汇总（双 sheet Excel）。"""
-    cond = plan_query.plan_conditions(search, status, test_type, department, receive_from, receive_to, pending=pending)
+    cond = plan_query.plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
+    )
     cond += plan_query.plan_filters_condition(filters)
     plans = (
         await session.execute(select(TestingPlan).where(*cond).order_by(TestingPlan.id))
@@ -114,6 +127,56 @@ async def export_testing_plans(
     stats = await plan_query.compute_plan_stats(session, cond, receive_from, receive_to)
     wb = plan_io.build_export_workbook(plans, stats)
     return xlsx_response(wb, "渗透测试工单导出.xlsx")
+
+
+@router.get("/testing-plans/conclusion")
+async def testing_plan_conclusion(
+    search: str = "",
+    status: int | None = None,
+    test_type: str = "",
+    department: str = "",
+    receive_from: str = "",
+    receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
+    filters: str = "",
+    pending: bool = False,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """结论性输出：按筛选条件生成结论文字与附件行数据（部门/系统/漏洞/整改状态聚合）。"""
+    cond = plan_query.plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
+    )
+    cond += plan_query.plan_filters_condition(filters)
+    return await plan_query.compute_conclusion(session, cond)
+
+
+@router.get("/testing-plans/conclusion/export")
+async def export_testing_plan_conclusion(
+    search: str = "",
+    status: int | None = None,
+    test_type: str = "",
+    department: str = "",
+    receive_from: str = "",
+    receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
+    filters: str = "",
+    pending: bool = False,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """下载结论性输出附件（工单ID/所属部门/测试系统/漏洞数/测试类型/整改完成情况）。"""
+    cond = plan_query.plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
+    )
+    cond += plan_query.plan_filters_condition(filters)
+    data = await plan_query.compute_conclusion(session, cond)
+    wb = plan_io.build_conclusion_workbook(data["rows"])
+    return xlsx_response(wb, "整改情况附件.xlsx")
 
 
 @router.get("/testing-plans/import/template")

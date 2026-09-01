@@ -6,7 +6,13 @@ ARG NPM_REGISTRY=https://registry.npmmirror.com
 
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN corepack enable && pnpm config set registry ${NPM_REGISTRY} && pnpm install --frozen-lockfile
+# corepack 下载 pnpm 包管理器自身时默认固定走 registry.npmjs.org，与下面 pnpm 依赖源
+# （pnpm config set registry）无关，海外源不可达会 ETIMEDOUT；需额外指定 COREPACK_NPM_REGISTRY，
+# 让 corepack 也从国内镜像下载 pnpm 本体。
+RUN corepack enable \
+  && export COREPACK_NPM_REGISTRY=${NPM_REGISTRY} \
+  && pnpm config set registry ${NPM_REGISTRY} \
+  && pnpm install --frozen-lockfile
 COPY . .
 RUN pnpm run build
 

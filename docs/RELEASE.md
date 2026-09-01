@@ -726,6 +726,23 @@
 
 ---
 
+## [2.9.0] - 2026-09-01
+
+渗透测试工单「初测完成时间」筛选与「结论输出」：按时间范围筛工单，一键生成通报结论文字与整改情况附件。
+
+### 新增
+
+- **初测完成时间筛选**（`backend/app/api/v1/testing_plan.py` / `backend/app/services/plan_query.py`）：列表 / 统计 / 导出接口新增 `first_test_from` / `first_test_to` 参数，`plan_conditions` 支持按「初测完成时间」区间过滤
+- **结论输出（通报汇总）**（`backend/app/services/plan_query.py` `compute_conclusion` / `plan_io.py` `build_conclusion_workbook`）：`GET /testing-plans/conclusion` 按筛选条件聚合生成结论文字（N 个部门 N 个系统、存在漏洞/未发现风险、已整改/整改中统计）与附件行数据；`GET /testing-plans/conclusion/export` 下载「整改情况附件.xlsx」（工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 / 整改完成情况）
+- **时间范围快捷项**（`frontend/src/utils/dateRange.ts` + `__tests__/dateRange.spec.ts`）：今天 / 本周 / 上周 / 本月 / 上月 / 自定义六档，周一起始口径（`mondayOf`），`computeDateRange` 计算起止日期
+- **工单列表时间范围与结论面板**（`frontend/src/views/TestingPlanList.vue`）：工具栏新增时间范围下拉 + 自定义日期选择器（初测完成起/止）；新增「结论输出」折叠面板（结论文字卡片 + 部门/系统/漏洞/整改 7 张 StatCard + 复制结论 / 下载附件）
+
+### 修复
+
+- **前端镜像构建 corepack 超时**（`frontend/Dockerfile`）：corepack 下载 pnpm 本体默认走 registry.npmjs.org，海外源不可达导致 `ETIMEDOUT`；构建时指定 `COREPACK_NPM_REGISTRY` 走国内镜像，与依赖源一致
+
+---
+
 ## [2.8.2] - 2026-09-01
 
 备份保留策略与升级缓存清理：响应 VPS 磁盘空间告警，防止 BuildKit 缓存无限累积与备份冗余。
