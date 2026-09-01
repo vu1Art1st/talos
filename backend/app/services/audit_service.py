@@ -5,6 +5,7 @@ import logging
 from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_info import get_client_ip, get_user_agent
 from app.core.timeutil import now
 from app.models import OperationLog
 
@@ -26,8 +27,8 @@ async def audit(
     ip = ""
     ua = ""
     if request is not None:
-        ip = (request.client.host if request.client else "")[:64]
-        ua = (request.headers.get("user-agent", ""))[:256]
+        ip = get_client_ip(request)[:64]
+        ua = get_user_agent(request)[:256]
     username = user if isinstance(user, str) else getattr(user, "username", "") or ""
     user_id = getattr(user, "id", None) if not isinstance(user, str) else None
     try:

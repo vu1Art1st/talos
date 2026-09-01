@@ -25,6 +25,21 @@
 
 ---
 
+## [2.10.3] - 2026-09-01
+
+审计日志来源信息修正：真实客户端 IP 解析与代理头透传。
+
+### 修复
+
+- **审计日志来源 IP 全为容器内网 IP**：生产链路 `浏览器 → Nginx(frontend 容器) → api 容器` 下，后端直接读 `request.client.host`（uvicorn TCP 对端）恒为 Nginx 容器内网 IP；且前端 Nginx 仅透传 `X-Real-IP`、未设 `X-Forwarded-For`，uvicorn 亦未开启 proxy-headers。新增统一解析模块 `backend/app/core/client_info.py`（`get_client_ip` / `get_user_agent`）——`X-Forwarded-For` 从右往左跳过内网/保留段取首个公网地址，兼容多层代理与 XFF 伪造防护，全内网场景退化取最近一跳；审计日志（`backend/app/services/audit_service.py`）与登录防爆破（`backend/app/api/v1/auth.py`）统一改用真实来源 IP
+- **登录防爆破锁粒度失效**：失败计数 key 此前取同一容器 IP，所有用户共享一把锁；修复后按真实来源 IP 隔离计数
+- **前端 Nginx 代理头补全**（`frontend/nginx.conf`）：`/api/` 与 `/storage/uploads/images/` 增加 `X-Forwarded-For $proxy_add_x_forwarded_for` 与 `X-Forwarded-Proto $scheme` 透传；外层如仍有代理（宿主 Nginx / 云 LB / CDN）需同样追加，方可还原最外侧真实 IP
+- **补单元测试**（`backend/tests/test_client_info.py` 新增）：覆盖单层/多层代理、伪造 XFF、IPv4/IPv6 带端口剥离、全内网退化等 13 例；`pytest` 全量 84 passed
+
+> **历史数据说明**：存量 `operation_logs.ip` 为容器内网 IP，请求链路未留痕，无法恢复真实来源；如需兜底可将内网网段 IP 统一标记占位，详见运维口径。UA 若无代理篡改则历史记录准确。
+
+---
+
 ## [2.10.2] - 2026-09-01
 
 系统类型拼写修正与漏洞统计子系统展示。

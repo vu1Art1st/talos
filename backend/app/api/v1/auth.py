@@ -3,6 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.client_info import get_client_ip
 from app.core.config import settings
 from app.core.deps import get_current_user, user_permissions
 from app.core.ratelimit import clear_failures, get_failures, incr_failure
@@ -36,7 +37,7 @@ async def login(
     session: AsyncSession = Depends(get_session),
 ):
     # 防爆破：同一用户名+客户端 IP 失败达阈则锁定一段时间
-    client_ip = request.client.host if request.client else "?"
+    client_ip = get_client_ip(request) or "?"
     fail_key = f"login_fail:{form.username}:{client_ip}"
     window = settings.LOGIN_LOCK_SECONDS
     if await get_failures(fail_key, window) >= settings.LOGIN_MAX_FAILURES:
