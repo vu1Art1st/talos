@@ -3,8 +3,11 @@
     <template #header>
       <div class="flex items-center gap-2">
         <span class="text-sm font-semibold">个人访问令牌</span>
-        <span class="text-xs text-gray-400">供内部看板与脚本调用开放只读 API（/api/v1/open/*）</span>
+        <span class="text-xs text-gray-400">供内部看板与脚本调用开放 API（/api/v1/open/*）</span>
         <div class="flex-1" />
+        <el-button class="btn-min" @click="guideVisible = true">
+          <el-icon class="mr-1"><Document /></el-icon>接口文档
+        </el-button>
         <el-button type="primary" class="btn-min" @click="openCreate">
           <el-icon class="mr-1"><Plus /></el-icon>新建令牌
         </el-button>
@@ -82,19 +85,29 @@
       <el-button type="primary" @click="copyToken">复制令牌</el-button>
     </template>
   </el-dialog>
+
+  <!-- 开放 API 访问指南（docs/OPEN_API_GUIDE.md 构建期内联） -->
+  <el-drawer v-model="guideVisible" title="开放 API 访问指南" size="800px">
+    <div class="md-doc" v-html="guideHtml"></div>
+  </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { Document, Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'
 import { fmtDateTime } from '../utils/format'
+import { renderMarkdown } from '../utils/markdown'
+import guideMd from '../../../docs/OPEN_API_GUIDE.md?raw'
 
 const { items, total, page, size, loading, load, onSizeChange } = useListPage('/pats')
+
+const guideVisible = ref(false)
+const guideHtml = computed(() => renderMarkdown(guideMd))
 
 const createVisible = ref(false)
 const creating = ref(false)
@@ -139,3 +152,78 @@ async function copyToken() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+/* 指南抽屉排版：v-html 内容不带 scoped 属性，须用 :deep；色值全部走 --tl-* 令牌保证明暗两态 */
+.md-doc {
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: rgb(var(--tl-gray-700));
+}
+.md-doc :deep(h1),
+.md-doc :deep(h2),
+.md-doc :deep(h3),
+.md-doc :deep(h4) {
+  color: rgb(var(--tl-gray-800));
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 20px 0 10px;
+}
+.md-doc :deep(h1) { font-size: 18px; }
+.md-doc :deep(h2) {
+  font-size: 15.5px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgb(var(--tl-gray-200));
+}
+.md-doc :deep(h3) { font-size: 14px; }
+.md-doc :deep(h4) { font-size: 13.5px; }
+.md-doc :deep(p) { margin: 8px 0; }
+.md-doc :deep(ul),
+.md-doc :deep(ol) { padding-left: 20px; margin: 8px 0; }
+.md-doc :deep(li) { margin: 3px 0; }
+.md-doc :deep(code) {
+  font-family: var(--tl-mono);
+  font-size: 12.5px;
+  background: rgb(var(--tl-gray-100));
+  border: 1px solid rgb(var(--tl-gray-200));
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.md-doc :deep(pre) {
+  background: rgb(var(--tl-gray-100));
+  border: 1px solid rgb(var(--tl-gray-200));
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 10px 0;
+}
+.md-doc :deep(pre code) { background: none; border: none; padding: 0; }
+.md-doc :deep(table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 10px 0;
+  font-size: 12.5px;
+}
+.md-doc :deep(th),
+.md-doc :deep(td) {
+  border: 1px solid rgb(var(--tl-gray-200));
+  padding: 5px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-doc :deep(th) {
+  background: rgb(var(--tl-gray-100));
+  color: rgb(var(--tl-gray-800));
+  font-weight: 600;
+}
+.md-doc :deep(blockquote) {
+  margin: 10px 0;
+  padding: 6px 12px;
+  border-left: 3px solid var(--tl-primary);
+  background: rgb(var(--tl-gray-100));
+  border-radius: 0 6px 6px 0;
+  color: rgb(var(--tl-gray-600));
+}
+.md-doc :deep(hr) { border: none; border-top: 1px solid rgb(var(--tl-gray-200)); margin: 16px 0; }
+.md-doc :deep(a) { color: var(--tl-accent); }
+</style>

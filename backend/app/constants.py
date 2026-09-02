@@ -182,6 +182,8 @@ AUDIT_ACTIONS = {
     "vuln_transition": "漏洞流转",
     "plan_transition": "工单流转",
     "plan_claim": "工单认领",
+    "plan_create": "创建工单",
+    "plan_update": "编辑工单",
     "report_export": "导出报告",
     "report_delete": "删除报告",
     "import_confirm": "导入入库",

@@ -340,9 +340,7 @@ html:not(.dark) .dot-tag i { box-shadow: none; }
   padding: 12px;
   border-radius: 6px;
   overflow: auto;
-  width: fit-content;
-  max-width: 100%;
-  margin: 8px auto;
+  margin: 8px 0;
 }
 .rich-content blockquote {
   border-left: 3px solid var(--el-color-primary);

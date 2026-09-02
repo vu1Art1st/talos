@@ -3358,6 +3358,169 @@ async def test_pat_rate_limit(client: AsyncClient, auth: dict, monkeypatch):
     assert codes[3] == 429
 
 
+async def test_open_api_plan_read(client: AsyncClient, auth: dict):
+    """开放 API 工单查询：PAT 可读渗透测试工单与漏扫基线工单，JWT 与站内端点边界不变。"""
+    resp = await client.post(
+        "/api/v1/pats", headers=auth, json={"name": "工单只读令牌", "expire_days": 30},
+    )
+    pat = {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    # 列表与详情（先在站内造一条，保证有数据）
+    created = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "开放API只读系统", "test_type": "渗透测试", "status": 10},
+    )
+    assert created.status_code == 200, created.text
+    plan_id = created.json()["id"]
+
+    resp = await client.get("/api/v1/open/testing-plans", headers=pat, params={"size": 5})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "total" in body and "items" in body
+
+    resp = await client.get(f"/api/v1/open/testing-plans/{plan_id}", headers=pat)
+    assert resp.status_code == 200, resp.text
+    for key in ("id", "ticket_id", "testers", "vuls", "reports", "retest_rounds"):
+        assert key in resp.json()
+
+    # 筛选参数生效：按部门精确过滤
+    resp = await client.get(
+        "/api/v1/open/testing-plans", headers=pat, params={"search": "开放API只读系统"},
+    )
+    assert [p["id"] for p in resp.json()["items"]] == [plan_id]
+
+    # 漏扫基线工单列表可读
+    assert (await client.get("/api/v1/open/nonpen-plans", headers=pat)).status_code == 200
+
+    # 认证边界：JWT 访问开放工单接口被拒；PAT 访问站内工单端点被拒；不存在 404
+    assert (await client.get("/api/v1/open/testing-plans", headers=auth)).status_code == 401
+    assert (await client.get("/api/v1/testing-plans", headers=pat)).status_code == 401
+    assert (await client.get("/api/v1/open/testing-plans/999999", headers=pat)).status_code == 404
+    assert (await client.get("/api/v1/open/nonpen-plans/999999", headers=pat)).status_code == 404
+
+    # 分页参数越界 422
+    assert (
+        await client.get("/api/v1/open/testing-plans", headers=pat, params={"size": 500})
+    ).status_code == 422
+
+
+async def test_open_api_plan_write(client: AsyncClient, auth: dict):
+    """开放 API 工单写入：创建 / 更新渗透测试工单与漏扫基线工单，写操作受 special:manage 约束。"""
+    resp = await client.post(
+        "/api/v1/pats", headers=auth, json={"name": "工单写入令牌", "expire_days": 30},
+    )
+    pat = {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    # 创建渗透测试工单（工单ID按需求接收日期自动生成）
+    resp = await client.post(
+        "/api/v1/open/testing-plans", headers=pat,
+        json={
+            "system_name": "开放API写入系统", "test_type": "渗透测试",
+            "department": "研发一部", "receive_time": "2026-09-03", "status": 10,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    plan = resp.json()
+    plan_id = plan["id"]
+    assert plan["ticket_id"].startswith("20260903-")
+    assert plan["department"] == "研发一部"
+
+    # 全量更新：改部门 + 状态流转 10 → 20（未测试 → 初测中）
+    update_body = {
+        "system_name": "开放API写入系统", "test_type": "渗透测试", "department": "研发二部",
+        "receive_time": "2026-09-03", "status": 20,
+    }
+    resp = await client.put(f"/api/v1/open/testing-plans/{plan_id}", headers=pat, json=update_body)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["department"] == "研发二部"
+    assert resp.json()["status"] == 20
+
+    # 非法状态流转 400（初测中 20 不能直接到复测完成 60）
+    resp = await client.put(
+        f"/api/v1/open/testing-plans/{plan_id}", headers=pat, json={**update_body, "status": 60},
+    )
+    assert resp.status_code == 400
+
+    # 必填校验 422（system_name 为空）
+    resp = await client.post(
+        "/api/v1/open/testing-plans", headers=pat, json={"system_name": ""},
+    )
+    assert resp.status_code == 422
+
+    # 更新不存在的工单 404
+    resp = await client.put(
+        "/api/v1/open/testing-plans/999999", headers=pat, json=update_body,
+    )
+    assert resp.status_code == 404
+
+    # 漏扫基线工单：创建 + 更新（测试项勾选生效）
+    resp = await client.post(
+        "/api/v1/open/nonpen-plans", headers=pat,
+        json={
+            "system_name": "开放API漏扫系统", "department": "研发一部",
+            "receive_time": "2026-09-03", "test_items": ["baseline", "host"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    nonpen = resp.json()
+    nonpen_id = nonpen["id"]
+    assert nonpen["ticket_id"].startswith("20260903-")
+    assert nonpen["items"]["baseline"]["status"] == "not_started"
+    assert nonpen["items"]["web"]["status"] == "ignored"
+
+    resp = await client.put(
+        f"/api/v1/open/nonpen-plans/{nonpen_id}", headers=pat,
+        json={
+            "system_name": "开放API漏扫系统", "department": "研发二部",
+            "receive_time": "2026-09-03", "test_items": ["web"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    updated = resp.json()
+    assert updated["department"] == "研发二部"
+    # 仅合并勾选变化：web 由 ignored 变 not_started，baseline 取消勾选保留 ignored
+    assert updated["items"]["web"]["status"] == "not_started"
+    assert updated["items"]["baseline"]["status"] == "ignored"
+
+    # 工单ID必须存在来源（无接收日期且未手动指定）→ 422
+    resp = await client.post(
+        "/api/v1/open/nonpen-plans", headers=pat, json={"system_name": "缺少工单ID来源"},
+    )
+    assert resp.status_code == 422
+
+    # 无 special:manage 权限的账号，其令牌写操作 403（读仍放行）
+    resp = await client.post(
+        "/api/v1/roles", headers=auth,
+        json={"name": "无专项写入权限", "permissions": ["vuln:submit"], "remark": ""},
+    )
+    role_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/users", headers=auth,
+        json={"username": "open_api_writer", "password": "Writer@123", "realname": "开放API写入",
+              "email": "", "phone": "", "is_active": True, "role_id": role_id},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/auth/login", data={"username": "open_api_writer", "password": "Writer@123"},
+    )
+    weak_auth = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    resp = await client.post(
+        "/api/v1/pats", headers=weak_auth, json={"name": "无权限令牌", "expire_days": 7},
+    )
+    weak_pat = {"Authorization": f"Bearer {resp.json()['token']}"}
+
+    assert (await client.get("/api/v1/open/testing-plans", headers=weak_pat)).status_code == 200
+    resp = await client.post(
+        "/api/v1/open/testing-plans", headers=weak_pat, json={"system_name": "无权限创建"},
+    )
+    assert resp.status_code == 403
+    assert "special:manage" in resp.json()["detail"]
+    resp = await client.put(
+        f"/api/v1/open/testing-plans/{plan_id}", headers=weak_pat, json=update_body,
+    )
+    assert resp.status_code == 403
+
+
 async def test_batch_import_confirm(client: AsyncClient, auth: dict):
     """批量确认入库：多批次统一关联工单 → 逐批确认并返回 report_ids；
     已确认批次重复关联跳过；单批失败隔离不影响其余批次；权限与参数校验。"""

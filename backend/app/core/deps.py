@@ -93,6 +93,24 @@ def require_perm(perm: str):
     return checker
 
 
+def require_pat_perm(perm: str):
+    """开放 API 写操作权限校验：PAT 认证后按「令牌所属用户」的角色权限校验。
+
+    与站内 require_perm 同口径（角色权限含 perm 或通配符 * 放行），避免个人令牌
+    绕过 RBAC 执行写操作；只读端点（/open/vulns、/open/stats、工单查询）不套用此依赖。
+    """
+
+    async def checker(user: User = Depends(get_pat_user)) -> User:
+        perms = user_permissions(user)
+        if "*" in perms or perm in perms:
+            return user
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, f"当前令牌所属账号缺少权限: {perm}",
+        )
+
+    return checker
+
+
 def require_any_perm(*required: str):
     """权限校验依赖工厂：满足任一权限（或通配符 *）即放行。"""
 

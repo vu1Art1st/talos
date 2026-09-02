@@ -25,6 +25,24 @@
 
 ---
 
+## [2.11.0] - 2026-09-03
+
+开放 API 新增工单读写（渗透测试工单 / 漏扫基线工单），与站内口径一致。
+
+### 新增
+
+- **开放 API 工单读写**（`backend/app/api/v1/open_plans.py`）：`/open/testing-plans`、`/open/nonpen-plans` 支持查询（过滤/分页/排序，复用 `plan_query.plan_conditions`，与站内列表同口径）、创建、全量更新；认证仅接受个人访问令牌 PAT（`get_pat_user`，JWT 拒绝），读不做数据归属过滤、写按令牌所属用户角色权限校验 `special:manage`（`require_pat_perm`，与站内 `require_perm` 同口径），避免个人令牌绕过 RBAC；写入逻辑复用 `services/plan_crud`，工单ID分配、状态流转校验、联动同步与统计重算口径不漂移
+- **工单 CRUD 服务抽取**（`backend/app/services/plan_crud.py`）：从站内路由（`testing_plan.py`、`nonpen.py`）抽取建/改工单逻辑，站内与开放 API 共用同一实现
+- **开放 API 指南**（`docs/OPEN_API_GUIDE.md`）：PAT 调用漏洞/态势（只读）与工单（读写）的认证、接口清单、参数、响应、错误码及 curl/Python/JS 示例（含每令牌每分钟 120 次限流 `PAT_RATE_LIMIT`）
+- **Markdown 渲染工具**（`frontend/src/utils/markdown.ts` + `markdown.spec.ts`）：基于 markdown-it、原始 HTML 转义（可安全 v-html），用于访问令牌页指南抽屉渲染 `OPEN_API_GUIDE.md`；`TokenList.vue` 接入
+- **构建上下文调整**：`docker-compose.yml` 前端 build context 提至仓库根、`frontend/Dockerfile` 新增 `.dockerignore`，使令牌页 `?raw` 可导入 `docs/OPEN_API_GUIDE.md`（含 `README.md`/`README_EN.md` 同步说明）
+
+### 变更
+
+- `backend/app/constants.py` 审计动作新增 `plan_create` / `plan_update`；`backend/app/core/deps.py` 新增 `require_pat_perm`；`__init__.py` 注册 `open_plans` 路由；`backend/tests/test_api.py` 补充开放工单接口用例
+
+---
+
 ## [2.10.3] - 2026-09-01
 
 审计日志来源信息修正：真实客户端 IP 解析与代理头透传。

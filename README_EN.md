@@ -32,7 +32,7 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 - **Security dashboard**: vulnerability trends, severity/status/type distribution, fix rate, and more, visualized with ECharts
 - **RBAC**: JWT (access/refresh) authentication with idle sliding expiration on refresh tokens; role-permission model with directory-based permission management and menu/button-level control in the frontend
 - **Notification channels**: WeCom/DingTalk webhooks plus SMTP email, subscribable to four event types — vulnerability created, ticket claimed, status transition, retest completed
-- **Open API**: personal access tokens (PATs, plaintext shown once) with read-only endpoints (`/open/vulns`, `/open/stats`), rate-limited per token
+- **Open API**: personal access tokens (PATs, plaintext shown once) with open endpoints (read-only vulns/stats, plus query/create/update for pen-testing and vuln-scan tickets), rate-limited per token; see [docs/OPEN_API_GUIDE.md](docs/OPEN_API_GUIDE.md) (also viewable on the Access Tokens page)
 - **Audit logs**: successful/failed logins (IP/UA) and sensitive operations are recorded uniformly and searchable
 
 ## Tech Stack

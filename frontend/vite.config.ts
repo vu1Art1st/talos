@@ -24,6 +24,8 @@ export default defineConfig({
     host: '0.0.0.0',
     port: frontendPort,
     strictPort: true,
+    // 允许 dev 服务器读取仓库根下的 docs/（访问令牌页 ?raw 导入 OPEN_API_GUIDE.md）
+    fs: { allow: ['..'] },
     proxy: {
       '/api': { target: `http://127.0.0.1:${backendPort}`, changeOrigin: true },
       '/storage': { target: `http://127.0.0.1:${backendPort}`, changeOrigin: true },

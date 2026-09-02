@@ -22,6 +22,7 @@ from app.core.filters import (
 )
 from app.core.timeutil import now as tznow
 from app.models import (
+    NonpenPlan,
     Report,
     TestingPlan,
     TestingPlanRetestRound,
@@ -29,6 +30,27 @@ from app.models import (
     Vul,
     testing_plan_testers,
 )
+
+
+def nonpen_search_condition(search: str):
+    """漏扫基线工单搜索：计划名称 / 测试系统 / 所属部门 / 工单ID（手动指定值，
+    或 YYYYMMDD-N 自动编号的日期+序号组合）。站内列表与开放 API 共用。"""
+    pat = f"%{search}%"
+    conds = [
+        NonpenPlan.plan_name.ilike(pat),
+        NonpenPlan.system_name.ilike(pat),
+        NonpenPlan.department.ilike(pat),
+        NonpenPlan.ticket_id_manual.ilike(pat),
+        NonpenPlan.receive_time.ilike(pat),
+        func.replace(NonpenPlan.receive_time, "-", "").ilike(pat),
+        func.cast(NonpenPlan.ticket_seq, String).ilike(pat),
+    ]
+    # 完整工单ID匹配：YYYYMMDD-N（如 20260810-3）→ 手动指定值本身，或自动编号的日期+当日序号组合
+    m = re.fullmatch(r"(\d{8})-(\d+)", search)
+    if m:
+        date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%"
+        conds.append(NonpenPlan.receive_time.like(date_like) & (NonpenPlan.ticket_seq == int(m.group(2))))
+    return or_(*conds)
 
 
 def plan_conditions(

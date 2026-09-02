@@ -1,0 +1,7 @@
+# 仅 frontend 镜像使用本文件（构建上下文 = 仓库根，见 docker-compose.yml 的 frontend.build）。
+# 目的：让镜像内可读取 docs/OPEN_API_GUIDE.md（访问令牌页 ?raw 导入），同时把上下文压到最小。
+*
+!frontend
+!docs
+frontend/node_modules
+frontend/dist

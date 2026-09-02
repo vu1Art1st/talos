@@ -11,6 +11,7 @@ from app.api.v1 import (
     nonpen,
     notify,
     open_api,
+    open_plans,
     pats,
     remote_testing,
     reports,
@@ -37,6 +38,7 @@ api_router.include_router(nonpen.router)
 api_router.include_router(dashboard.router)
 api_router.include_router(pats.router)
 api_router.include_router(open_api.router)
+api_router.include_router(open_plans.router)
 api_router.include_router(audit.router)
 api_router.include_router(notify.router)
 api_router.include_router(misc.router)

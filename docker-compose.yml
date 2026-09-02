@@ -80,7 +80,9 @@ services:
 
   frontend:
     build:
-      context: ./frontend
+      # 上下文取仓库根：访问令牌页 ?raw 导入 docs/OPEN_API_GUIDE.md（见 frontend/Dockerfile 与根 .dockerignore）
+      context: .
+      dockerfile: frontend/Dockerfile
       args:
         NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
     restart: unless-stopped

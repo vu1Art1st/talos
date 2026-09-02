@@ -5,10 +5,8 @@
 - testing_plan_id 非空表示由测试计划联动创建：编辑公共字段双向同步，删除互相级联；
 - 不关联漏洞 / 报告 / 人天，保持扫描类业务逻辑独立（需求确认）。
 """
-import re
-
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, func, or_, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import require_perm
@@ -22,29 +20,9 @@ from app.schemas import (
     NonpenPlanOut,
     Page,
 )
-from app.services import nonpen_service, ticket_service
+from app.services import nonpen_service, plan_crud, plan_query
 
 router = APIRouter(tags=["漏扫基线工单"])
-
-
-def _search_condition(search: str):
-    """搜索：计划名称 / 测试系统 / 所属部门 / 工单ID（手动指定值，或 YYYYMMDD-N 自动编号的日期+序号组合）。"""
-    pat = f"%{search}%"
-    conds = [
-        NonpenPlan.plan_name.ilike(pat),
-        NonpenPlan.system_name.ilike(pat),
-        NonpenPlan.department.ilike(pat),
-        NonpenPlan.ticket_id_manual.ilike(pat),
-        NonpenPlan.receive_time.ilike(pat),
-        func.replace(NonpenPlan.receive_time, "-", "").ilike(pat),
-        func.cast(NonpenPlan.ticket_seq, String).ilike(pat),
-    ]
-    # 完整工单ID匹配：YYYYMMDD-N（如 20260810-3）→ 手动指定值本身，或自动编号的日期+当日序号组合
-    m = re.fullmatch(r"(\d{8})-(\d+)", search)
-    if m:
-        date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%"
-        conds.append(NonpenPlan.receive_time.like(date_like) & (NonpenPlan.ticket_seq == int(m.group(2))))
-    return or_(*conds)
 
 
 # 注意：/nonpen-plans/stats 需注册在 /nonpen-plans/{row_id} 之前，防止路径吞噬
@@ -71,7 +49,7 @@ async def list_nonpen_plans(
 ):
     cond = []
     if search:
-        cond.append(_search_condition(search))
+        cond.append(plan_query.nonpen_search_condition(search))
     stmt = select(NonpenPlan).where(*cond)
     stmt = apply_sort(
         stmt, NonpenPlan, sort, order,
@@ -94,15 +72,7 @@ async def create_nonpen_plan(
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    data = body.model_dump()
-    test_items = list(data.pop("test_items") or [])
-    row = NonpenPlan(**data, items=nonpen_service.build_items(test_items), creator_id=user.id)
-    await ticket_service.assign_ticket_seq(session, row)
-    await ticket_service.check_ticket_id_unique(session, row.ticket_id)
-    session.add(row)
-    await session.commit()
-    await session.refresh(row)
-    return row
+    return await plan_crud.create_nonpen(session, body.model_dump(), user)
 
 
 @router.get("/nonpen-plans/{row_id}", response_model=NonpenPlanOut)
@@ -123,25 +93,7 @@ async def update_nonpen_plan(
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
-    data = body.model_dump()
-    test_items = list(data.pop("test_items") or [])
-    for k, v in data.items():
-        setattr(row, k, v)
-    # 编辑仅合并勾选变化，保留未变化测试项的状态与次数（不重置）
-    row.items = nonpen_service.merge_items(row.items, test_items)
-    # 联动双方共享同一工单ID，唯一性校验需排除自身及来源测试计划
-    excludes = [(NonpenPlan, row.id)]
-    if row.testing_plan_id is not None:
-        excludes.append((TestingPlan, row.testing_plan_id))
-    await ticket_service.check_ticket_id_unique(session, row.ticket_id, exclude=excludes)
-    # 联动双向同步：编辑联动漏扫基线工单公共字段时，自动同步更新其来源测试计划
-    if row.testing_plan_id is not None:
-        source = await session.get(TestingPlan, row.testing_plan_id)
-        if source is not None:
-            nonpen_service.sync_linked_fields(row, source)
-    await session.commit()
-    await session.refresh(row)
-    return row
+    return await plan_crud.update_nonpen(session, row, body.model_dump())
 
 
 @router.delete("/nonpen-plans/{row_id}")

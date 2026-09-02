@@ -7,7 +7,7 @@ from openpyxl import load_workbook
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import NONPEN_ITEMS, PlanStatus, TESTING_PLAN_STATUS
+from app.constants import PlanStatus, TESTING_PLAN_STATUS
 from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.timeutil import mandays_between
@@ -24,7 +24,7 @@ from app.models import (
     Vul,
 )
 from app.schemas import CompleteNoVulnIn, Page, TestingPlanIn, TestingPlanOut
-from app.services import nonpen_service, plan_io, plan_query, plan_service, ticket_service, vuln_service
+from app.services import plan_crud, plan_io, plan_query, plan_service, vuln_service
 from app.services.audit_service import audit
 from app.services.notify_service import notify
 
@@ -215,74 +215,13 @@ async def get_testing_plan(
     return await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
 
 
-async def _assign_ticket_seq(session: AsyncSession, row: TestingPlan) -> None:
-    """按需求接收日期分配当日「最大编号+1」的录入次序（ticket_seq）。
-
-    委托给 ticket_service.assign_ticket_seq：与测试计划同源的工单ID分配逻辑，
-    现为测试计划 / 漏扫基线工单两表共享同一当日序号序列（见 services/ticket_service.py）。
-    """
-    await ticket_service.assign_ticket_seq(session, row)
-
-
-async def _check_ticket_id_unique(
-    session: AsyncSession, ticket_id: str, exclude_id: int | None = None,
-    linked_nonpen_ids: list[int] | None = None,
-) -> None:
-    """校验工单ID唯一性：与「显示编号」口径一致——手动指定值本身，或纯自动记录
-    （ticket_id_manual 为空）由 receive_time+ticket_seq 生成的值，均不得与其他记录重复。
-
-    委托给 ticket_service.check_ticket_id_unique：现为测试计划 / 漏扫基线工单两表全局唯一。
-    排除自身及联动创建的非渗透记录（联动双方共享同一工单ID，须相互排除）。
-    """
-    excludes = [(TestingPlan, exclude_id)] if exclude_id is not None else []
-    for nid in (linked_nonpen_ids or []):
-        excludes.append((NonpenPlan, nid))
-    await ticket_service.check_ticket_id_unique(
-        session, ticket_id, exclude=excludes or None,
-    )
-
-
 @router.post("/testing-plans", response_model=TestingPlanOut)
 async def create_testing_plan(
     body: TestingPlanIn,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    data = body.model_dump()
-    create_nonpen = bool(data.pop("create_nonpen", False))
-    nonpen_test_items = list(data.pop("nonpen_test_items") or [])
-    row = TestingPlan(**data, creator_id=user.id)
-    await _assign_ticket_seq(session, row)
-    await _check_ticket_id_unique(session, row.ticket_id)
-    session.add(row)
-    # 勾选「创建漏扫基线工单」：同一工单联动生成漏扫基线工单（共享工单ID与接收日期）
-    if create_nonpen:
-        if not nonpen_test_items:
-            raise HTTPException(400, "已勾选「创建漏扫基线工单」，请至少选择一个非渗透测试项")
-        for k in nonpen_test_items:
-            if k not in NONPEN_ITEMS:
-                raise HTTPException(400, f"不支持的测试项：{k}")
-        if not row.receive_time and not row.ticket_id_manual:
-            raise HTTPException(400, "已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID")
-        await session.flush()  # 先持久化测试计划拿到 id，供非渗透记录引用
-        session.add(NonpenPlan(
-            plan_name=row.plan_name,
-            system_name=row.system_name,
-            test_type=row.test_type,
-            department=row.department,
-            ticket_time=row.ticket_time,
-            receive_time=row.receive_time,
-            ticket_seq=row.ticket_seq,  # 混合工单：非渗透复用测试计划的当日序号
-            ticket_id_manual=row.ticket_id_manual,
-            asset_ids=list(row.asset_ids or []),
-            items=nonpen_service.build_items(nonpen_test_items),
-            testing_plan_id=row.id,  # 标记联动来源，用于双向同步与级联删除
-            detail=row.detail,
-            creator_id=user.id,
-        ))
-    await session.commit()
-    await session.refresh(row)
-    return row
+    return await plan_crud.create_plan(session, body.model_dump(), user)
 
 
 @router.post("/testing-plans/{row_id}/claim", response_model=TestingPlanOut)
@@ -491,51 +430,8 @@ async def update_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
-    old_status = row.status
-    if body.status != row.status and not plan_service.can_operate(user, row):
-        raise HTTPException(403, "仅认领者或管理员可修改测试状态")
-    # 校验状态流转合法性（仅当状态有变化时）
-    if body.status != row.status and not vuln_service.can_plan_transition(row.status, body.status):
-        raise HTTPException(400, f"不允许从当前状态流转到目标状态")
-    # 编辑页直接流转为「测试通过」时，同样要求计划无关联漏洞（与无漏洞完结接口口径一致）
-    if body.status == PlanStatus.PASSED and row.status != PlanStatus.PASSED:
-        vul_count = (
-            await session.execute(
-                select(func.count(Vul.id)).where(Vul.testing_plan_id == row_id)
-            )
-        ).scalar_one()
-        if vul_count:
-            raise HTTPException(400, "该计划存在关联漏洞，不能流转为「测试通过」")
-    # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
-    if body.status == 50 and row.status != 50:
-        plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
-    data = body.model_dump()
-    # 联动相关字段仅创建时生效：编辑不回写 create_nonpen 勾选，也不存在 nonpen_test_items 列
-    data.pop("create_nonpen", None)
-    data.pop("nonpen_test_items", None)
-    for k, v in data.items():
-        setattr(row, k, v)
-    # 补生成工单ID序号（历史/导入数据无序号时自动补齐）
-    await _assign_ticket_seq(session, row)
-    # 联动漏扫基线工单：编辑测试计划公共字段时双向同步；联动双方共享同一工单ID，唯一性校验需相互排除
-    linked = (await session.execute(
-        select(NonpenPlan).where(NonpenPlan.testing_plan_id == row.id)
-    )).scalars().all()
-    # 保存前校验工单ID唯一性（手动指定值或自动生成值均不可重复）
-    await _check_ticket_id_unique(
-        session, row.ticket_id, exclude_id=row.id,
-        linked_nonpen_ids=[np.id for np in linked],
-    )
-    # 有关联漏洞时统计以自动重算为准，覆盖手填值
-    if row.vuls:
-        await plan_service.refresh_stats(session, row.id)
-    # 有关联初测报告时实际人天自动计算（仅纳入初测报告，复测报告不计入）
-    await plan_service.refresh_mandays(session, row.id)
-    # 联动双向同步：编辑测试计划公共字段时，自动同步更新其联动的漏扫基线工单
-    for np in linked:
-        nonpen_service.sync_linked_fields(row, np)
-    await session.commit()
-    await session.refresh(row)
+    # 写入核心逻辑与开放 API 共用（services/plan_crud.update_plan），返回更新前状态供审计
+    row, old_status = await plan_crud.update_plan(session, row, body.model_dump(), user)
     if body.status != old_status:
         await audit(session, request, "plan_transition", user, {
             "target": f"testing-plans/{row_id}", "system": row.system_name,
