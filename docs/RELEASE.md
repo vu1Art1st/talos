@@ -25,6 +25,23 @@
 
 ---
 
+## [2.11.1] - 2026-09-09
+
+修复报告导入后漏洞与章节顺序与原报告不一致的问题（章节导航乱序）。
+
+### 修复
+
+- **导入章节乱序（根因）**（`backend/app/services/import_service.py`）：确认入库的解析记录查询此前无 `ORDER BY`，生产 PostgreSQL 返回顺序不定，导致章节 `order` 按乱序写入——报告编辑页「章节导航」与导出 Word 章节顺序与原报告不一致。现严格按解析序号 `ImportRecord.seq`（文档顺序）处理，SQLite 开发环境行为不变
+- **漏洞列表默认顺序不稳定**（`backend/app/api/v1/vulns.py`）：默认排序仅 `submit_time` 倒序、无同值兜底；报告格式导入的漏洞提交时间全部相同（报告日期 14:00），顺序由数据库物理顺序决定。现默认排序补 `id` 升序兜底，同批次漏洞按原报告序号稳定展示
+- **存量数据修复脚本**（`backend/scripts/repair_report_section_order.py`）：按 `import_records.vul_id → seq` 重排历史导入报告的章节顺序（幂等，支持 `--dry-run`），修复已升级生产环境的乱序报告
+
+### 变更
+
+- **全站分页页长选项**（`frontend/src/components/TlPagination.vue`）：页长选项由 `[20,50,100]` 扩展为 `[10,15,20,50,100]`
+- **侧栏折叠与主区宽度**（`frontend/src/layouts/MainLayout.vue`）：折叠切换改为单按钮按状态切换图标（避免折叠态双图标）；主内容区最大宽度由 1400px 提升至 1920px 封顶居中，≥1536px 时内边距同步放大（MASTER.md 6.2）
+
+---
+
 ## [2.11.0] - 2026-09-03
 
 开放 API 新增工单读写（渗透测试工单 / 漏扫基线工单），与站内口径一致。

@@ -45,7 +45,7 @@ async def load_parsed_records(
     stmt = select(ImportRecord).where(
         ImportRecord.batch_id == batch_id,
         ImportRecord.status == "parsed",
-    )
+    ).order_by(ImportRecord.seq, ImportRecord.id)  # 按文档序号处理，保证章节/漏洞顺序与原报告一致（PG 无默认顺序）
     if record_ids:
         stmt = stmt.where(ImportRecord.id.in_(record_ids))
     records = (await session.execute(stmt)).scalars().all()

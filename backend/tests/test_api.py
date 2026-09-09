@@ -1359,6 +1359,38 @@ async def test_import_report_public_urls_and_doc_time(client: AsyncClient, auth:
     assert cells[0] == "2026-07-15", cells
 
 
+async def test_import_report_section_and_list_order(client: AsyncClient, auth: dict):
+    """导入报告章节顺序：确认入库按解析序号处理，报告章节 order、章节导航渲染顺序
+    与 /vulns 默认视图顺序均与原报告序号一致（回归：PG 下无序处理导致章节乱序）。"""
+    system_name = "章节顺序系统SX"
+    titles = [f"章节顺序漏洞SX{i:02d}" for i in range(1, 6)]
+    doc = _build_report_docx(
+        system_name, "http://10.40.40.40/sx", "10.40.40.40",
+        sections=[(t, "高危", "逻辑漏洞", False) for t in titles],
+    )
+    filename = "20260720章节顺序系统SX渗透测试报告.docx"
+    records, _ = await _import_report(client, auth, filename, doc)
+    # 解析记录本身按文档序号返回
+    assert [r["title"] for r in records] == titles
+
+    # 报告章节 order 与解析 seq 严格一致（章节导航按 order 渲染）
+    resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
+    report = [r for r in resp.json()["items"] if r["project_name"] == system_name][0]
+    detail = (await client.get(f"/api/v1/reports/{report['id']}", headers=auth)).json()
+    sections = sorted(detail["sections"], key=lambda s: s["order"])
+    assert [s["title"] for s in sections] == titles
+    assert [s["order"] for s in sections] == list(range(len(titles)))
+
+    # /vulns 默认视图（不传 sort）：同 submit_time 批次按 id 升序 = 原报告序号
+    plan_id = report["testing_plan_id"]
+    resp = await client.get(
+        "/api/v1/vulns", headers=auth, params={"testing_plan_id": plan_id, "size": 50},
+    )
+    items = resp.json()["items"]
+    assert len(items) == len(titles)
+    assert [v["title"] for v in items] == titles
+
+
 async def test_special_modules_crud(client: AsyncClient, auth: dict):
     """三个专项模块：远程检测 / 测试计划 / 春耕行动 CRUD。"""
     # ---- 远程检测（2026-08-14 按通报口径重构：申诉报告改为附件上传） ----

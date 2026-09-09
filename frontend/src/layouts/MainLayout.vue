@@ -80,13 +80,11 @@
         </template>
       </nav>
 
-      <!-- 底部：折叠切换 -->
+      <!-- 底部：折叠切换（单按钮，按状态切换图标，避免折叠态出现双图标） -->
       <div class="tl-side-foot flex-none">
-        <button class="nav-item" @click="collapsed = !collapsed">
-          <el-icon :size="15"><Fold /></el-icon><span v-if="!collapsed">收起侧栏</span>
-        </button>
-        <button v-if="collapsed" class="nav-item justify-center" title="展开侧栏" @click="collapsed = !collapsed">
-          <el-icon :size="15"><Expand /></el-icon>
+        <button class="nav-item" :class="{ 'justify-center': collapsed }"
+                :title="collapsed ? '展开侧栏' : undefined" @click="collapsed = !collapsed">
+          <el-icon :size="15"><Expand v-if="collapsed" /><Fold v-else /></el-icon><span v-if="!collapsed">收起侧栏</span>
         </button>
       </div>
     </el-aside>
@@ -122,7 +120,7 @@
       </el-header>
 
       <el-main class="tl-main overflow-auto">
-        <div class="max-w-[1400px] mx-auto w-full">
+        <div class="max-w-[1920px] mx-auto w-full">
           <!-- 视图多为多根节点（Fragment），transition 需单元素根，故用带 key 的 div 包裹 -->
           <router-view v-slot="{ Component, route: r }">
             <transition name="fade-slide" mode="out-in">
@@ -357,7 +355,8 @@ async function changePassword() {
 }
 .icon-btn:hover { border-color: var(--tl-border-strong); color: var(--tl-text-1); }
 
-/* 主区：20/28/48 + 最大 1400px 居中 */
+/* 主区：20/28/48，≥1536px 提升 24/32/48；内容 1920px 封顶居中（MASTER.md 6.2） */
 .tl-main { padding: 20px 28px 48px; }
+@media (min-width: 1536px) { .tl-main { padding: 24px 32px 48px; } }
 @media (max-width: 1023px) { .tl-main { padding: 16px 16px 40px; } }
 </style>

@@ -273,7 +273,9 @@ async def list_vulns(
         stmt = apply_sort(
             stmt, Vul, sort, order,
             {"id", "title", "level", "vul_type", "status", "submit_time"},
-            Vul.submit_time.desc(),
+            # 默认视图：提交时间倒序 + id 升序兜底——报告导入的漏洞 submit_time 相同
+            # （均为报告日期 14:00），id 升序保证同批次按原报告序号稳定展示
+            (Vul.submit_time.desc(), Vul.id.asc()),
         )
     total, vulns = await paginate(session, stmt, page, size)
     return Page(total=total, items=[build_vul_out(v) for v in vulns])
