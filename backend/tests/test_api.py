@@ -1393,6 +1393,13 @@ async def test_import_report_section_and_list_order(client: AsyncClient, auth: d
     assert len(items) == len(titles)
     assert [v["title"] for v in items] == titles
 
+    # 导入序号映射 {vul_id: seq}：漏洞 id 顺序与 seq 顺序一致，供流程抽屉同等级内按原报告序号排序
+    resp = await client.get(f"/api/v1/testing-plans/{plan_id}/vuln-order", headers=auth)
+    assert resp.status_code == 200, resp.text
+    order_map = resp.json()
+    assert len(order_map) == len(titles)
+    assert [order_map[str(v["id"])] for v in items] == list(range(1, len(titles) + 1))
+
 
 async def test_special_modules_crud(client: AsyncClient, auth: dict):
     """三个专项模块：远程检测 / 测试计划 / 春耕行动 CRUD。"""

@@ -15,6 +15,7 @@ from app.core.timeutil import now as tznow
 from app.core.xlsx import xlsx_response
 from app.db import get_session
 from app.models import (
+    ImportRecord,
     Message,
     NonpenPlan,
     Report,
@@ -213,6 +214,34 @@ async def get_testing_plan(
 ):
     """单条计划详情（含测试人员/关联漏洞/关联报告/复测轮次），供流程抽屉刷新。"""
     return await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+
+
+@router.get("/testing-plans/{row_id}/vuln-order")
+async def get_plan_vuln_order(
+    row_id: int,
+    _: User = Depends(require_perm("special:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """工单关联漏洞的导入解析序号映射 {vul_id: seq}，供流程抽屉同等级内按原报告序号排序。
+
+    历史批次（修复前生产 PostgreSQL 无序处理）漏洞 id 与原报告序号错位且不可回改，
+    排序纠偏依赖此映射：取漏洞在各导入批次中的最小解析序号（首次导入顺序）；
+    非 Word 导入的漏洞无映射，前端回退 submit_time / id 兜底。
+    """
+    await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    vul_ids = (
+        await session.execute(select(Vul.id).where(Vul.testing_plan_id == row_id))
+    ).scalars().all()
+    if not vul_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(ImportRecord.vul_id, func.min(ImportRecord.seq))
+            .where(ImportRecord.vul_id.in_(vul_ids))
+            .group_by(ImportRecord.vul_id)
+        )
+    ).all()
+    return {str(vul_id): seq for vul_id, seq in rows if vul_id is not None}
 
 
 @router.post("/testing-plans", response_model=TestingPlanOut)

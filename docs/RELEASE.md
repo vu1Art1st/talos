@@ -25,6 +25,23 @@
 
 ---
 
+## [2.12.1] - 2026-09-09
+
+修复渗透测试工单流程抽屉中历史导入漏洞排序与原报告序号不一致的问题。
+
+### 修复
+
+- **流程抽屉历史漏洞排序错乱**：工单流程「漏洞」列表按 `level + submit_time + id` 排序，历史导入漏洞（2.11.1 修复前生产 PostgreSQL 无序处理入库）`submit_time` 全同（报告日期 14:00）、id 已按错位顺序生成且不可回改，同等级内顺序仍乱。现新增导入解析序号纠偏，无需改动存量数据：
+  - **后端**（`backend/app/api/v1/testing_plan.py`）：新增 `GET /testing-plans/{row_id}/vuln-order`，返回工单关联漏洞的导入解析序号映射 `{vul_id: seq}`（取各漏洞在导入批次中的最小 `seq` 即首次导入顺序）
+  - **前端**（`frontend/src/components/PlanWorkflowDrawer.vue` + 新增 `frontend/src/utils/vulnOrder.ts`）：流程抽屉同等级内优先按导入序号（原报告序号）排序，非导入漏洞回退录入时间 / id 兜底（原行为）
+
+### 测试
+
+- `backend/tests/test_api.py`：导入报告后断言 `vuln-order` 映射的 seq 顺序与漏洞 id 顺序一致
+- `frontend/src/utils/__tests__/vulnOrder.spec.ts`：等级分组 / seq 纠偏 / 无映射兜底 / 混合场景 5 个用例
+
+---
+
 ## [2.12.0] - 2026-09-09
 
 审计日志与漏洞操作日志显示用户姓名（realname），详情页与报告编辑页滚动分离及章节导航快捷定位。
