@@ -36,7 +36,7 @@ from app.schemas import (
     VulUpdateIn,
 )
 from app.services import plan_service, vuln_service
-from app.services.audit_service import audit
+from app.services.audit_service import audit, resolve_realnames
 from app.services.notify_service import notify
 
 router = APIRouter(prefix="/vulns", tags=["漏洞"])
@@ -834,7 +834,14 @@ async def vuln_logs(
             select(VulLog).where(VulLog.vul_id == vul_id).order_by(VulLog.create_time.desc())
         )
     ).scalars().all()
-    return logs
+    # 展示名：优先用户姓名，未设置由前端回退 username（user_id 命中优先、username 兜底）
+    by_id, by_name = await resolve_realnames(session, logs)
+    result: list[VulLogOut] = []
+    for l in logs:
+        o = VulLogOut.model_validate(l)
+        o.realname = by_id.get(l.user_id) or by_name.get(l.username, "")
+        result.append(o)
+    return result
 
 
 # ---------- 复测记录（复测处理页） ----------

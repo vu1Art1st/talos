@@ -13,6 +13,8 @@ class OperationLogOut(BaseModel):
     id: int
     user_id: int | None = None
     username: str = ""
+    # 展示名：优先用户姓名（realname），未设置由调用方回退 username（端点批量解析填充）
+    realname: str = ""
     action: str = ""
     detail: str = ""
     ip: str = ""

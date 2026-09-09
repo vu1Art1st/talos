@@ -12,6 +12,7 @@ from app.core.timeutil import parse_date
 from app.db import get_session
 from app.models import OperationLog, User
 from app.schemas import OperationLogOut, Page
+from app.services.audit_service import resolve_realnames
 
 router = APIRouter(prefix="/audit", tags=["审计日志"])
 
@@ -61,4 +62,11 @@ async def list_logs(
         OperationLog.id.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
-    return Page(total=total, items=[OperationLogOut.model_validate(i) for i in items])
+    # 展示名：优先用户姓名，未设置由前端回退 username（user_id 命中优先、username 兜底）
+    by_id, by_name = await resolve_realnames(session, items)
+    out: list[OperationLogOut] = []
+    for i in items:
+        o = OperationLogOut.model_validate(i)
+        o.realname = by_id.get(i.user_id) or by_name.get(i.username, "")
+        out.append(o)
+    return Page(total=total, items=out)

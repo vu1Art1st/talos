@@ -3,13 +3,36 @@ import json
 import logging
 
 from fastapi import Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_info import get_client_ip, get_user_agent
 from app.core.timeutil import now
-from app.models import OperationLog
+from app.models import OperationLog, User
 
 logger = logging.getLogger(__name__)
+
+
+async def resolve_realnames(
+    session: AsyncSession, items: list,
+) -> tuple[dict[int, str], dict[str, str]]:
+    """为日志记录（OperationLog / VulLog）批量解析用户姓名（realname）。
+
+    返回 ({user_id: realname}, {username: realname}) 两个映射，调用方按
+    user_id 命中优先、username 兜底（覆盖登录失败等 user_id 为空的记录）；
+    未设置姓名的返回空串，展示层回退用户名。
+    """
+    user_ids = {i.user_id for i in items if getattr(i, "user_id", None)}
+    usernames = {i.username for i in items if getattr(i, "username", "")}
+    by_id: dict[int, str] = {}
+    by_name: dict[str, str] = {}
+    if user_ids:
+        for u in (await session.execute(select(User).where(User.id.in_(user_ids)))).scalars():
+            by_id[u.id] = u.realname or ""
+    if usernames:
+        for u in (await session.execute(select(User).where(User.username.in_(usernames)))).scalars():
+            by_name[u.username] = u.realname or ""
+    return by_id, by_name
 
 
 async def audit(

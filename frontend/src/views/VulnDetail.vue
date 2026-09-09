@@ -1,6 +1,7 @@
 <template>
-  <div v-if="vul" class="grid grid-cols-1 xl:grid-cols-[1fr_320px] gap-4">
-    <div class="space-y-4">
+  <!-- 正文与侧栏滚动分离：页面整体不滚动，左侧正文/右侧（状态流转+操作日志）各自独立滚动 -->
+  <div v-if="vul" class="flex h-full min-h-0 flex-col xl:flex-row gap-4">
+    <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
       <el-card shadow="never">
         <div class="flex items-start justify-between gap-4">
           <div>
@@ -60,7 +61,7 @@
       </el-card>
     </div>
 
-    <div class="space-y-4">
+    <div class="space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto xl:w-[320px] xl:shrink-0">
       <el-card v-if="auth.hasPerm('vuln:audit')" shadow="never">
         <template #header>状态流转</template>
         <el-empty v-if="!transitions.length" description="当前状态没有可执行的流转" :image-size="80" />
@@ -80,7 +81,7 @@
         <template #header>操作日志</template>
         <el-timeline class="!pl-1">
           <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmtDateTime(log.create_time)" size="small">
-            <div class="text-sm"><b>{{ log.username }}</b> {{ log.action }}</div>
+            <div class="text-sm"><b>{{ log.realname || log.username }}</b> {{ log.action }}</div>
             <div v-if="log.content" class="text-xs text-gray-400 mt-0.5">{{ log.content }}</div>
           </el-timeline-item>
         </el-timeline>

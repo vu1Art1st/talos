@@ -141,11 +141,14 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
     resp = await client.get(f"/api/v1/vulns/{vul_id}/transitions", headers=auth)
     assert {t["status"] for t in resp.json()} == {10, 55}
 
-    # 日志包含创建与状态流转
+    # 日志包含创建与状态流转；展示名优先用户姓名（admin 姓名为「管理员」）
     resp = await client.get(f"/api/v1/vulns/{vul_id}/logs", headers=auth)
-    actions = [log["action"] for log in resp.json()]
+    logs = resp.json()
+    actions = [log["action"] for log in logs]
     assert "创建漏洞" in actions
     assert len(actions) >= 2
+    assert all("realname" in log for log in logs)
+    assert any(log["realname"] == "管理员" for log in logs)
 
 
 async def test_vuln_batch_create(client: AsyncClient, auth: dict):
@@ -3292,12 +3295,19 @@ async def test_audit_login_and_operation(client: AsyncClient, auth: dict):
     assert "login_success" in actions and "login_failure" in actions
     sample = logs["items"][0]
     assert sample["username"] and sample["ip"] != "" and sample["create_time"]
+    # 展示名：admin 设置了姓名，登录成功记录应返回 realname
+    succ = next(i for i in logs["items"] if i["action"] == "login_success")
+    assert succ["realname"] == "管理员"
 
     # 操作日志：建漏洞 → vuln_create
     await client.post("/api/v1/vulns", headers=auth, json={"title": "审计测试漏洞", "level": 30})
     resp = await client.get("/api/v1/audit/logs", headers=auth, params={"category": "operation", "size": 50})
-    actions = {i["action"] for i in resp.json()["items"]}
+    items = resp.json()["items"]
+    actions = {i["action"] for i in items}
     assert "vuln_create" in actions
+    # 操作人姓名解析（user_id 命中优先）
+    op = next(i for i in items if i["action"] == "vuln_create")
+    assert op["realname"] == "管理员"
 
     # 筛选：按动作精确定位
     resp = await client.get("/api/v1/audit/logs", headers=auth, params={"action": "login_failure"})

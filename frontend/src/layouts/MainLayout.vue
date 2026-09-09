@@ -120,7 +120,8 @@
       </el-header>
 
       <el-main class="tl-main overflow-auto">
-        <div class="max-w-[1920px] mx-auto w-full">
+        <!-- h-full：撑满 el-main，使声明了 h-full 的视图（报告编辑/漏洞编辑/详情）正文与侧栏可各自独立滚动 -->
+        <div class="max-w-[1920px] mx-auto w-full h-full">
           <!-- 视图多为多根节点（Fragment），transition 需单元素根，故用带 key 的 div 包裹 -->
           <router-view v-slot="{ Component, route: r }">
             <transition name="fade-slide" mode="out-in">

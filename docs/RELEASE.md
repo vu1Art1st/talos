@@ -25,6 +25,22 @@
 
 ---
 
+## [2.12.0] - 2026-09-09
+
+审计日志与漏洞操作日志显示用户姓名（realname），详情页与报告编辑页滚动分离及章节导航快捷定位。
+
+### 新增
+
+- **日志展示名（realname）**：`OperationLogOut` / `VulLogOut` 新增 `realname` 字段；`audit_service` 新增 `resolve_realnames` 批量按 `user_id`（优先）/ `username`（兜底，覆盖登录失败等 `user_id` 为空记录）解析用户姓名；`audit.list_logs` 与 `vulns.vuln_logs` 填充 `realname`，未设置时前端回退用户名（`AuditLog.vue`、`VulnDetail.vue` 操作日志）
+- **详情页滚动分离**（`frontend/src/views/VulnDetail.vue`、`MainLayout.vue`）：漏洞详情改为正文与右侧（状态流转 + 操作日志）各自独立滚动（`h-full` 撑满主区），页面整体不再随内容滚动；主区容器补 `h-full`
+- **报告编辑章节导航快捷定位**（`frontend/src/views/ReportEditor.vue`）：章节导航头部新增「滚动到顶部 / 底部」按钮，一键平滑滚动正文区（`contentScrollRef`）
+
+### 测试
+
+- `backend/tests/test_api.py`：审计 / 漏洞日志断言 `realname` 存在，且 admin（姓名「管理员」）记录正确返回 `realname`
+
+---
+
 ## [2.11.1] - 2026-09-09
 
 修复报告导入后漏洞与章节顺序与原报告不一致的问题（章节导航乱序）。

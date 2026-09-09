@@ -29,7 +29,7 @@
         <template #default="{ row }"><span class="num">{{ fmtDateTime(row.create_time) }}</span></template>
       </el-table-column>
       <el-table-column prop="username" label="用户" width="120">
-        <template #default="{ row }">{{ row.username || '-' }}</template>
+        <template #default="{ row }">{{ row.realname || row.username || '-' }}</template>
       </el-table-column>
       <el-table-column prop="action" label="动作" width="130" sortable="custom">
         <template #default="{ row }">

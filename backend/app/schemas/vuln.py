@@ -129,6 +129,8 @@ class VulLogOut(BaseModel):
 
     id: int
     username: str = ""
+    # 展示名：优先用户姓名（realname），未设置由调用方回退 username（端点批量解析填充）
+    realname: str = ""
     action: str = ""
     content: str = ""
     create_time: datetime | None = None

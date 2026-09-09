@@ -1,7 +1,7 @@
 <template>
   <!-- 需求4：小屏内容滚动与页面滚动分离 —— 页面整体不滚动，内容区/侧栏各自滚动 -->
   <div v-if="report" class="flex h-full min-h-0 flex-col xl:flex-row gap-4">
-    <div class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+    <div ref="contentScrollRef" class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
       <el-card shadow="never">
         <template #header>
           <div class="flex items-center justify-between">
@@ -110,7 +110,24 @@
     <div class="xl:w-[300px] xl:shrink-0 space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
       <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
       <el-card shadow="never">
-        <template #header>章节导航</template>
+        <template #header>
+          <div class="flex items-center justify-between">
+            <span>章节导航</span>
+            <!-- 快速定位：一键滚动正文区到页面顶部/底部 -->
+            <div class="flex items-center gap-0.5">
+              <el-tooltip content="滚动到顶部" placement="top">
+                <el-button link size="small" class="!px-1" @click="scrollContentTo('top')">
+                  <el-icon><ArrowUp /></el-icon>
+                </el-button>
+              </el-tooltip>
+              <el-tooltip content="滚动到底部" placement="top">
+                <el-button link size="small" class="!px-1" @click="scrollContentTo('bottom')">
+                  <el-icon><ArrowDown /></el-icon>
+                </el-button>
+              </el-tooltip>
+            </div>
+          </div>
+        </template>
         <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="80" />
         <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
           <template v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`">
@@ -208,6 +225,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
@@ -316,6 +334,15 @@ function scrollToSection(i: number) {
   if (suppressClick) { suppressClick = false; return }
   activeSection.value = i
   document.getElementById(`section-${i}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// 章节导航快速定位：正文滚动区一键滚到顶部/底部
+const contentScrollRef = ref<HTMLElement | null>(null)
+
+function scrollContentTo(pos: 'top' | 'bottom') {
+  const el = contentScrollRef.value
+  if (!el) return
+  el.scrollTo({ top: pos === 'top' ? 0 : el.scrollHeight, behavior: 'smooth' })
 }
 
 function onDragStart(i: number, e: DragEvent) {
