@@ -28,6 +28,7 @@ from pygments.token import Token
 from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow  # 系统本地时间（UTC+8）；别名避免遮蔽模块内局部变量 now
+from app.services.report_html import RETEST_LABEL_HTML, strip_embedded_retest
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
 _IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc="([^"]+)"', re.IGNORECASE)
@@ -803,7 +804,10 @@ def _append_details(
     for section in sections:
         vul = by_id.get(section.get("vul_id"))
         title = section.get("title") or "未命名章节"
-        content_html = section.get("content_html", "")
+        retest = (vul or {}).get("retest_html", "")
+        # 复测详情以漏洞字段为唯一权威：先剥离章节快照中历史内嵌的复测详情段（避免同一内容
+        # 在正文尾部与复测面板重复），再在正文末尾统一追加一次，保证导出始终反映最新复测内容
+        content_html = strip_embedded_retest(section.get("content_html", ""), retest)
         if vul is not None:
             # 测试状态：按漏洞最新 is_retest 重写快照（复测未通过也属于复测）
             state = "复测" if vul.get("is_retest") else "初测"
@@ -822,10 +826,9 @@ def _append_details(
         doc.add_paragraph(title, style="Heading 3")
         body_start = len(doc.paragraphs)
         _add_html(doc, content_html)
-        # 章节快照未含复测详情时，追加漏洞最新复测内容（避免与生成时嵌入的快照重复）
-        retest = (vul or {}).get("retest_html", "")
-        if retest and "复测详情" not in (content_html or ""):
-            _add_html(doc, f"<p><strong>复测详情：</strong></p>{retest}")
+        # 复测详情统一在正文末尾追加一次（章节快照中的历史内嵌段已在上方剥离）
+        if retest:
+            _add_html(doc, f"{RETEST_LABEL_HTML}{retest}")
         _apply_field_spacing(doc, body_start)
 
 

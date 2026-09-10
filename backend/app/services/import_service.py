@@ -377,10 +377,17 @@ async def confirm_one_record(
         session.add(vul)
         await session.flush()
         is_new = True
+    log_content = f"来源批次 #{batch.id}（{batch.filename}）"
+    if rec.level_mismatch:
+        # 汇总表与详情等级不一致时以详情为准，写入日志便于追溯误判修复过程
+        log_content += (
+            f"；风险问题详情等级「{rec.level_detail_text}」与汇总表「{rec.level_summary_text}」"
+            f"不一致，已采用详情等级"
+        )
     session.add(VulLog(
         vul_id=vul.id, user_id=user.id, username=user.username,
         action="Word导入创建" if is_new else "Word导入复测更新",
-        content=f"来源批次 #{batch.id}（{batch.filename}）",
+        content=log_content,
     ))
     rec.status = "confirmed"
     rec.vul_id = vul.id

@@ -25,6 +25,17 @@
       <el-button type="primary" :loading="submitting" @click="submit">确认入库</el-button>
     </template>
   </el-dialog>
+
+  <!-- 等级不一致：批量入库前强制确认一次（明细见 ImportLevelMismatchDialog） -->
+  <ImportLevelMismatchDialog
+    v-model="mismatchVisible"
+    :items="mismatchItems"
+    show-batch
+    confirm-text="确认入库"
+    cancel-text="返回核对"
+    :loading="submitting"
+    @confirm="onMismatchConfirm"
+  />
 </template>
 
 <script lang="ts">
@@ -40,6 +51,7 @@ export interface BatchConfirmResult {
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import client from '../api/client'
+import ImportLevelMismatchDialog from './ImportLevelMismatchDialog.vue'
 import { usePlanAssetLink } from '../composables/usePlanAssetLink'
 
 const props = defineProps<{
@@ -54,6 +66,9 @@ const emit = defineEmits<{
 const plans = ref<any[]>([])
 const assets = ref<any[]>([])
 const submitting = ref(false)
+// 等级不一致提醒：批量入库前先检查并强制确认一次
+const mismatchItems = ref<any[]>([])
+const mismatchVisible = ref(false)
 const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
   () => plans.value,
   () => assets.value,
@@ -71,17 +86,40 @@ async function loadOptions() {
 
 async function submit() {
   if (!props.batchIds.length || submitting.value) return
+  // 入库前先检查等级不一致记录；命中则弹窗强制确认一次后再入库
   submitting.value = true
   try {
-    const { data } = await client.post('/imports/batch-confirm', {
-      batch_ids: props.batchIds,
-      testing_plan_id: planId.value,
-      asset_id: assetId.value,
+    const { data } = await client.get('/imports/level-mismatches', {
+      params: { batch_ids: props.batchIds.join(',') },
     })
-    emit('success', data as BatchConfirmResult)
+    if (data.length) {
+      mismatchItems.value = data
+      mismatchVisible.value = true
+      return
+    }
+    await doSubmit()
   } finally {
     submitting.value = false
   }
+}
+
+async function onMismatchConfirm() {
+  mismatchVisible.value = false
+  submitting.value = true
+  try {
+    await doSubmit()
+  } finally {
+    submitting.value = false
+  }
+}
+
+async function doSubmit() {
+  const { data } = await client.post('/imports/batch-confirm', {
+    batch_ids: props.batchIds,
+    testing_plan_id: planId.value,
+    asset_id: assetId.value,
+  })
+  emit('success', data as BatchConfirmResult)
 }
 
 watch(

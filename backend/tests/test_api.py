@@ -2889,8 +2889,13 @@ async def test_create_retest_record_with_status(client: AsyncClient, auth: dict)
     assert vul2_detail["is_retest"] is True
 
 
-async def test_report_section_contains_retest(client: AsyncClient, auth: dict):
-    """含复测内容的漏洞生成报告：章节 content_html 嵌入复测详情。"""
+async def test_report_section_excludes_retest(client: AsyncClient, auth: dict):
+    """含复测内容的漏洞生成报告：章节快照不再内嵌复测详情。
+
+    回归：内嵌快照会与复测详情面板重复展示，且快照不随复测更新——导出时还会因
+    「正文已含复测详情」跳过追加最新内容。复测详情以漏洞字段为唯一权威来源，
+    由导出流程统一追加一次。
+    """
     resp = await client.post(
         "/api/v1/vulns", headers=auth, json={"title": "报告复测漏洞", "level": 20},
     )
@@ -2907,8 +2912,10 @@ async def test_report_section_contains_retest(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 200, resp.text
     section = resp.json()["sections"][0]
-    assert "复测详情" in section["content_html"]
-    assert "复测发现仍可利用" in section["content_html"]
+    assert "复测详情" not in section["content_html"]
+
+    detail = (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()
+    assert "复测发现仍可利用" in detail["retest_html"]
 
 
 async def test_knowledge_crud_and_from_vul(client: AsyncClient, auth: dict):
@@ -3706,6 +3713,66 @@ async def test_batch_confirm_chrono_order(client: AsyncClient, auth: dict):
     # 同一工单同一标题应去重合并为一条漏洞，最终状态为「已修复」(60)
     vul = await _find_vuln(client, auth, "XSS时序漏洞")
     assert vul["status"] == 60, f"期望已修复(60)，实际 {vul['status']}"
+
+
+async def test_import_level_mismatch_notice(client: AsyncClient, auth: dict):
+    """风险问题汇总与风险问题详情等级不一致：入库取详情等级并暴露提醒明细。
+
+    回归：旧实现只认汇总表，详情同行写法（「漏洞等级：高危」）被整体丢弃，
+    匹配失败时静默回落中危，导致漏洞等级误判。
+    """
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("风险问题汇总", level=1)
+    table = doc.add_table(rows=2, cols=4)
+    for i, h in enumerate(("问题等级", "风险类型", "风险问题", "修复状态")):
+        table.rows[0].cells[i].text = h
+    table.rows[1].cells[0].text = "中危"
+    table.rows[1].cells[1].text = "越权"
+    table.rows[1].cells[2].text = "平行越权访问项目信息"
+    table.rows[1].cells[3].text = "未修复"
+    doc.add_heading("风险问题详情", level=1)
+    doc.add_heading("平行越权访问项目信息（未修复）", level=3)
+    doc.add_paragraph("测试状态：初测")
+    doc.add_paragraph("漏洞等级：高危")
+    doc.add_paragraph("漏洞描述：")
+    doc.add_paragraph("可越权访问他人项目信息。")
+
+    buf = BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    resp = await client.post(
+        "/api/v1/imports", headers=auth,
+        files={"file": ("20260910等级不一致系统渗透测试报告.docx", buf,
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+    )
+    assert resp.status_code == 200, resp.text
+    batch_id = resp.json()["id"]
+    detail = await _wait_batch(client, auth, batch_id)
+    rec = detail["records"][0]
+    assert rec["level"] == 20  # 以风险问题详情的高危为准
+    assert rec["level_source"] == "detail"
+    assert rec["level_mismatch"] is True
+    assert rec["level_summary_text"] == "中危"
+    assert rec["level_detail_text"] == "高危"
+
+    resp = await client.get(
+        "/api/v1/imports/level-mismatches", headers=auth,
+        params={"batch_ids": str(batch_id)},
+    )
+    assert resp.status_code == 200, resp.text
+    items = resp.json()
+    assert len(items) == 1, items
+    assert items[0]["batch_id"] == batch_id
+    assert items[0]["title"] == "平行越权访问项目信息"
+    assert items[0]["level"] == 20
+    assert items[0]["level_summary"] == 30
+    assert items[0]["level_detail_text"] == "高危"
+
+    # 不指定批次时同样可查到待入库的不一致记录（批量确认场景）
+    resp = await client.get("/api/v1/imports/level-mismatches", headers=auth)
+    assert any(x["batch_id"] == batch_id for x in resp.json())
 
 
 # ---------- F3 通知渠道 ----------

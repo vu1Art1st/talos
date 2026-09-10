@@ -50,6 +50,12 @@ class ImportRecord(Base):
     solution_html: Mapped[str] = mapped_column(Text, default="")
     retest_html: Mapped[str] = mapped_column(Text, default="")  # 报告格式的复测详情
     fixed: Mapped[bool] = mapped_column(Boolean, default=False)  # 报告格式的修复状态
+    # 漏洞等级来源追溯：detail（风险问题详情）/ summary（风险问题汇总）/ template（导入模板字段）
+    # / default（中危兜底）；level_mismatch 标识汇总表与详情等级不一致，供导入预览提醒
+    level_source: Mapped[str] = mapped_column(String(16), default="default")
+    level_summary_text: Mapped[str] = mapped_column(String(32), default="")
+    level_detail_text: Mapped[str] = mapped_column(String(32), default="")
+    level_mismatch: Mapped[bool] = mapped_column(Boolean, default=False)
     # parsed / error / confirmed / discarded
     status: Mapped[str] = mapped_column(String(16), default="parsed")
     parse_error: Mapped[str] = mapped_column(Text, default="")

@@ -20,6 +20,12 @@ class ImportRecordOut(BaseModel):
     solution_html: str = ""
     retest_html: str = ""
     fixed: bool = False
+    # 漏洞等级来源与一致性：detail/summary/template/default；level_mismatch=True 时
+    # 导入确认前前端弹窗提醒「风险问题汇总与风险问题详情等级不一致」
+    level_source: str = "default"
+    level_summary_text: str = ""
+    level_detail_text: str = ""
+    level_mismatch: bool = False
     status: str = "parsed"
     parse_error: str = ""
     vul_id: int | None = None

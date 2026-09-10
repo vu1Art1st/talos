@@ -44,7 +44,8 @@ def _save_image(part, rid: str, image_dir: Path, url_prefix: str) -> str | None:
     return f"{url_prefix}/{name}"
 
 
-def _run_to_html(run, part, image_dir: Path, url_prefix: str) -> str:
+def _run_to_html(run, part, image_dir: Path, url_prefix: str, text: str | None = None) -> str:
+    """run → 行内 HTML。text 非 None 时用其替代 run 原文（用于裁掉段首的字段标签）。"""
     pieces: list[str] = []
     # 图片：w:drawing 内的 a:blip r:embed 引用
     for blip in run._element.iter(_A_BLIP):
@@ -53,23 +54,43 @@ def _run_to_html(run, part, image_dir: Path, url_prefix: str) -> str:
             url = _save_image(part, rid, image_dir, url_prefix)
             if url:
                 pieces.append(f'<img src="{url}">')
-    text = html_mod.escape(run.text or "")
-    if text:
+    content = html_mod.escape(run.text if text is None else text)
+    if content:
         if run.bold:
-            text = f"<strong>{text}</strong>"
+            content = f"<strong>{content}</strong>"
         if run.italic:
-            text = f"<em>{text}</em>"
-        pieces.append(text)
+            content = f"<em>{content}</em>"
+        pieces.append(content)
     return "".join(pieces)
 
 
+def _para_to_html(p, part, image_dir: Path, url_prefix: str, skip_label: str = "") -> str:
+    """段落 → `<p>` HTML；skip_label 非空时裁掉段首「标签：」及其之前的文字。
+
+    「标签：值」同行写法需要保留标签之后的内容（含图片与格式），故按字符区间逐 run
+    裁剪后再渲染，而不是整体丢弃该段落。"""
+    start: int | None = None
+    if skip_label:
+        m = re.match(rf"^\s*{re.escape(skip_label)}\s*[:：]\s*", p.text or "")
+        if m is not None:
+            start = m.end()
+    pos = 0
+    pieces: list[str] = []
+    for run in p.runs:
+        raw = run.text or ""
+        run_start, run_end = pos, pos + len(raw)
+        pos = run_end
+        if start is None:
+            keep = raw
+        else:
+            keep = raw[max(0, start - run_start):] if run_end > start else ""
+        pieces.append(_run_to_html(run, part, image_dir, url_prefix, keep))
+    inner = "".join(pieces)
+    return f"<p>{inner}</p>" if inner.strip() else ""
+
+
 def _cell_to_html(cell: _Cell, part, image_dir: Path, url_prefix: str) -> str:
-    paragraphs: list[str] = []
-    for p in cell.paragraphs:
-        inner = "".join(_run_to_html(r, part, image_dir, url_prefix) for r in p.runs)
-        if inner.strip():
-            paragraphs.append(f"<p>{inner}</p>")
-    return "".join(paragraphs)
+    return "".join(_para_to_html(p, part, image_dir, url_prefix) for p in cell.paragraphs)
 
 
 def _cell_text(cell: _Cell) -> str:
@@ -129,6 +150,11 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[di
             "reproduce_html": "",
             "solution_html": "",
             "errors": [],
+            # 固定模板：等级取自模板「漏洞等级」字段本身，无汇总/详情不一致问题
+            "level_source": "template",
+            "level_summary_text": "",
+            "level_detail_text": "",
+            "level_mismatch": False,
         }
         if not record["title"]:
             record["errors"].append("漏洞名称为空")
@@ -165,6 +191,10 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[di
 
 _SUMMARY_HEADERS = ("问题等级", "风险类型", "风险问题", "修复状态")
 _LEVEL_EXPORT_REVERSE = {v: k for k, v in VUL_LEVEL_EXPORT.items()}  # 超危→10 等报告口径
+# 可识别的等级词（严重/高危/中危/低危/安全 + 导出口径 超危），用于详情章节等级取值校验
+_LEVEL_WORDS = tuple(dict.fromkeys([*VUL_LEVEL_REVERSE, *_LEVEL_EXPORT_REVERSE]))
+# 详情等级取值允许包裹的括号/空白（模板占位行「【超危】【高危】…」不在此列）
+_DETAIL_LEVEL_TRIM = "【】[]（）() \t"
 # 报告文件名：日期 + 公司/系统名 + 渗透测试(复测)报告 + 可选轮次后缀 -N（同日重复发起复测自动追加 -1/-2）
 # 例：20250917中移系统集成有限公司综合办公系统渗透测试复测报告-1.docx → 第二轮复测
 _REPORT_NAME_RE = re.compile(r"^(\d{8})?(.*?)(?:渗透测试)?(复测)?报告(?:-(\d+))?$")
@@ -181,6 +211,16 @@ _SECTION_LABELS = {
     "漏洞证明": "reproduce_html",
     "修复建议": "solution_html",
 }
+# 「标签：值」同行写法（报告作者书写格式不统一，实测报告中与独立标签行混用）：
+# 如「漏洞等级：高危」「漏洞链接：\n1. http://…」，必须要求冒号才认定为标签，
+# 避免把「漏洞证明如下所示…」这类正文误判为字段标签。
+_SECTION_LABEL_COLON_PATTERNS: list[tuple[str, str, re.Pattern]] = [
+    (label, key, re.compile(rf"^\s*{re.escape(label)}\s*[:：]"))
+    for label, key in _SECTION_LABELS.items()
+]
+_RETEST_LABEL_COLON_RE = re.compile(r"^\s*(\d*漏洞复测)\s*[:：]")
+# 手工编号的链接前缀（如「1. http://…」），取值时剥离
+_URL_LEADING_NUM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*")
 
 
 def _find_summary_table(doc: Document):
@@ -324,6 +364,16 @@ def _map_level_report(text: str) -> int | None:
     return None
 
 
+def _level_word(text: str) -> str:
+    """从详情章节的等级取值中识别等级词，仅接受「就是等级词本身」的写法。
+
+    模板占位行（如「【超危】【高危】【中危】【低危】」）去掉首尾括号后不等于任一
+    等级词，一律忽略，避免把占位行误当成详情等级。
+    """
+    t = _norm_label(text).strip(_DETAIL_LEVEL_TRIM)
+    return t if t in _LEVEL_WORDS else ""
+
+
 def _fuzzy_type(text: str) -> int:
     """类型模糊匹配：精确/包含未命中时按公共字符数取最优（如 权限跨越→权限绕过）。"""
     code = _map_type(text)
@@ -364,19 +414,87 @@ def _normalize_vul_title(raw_title: str) -> tuple[str, bool]:
     return title or raw_title, fixed
 
 
+def _match_section_label(text: str) -> tuple[str | None, str]:
+    """识别段落是否为「风险问题详情」字段标签，返回 (记录字段, 命中的标签原文)。
+
+    标签存在两种书写形态，均需支持（实测同一份报告中两种写法混用）：
+    - 独占一段：`漏洞链接：` → 值在后续段落，返回的标签原文为空；
+    - 与值同段：`漏洞等级：高危`、`漏洞链接：\\n1. http://…` → 值在本段，返回的标签
+      原文非空，调用方据此从本段取出同行值（否则该字段会被整体丢弃）。
+    """
+    norm = _norm_label(text)
+    if norm in _SECTION_LABELS:
+        return _SECTION_LABELS[norm], ""
+    if _RETEST_LABEL_RE.match(norm):
+        return "retest_html", ""
+    m = _RETEST_LABEL_COLON_RE.match(text or "")
+    if m:
+        return "retest_html", m.group(1)
+    for label, key, pattern in _SECTION_LABEL_COLON_PATTERNS:
+        if pattern.match(text or ""):
+            return key, label
+    return None, ""
+
+
+def _inline_value(text: str, label: str) -> str:
+    """取「标签：值」同段中的值部分（保留原始字符，不归一化以免破坏 URL 中的冒号）。"""
+    m = re.match(rf"^\s*{re.escape(label)}\s*[:：]\s*([\s\S]*)$", text or "")
+    return m.group(1).strip() if m else ""
+
+
+def _clean_url(value: str) -> str:
+    """去掉手工编号前缀（如「1. http://…」），保证入库为可直接访问的链接。"""
+    return _URL_LEADING_NUM_RE.sub("", (value or "").strip())
+
+
+# 汇总表标题模糊匹配阈值：最长公共子串长度下限 + 相似度（LCS / 较短标题长度）下限。
+# 旧实现按「公共字符集合大小 ≥ 4」判定，会把「RSA私钥泄露」误配到
+# 「前端JS泄露SM4加密密钥」（公共字符 {S,泄,露,钥}=4）而取到错误等级。
+_SUMMARY_LCS_MIN = 4
+_SUMMARY_SIMILARITY_MIN = 0.6
+
+
+def _longest_common_substring_len(a: str, b: str) -> int:
+    """最长公共子串长度（动态规划；标题为短文本，开销可忽略）。"""
+    if not a or not b:
+        return 0
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for ca in a:
+        cur = [0] * (len(b) + 1)
+        for j, cb in enumerate(b, start=1):
+            if ca == cb:
+                cur[j] = prev[j - 1] + 1
+                if cur[j] > best:
+                    best = cur[j]
+        prev = cur
+    return best
+
+
 def _match_summary(summary: list[dict], title: str) -> dict | None:
-    """按标题包含关系匹配汇总表行，未命中时取公共字符最多的行。"""
+    """按标题匹配汇总表行：先精确包含，再按「最长公共子串 + 相似度」唯一匹配。
+
+    候选行须同时满足 LCS 长度与相似度阈值，且只有唯一候选才算命中——
+    命中多条视为歧义（返回 None），避免张冠李戴取到无关行的等级。
+    """
     t = _norm_label(title)
+    if not t:
+        return None
     for row in summary:
         rt = _norm_label(row["title"])
-        if t and rt and (t in rt or rt in t):
+        if rt and (t in rt or rt in t):
             return row
-    best, best_score = None, 0
+    hits: list[dict] = []
     for row in summary:
-        score = len(set(t) & set(_norm_label(row["title"])))
-        if score > best_score:
-            best, best_score = row, score
-    return best if best_score >= 4 else None
+        rt = _norm_label(row["title"])
+        if not rt:
+            continue
+        score = _longest_common_substring_len(t, rt)
+        if score < _SUMMARY_LCS_MIN:
+            continue
+        if score / min(len(t), len(rt)) >= _SUMMARY_SIMILARITY_MIN:
+            hits.append(row)
+    return hits[0] if len(hits) == 1 else None
 
 
 def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
@@ -452,36 +570,80 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
             "retest_html": "",
             "fixed": fixed,
             "errors": [],
+            # 等级来源追溯：detail（风险问题详情）/ summary（风险问题汇总）/ default（中危兜底）
+            "level_source": "default",
+            "level_summary_text": "",
+            "level_detail_text": "",
+            "level_mismatch": False,
         }
         bucket: str | None = None
+        detail_level_text = ""
         for p in paras:
-            norm = _norm_label(p.text)
-            if norm in _SECTION_LABELS:
-                bucket = _SECTION_LABELS[norm]
+            key, label = _match_section_label(p.text)
+            if key is not None:
+                bucket = key
+                if not label:
+                    continue
+                # 「标签：值」同行写法：实测报告中与独立标签行混用，同行值必须取用，
+                # 否则漏洞等级 / 漏洞链接会随该段整体丢失
+                inline = _inline_value(p.text, label)
+                if bucket == "level":
+                    detail_level_text = _level_word(inline) or detail_level_text
+                    bucket = None
+                elif bucket == "status":
+                    bucket = None
+                elif bucket == "affected_url":
+                    if inline and not record["affected_url"]:
+                        record["affected_url"] = _clean_url(inline)[:512]
+                    bucket = None
+                else:
+                    record[bucket] += _para_to_html(
+                        p, part, img_dir, image_url_prefix, skip_label=label
+                    )
                 continue
-            if _RETEST_LABEL_RE.match(norm):
-                bucket = "retest_html"
+            if bucket == "level":
+                # 「漏洞等级：」独立标签行 + 值另起一行的写法
+                if not detail_level_text:
+                    detail_level_text = _level_word(p.text)
                 continue
             if bucket in ("description_html", "reproduce_html", "solution_html", "retest_html"):
                 inner = "".join(_run_to_html(r, part, img_dir, image_url_prefix) for r in p.runs)
                 if inner.strip():
                     record[bucket] += f"<p>{inner}</p>"
             elif bucket == "affected_url" and not record["affected_url"] and p.text.strip():
-                record["affected_url"] = p.text.strip()[:512]
-            # status/level 桶为模板选项占位行（如【超危】【高危】…），以汇总表为准
+                record["affected_url"] = _clean_url(p.text)[:512]
+            # status 桶为模板选项占位行（如【超危】【高危】…），测试状态以漏洞字段为准
 
+        record["level_detail_text"] = detail_level_text
         # 等级/类型/修复状态优先取汇总表：数量一致按序配对，否则按标题匹配
         row = summary[idx] if len(summary) == len(sections) else _match_summary(summary, title)
         if row is not None:
-            level = _map_level_report(row["level_text"])
-            if level is None:
-                record["errors"].append(f"无法识别漏洞等级「{row['level_text']}」，已按中危处理")
-            else:
-                record["level"] = level
+            record["level_summary_text"] = row["level_text"]
             record["vul_type"] = _fuzzy_type(row["type_text"])
             record["fixed"] = record["fixed"] or row["fixed"]
+        # 等级来源优先级（D1）：风险问题详情等级 > 汇总表匹配等级 > 中危兜底。
+        # 详情是漏洞自身的权威描述；汇总表常与详情不一致（甚至两处漏洞集合不同），
+        # 匹配失败时旧实现静默回落中危，导致等级被误判
+        detail_level = _map_level_report(detail_level_text) if detail_level_text else None
+        summary_level = _map_level_report(row["level_text"]) if row is not None else None
+        if detail_level is not None:
+            record["level"] = detail_level
+            record["level_source"] = "detail"
+            # 报告存在汇总表却与该漏洞对不上（未匹配到行）同样属「汇总与详情不一致」，
+            # 一并标记提醒：此类报告常因汇总表与详情不是同一批漏洞而导致等级误判
+            record["level_mismatch"] = bool(summary) and summary_level != detail_level
+        elif summary_level is not None:
+            record["level"] = summary_level
+            record["level_source"] = "summary"
         else:
-            record["errors"].append("未在「风险问题汇总」表中匹配到该漏洞，等级已按中危处理")
+            record["level"] = 30
+            record["level_source"] = "default"
+            if row is None:
+                record["errors"].append(
+                    "未在「风险问题汇总」表中匹配到该漏洞，且风险问题详情未给出漏洞等级，已按中危处理"
+                )
+            else:
+                record["errors"].append(f"无法识别漏洞等级「{row['level_text']}」，已按中危处理")
         records.append(record)
 
     return meta, records

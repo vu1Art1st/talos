@@ -37,7 +37,21 @@
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
         报告格式确认入库时：已选择的渗透测试工单将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
       </div>
+      <el-alert
+        v-if="mismatchItems.length"
+        class="mt-3"
+        type="warning"
+        :closable="false"
+        show-icon
+        title="风险问题汇总与风险问题详情等级不一致"
+      >
+        <div class="flex items-center gap-2 text-xs">
+          <span>共 {{ mismatchItems.length }} 条记录，入库将以风险问题详情的等级为准。</span>
+          <el-button link type="primary" size="small" @click="mismatchVisible = true">查看详情</el-button>
+        </div>
+      </el-alert>
     </el-card>
+
 
     <el-card v-for="rec in records" :key="rec.id" shadow="never"
              :class="{ 'opacity-50': rec.status === 'discarded' }">
@@ -108,6 +122,8 @@
     </el-card>
 
     <el-empty v-if="!records.length" description="该批次没有解析出漏洞记录，请检查文档是否符合模板" :image-size="80" />
+
+    <ImportLevelMismatchDialog v-model="mismatchVisible" :items="mismatchItems" />
   </div>
 </template>
 
@@ -116,6 +132,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import ImportLevelMismatchDialog from '../components/ImportLevelMismatchDialog.vue'
 import { usePlanAssetLink } from '../composables/usePlanAssetLink'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, importRecordMeta, levelDotStyle } from '../utils/colors'
@@ -134,6 +151,10 @@ const meta = ref<any>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
 const loading = ref(false)
+// 等级不一致提醒：风险汇总与风险详情等级不一致的记录（仅在首次加载时自动弹窗，横幅可再次查看）
+const mismatchItems = ref<any[]>([])
+const mismatchVisible = ref(false)
+const mismatchNotified = ref(false)
 
 const selected = computed(() =>
   records.value.filter((r) => r.status === 'parsed' && checked[r.id]).map((r) => r.id),
@@ -152,8 +173,21 @@ async function load() {
     batch.value = data.batch
     records.value = data.records
     for (const r of data.records) if (r.status === 'parsed' && checked[r.id] === undefined) checked[r.id] = true
+    await loadLevelMismatch()
   } finally {
     loading.value = false
+  }
+}
+
+// 报告存在「风险问题汇总与风险问题详情等级不一致」的记录时提醒用户
+async function loadLevelMismatch() {
+  const { data } = await client.get('/imports/level-mismatches', {
+    params: { batch_ids: route.params.id },
+  })
+  mismatchItems.value = data
+  if (data.length && !mismatchNotified.value) {
+    mismatchNotified.value = true
+    mismatchVisible.value = true
   }
 }
 

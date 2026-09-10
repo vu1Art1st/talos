@@ -33,7 +33,7 @@ from app.services import plan_service, vuln_service
 from app.services.audit_service import audit
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.services.notify_service import notify
-from app.services.report_html import vuln_section_html as _vuln_section_html
+from app.services.report_html import strip_embedded_retest, vuln_section_html as _vuln_section_html
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/reports", tags=["报告"])
@@ -170,7 +170,9 @@ async def _create_retest_report(
     for s in src.sections:
         report.sections.append(ReportSection(
             order=s.order, title=s.title,
-            content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
+            # 章节正文不内嵌复测详情：复制时剥离历史内嵌段，复测详情由漏洞字段单独维护
+            content_html=strip_embedded_retest(s.content_html),
+            content_json=s.content_json, vul_id=s.vul_id,
         ))
     session.add(report)
     await session.flush()

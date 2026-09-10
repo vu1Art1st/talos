@@ -27,7 +27,7 @@ from app.schemas import (
 )
 from app.services import import_service
 from app.services.audit_service import audit
-from app.services.docx_parser import build_import_template
+from app.services.docx_parser import _map_level_report, build_import_template
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.workers.dispatch import dispatch
 
@@ -204,6 +204,45 @@ async def list_batches(
     )
     total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=items)
+
+
+@router.get("/level-mismatches")
+async def level_mismatches(
+    batch_ids: str = Query("", description="逗号分隔的批次ID；为空表示全部待入库批次"),
+    _: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """待入库批次中「风险问题汇总」与「风险问题详情」等级不一致的记录。
+
+    入库以详情等级为准，此处供导入预览页与批量确认弹窗在落库前统一提醒用户。
+    必须声明在 /{batch_id} 之前，否则会被路径参数路由抢先匹配。
+    """
+    stmt = (
+        select(ImportRecord, ImportBatch.filename)
+        .join(ImportBatch, ImportRecord.batch_id == ImportBatch.id)
+        .where(
+            ImportRecord.status == "parsed",
+            ImportRecord.level_mismatch.is_(True),
+        )
+        .order_by(ImportRecord.batch_id, ImportRecord.seq)
+    )
+    ids = [int(x) for x in batch_ids.replace(",", " ").split() if x.isdigit()]
+    if ids:
+        stmt = stmt.where(ImportRecord.batch_id.in_(ids))
+    rows = (await session.execute(stmt)).all()
+    return [
+        {
+            "batch_id": rec.batch_id,
+            "filename": filename,
+            "record_id": rec.id,
+            "title": rec.title,
+            "level": rec.level,  # 实际入库等级（详情优先）
+            "level_summary": _map_level_report(rec.level_summary_text or ""),
+            "level_summary_text": rec.level_summary_text,
+            "level_detail_text": rec.level_detail_text,
+        }
+        for rec, filename in rows
+    ]
 
 
 @router.get("/{batch_id}")

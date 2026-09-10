@@ -488,3 +488,68 @@ def test_cover_and_version_date_use_report_time(tmp_path):
     table1 = doc.tables[1]
     cells = [c.text.strip() for c in table1.rows[2].cells]
     assert cells[0] == "2026-07-01", cells
+
+
+# ---------- 复测详情单一权威源：章节正文不内嵌，导出统一按漏洞字段追加一次 ----------
+def test_vuln_section_html_excludes_retest():
+    """章节快照不再内嵌复测详情（避免与复测详情面板重复、且快照不会随复测更新）。"""
+    class _V:
+        is_retest = True
+        level = 20
+        affected_url = "http://a.com/x"
+        description_html = "<p>描述</p>"
+        reproduce_html = ""
+        solution_html = ""
+        retest_html = "<p>复测内容</p>"
+
+    html = _vuln_section_html(_V())
+    assert "复测详情" not in html
+    assert "复测内容" not in html
+    assert "描述" in html
+
+
+def test_strip_embedded_retest():
+    """历史内嵌段剥离：默认丢弃末尾段；提供 retest_html 时保留其后手工追加内容。"""
+    from app.services.report_html import strip_embedded_retest
+
+    assert strip_embedded_retest("") == ""
+    assert strip_embedded_retest("<p>正文</p>") == "<p>正文</p>"
+    legacy = "<p>正文</p><p><strong>复测详情：</strong></p><p>旧复测</p>"
+    assert strip_embedded_retest(legacy) == "<p>正文</p>"
+    # 精确边界：复测段之后仍有手工追加内容时只删除复测段本身
+    with_tail = "<p>正文</p><p><strong>复测详情：</strong></p><p>旧复测</p><p>补充说明</p>"
+    assert strip_embedded_retest(with_tail, "<p>旧复测</p>") == "<p>正文</p><p>补充说明</p>"
+
+
+def test_export_retest_detail_single_and_latest(tmp_path):
+    """回归：章节快照内嵌旧复测详情时，导出只保留漏洞字段中的最新复测详情一份。"""
+    vulns = [{
+        "id": 1, "title": "明文传输", "level": 40, "vul_type": 10, "status": 60,
+        "affected_url": "", "is_retest": True, "retest_html": "<p>最新复测结论</p>",
+    }]
+    sections = [{
+        "title": "明文传输", "vul_id": 1,
+        "content_html": (
+            "<p><strong>测试状态：</strong>初测</p><p><strong>漏洞描述：</strong></p><p>正文</p>"
+            "<p><strong>复测详情：</strong></p><p>旧复测内容</p>"
+        ),
+    }]
+    doc = _build(tmp_path, vulns=vulns, sections=sections)
+    texts = [p.text for p in doc.paragraphs]
+    assert sum(1 for t in texts if "复测详情" in t) == 1, texts
+    blob = "\n".join(texts)
+    assert "最新复测结论" in blob
+    assert "旧复测内容" not in blob
+
+
+def test_export_retest_detail_appended_when_absent(tmp_path):
+    """章节快照不含复测详情时，导出仍须追加漏洞字段的复测详情（缺失会丢内容）。"""
+    vulns = [{
+        "id": 1, "title": "越权", "level": 20, "vul_type": 10, "status": 60,
+        "affected_url": "", "is_retest": True, "retest_html": "<p>复测已修复</p>",
+    }]
+    sections = [{"title": "越权", "vul_id": 1, "content_html": "<p>正文</p>"}]
+    doc = _build(tmp_path, vulns=vulns, sections=sections)
+    blob = "\n".join(p.text for p in doc.paragraphs)
+    assert "复测详情" in blob
+    assert "复测已修复" in blob

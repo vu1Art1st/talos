@@ -107,6 +107,23 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE import_records ADD COLUMN retest_html TEXT NOT NULL DEFAULT ''"))
         if record_cols and "fixed" not in record_cols:
             await conn.execute(text("ALTER TABLE import_records ADD COLUMN fixed BOOLEAN NOT NULL DEFAULT 0"))
+        # 导入记录等级来源追溯（报告「风险问题详情」等级优先，汇总表次之）：Alembic a4b5c6d7e8f9 同步
+        if record_cols and "level_source" not in record_cols:
+            await conn.execute(text(
+                "ALTER TABLE import_records ADD COLUMN level_source VARCHAR(16) NOT NULL DEFAULT 'default'"
+            ))
+        if record_cols and "level_summary_text" not in record_cols:
+            await conn.execute(text(
+                "ALTER TABLE import_records ADD COLUMN level_summary_text VARCHAR(32) NOT NULL DEFAULT ''"
+            ))
+        if record_cols and "level_detail_text" not in record_cols:
+            await conn.execute(text(
+                "ALTER TABLE import_records ADD COLUMN level_detail_text VARCHAR(32) NOT NULL DEFAULT ''"
+            ))
+        if record_cols and "level_mismatch" not in record_cols:
+            await conn.execute(text(
+                "ALTER TABLE import_records ADD COLUMN level_mismatch BOOLEAN NOT NULL DEFAULT 0"
+            ))
         # 组织新增系统负责人三字段
         group_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(groups)"))).fetchall()}
         for col, ddl in (("owner_name", "VARCHAR(64)"), ("owner_phone", "VARCHAR(32)"), ("owner_email", "VARCHAR(128)")):

@@ -243,3 +243,132 @@ def test_parse_report_docx_sample(tmp_path: Path):
     assert rec["description_html"]
     assert rec["retest_html"]  # 「20260729漏洞复测：」段落
     assert rec["errors"] == []
+
+
+# ---------- 等级来源：风险问题详情优先（回归：曾被静默误判为中危） ----------
+
+def _make_report_docx(path: Path, summary_rows, sections) -> None:
+    """构造平台报告格式 docx：风险问题汇总表 + 风险问题详情 H3 章节。
+
+    summary_rows: [(等级, 类型, 漏洞标题, 修复状态)]
+    sections: [(章节标题, [段落文本])]
+    """
+    doc = Document()
+    doc.add_heading("风险问题汇总", level=2)
+    table = doc.add_table(rows=1 + len(summary_rows), cols=4)
+    for i, h in enumerate(("问题等级", "风险类型", "风险问题", "修复状态")):
+        table.rows[0].cells[i].text = h
+    for i, (level, vtype, title, status) in enumerate(summary_rows, start=1):
+        for j, v in enumerate((level, vtype, title, status)):
+            table.rows[i].cells[j].text = v
+    doc.add_heading("风险问题详情", level=2)
+    for title, paras in sections:
+        doc.add_heading(title, level=3)
+        for text in paras:
+            doc.add_paragraph(text)
+    doc.save(str(path))
+
+
+def test_level_word_rejects_placeholder():
+    """详情等级取值：只认等级词本身，模板占位行（【超危】【高危】…）不得误取。"""
+    from app.services.docx_parser import _level_word
+
+    assert _level_word("高危") == "高危"
+    assert _level_word("超危") == "超危"
+    assert _level_word("严重") == "严重"
+    assert _level_word("【超危】【高危】【中危】【低危】") == ""
+    assert _level_word("高危风险") == ""
+
+
+def test_match_summary_rejects_weak_overlap():
+    """汇总表模糊匹配加固：公共字符偶合（RSA私钥泄露 ⊕ 前端JS泄露SM4加密密钥）不得命中。"""
+    from app.services.docx_parser import _match_summary
+
+    summary = [{"title": "前端JS泄露SM4加密密钥", "level_text": "中危",
+                "type_text": "信息泄露", "fixed": False}]
+    assert _match_summary(summary, "RSA私钥泄露") is None
+    # 标题包含关系仍应命中
+    assert _match_summary(summary, "前端JS泄露SM4加密密钥（未修复）") is not None
+
+
+def test_report_inline_label_and_detail_level(tmp_path: Path):
+    """回归：标签与值同段（「漏洞等级：高危」「漏洞链接：\\n1. http://…」）必须被解析。"""
+    docx_file = tmp_path / "inline.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[("高危", "越权", "用户管理存在垂直越权", "未修复")],
+        sections=[("用户管理存在垂直越权", [
+            "测试状态：初测",
+            "漏洞等级：高危",
+            "漏洞链接：\n1. http://10.0.0.9/api/user",
+            "漏洞描述：",
+            "普通用户可越权管理用户。",
+        ])],
+    )
+    _, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")[1:]
+    rec = records[0]
+    assert rec["level"] == 20
+    assert rec["level_source"] == "detail"
+    assert rec["affected_url"] == "http://10.0.0.9/api/user"  # 手工编号前缀被剥离
+    assert rec["errors"] == []
+
+
+def test_report_detail_level_wins_over_unmatched_summary(tmp_path: Path):
+    """回归：汇总表与详情章节漏洞集合不同（数量也不齐）时，等级取详情而不是中危兜底。"""
+    docx_file = tmp_path / "mismatch.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[
+            ("中危", "信息泄露", "前端JS泄露SM4加密密钥", "未修复"),
+            ("低危", "配置缺陷", "SourceMap文件泄露", "未修复"),
+        ],
+        sections=[
+            ("RSA私钥泄露", ["测试状态：初测", "漏洞等级：高危", "漏洞证明：", "泄露私钥"]),
+            ("平行越权-通知通报-工作通知&风险通报",
+             ["测试状态：初测", "漏洞等级：高危", "漏洞证明：", "越权查看通知"]),
+            ("垂直越权-数字安全-威胁情报",
+             ["测试状态：初测", "漏洞等级：高危", "漏洞证明：", "越权查看情报"]),
+        ],
+    )
+    _, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")[1:]
+    assert len(records) == 3
+    assert [r["level"] for r in records] == [20, 20, 20]
+    assert all(r["level_source"] == "detail" for r in records)
+    assert all(r["errors"] == [] for r in records)
+    # 有汇总表却与该漏洞对不上 → 同样标记为「汇总与详情不一致」，供导入前提醒
+    assert all(r["level_mismatch"] is True for r in records)
+    assert all(r["level_summary_text"] == "" for r in records)
+
+
+def test_report_level_mismatch_flag(tmp_path: Path):
+    """汇总表与详情等级不一致：按序配对后取详情等级，并标记 level_mismatch 供弹窗提醒。"""
+    docx_file = tmp_path / "flag.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[("中危", "越权", "平行越权访问项目信息", "未修复")],
+        sections=[("平行越权访问项目信息", ["测试状态：初测", "漏洞等级：高危", "漏洞证明：", "越权"])],
+    )
+    _, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")[1:]
+    rec = records[0]
+    assert rec["level"] == 20
+    assert rec["level_source"] == "detail"
+    assert rec["level_summary_text"] == "中危"
+    assert rec["level_detail_text"] == "高危"
+    assert rec["level_mismatch"] is True
+
+
+def test_report_level_medium_fallback_without_any_source(tmp_path: Path):
+    """详情与汇总表均无可用等级时才回落中危，并记录 errors 提示人工核对。"""
+    docx_file = tmp_path / "fallback.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[("中危", "信息泄露", "前端JS泄露SM4加密密钥", "未修复")],
+        sections=[
+            ("甲漏洞", ["漏洞描述：", "无等级信息"]),
+            ("乙漏洞", ["漏洞描述：", "无等级信息"]),
+        ],
+    )
+    _, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")[1:]
+    assert [r["level"] for r in records] == [30, 30]
+    assert all(r["level_source"] == "default" for r in records)
+    assert all(r["errors"] for r in records)
