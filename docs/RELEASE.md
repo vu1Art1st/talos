@@ -25,6 +25,29 @@
 
 ---
 
+## [2.12.3] - 2026-09-10
+
+修复 2.12.2 内置的存量数据维护脚本在 `--dry-run` 下崩溃的问题。
+
+### 修复
+
+- **`scripts.fix_retest_section_dup --dry-run` 抛 `MissingGreenlet`**（`backend/scripts/fix_retest_section_dup.py`）：
+  试运行分支在 `await session.rollback()` **之后**才逐条打印章节信息，而 rollback 会使会话内 ORM 实例全部过期，
+  此后再访问 `s.id` / `s.report_id` / `s.content_html` 等属性会触发同步 IO，在异步会话中直接抛
+  `sqlalchemy.exc.MissingGreenlet`（VPS 上以 `docker compose run --rm api ...` 执行时必现；本地因当次未跑到该分支而漏检）。
+  现改为在扫描阶段先把 `id` / `report_id` / `vul_id` / 原文 / 新值取出为普通 dict（同一份数据复用于备份文件），
+  打印与备份均只读该纯数据快照，不再触碰 rollback 后的 ORM 实例。
+
+  > 该失败发生在任何写库动作之前（试运行本就不提交），**不会污染数据**；
+  > 省略 `--dry-run` 直接执行正式清理的路径不受影响。
+
+### 测试
+
+- 本地容器复现：临时注入一条「正文尾部内嵌复测详情」的旧格式章节 →
+  `--dry-run` 正常打印该章节长度变化（573 → 527 字符）→ 正式清理后内容精确还原为注入前原文、内嵌标记消失。
+
+---
+
 ## [2.12.2] - 2026-09-10
 
 修复报告导入漏洞等级误判与复测详情重复/遗漏两类问题。

@@ -57,6 +57,10 @@ async def main(dry_run: bool = False) -> None:
             retest_by_vul = {vid: (html or "") for vid, html in rows}
 
         pending: list[tuple[ReportSection, str]] = []
+        # 纯数据快照：dry-run 需在 rollback 之后打印，而 rollback 会使会话内 ORM 实例全部过期，
+        # 此后访问 s.id 等属性会触发同步 IO，在异步会话中直接抛 MissingGreenlet；
+        # 故先把要展示 / 备份的值取出为普通 dict（同时供备份文件复用）。
+        records: list[dict] = []
         emptied: list[int] = []
         for s in sections:
             retest = retest_by_vul.get(s.vul_id or -1, "")
@@ -66,38 +70,32 @@ async def main(dry_run: bool = False) -> None:
             if not new_html.strip():
                 emptied.append(s.id)
             pending.append((s, new_html))
+            records.append({
+                "id": s.id,
+                "report_id": s.report_id,
+                "vul_id": s.vul_id,
+                "before": s.content_html,
+                "after": new_html,
+            })
 
         if dry_run:
             await session.rollback()
-            for s, new_html in pending:
+            for row in records:
                 print(
-                    f"  [dry-run] 节 {s.id}（报告 {s.report_id} / 漏洞 {s.vul_id}）"
-                    f" {len(s.content_html)} → {len(new_html)} 字符"
+                    f"  [dry-run] 节 {row['id']}（报告 {row['report_id']} / 漏洞 {row['vul_id']}）"
+                    f" {len(row['before'])} → {len(row['after'])} 字符"
                 )
-            print(f"[dry-run] 待清理 {len(pending)} 个章节（未落库）")
+            print(f"[dry-run] 待清理 {len(records)} 个章节（未落库）")
         else:
             backup_path = ""
-            if pending:
+            if records:
                 backup_dir = settings.storage_sub("backups")
                 backup_dir.mkdir(parents=True, exist_ok=True)
                 backup_file = backup_dir / (
                     f"report_sections_retest_{datetime.now():%Y%m%d%H%M%S}.json"
                 )
                 backup_file.write_text(
-                    json.dumps(
-                        [
-                            {
-                                "id": s.id,
-                                "report_id": s.report_id,
-                                "vul_id": s.vul_id,
-                                "before": s.content_html,
-                                "after": new_html,
-                            }
-                            for s, new_html in pending
-                        ],
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
+                    json.dumps(records, ensure_ascii=False), encoding="utf-8"
                 )
                 backup_path = str(backup_file)
             for s, new_html in pending:
