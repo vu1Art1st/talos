@@ -129,6 +129,63 @@ bash scripts/migrate.sh
 > 注意：为保证纳管判断成立，**每次发布后都要执行 `migrate.sh`**；跨多个版本一次性升级时尤其不能跳过，
 > 否则旧库可能被误纳管到 head 而漏掉中间版本的 ALTER。
 
+### 3.4 版本相关的一次性数据维护（按需执行）
+
+部分版本除代码与结构迁移外，还需对**存量数据**做一次性规整。已内置脚本的版本见下表；
+命令须在 `upgrade.sh` 完成之后执行（新镜像已生效，容器内才有对应脚本）。
+
+| 版本 | 脚本 | 用途 |
+| --- | --- | --- |
+| 2.12.2 | `scripts.fix_retest_section_dup` | 剥离存量报告章节正文尾部内嵌的「复测详情」副本（见下） |
+| — | `scripts.backfill_retest` | 复测聚合标题回填，`upgrade.sh` 已自动执行（见 3.2） |
+
+#### 2.12.2 清理存量报告章节的复测详情副本
+
+**背景**：早期 `vuln_section_html` 会把 `vulns.retest_html` 追加为章节正文的最后一个元素，
+导致同一份复测详情既内嵌在章节正文（漏洞详情框）尾部、又出现在复测详情框，界面重复展示；
+且章节快照不随复测更新，导出报告会因「正文已含复测详情」跳过追加最新内容，造成**导出遗漏最新复测结论**。
+2.12.2 起新生成章节不再内嵌，存量数据用本脚本清理（幂等，可重复执行）。
+
+```bash
+# 在 VPS 仓库根目录（docker-compose.yml 所在处）执行；路径按实际部署替换
+cd /opt/talos
+
+# 1) 试运行：只统计将清理的章节数并逐条打印长度变化，不写库
+sudo docker compose run --rm api python -m scripts.fix_retest_section_dup --dry-run
+
+# 2) 确认无误后执行清理；落库前会自动把被修改章节的原值备份为 JSON
+sudo docker compose run --rm api python -m scripts.fix_retest_section_dup
+```
+
+执行输出示例：
+
+```text
+含内嵌复测详情段的章节：227 个
+清理完成：已剥离 227 个章节的内嵌复测详情段
+原值备份：/app/storage/backups/report_sections_retest_20260910125131.json
+```
+
+**验证**（用同一个脚本的试运行即可，无需手写 SQL）：
+
+```bash
+# 再跑一次 dry-run，应输出「含内嵌复测详情段的章节：0 个」
+sudo docker compose run --rm api python -m scripts.fix_retest_section_dup --dry-run
+
+# 复测详情本身不丢：内容仍保存在 vulns.retest_html
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT count(*) AS vulns_with_retest FROM vulns WHERE length(retest_html) > 0"'
+```
+
+**备份与回滚**：
+
+```bash
+# 备份文件位于 storage_data 卷内（不会随容器删除），可列目录或拷出留档
+sudo docker compose exec -T api ls -l /app/storage/backups/
+sudo docker compose cp api:/app/storage/backups/report_sections_retest_<时间戳>.json ./
+```
+
+> 备份 JSON 内含每条章节的 `id` / `report_id` / `vul_id` / `before` / `after` 原文，可据此逐条还原；
+> 若需整库回退，使用升级前备份（`upgrade.sh` 已自动生成）走 `scripts/restore.sh`（见「六、更换 VPS」）。
+
 ---
 
 ## 四、Docker 镜像加速（腾讯云，可选但推荐）
@@ -281,11 +338,108 @@ docker compose exec api python -m alembic current   # 应显示 head 版本号
 
 ---
 
-## 附：常用排查
+## 八、升级后功能未生效排查（代码未提交 / 未拉到）
+
+### 现象
+
+在服务器执行 `bash scripts/upgrade.sh` 后，页面仍是旧行为（筛选条件、时间口径、新增字段等不生效），
+或数据库缺少本次发布新增的列 / 表。
+
+### 根因
+
+`upgrade.sh` 用 `git pull --ff-only` 拉取**远程已有提交**。若开发机的改动只存在于本地工作区
+（未 `git commit` / 未 `git push`），VPS 拉到的是上一次提交，自然还是旧代码——即使执行了
+`docker compose build` 重建镜像也一样（镜像只是把仓库里的旧代码重新烘焙了一遍）。
+
+### 排查步骤
 
 ```bash
-docker compose ps                 # 各服务状态
-docker compose logs -f api        # 后端日志
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'   # 查看表
-docker compose exec api python -m alembic current   # 当前迁移版本
+# 1) 服务器当前代码版本：与开发机 git log -1 --oneline 对比是否一致
+git log -1 --oneline
+
+# 2) 是否有远程提交未拉取：出现 "behind" 即说明远程有新提交
+git fetch origin && git status -sb
+
+# 3) 容器内实际版本号：判断镜像是否已重建到目标版本
+sudo docker compose exec -T api python -c "from app.core.config import settings; print(settings.APP_VERSION)"
+
+# 4) 数据库迁移版本：应等于代码 backend/alembic/versions/ 下的 head
+sudo docker compose exec -T api python -m alembic current
 ```
+
+### 修复
+
+```bash
+# 开发机：先把本地改动提交并推送（务必先推送，VPS 才拉得到）
+git add -A && git commit -m "..." && git push origin main --tags
+
+# 服务器：重走一遍升级（内部含 git pull → 重建镜像 → 迁移 → 重启 → 打印版本）
+bash scripts/upgrade.sh
+```
+
+### 预防
+
+- 每次发布**先在开发机 `git push`**，再到 VPS 执行 `upgrade.sh`；不要在服务器上直接改代码。
+- 升级收尾务必核对三处一致：`git log -1`、容器内 `APP_VERSION`、`alembic current`。
+- **只 `git pull` + `docker compose up -d` 不会让代码改动生效**：镜像已烘焙代码，必须重建
+  （`docker compose build` 或 `docker compose up -d --build`），或直接走 `upgrade.sh`。
+- 端口占用 / 构建失败等中断后重试是安全的：`upgrade.sh` 各步骤幂等，可重复执行。
+
+---
+
+## 附：常用排查
+
+> VPS 上 docker 命令需 `sudo`（与 `scripts/upgrade.sh` 一致）；本地开发环境去掉 `sudo`。
+> 以下命令均假设当前目录为仓库根（`docker-compose.yml` 所在处）。
+
+### 服务与版本
+
+```bash
+sudo docker compose ps                                        # 各服务状态与端口
+sudo docker compose logs -f api --tail 200                    # 后端日志（跟踪）
+sudo docker compose logs --tail 200 worker                    # worker 日志（导入解析 / 报告导出在其执行）
+sudo docker compose exec -T api python -c "from app.core.config import settings; print(settings.APP_VERSION)"
+sudo docker compose exec -T api python -m alembic current     # 当前迁移版本
+```
+
+### 接口连通性（绕开浏览器）
+
+```bash
+# 前端 nginx 已把 /api 同源反代到后端；未对外暴露 8000 端口时用该入口探测
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1/api/v1/imports/template
+
+# 取登录令牌后调用任意接口排查（首次登录的账号需先改密码）
+TOKEN=$(curl -s -X POST http://127.0.0.1/api/v1/auth/login \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  -d 'username=admin&password=<口令>' \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+curl -s -H "Authorization: Bearer $TOKEN" http://127.0.0.1/api/v1/auth/me
+```
+
+### 数据库直查
+
+```bash
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\dt"'
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT id,title,status FROM reports ORDER BY id DESC LIMIT 5"'
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c "SELECT version_num FROM alembic_version"'
+```
+
+### 文件与磁盘
+
+```bash
+sudo docker compose exec -T api ls -l /app/storage/exports/     # 报告导出产物
+sudo docker compose exec -T api ls -l /app/storage/backups/     # 数据维护脚本产生的备份
+bash scripts/disk-usage.sh                                     # 磁盘占用概览
+sudo docker system df                                           # 镜像 / 卷 / 缓存占用
+sudo docker builder prune --filter "until=168h" -f              # 清理 7 天前的构建缓存
+```
+
+### 只重建单个服务
+
+```bash
+sudo docker compose up -d --build api worker    # 仅后端（导入解析 / 报告导出在 worker，务必一并重建）
+sudo docker compose up -d --build frontend      # 仅前端
+```
+
+> 导入解析（`parse_import_task`）与报告导出（`export_report_task`）由 **worker** 容器执行，
+> 只重建 `api` 不会让解析 / 导出相关的代码改动生效。
