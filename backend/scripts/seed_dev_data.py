@@ -5,7 +5,7 @@
 - 渗透工单覆盖全部 7 种状态（含多轮复测、无漏洞闭环）；漏洞覆盖全部 6 种状态、
   5 类独立来源，等级/类型分布有区分度（支撑等级分布、类型 Top10）；
 - 资产-漏洞-工单-报告关联完整，已修复漏洞带复测记录与操作日志；
-- 知识库直接复用 scripts.seed_knowledge.SEED_DATA（50 条标准模板）。
+- 知识库直接复用 scripts.seed_knowledge.SEED_DATA（数据源 knowledge-import-vulnerabilities.json）。
 
 用法（backend 目录下）：
     python -m scripts.seed_dev_data --reset          # 清空并重建（需显式 --reset）
@@ -519,12 +519,12 @@ async def reset_and_seed() -> None:
                 await session.execute(spring_action_vulns.insert().values(
                     spring_action_id=sa.id, vul_id=vuls[vi].id))
 
-        # ---------- 知识库（复用 seed_knowledge 的 50 条标准模板） ----------
-        for name, vt, sl, desc, harm, sol, refs in SEED_DATA:
+        # ---------- 知识库（复用 seed_knowledge 的标准模板，HTML 原样入库） ----------
+        for name, vt, sl, desc_html, harm_html, sol_html, refs in SEED_DATA:
             session.add(KnowledgeEntry(
                 vulnerability_name=name, vul_type=vt, severity_level=sl,
-                description_html=f"<p>{desc}</p>", harm_html=f"<p>{harm}</p>",
-                solution_html=f"<p>{sol}</p>", references=list(refs),
+                description_html=desc_html, harm_html=harm_html,
+                solution_html=sol_html, references=list(refs),
                 creator_id=admin.id, username=admin.realname,
             ))
 

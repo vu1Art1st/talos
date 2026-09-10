@@ -25,6 +25,59 @@
 
 ---
 
+## [2.13.0] - 2026-09-10
+
+漏洞模板库内容全面优化：CVE 命名规范、多漏洞组件拆分、描述与修复建议增强，并提供幂等同步脚本。
+
+### 新增
+
+- **模板库同步脚本** `backend/scripts/sync_knowledge_templates.py`：以 `backend/knowledge-import-vulnerabilities.json`
+  为唯一权威数据源，按漏洞名称 upsert；`--prune` 清理改名 / 合并后的残留条目，`--dry-run` 仅打印差异。
+  幂等可重跑，入库前统一过 `sanitize_html` 消毒并校验字典码。
+- **模板库数据完整性测试** `backend/tests/test_knowledge_templates.py`：固化名称唯一性、编号修复建议、
+  CVE 命名格式、多漏洞组件拆分、参考链接来源等要求。
+
+### 变更
+
+- **模板数据集扩充为 135 条**（`backend/knowledge-import-vulnerabilities.json`，含 33 条带 CVE 编号）：
+  - **CVE 编号入名**：有明确编号的漏洞名称统一为「名称（CVE-YYYY-NNNN）」，如
+    `Fastjson 1.2.24反序列化命令执行（CVE-2017-18349）`、`Apache Shiro认证绕过（CVE-2020-1957）`；
+    无 CVE 的组件漏洞沿用官方 / 威胁情报编号（`Nacos默认密钥权限绕过（QVD-2023-6271）`、
+    `MariaDB认证远程代码执行（QVD-2026-48306）`）。
+  - **多漏洞组件拆分**：`Fastjson反序列化` 拆为 1.2.24（CVE-2017-18349）与 autoType 绕过（CVE-2022-25845）；
+    `Shiro反序列化` 拆为 rememberMe 反序列化（CVE-2016-4437）与认证绕过（CVE-2020-1957）；
+    `Nacos权限绕过/默认密钥` 拆为 CVE-2021-29441 与默认密钥两条；`目录遍历/列目录`、`目录暴露` 修正为
+    「路径遍历（目录穿越）」与「目录列表（目录浏览）」两条单一漏洞模板。
+  - **描述与修复建议增强**：补全「原理 + 触发条件 + 影响版本」；修复建议多条时统一按
+    `<p>1、…</p><p>2、…</p>` 编号换行；参考链接改用先知社区 / FreeBuf / 安全内参 / 绿盟 / 启明星辰 /
+    阿里云·腾讯云安全 / 官方通告 / NVD 等。
+  - **重点组件漏洞扩充（新增 41 条）**：覆盖天清汉马 VPN、Apache Tomcat、NGINX、Kubernetes（k8s）、
+    MySQL、GreatDB、MariaDB、MongoDB、ZooKeeper、Redis、Nacos、RabbitMQ、MinIO、React/Next.js、
+    Dify、FastAPI(Starlette)、JeecgBoot，并纳入截至发布时的最新漏洞，如
+    `Nacos 3.x权限绕过（鉴权作用域错配）`（3.0.0–3.2.3）、`React Server Components远程代码执行（CVE-2025-55182，React2Shell）`、
+    `Next.js React Server Components远程代码执行（CVE-2025-66478）`、`JeecgBoot积木报表未授权远程代码执行`、
+    `NGINX rewrite模块堆缓冲区溢出远程代码执行（CVE-2026-42945）`、`Apache Tomcat Tribes集群反序列化远程代码执行（CVE-2026-34486）`、
+    `Kubernetes(k8s) Ingress-NGINX未授权远程代码执行（CVE-2025-1974）`、`Redis Lua沙箱逃逸远程代码执行（CVE-2025-49844）`、
+    `MongoDB未授权内存信息泄露（CVE-2025-14847）`、`MinIO服务账号与STS权限提升（CVE-2025-62506）`。
+- **预置数据单源化**：`scripts/seed_knowledge.py` 改为直接读取上述 JSON（`SEED_DATA` 现携带富文本 HTML），
+  `scripts/seed_dev_data.py` 同步改为 HTML 原样入库，消除两份模板数据源不一致的问题。
+- **模板列表预览可读性**（`frontend/src/views/KnowledgeList.vue`）：列表「标准描述 / 修复建议」列提取纯文本时
+  在块级元素间补换行，「1、2、3」编号建议不再黏连成一行。
+
+### 移除
+
+- 清理名称优化产生的 4 条历史残留条目（`Fastjson反序列化`、`Shiro反序列化`、`目录暴露`、`目录遍历/列目录`），
+  由 `sync_knowledge_templates --prune` 幂等完成。
+
+### 测试
+
+- `pytest tests/test_knowledge_templates.py` 6 项通过；WSL-Kali docker 容器内对 PostgreSQL 实测同步：
+  先后完成基础优化（新建 33 / 更新 60 / 清理 4，库内 93 条）与重点组件扩充（新建 41 条）及别名命名调整
+  （新建 6 / 清理 5），最终库内 **135 条**（33 条含 CVE）；再次 `--dry-run` 为「新建 0 / 清理 0」，验证幂等。
+- 页面实测（admin1 登录）：模板库 135 行，18 个重点关注组件均可检索到对应模板。
+
+---
+
 ## [2.12.3] - 2026-09-10
 
 修复 2.12.2 内置的存量数据维护脚本在 `--dry-run` 下崩溃的问题。

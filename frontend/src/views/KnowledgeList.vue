@@ -201,9 +201,13 @@ const formRules: FormRules = {
 }
 
 function plainText(html: string) {
-  // DOMParser 解析不挂载到页面，仅提取纯文本用于表格预览
+  // DOMParser 解析不挂载到页面，仅提取纯文本用于表格预览；
+  // 块级元素之间补换行，避免「1、2、3」编号的修复建议在预览中黏连成一行
   const doc = new DOMParser().parseFromString(html || '', 'text/html')
-  return (doc.body.textContent ?? '').trim()
+  doc.querySelectorAll('p, li, br, div, blockquote, h1, h2, h3, h4, tr').forEach((el) => {
+    el.insertAdjacentText('beforeend', '\n')
+  })
+  return (doc.body.textContent ?? '').replace(/\n{2,}/g, '\n').trim()
 }
 
 async function load() {

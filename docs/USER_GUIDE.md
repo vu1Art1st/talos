@@ -239,6 +239,23 @@ Talos 是一个漏洞全生命周期管理平台，覆盖「漏洞发现 → 提
 - 行内**删除** → 气泡确认「确认删除该条目？」→「删除成功」。
 - 勾选多行后点**「批量删除 (N)」** → 确认框 →「已删除 X 条」。
 
+### 4.4 官方模板数据同步（运维）
+
+平台内置一份经过整理的官方模板数据集 `backend/knowledge-import-vulnerabilities.json`，条目按「漏洞名称」维护，
+有明确编号的漏洞在名称后附带 CVE（如 `Spring Cloud Gateway命令执行（CVE-2022-22947）`），多漏洞组件
+（Nacos / Shiro / Fastjson 等）按单个漏洞拆分，修复建议多条时按 `1、2、3` 编号换行。
+
+同步命令在 `backend` 目录下（容器内在 `/app`）执行：
+
+```bash
+python -m scripts.sync_knowledge_templates --dry-run --prune   # 试运行，仅打印新建 / 更新 / 清理明细
+python -m scripts.sync_knowledge_templates --prune             # 正式同步（幂等，可重复执行）
+```
+
+- 默认仅按名称 **upsert**（不删除条目）；`--prune` 会删除数据文件中不存在的存量条目，
+  用于清理名称优化（补 CVE 编号、拆分组件）后遗留的旧名称条目。
+- docker 部署下可用 `docker exec <api容器名> python -m scripts.sync_knowledge_templates --prune` 执行。
+
 ---
 
 ## 5. 资产管理
