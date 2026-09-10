@@ -4,11 +4,16 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 
-// mock 路由：报告 ID 来自路由参数
-vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: '1' } }),
-  useRouter: () => ({ push: vi.fn() }),
-}))
+// mock 路由：报告 ID 来自路由参数。组件经 useAuthStore → stores/auth.ts → router/index.ts
+// 间接依赖 createRouter/createWebHistory，故用 importOriginal 保留真实导出、仅覆盖 hook。
+vi.mock('vue-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('vue-router')>()
+  return {
+    ...actual,
+    useRoute: () => ({ params: { id: '1' } }),
+    useRouter: () => ({ push: vi.fn() }),
+  }
+})
 
 // mock 导出任务 composable：报告编辑器对它仅有提交/轮询调用，冒烟无需真实行为
 vi.mock('../../composables/useExportJobs', () => ({

@@ -392,16 +392,8 @@
             <div class="tp-create-check">
               <el-icon v-if="form.create_nonpen" :size="14"><Check /></el-icon>
             </div>
-            <div>
-              <div class="tp-create-title">
-                创建漏扫基线工单
-              </div>
-              <div class="tp-create-desc">
-                {{ form.create_nonpen
-                  ? '勾选后展开测试项；保存时自动同步新增漏扫基线工单，与渗透测试分开管理/统计'
-                  : '点击可勾选，勾选后展开测试项选择；保存时自动同步新增漏扫基线工单' }}
-              </div>
-            </div>
+            <span class="tp-create-title">创建漏扫基线工单</span>
+            <span class="tp-create-desc">勾选后展开测试项；保存时自动同步漏扫基线工单</span>
           </div>
           <div v-if="form.create_nonpen" class="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-2">
             <div v-for="t in nonpenItems()" :key="t.key" class="test-item-check"
@@ -1061,9 +1053,11 @@ onBeforeUnmount(() => {
 }
 
 /* ---------- 创建漏扫基线工单（联动） ---------- */
+/* 单行布局：圆圈、标题、说明文字垂直居中共用一条水平轴线；wrap 兜底窄屏换行 */
 .tp-create-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 10px 12px;
   border: 1px dashed var(--tl-border);
@@ -1080,7 +1074,6 @@ onBeforeUnmount(() => {
   width: 20px;
   height: 20px;
   flex: none;
-  margin-top: 1px;
   border-radius: 50%;
   border: 1px solid var(--tl-border);
   display: flex;
@@ -1094,8 +1087,7 @@ onBeforeUnmount(() => {
   color: #fff;
 }
 .tp-create-title { font-size: 13px; font-weight: 500; }
-/* 渐变注释：品牌视觉渐变统一色源见 style.css .tl-brand-gradient */
-.tp-create-desc { font-size: 12px; margin-top: 2px; color: var(--tl-text-3); }
+.tp-create-desc { font-size: 12px; color: var(--tl-text-3); }
 
 /* 结论输出：结论文字卡片 */
 .conclusion-box {
