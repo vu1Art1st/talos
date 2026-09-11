@@ -3,7 +3,9 @@
     <!-- 筛选工具栏 -->
     <FilterToolbar>
       <span class="text-xs text-gray-400">按时间筛选：</span>
-      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-60"
+      <!-- daterange 根节点即 .el-input__wrapper（自带 flex-grow:1），在 .tl-filterbar 内会被拉伸撑满，
+           必须显式 grow-0 才能让 !w-60 的固定宽度生效 -->
+      <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-60 !grow-0"
                       start-placeholder="提交起" end-placeholder="提交止" @change="reload" />
       <el-select v-model="deptFilter" filterable clearable placeholder="全部部门" class="!w-40" @change="reload">
         <el-option v-for="d in departments" :key="d" :label="d" :value="d" />

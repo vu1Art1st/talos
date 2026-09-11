@@ -13,8 +13,10 @@
         <el-option v-for="(name, code) in actionOptions" :key="code" :label="name" :value="code" />
       </el-select>
       <el-input v-model="filters.ip" placeholder="IP" clearable class="!w-36" />
+      <!-- daterange 的根节点即 .el-input__wrapper（自带 flex-grow:1），在 flex 行内会被拉伸撑满，
+           必须显式 grow-0 才能让 !w-64 的固定宽度生效 -->
       <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
-                      start-placeholder="开始日期" end-placeholder="结束日期" class="!w-64" />
+                      start-placeholder="开始日期" end-placeholder="结束日期" class="!w-64 !grow-0" />
       <el-button @click="reload">查询</el-button>
     </div>
 
@@ -24,7 +26,8 @@
       <el-tab-pane label="全部" name="all" />
     </el-tabs>
 
-    <el-table :data="items" stripe @sort-change="onSortChange">
+    <el-table :data="items" stripe :default-sort="{ prop: 'create_time', order: 'descending' }"
+              @sort-change="onSortChange">
       <el-table-column prop="create_time" label="时间" width="170" sortable="custom">
         <template #default="{ row }"><span class="num">{{ fmtDateTime(row.create_time) }}</span></template>
       </el-table-column>
@@ -69,7 +72,8 @@ const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({ username: '', action: '', ip: '' })
 
 const { items, total, page, size, loading, load, reload, onSizeChange, onSortChange } = useListPage('/audit/logs', {
-  defaultSort: { prop: 'create_time', order: 'descending' },
+  // 注意：此处 order 用接口词典（asc/desc），Element Plus 的 ascending/descending 只用于表格 :default-sort
+  defaultSort: { prop: 'create_time', order: 'desc' },
   extraParams: () => ({
     category: activeTab.value,
     username: filters.username,

@@ -25,6 +25,19 @@
 
 ---
 
+## [2.13.1] - 2026-09-11
+
+### 修复
+
+- **远程检测新建 / 编辑在 PostgreSQL 下报 500**：远程检测口径重构（`appeal_success` → `appeal_status`）时，
+  迁移 `e5f6a7b8c9d0` 漏删旧列 `remote_testings.appeal_success`。该列在基线中为 `NOT NULL` 且无默认值、
+  模型已不再映射，导致 PostgreSQL 下任何 `INSERT` 都触发 `NotNullViolationError`（SQLite 开发库因重建表
+  逻辑不受影响，故此前未被发现）。新增迁移 `b4c5d6e7f8a9` 幂等删除该遗留列（列已不存在时自动跳过），
+  并在 `app/db.py` 轻量迁移中同步兜底；新增 `tests/test_schema_consistency.py` 守卫「模型 / Alembic /
+  SQLite 轻量迁移」三处对废弃列的处理口径。
+
+---
+
 ## [2.13.0] - 2026-09-10
 
 漏洞模板库内容全面优化：CVE 命名规范、多漏洞组件拆分、描述与修复建议增强，并提供幂等同步脚本。

@@ -19,10 +19,17 @@ export interface ListPageState<T> {
 export interface ListPageOptions {
   /** 每页条数，默认 20 */
   size?: number
-  /** 初始排序（如默认按时间倒序的页面） */
+  /** 初始排序（如默认按时间倒序的页面）；order 用接口词典 asc/desc（误传 ascending/descending 会自动归一化） */
   defaultSort?: { prop: string; order: string }
   /** 附加查询参数（如筛选条件），每次 load 时求值 */
   extraParams?: () => Record<string, unknown>
+}
+
+/** 归一化排序方向：接口只认 asc/desc，兼容误传 Element Plus 的 ascending/descending */
+function normalizeOrder(order: string): string {
+  if (order === 'ascending') return 'asc'
+  if (order === 'descending') return 'desc'
+  return order
 }
 
 export function useListPage<T = any>(url: string, options: ListPageOptions = {}): ListPageState<T> {
@@ -32,7 +39,9 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
   const size = ref(options.size ?? 20)
   const search = ref('')
   const sort = reactive<{ prop: string; order: string }>(
-    options.defaultSort ? { ...options.defaultSort } : { prop: '', order: '' },
+    options.defaultSort
+      ? { prop: options.defaultSort.prop, order: normalizeOrder(options.defaultSort.order) }
+      : { prop: '', order: '' },
   )
   const loading = ref(false)
 

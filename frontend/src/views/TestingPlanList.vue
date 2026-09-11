@@ -10,8 +10,10 @@
       <el-select v-model="rangeKind" placeholder="时间范围" class="!w-28" clearable @change="onRangeChange">
         <el-option v-for="o in DATE_RANGE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
+      <!-- daterange 根节点即 .el-input__wrapper（自带 flex-grow:1），在 .tl-filterbar 内会被拉伸撑满，
+           必须显式 grow-0 才能让 !w-64 的固定宽度生效 -->
       <el-date-picker v-if="rangeKind === 'custom'" v-model="customRange" type="daterange"
-                      value-format="YYYY-MM-DD" class="!w-64" start-placeholder="初测完成起"
+                      value-format="YYYY-MM-DD" class="!w-64 !grow-0" start-placeholder="初测完成起"
                       end-placeholder="初测完成止" @change="reload" />
       <el-popover
         :visible="filterVisible"

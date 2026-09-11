@@ -294,6 +294,14 @@ async def _migrate_lightweight() -> None:
                 await conn.execute(text(
                     "UPDATE remote_testings SET appeal_status = 'success' WHERE appeal_success = 1"
                 ))
+            # 遗留列 appeal_success 已被 appeal_status 取代（Alembic b4c5d6e7f8a9 同步）：
+            # 该列 NOT NULL 且无默认值、模型已不再映射，残留会导致 INSERT 报错。
+            # 下方「重建表」分支已顺带清理，此处兜底覆盖不走重建的旧库。
+            if "appeal_success" in rt_cols:
+                try:
+                    await conn.execute(text("ALTER TABLE remote_testings DROP COLUMN appeal_success"))
+                except Exception:  # noqa: BLE001  SQLite < 3.35 不支持 DROP COLUMN，忽略残留列
+                    pass
             # 废弃列 title（带索引）/ test_time / appeal_report_id（带外键）无法直接 DROP，
             # 采用「重建表」整体清理，保证模型与库结构一致
             if {"title", "test_time", "appeal_report_id"} & rt_cols:

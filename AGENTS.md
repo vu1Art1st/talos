@@ -83,6 +83,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 列表页（分页/排序/加载）、CRUD 弹窗、资产选择器、导出任务必须复用 `src/composables/` 对应组合式函数，禁止再复制样板。
 - 状态标签统一 `tl-tag` 类 + `softStyle()` 柔和样式；表格行内允许「色点 + 文字」dot-tag 变体（等级/状态语义），色值仍走 colors.ts 字典注册表，禁止视图内硬编码。
 - Tailwind 灰阶类（`text-gray-*` / `bg-gray-*` / `border-gray-*` / `bg-white`）已映射到 `--tl-gray-*` 令牌自动适配暗黑模式，可直接使用；新增样式优先用令牌，保证明暗两态可用。
+- 日期区间选择器（`el-date-picker[type=daterange]`）的根节点即 `.el-input__wrapper`，Element Plus 给该类设了 `flex-grow: 1`；放进 flex 行（`.tl-filterbar` 或自写 `flex` 容器）会被拉伸撑满、`!w-*` 失效。固定宽度必须同时写 `!grow-0`（`flex-grow: 0 !important`）。
 
 ## UI 设计规范精要
 

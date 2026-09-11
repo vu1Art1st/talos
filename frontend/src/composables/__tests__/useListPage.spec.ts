@@ -72,6 +72,22 @@ describe('useListPage', () => {
     })
   })
 
+  it('defaultSort 误传 Element Plus 词表（descending/ascending）时归一化为接口词典', async () => {
+    const lp = useListPage('/audit/logs', {
+      defaultSort: { prop: 'create_time', order: 'descending' },
+    })
+    await lp.load()
+    // 回归用例：曾因 defaultSort 传 'descending' 导致后端按非 desc 处理、日志按时间升序
+    expect(get).toHaveBeenLastCalledWith('/audit/logs', {
+      params: { search: '', page: 1, size: 20, sort: 'create_time', order: 'desc' },
+    })
+    expect(lp.sort.order).toBe('desc')
+
+    const lp2 = useListPage('/vulns', { defaultSort: { prop: 'id', order: 'ascending' } })
+    await lp2.load()
+    expect(lp2.sort.order).toBe('asc')
+  })
+
   it('reload 回到第一页', async () => {
     const lp = useListPage('/reports')
     await lp.load(4)
