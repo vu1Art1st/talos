@@ -4,6 +4,14 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
+    // 自定义错误页：顶层路由（不继承主布局）；public 使其在未登录时也可访问
+    // ——401 / 404 / 502 常发生在登录之前，若被守卫拦到 /login 则错误页形同虚设。
+    {
+      path: '/error/:code(\\d{3})',
+      name: 'error',
+      component: () => import('../views/ErrorPage.vue'),
+      meta: { title: '出错了', public: true },
+    },
     {
       path: '/',
       component: () => import('../layouts/MainLayout.vue'),
@@ -33,14 +41,22 @@ const router = createRouter({
         { path: 'tokens', name: 'tokens', component: () => import('../views/TokenList.vue'), meta: { title: '访问令牌' } },
       ],
     },
-    { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
+    // 未匹配的路径：进 404 错误页（原先静默重定向到 /dashboard，会掩盖错误链接且无从发现）
+    {
+      path: '/:pathMatch(.*)*',
+      name: 'not-found',
+      redirect: (to) => ({ name: 'error', params: { code: '404' }, query: { from: to.fullPath } }),
+    },
   ],
 })
 
 router.beforeEach((to) => {
-  const token = localStorage.getItem('access_token')
-  if (!token && to.name !== 'login') return { name: 'login', query: { redirect: to.fullPath } }
-  if (token && to.name === 'login') return { name: 'dashboard' }
+  // 公开页（错误页）不做登录态判断：未登录也必须能看到 401 / 404 / 502 页面
+  if (to.meta.public !== true) {
+    const token = localStorage.getItem('access_token')
+    if (!token && to.name !== 'login') return { name: 'login', query: { redirect: to.fullPath } }
+    if (token && to.name === 'login') return { name: 'dashboard' }
+  }
   document.title = to.meta.title ? `${to.meta.title} - Talos 漏洞管理平台` : 'Talos 漏洞管理平台'
 })
 

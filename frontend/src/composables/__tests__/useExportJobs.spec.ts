@@ -35,10 +35,10 @@ beforeEach(() => {
 })
 
 describe('useExportJobs', () => {
-  it('fetchJobs 请求报告导出记录并透传列表', async () => {
+  it('fetchJobs 请求报告导出记录并透传列表（轮询请求声明错误页豁免）', async () => {
     getMock.mockResolvedValueOnce({ data: [{ id: 3, fmt: 'docx', status: 'done' }] })
     const jobs = await useExportJobs().fetchJobs(9)
-    expect(getMock).toHaveBeenCalledWith('/reports/9/exports')
+    expect(getMock).toHaveBeenCalledWith('/reports/9/exports', { meta: { skipErrorPage: true } })
     expect(jobs).toHaveLength(1)
   })
 

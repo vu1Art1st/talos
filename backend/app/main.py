@@ -1,8 +1,10 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api.v1 import api_router
@@ -55,6 +57,20 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         return response
+
+    # 统一错误响应体：前端按状态码跳转自定义错误页（frontend/src/utils/errorPage.ts），
+    # 响应体只需给出可读文案；明细留在服务端日志，避免把内部信息透给客户端。
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error_handler(request: Request, exc: RequestValidationError):
+        logger.warning("请求参数校验失败 %s %s: %s", request.method, request.url.path, exc.errors())
+        return JSONResponse(status_code=422, content={"detail": "请求参数校验失败，请检查填写内容"})
+
+    @app.exception_handler(Exception)
+    async def _unhandled_error_handler(request: Request, exc: Exception):
+        # 兜底 500：Starlette 默认返回纯文本 "Internal Server Error"，前端拿不到 detail，
+        # 这里改为与其它接口一致的 JSON 结构，同时用 logger.exception 保留完整堆栈。
+        logger.exception("未处理异常 %s %s", request.method, request.url.path)
+        return JSONResponse(status_code=500, content={"detail": "服务器内部错误，请稍后重试"})
 
     app.include_router(api_router, prefix="/api/v1")
     # 仅公开图片子目录：导出/导入原始文档/预览等敏感文件不再静态暴露，改走鉴权接口

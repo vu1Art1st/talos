@@ -1,10 +1,23 @@
 import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
+import { normalizeRedirect, resolveErrorPolicy, resolvePageCode } from '../utils/errorPage'
+
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /**
+     * 错误页豁免：置 true 时该请求失败不触发全屏错误页（仅保留轻提示）。
+     * 用于后台轮询等场景，避免编辑中途被错误页清屏。401（登录态失效）不受此豁免影响。
+     */
+    meta?: { skipErrorPage?: boolean }
+  }
+}
 
 const client = axios.create({ baseURL: '/api/v1', timeout: 30000 })
 
 let refreshing: Promise<string | null> | null = null
+/** 正在跳转的错误码：并发请求同时失败时只跳一次 */
+let redirecting: string | null = null
 
 async function refreshToken(): Promise<string | null> {
   const refresh = localStorage.getItem('refresh_token')
@@ -28,6 +41,31 @@ function tokenExpiresIn(token: string): number | null {
   }
 }
 
+function clearCredentials() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+}
+
+function toastError(error: any) {
+  const msg = error?.response?.data?.detail || error?.message || '请求失败'
+  ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
+}
+
+/** 跳错误页（幂等）：当前已是同一错误页、或同码跳转正在进行时不重复导航 */
+function goErrorPage(status: number, query: Record<string, string> = {}) {
+  const code = resolvePageCode(status)
+  const current = router.currentRoute.value
+  if (current.name === 'error' && String(current.params.code) === code) return
+  if (redirecting === code) return
+  redirecting = code
+  void router
+    .replace({ name: 'error', params: { code }, query })
+    .catch(() => undefined)
+    .finally(() => {
+      redirecting = null
+    })
+}
+
 client.interceptors.request.use(async (config) => {
   let token = localStorage.getItem('access_token')
   // 临期主动刷新：距过期不足 5 分钟先续期（单飞去重），保证活跃用户的空闲窗口持续顺延
@@ -46,21 +84,36 @@ client.interceptors.response.use(
   (resp) => resp,
   async (error) => {
     const { response, config } = error
-    if (response?.status === 401 && !config._retried && !config.url?.includes('/auth/login')) {
-      config._retried = true
-      refreshing = refreshing ?? refreshToken()
-      const token = await refreshing
-      refreshing = null
-      if (token) {
-        config.headers.Authorization = `Bearer ${token}`
-        return client(config)
+    const status: number | undefined = response?.status
+    const method = String(config?.method || 'get').toUpperCase()
+    const url = typeof config?.url === 'string' ? config.url : ''
+    // 登录 / 刷新接口自身的 401 是「凭证错误」的业务语义，须就地提示，不进错误页
+    const isAuthPath = url.includes('/auth/login') || url.includes('/auth/refresh')
+
+    if (status === 401 && !isAuthPath) {
+      // 先静默刷新并重放；刷新失败（或重放后仍 401）说明登录态已彻底失效
+      if (!config._retried) {
+        config._retried = true
+        refreshing = refreshing ?? refreshToken()
+        const token = await refreshing
+        refreshing = null
+        if (token) {
+          config.headers.Authorization = `Bearer ${token}`
+          return client(config)
+        }
       }
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      router.push('/login')
+      clearCredentials()
+      // 保留原访问意图：401 页「重新登录」后回到该页面
+      goErrorPage(401, { redirect: normalizeRedirect(router.currentRoute.value.fullPath) })
+      return Promise.reject(error)
     }
-    const msg = response?.data?.detail || error.message || '请求失败'
-    if (response?.status !== 409) ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
+
+    const policy = resolveErrorPolicy({ status, method, skipErrorPage: config?.meta?.skipErrorPage === true })
+    if (policy === 'page' && status != null) {
+      goErrorPage(status, { from: normalizeRedirect(router.currentRoute.value.fullPath) })
+    } else if (policy === 'toast') {
+      toastError(error)
+    }
     return Promise.reject(error)
   },
 )

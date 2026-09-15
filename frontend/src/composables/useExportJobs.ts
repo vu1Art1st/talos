@@ -21,9 +21,13 @@ export interface ExportJob {
 }
 
 export function useExportJobs() {
-  /** 拉取指定报告的导出记录（调用方自行决定缓存结构） */
+  /**
+   * 拉取指定报告的导出记录（调用方自行决定缓存结构）。
+   * 该接口被报告编辑器 / 工单抽屉以 2s 间隔轮询，故声明 skipErrorPage：
+   * 失败时只留轻提示，不用全屏错误页打断正在进行的编辑。
+   */
   async function fetchJobs(reportId: number | string): Promise<ExportJob[]> {
-    const { data } = await client.get(`/reports/${reportId}/exports`)
+    const { data } = await client.get(`/reports/${reportId}/exports`, { meta: { skipErrorPage: true } })
     return data
   }
 
