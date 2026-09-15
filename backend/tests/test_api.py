@@ -1712,6 +1712,54 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
             await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
 
 
+async def test_testing_plan_search_by_ticket_id(client: AsyncClient, auth: dict):
+    """关键词搜索支持工单ID：手动指定值 / 自动编号（完整 YYYYMMDD-N、日期段、序号段）。"""
+    DEPT = "工单ID搜索部门"
+    A = "工单ID搜索系统-手动"
+    B = "工单ID搜索系统-自动"
+    created = []
+
+    # 自动编号：需求接收日期 2026-05-06 → 20260506-N
+    resp = await client.post("/api/v1/testing-plans", headers=auth, json={
+        "system_name": B, "test_type": "渗透测试", "department": DEPT,
+        "receive_time": "2026-05-06",
+    })
+    assert resp.status_code == 200, resp.text
+    auto = resp.json()
+    created.append(auto)
+    assert auto["ticket_id"].startswith("20260506-")
+
+    # 手动指定工单ID（与自动编号同属一个搜索口径）
+    manual_id = "ZDDD-2026-001"
+    resp = await client.post("/api/v1/testing-plans", headers=auth, json={
+        "system_name": A, "test_type": "渗透测试", "department": DEPT,
+        "receive_time": "2026-05-06", "ticket_id_manual": manual_id,
+    })
+    assert resp.status_code == 200, resp.text
+    manual = resp.json()
+    created.append(manual)
+    assert manual["ticket_id"] == manual_id
+
+    def q(keyword: str) -> dict:
+        # 限定专属部门，避免共享会话库中其他测试残留计划干扰集合比较
+        return {"search": keyword, "department": DEPT}
+
+    try:
+        # 手动指定值（完整值与片段）
+        assert await _list_plan_names(client, auth, q(manual_id)) == {A}
+        assert await _list_plan_names(client, auth, q("ZDDD")) == {A}
+        # 自动编号完整值 YYYYMMDD-N
+        assert await _list_plan_names(client, auth, q(auto["ticket_id"])) == {B}
+        # 自动编号的日期段（YYYYMMDD）与序号段
+        assert await _list_plan_names(client, auth, q("20260506")) == {A, B}
+        assert await _list_plan_names(client, auth, q(f"20260506-{auto['ticket_seq']}")) == {B}
+        # 原有口径不受影响：系统名关键词仍可搜
+        assert await _list_plan_names(client, auth, q("工单ID搜索系统")) == {A, B}
+    finally:
+        for p in created:
+            await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+
 async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     """测试计划工作台：认领/退出、录入漏洞统计重算、报告关联三方状态联动。"""
     resp = await client.post(

@@ -2,7 +2,7 @@
   <div class="space-y-3">
     <FilterToolbar>
       <div class="tl-search-field">
-        <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门" clearable
+        <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门 / 工单ID" clearable
                   @keyup.enter="reload" @clear="reload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>

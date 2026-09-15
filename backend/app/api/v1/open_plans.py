@@ -71,7 +71,7 @@ async def open_list_testing_plans(
 ):
     """渗透测试工单分页列表（筛选参数与站内 GET /testing-plans 的固定参数一致）。
 
-    search 匹配测试系统 / 所属部门 / 测试类型；时间参数为 YYYY-MM-DD 闭区间。
+    search 匹配测试系统 / 所属部门 / 测试类型 / 工单ID；时间参数为 YYYY-MM-DD 闭区间。
     """
     cond = plan_query.plan_conditions(
         search, status, test_type, department, receive_from, receive_to,

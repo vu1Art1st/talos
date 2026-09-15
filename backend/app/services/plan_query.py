@@ -3,6 +3,9 @@
 列表 / 统计 / 导出三个入口共用的条件拼装都集中在此，路由层只做参数编排。
 聚合筛选的通用表达式构造在 core/filters.py，本模块补充 TestingPlan 特有的
 派生字段（工单ID、测试人员多对多、关联计数）。
+关键词搜索（plan_search_condition / nonpen_search_condition）与聚合筛选的
+工单ID表达式（_ticket_id_filter_expr）口径一致：手动指定值优先，否则由
+receive_time(YYYY-MM-DD) + ticket_seq 派生 YYYYMMDD-N。
 """
 import re
 from datetime import timedelta
@@ -53,6 +56,29 @@ def nonpen_search_condition(search: str):
     return or_(*conds)
 
 
+def plan_search_condition(search: str):
+    """渗透测试工单搜索：测试系统 / 所属部门 / 测试类型 / 工单ID（手动指定值，
+    或 YYYYMMDD-N 自动编号的日期+序号组合）。站内列表与开放 API 共用。"""
+    pat = f"%{search}%"
+    conds = [
+        TestingPlan.system_name.ilike(pat),
+        TestingPlan.department.ilike(pat),
+        TestingPlan.test_type.ilike(pat),
+        TestingPlan.ticket_id_manual.ilike(pat),
+        TestingPlan.receive_time.ilike(pat),
+        func.replace(TestingPlan.receive_time, "-", "").ilike(pat),
+        func.cast(TestingPlan.ticket_seq, String).ilike(pat),
+    ]
+    # 完整工单ID匹配：YYYYMMDD-N（如 20260727-1）→ 手动指定值本身，或自动编号的日期+当日序号组合
+    m = re.fullmatch(r"(\d{8})-(\d+)", search)
+    if m:
+        date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%"
+        conds.append(
+            TestingPlan.receive_time.like(date_like) & (TestingPlan.ticket_seq == int(m.group(2)))
+        )
+    return or_(*conds)
+
+
 def plan_conditions(
     search: str = "",
     status: int | None = None,
@@ -76,11 +102,7 @@ def plan_conditions(
     """
     cond = []
     if search:
-        cond.append(
-            TestingPlan.system_name.ilike(f"%{search}%")
-            | TestingPlan.department.ilike(f"%{search}%")
-            | TestingPlan.test_type.ilike(f"%{search}%")
-        )
+        cond.append(plan_search_condition(search))
     if status is not None:
         cond.append(TestingPlan.status == status)
     if pending:
