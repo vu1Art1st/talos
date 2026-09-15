@@ -340,6 +340,25 @@ async def _migrate_lightweight() -> None:
                     "ON remote_testings (system_name)"
                 ))
                 await conn.execute(text("PRAGMA foreign_keys=ON"))
+        # 远程检测关联口径（2026-09-11，Alembic c7d8e9f0a1b2 同步）：
+        # 关联资产 asset_id / 资产归属 asset_belong / 关联漏洞 vuln_id；重建分支之后补列，保证两条路径都齐备
+        rt_cols = {r[1] for r in (
+            await conn.execute(text("PRAGMA table_info(remote_testings)"))
+        ).fetchall()}
+        if rt_cols:
+            for col, ddl in (
+                ("asset_id", "INTEGER"),
+                ("asset_belong", "VARCHAR(128) NOT NULL DEFAULT ''"),
+                ("vuln_id", "INTEGER"),
+            ):
+                if col not in rt_cols:
+                    await conn.execute(text(f"ALTER TABLE remote_testings ADD COLUMN {col} {ddl}"))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_remote_testings_asset_id ON remote_testings (asset_id)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_remote_testings_vuln_id ON remote_testings (vuln_id)"
+            ))
 
 
 async def _backfill_asset_tech_fields() -> None:

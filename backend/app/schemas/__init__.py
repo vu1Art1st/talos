@@ -89,6 +89,7 @@ from .special import (
     PlanImportResultOut,
     RemoteTestingIn,
     RemoteTestingOut,
+    RemoteTestingVulDraft,
     RetestRoundOut,
     SpringActionIn,
     SpringActionOut,

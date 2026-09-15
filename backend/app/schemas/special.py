@@ -5,19 +5,42 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app.constants import NONPEN_ITEMS
 
+from .asset import AssetBrief
 from .common import ReportBrief, UserBrief, VulBrief, HtmlStr
 
 
+class SpringActionVulDraft(BaseModel):
+    """漏洞草稿（春耕行动原始报告导入/表单快捷录入、远程检测「新增漏洞」共用），无资产与工单关联。"""
+
+    title: str = Field(min_length=1, max_length=255)
+    level: int = 30
+    vul_type: int = 75
+    affected_url: str = ""
+    description_html: HtmlStr = ""
+    reproduce_html: HtmlStr = ""
+    solution_html: HtmlStr = ""
+
+
+class RemoteTestingVulDraft(SpringActionVulDraft):
+    """远程检测「新增漏洞」草稿：在通用草稿上允许指定漏洞来源（VUL_SOURCE，0=未选择）。"""
+
+    source: int = 0
+
+
 class RemoteTestingIn(BaseModel):
-    """远程检测记录（2026-08-14 按通报口径重构，申诉报告改为附件上传）。"""
+    """远程检测记录（2026-08-14 按通报口径重构，2026-09-11 关联资产台账与漏洞库）。"""
 
     system_name: str = Field(min_length=1, max_length=128)
     notice_time: str = ""  # 通报时间（YYYY-MM）
-    department: str = ""  # 资产归属
+    department: str = ""  # 部门（选资产自动带出）
+    asset_belong: str = ""  # 资产归属
+    asset_id: int | None = None  # 关联资产台账（系统名称/部门来源）
     notified_unit: str = ""  # 被通报单位
     is_external: bool = False  # 是否外部项目
-    vuln_name: str = ""  # 漏洞名称
-    vuln_type: str = ""  # 漏洞类型
+    vuln_name: str = ""  # 漏洞名称（历史文本快照，关联漏洞时由服务端忽略）
+    vuln_type: str = ""  # 漏洞类型（历史文本快照，关联漏洞时由服务端忽略）
+    vuln_id: int | None = None  # 关联漏洞库
+    new_vul: RemoteTestingVulDraft | None = None  # 保存时创建并关联的漏洞草稿
     appeal_status: str = ""  # 申诉状态：''/success/fail
     appeal_method: str = ""  # 申诉方式
     appeal_file_name: str = ""  # 申诉报告附件原始文件名
@@ -29,6 +52,8 @@ class RemoteTestingOut(RemoteTestingIn):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    asset: AssetBrief | None = None  # 关联资产摘要
+    vuln: VulBrief | None = None  # 关联漏洞摘要
     create_time: datetime | None = None
     update_time: datetime | None = None
 
@@ -166,18 +191,6 @@ class NonpenItemTransitionIn(BaseModel):
 class NonpenItemIgnoreIn(BaseModel):
     """忽略 / 取消忽略测试项。"""
     ignored: bool = True
-
-
-class SpringActionVulDraft(BaseModel):
-    """春耕行动保存时待创建的漏洞草稿（原始报告导入/表单快捷录入共用），无资产与工单关联。"""
-
-    title: str = Field(min_length=1, max_length=255)
-    level: int = 30
-    vul_type: int = 75
-    affected_url: str = ""
-    description_html: HtmlStr = ""
-    reproduce_html: HtmlStr = ""
-    solution_html: HtmlStr = ""
 
 
 class SpringReportParseOut(BaseModel):

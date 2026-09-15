@@ -1403,17 +1403,35 @@ async def test_import_report_section_and_list_order(client: AsyncClient, auth: d
 
 async def test_special_modules_crud(client: AsyncClient, auth: dict):
     """三个专项模块：远程检测 / 测试计划 / 春耕行动 CRUD。"""
-    # ---- 远程检测（2026-08-14 按通报口径重构：申诉报告改为附件上传） ----
+    # ---- 远程检测（2026-08-14 通报口径；2026-09-11 关联资产台账与漏洞库） ----
+    # 关联资产：系统名称/部门由资产带出，另存资产归属
+    resp = await client.post(
+        "/api/v1/assets", headers=auth, json={"name": "门户系统", "department": "信息部"},
+    )
+    assert resp.status_code == 200, resp.text
+    rt_asset_id = resp.json()["id"]
+
     resp = await client.post(
         "/api/v1/remote-testings", headers=auth,
         json={"system_name": "门户系统", "notice_time": "2026-01", "department": "信息部",
-              "notified_unit": "省公司", "is_external": False, "vuln_name": "SQL注入",
-              "vuln_type": "SQL注入", "appeal_status": "", "appeal_method": "",
+              "asset_belong": "省公司", "asset_id": rt_asset_id,
+              "notified_unit": "省公司", "is_external": False,
+              "new_vul": {"title": "SQL注入", "level": 20, "vul_type": 30, "source": 10},
+              "appeal_status": "", "appeal_method": "",
               "appeal_file_name": "", "appeal_file_path": "", "appeal_file_size": 0},
     )
     assert resp.status_code == 200, resp.text
-    rt_id = resp.json()["id"]
-    assert resp.json()["system_name"] == "门户系统"
+    rt = resp.json()
+    rt_id = rt["id"]
+    assert rt["system_name"] == "门户系统"
+    assert rt["asset"]["id"] == rt_asset_id
+    assert rt["asset_belong"] == "省公司"
+    # 「新增漏洞」草稿随保存创建并关联，文本快照同步为漏洞口径
+    assert rt["vuln"]["title"] == "SQL注入"
+    assert rt["vuln"]["vul_type"] == 30
+    assert rt["vuln_name"] == "SQL注入"
+    assert rt["vuln_type"] == "30"
+    rt_vul_id = rt["vuln"]["id"]
 
     # 申诉报告附件上传（返回文件元信息供表单绑定）
     resp = await client.post(
@@ -1429,13 +1447,24 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     resp = await client.put(
         f"/api/v1/remote-testings/{rt_id}", headers=auth,
         json={"system_name": "门户系统", "notice_time": "2026-02", "department": "信息部",
-              "notified_unit": "省公司", "is_external": True, "vuln_name": "SQL注入",
-              "vuln_type": "SQL注入", "appeal_status": "success", "appeal_method": "线下申诉",
+              "asset_belong": "省公司", "asset_id": rt_asset_id,
+              "notified_unit": "省公司", "is_external": True, "vuln_id": rt_vul_id,
+              "appeal_status": "success", "appeal_method": "线下申诉",
               "appeal_file_name": up["name"], "appeal_file_path": up["path"],
               "appeal_file_size": up["size"]},
     )
     assert resp.status_code == 200
     assert resp.json()["appeal_status"] == "success"
+    # 保留关联漏洞时文本快照继续由漏洞派生，不受前端是否有文本输入影响
+    assert resp.json()["vuln_id"] == rt_vul_id
+    assert resp.json()["vuln"]["id"] == rt_vul_id
+
+    # 关联漏洞不存在时拒绝保存
+    resp = await client.post(
+        "/api/v1/remote-testings", headers=auth,
+        json={"system_name": "非法关联系统", "vuln_id": 999999},
+    )
+    assert resp.status_code == 400
 
     # 申诉报告附件下载
     resp = await client.get(f"/api/v1/remote-testings/{rt_id}/appeal", headers=auth)
@@ -1444,6 +1473,10 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
 
     resp = await client.get("/api/v1/remote-testings", headers=auth, params={"search": "门户"})
     assert rt_id in [r["id"] for r in resp.json()["items"]]
+    # 部门列为独立字段可检索；关联漏洞标题同样参与检索（列表「漏洞名称」点击查看详情）
+    resp = await client.get("/api/v1/remote-testings", headers=auth, params={"search": "SQL注入"})
+    hit = [r for r in resp.json()["items"] if r["id"] == rt_id]
+    assert hit and hit[0]["vuln"]["title"] == "SQL注入"
 
     # ---- 测试计划 ----
     resp = await client.post(
@@ -1573,6 +1606,10 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     imported_id = sa2["vuls"][0]["id"]
     resp = await client.post("/api/v1/vulns/batch-delete", headers=auth, json={"ids": [imported_id]})
     assert resp.status_code == 200
+
+    # 清理远程检测「新增漏洞」创建的漏洞（避免污染历史漏洞库计数）
+    resp = await client.post("/api/v1/vulns/batch-delete", headers=auth, json={"ids": [rt_vul_id]})
+    assert resp.status_code == 200, resp.text
 
     # ---- 删除 ----
     for path in (f"/api/v1/remote-testings/{rt_id}",

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now
 from app.db import Base
-from app.models.business import Vul
+from app.models.business import Asset, Vul
 from app.models.user import User
 
 # 春耕行动-漏洞多对多关联表
@@ -29,11 +29,16 @@ testing_plan_testers = Table(
 
 
 class RemoteTesting(Base):
-    """远程检测记录（2026-08-14 按通报口径重构）。
+    """远程检测记录（2026-08-14 按通报口径重构，2026-09-11 关联资产台账与漏洞库）。
 
-    表单项对应通报列表：通报时间 / 系统名称 / 资产归属 / 被通报单位 / 是否外部项目 /
+    表单项对应通报列表：通报时间 / 系统名称 / 部门 / 资产归属 / 被通报单位 / 是否外部项目 /
     漏洞名称 / 漏洞类型 / 申诉状态 / 申诉报告(附件) / 申诉方式。
     申诉报告不再关联报告中心，改为附件上传（appeal_file_* 字段）。
+
+    关联口径（2026-09-11）：
+    - asset_id 指向资产台账，系统名称与部门由所选资产带出（仍可手工修正）；
+    - vuln_id 指向漏洞库，漏洞名称与漏洞类型派生展示；录入新漏洞时由 API 创建后回填。
+    - vuln_name / vuln_type 为历史文本快照，关联漏洞存在时不再作为展示来源，仅兜底旧数据。
     """
 
     __tablename__ = "remote_testings"
@@ -41,11 +46,14 @@ class RemoteTesting(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     notice_time: Mapped[str] = mapped_column(String(32), default="")  # 通报时间（YYYY-MM）
     system_name: Mapped[str] = mapped_column(String(128), index=True)
-    department: Mapped[str] = mapped_column(String(128), default="")  # 资产归属
+    department: Mapped[str] = mapped_column(String(128), default="")  # 部门（选资产自动带出）
+    asset_belong: Mapped[str] = mapped_column(String(128), default="")  # 资产归属
+    asset_id: Mapped[int | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)  # 关联资产台账
     notified_unit: Mapped[str] = mapped_column(String(128), default="")  # 被通报单位
     is_external: Mapped[bool] = mapped_column(Boolean, default=False)  # 是否外部项目
-    vuln_name: Mapped[str] = mapped_column(String(255), default="")  # 漏洞名称
-    vuln_type: Mapped[str] = mapped_column(String(64), default="")  # 漏洞类型
+    vuln_name: Mapped[str] = mapped_column(String(255), default="")  # 漏洞名称（历史文本快照）
+    vuln_type: Mapped[str] = mapped_column(String(64), default="")  # 漏洞类型（历史文本快照）
+    vuln_id: Mapped[int | None] = mapped_column(ForeignKey("vulns.id"), nullable=True, index=True)  # 关联漏洞库
     appeal_status: Mapped[str] = mapped_column(String(16), default="")  # 申诉状态：''未申诉 / success申诉成功 / fail申诉失败
     appeal_method: Mapped[str] = mapped_column(String(64), default="")  # 申诉方式
     appeal_file_name: Mapped[str] = mapped_column(String(255), default="")  # 申诉报告附件原始文件名
@@ -54,6 +62,9 @@ class RemoteTesting(Base):
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+    asset: Mapped[Asset | None] = relationship(lazy="selectin")
+    vuln: Mapped[Vul | None] = relationship(lazy="selectin")
 
 
 class TestingPlan(Base):

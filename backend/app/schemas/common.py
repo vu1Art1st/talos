@@ -39,6 +39,7 @@ class VulBrief(BaseModel):
     level: int = 30
     status: int = 10
     layer: int = 10  # 所在层（网络层级），供春耕行动等关联方聚合展示
+    vul_type: int = 75  # 漏洞类型字典码（远程检测等关联方按名称展示）
 
 
 class ReportBrief(BaseModel):

@@ -12,8 +12,9 @@ from app.core.config import settings
 from app.core.deps import require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
-from app.models import RemoteTesting, User
+from app.models import Asset, RemoteTesting, User, Vul
 from app.schemas import Page, RemoteTestingIn, RemoteTestingOut
+from app.services import vuln_service
 
 router = APIRouter(tags=["专项管理"])
 
@@ -28,18 +29,21 @@ async def list_remote_testings(
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    cond = []
+    stmt = select(RemoteTesting)
     if search:
-        cond.append(
-            RemoteTesting.system_name.ilike(f"%{search}%")
-            | RemoteTesting.department.ilike(f"%{search}%")
-            | RemoteTesting.notified_unit.ilike(f"%{search}%")
-            | RemoteTesting.vuln_name.ilike(f"%{search}%")
+        like = f"%{search}%"
+        # 关联漏洞的标题同样参与检索（旧记录的文本快照仍保留匹配）
+        stmt = stmt.outerjoin(Vul, RemoteTesting.vuln_id == Vul.id).where(
+            RemoteTesting.system_name.ilike(like)
+            | RemoteTesting.department.ilike(like)
+            | RemoteTesting.asset_belong.ilike(like)
+            | RemoteTesting.notified_unit.ilike(like)
+            | RemoteTesting.vuln_name.ilike(like)
+            | Vul.title.ilike(like)
         )
-    stmt = select(RemoteTesting).where(*cond)
     stmt = apply_sort(
         stmt, RemoteTesting, sort, order,
-        {"id", "system_name", "notice_time", "department", "is_external",
+        {"id", "system_name", "notice_time", "department", "asset_belong", "is_external",
          "vuln_name", "appeal_status", "create_time"},
         RemoteTesting.id.desc(),
     )
@@ -73,13 +77,43 @@ async def upload_remote_appeal(
     }
 
 
+async def _resolve_links(
+    session: AsyncSession, body: RemoteTestingIn, user: User,
+) -> dict:
+    """解析远程检测的关联资产与关联漏洞。
+
+    - asset_id 非空时校验资产存在；
+    - new_vul 非空时创建漏洞（来源取草稿自带的 VUL_SOURCE），回填 vuln_id；
+    - 最终存在关联漏洞时，以漏洞标题/类型同步文本快照，保证列表与导出口径一致。
+    """
+    data = body.model_dump(exclude={"new_vul"})
+    if body.asset_id and not await session.get(Asset, body.asset_id):
+        raise HTTPException(400, "关联资产不存在")
+    vul: Vul | None = None
+    if body.new_vul:
+        created = await vuln_service.create_draft_vulns(
+            session, [body.new_vul], user, body.new_vul.source,
+        )
+        vul = created[0]
+        data["vuln_id"] = vul.id
+    elif body.vuln_id:
+        vul = await session.get(Vul, body.vuln_id)
+        if not vul:
+            raise HTTPException(400, "关联漏洞不存在")
+    if vul is not None:
+        data["vuln_name"] = vul.title
+        data["vuln_type"] = str(vul.vul_type)
+    return data
+
+
 @router.post("/remote-testings", response_model=RemoteTestingOut)
 async def create_remote_testing(
     body: RemoteTestingIn,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    row = RemoteTesting(**body.model_dump(), creator_id=user.id)
+    data = await _resolve_links(session, body, user)
+    row = RemoteTesting(**data, creator_id=user.id)
     session.add(row)
     await session.commit()
     await session.refresh(row)
@@ -90,12 +124,12 @@ async def create_remote_testing(
 async def update_remote_testing(
     row_id: int,
     body: RemoteTestingIn,
-    _: User = Depends(require_perm("special:manage")),
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, RemoteTesting, row_id, "远程检测记录不存在")
     old_path = row.appeal_file_path
-    for k, v in body.model_dump().items():
+    for k, v in (await _resolve_links(session, body, user)).items():
         setattr(row, k, v)
     await session.commit()
     # 替换附件时清理旧文件（更新失败时旧文件仍保留，不影响记录）
