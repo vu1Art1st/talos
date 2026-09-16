@@ -24,6 +24,11 @@ PLAN_EXCEL_HEADERS = [
 ]
 
 PLAN_STATUS_REVERSE = {v: k for k, v in TESTING_PLAN_STATUS.items()}
+# 兼容历史 Excel：状态改名前导出的模板仍按旧文案导入（2026-09-16 等待复测→初测完成、复测申请→提请复测）
+PLAN_STATUS_REVERSE.update({
+    "等待复测": PlanStatus.WAIT_RETEST,
+    "复测申请": PlanStatus.RETEST_APPLY,
+})
 
 
 def _to_int(text: str) -> int:

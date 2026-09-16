@@ -310,9 +310,9 @@ GET /api/v1/open/stats
 
 | 码值 | 名称 | 码值 | 名称 |
 |---|---|---|---|
-| 10 | 未测试 | 40 | 复测申请 |
+| 10 | 未测试 | 40 | 提请复测 |
 | 20 | 初测中 | 50 | 复测中 |
-| 30 | 等待复测 | 60 | 复测完成 |
+| 30 | 初测完成 | 60 | 复测完成 |
 | 70 | 测试通过（无漏洞闭环终态） | | |
 
 合法流转：
@@ -320,9 +320,9 @@ GET /api/v1/open/stats
 | 当前状态 | 可流转到 |
 |---|---|
 | 10 未测试 | 20 初测中、70 测试通过 |
-| 20 初测中 | 30 等待复测、70 测试通过 |
-| 30 等待复测 | 40 复测申请、50 复测中 |
-| 40 复测申请 | 50 复测中 |
+| 20 初测中 | 30 初测完成、70 测试通过 |
+| 30 初测完成 | 40 提请复测、50 复测中 |
+| 40 提请复测 | 50 复测中 |
 | 50 复测中 | 60 复测完成 |
 | 60 复测完成 | 50 复测中 |
 | 70 测试通过 | 20 初测中 |
@@ -512,7 +512,7 @@ curl -sS -X POST "$TALOS_BASE/open/nonpen-plans" \
 
 | 字段 | 说明 |
 |---|---|
-| `status` | `not_started` 未开始 / `testing` 测试中 / `wait_retest` 等待复测 / `retesting` 复测中 / `retest_done` 复测完成 / `ignored` 已忽略 |
+| `status` | `not_started` 未开始 / `testing` 测试中 / `wait_retest` 初测完成 / `retesting` 复测中 / `retest_done` 复测完成 / `ignored` 已忽略 |
 | `first_times` | 初测次数（扫描次数口径按此统计，复测不重复计数） |
 | `retest_times` | 复测次数 |
 | `testing_plan_id` | 非空表示由渗透测试工单联动创建（共享工单ID，编辑公共字段双向同步） |
@@ -1174,6 +1174,6 @@ GET /open/nonpen-plans/{id}                                -> NonpenPlanOut
 POST /open/nonpen-plans         body=NonpenPlanIn          -> NonpenPlanOut     (需 special:manage)
 PUT  /open/nonpen-plans/{id}    body=NonpenPlanIn(全量)    -> NonpenPlanOut     (需 special:manage)
 
-工单状态: 10未测试 20初测中 30等待复测 40复测申请 50复测中 60复测完成 70测试通过
+工单状态: 10未测试 20初测中 30初测完成 40提请复测 50复测中 60复测完成 70测试通过
 漏扫测试项: baseline基线扫描 / host主机漏洞扫描 / web Web漏洞扫描
 ```

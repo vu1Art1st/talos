@@ -21,8 +21,8 @@ class PlanStatus(IntEnum):
     """测试计划状态码。"""
     UNTESTED = 10      # 未测试
     TESTING = 20       # 初测中
-    WAIT_RETEST = 30   # 等待复测
-    RETEST_APPLY = 40  # 复测申请
+    WAIT_RETEST = 30   # 初测完成（等待业务系统提交复测）
+    RETEST_APPLY = 40  # 提请复测
     RETESTING = 50     # 复测中
     RETEST_DONE = 60   # 复测完成
     PASSED = 70        # 测试通过（测试完成且确认未发现安全漏洞，无漏洞闭环终态）
@@ -97,16 +97,16 @@ VUL_TRANSITIONS = {
 }
 
 # 测试计划状态机：当前状态 -> 允许流转到的状态
-# 未测试 --开始初测--> 初测中 --初测完成--> 等待复测 --发起复测申请--> 复测申请
-# 复测申请 --确认复测--> 复测中 --全部漏洞闭环--> 复测完成
-# 等待复测/复测申请 --报告发起复测--> 复测中（报告联动）
+# 未测试 --开始初测--> 初测中 --初测完成--> 初测完成 --提请复测--> 提请复测
+# 提请复测 --确认复测--> 复测中 --全部漏洞闭环--> 复测完成
+# 初测完成/提请复测 --报告发起复测--> 复测中（报告联动）
 # 复测完成 --漏洞重新打开--> 复测中
 # 初测中 --确认无漏洞--> 测试通过（无漏洞闭环，无需复测）
 # 测试通过 --补录/关联新漏洞--> 初测中（自动重开）
 PLAN_TRANSITIONS = {
     PlanStatus.UNTESTED: {PlanStatus.TESTING, PlanStatus.PASSED},
     PlanStatus.TESTING: {PlanStatus.WAIT_RETEST, PlanStatus.PASSED},
-    PlanStatus.WAIT_RETEST: {PlanStatus.RETEST_APPLY, PlanStatus.RETESTING},  # 复测申请或报告直接发起复测
+    PlanStatus.WAIT_RETEST: {PlanStatus.RETEST_APPLY, PlanStatus.RETESTING},  # 提请复测或报告直接发起复测
     PlanStatus.RETEST_APPLY: {PlanStatus.RETESTING},
     PlanStatus.RETESTING: {PlanStatus.RETEST_DONE},
     PlanStatus.RETEST_DONE: {PlanStatus.RETESTING},  # 漏洞回退时重新打开
@@ -142,8 +142,8 @@ URL_TAG = {10: "互联网", 20: "办公网"}
 TESTING_PLAN_STATUS = {
     PlanStatus.UNTESTED: "未测试",
     PlanStatus.TESTING: "初测中",
-    PlanStatus.WAIT_RETEST: "等待复测",
-    PlanStatus.RETEST_APPLY: "复测申请",
+    PlanStatus.WAIT_RETEST: "初测完成",
+    PlanStatus.RETEST_APPLY: "提请复测",
     PlanStatus.RETESTING: "复测中",
     PlanStatus.RETEST_DONE: "复测完成",
     PlanStatus.PASSED: "测试通过",
@@ -321,11 +321,11 @@ NONPEN_ITEMS = {
     "web": ("Web漏洞扫描", "Web 应用 / 接口漏洞"),
 }
 
-# 非渗透测试项独立流转状态：未开始→初测中→等待复测→复测中→复测完成，任意阶段可忽略
+# 非渗透测试项独立流转状态：未开始→初测中→初测完成→复测中→复测完成，任意阶段可忽略
 NONPEN_ITEM_STATUS = {
     "not_started": "未开始",
     "testing": "初测中",
-    "wait_retest": "等待复测",
+    "wait_retest": "初测完成",
     "retesting": "复测中",
     "retest_done": "复测完成",
     "ignored": "忽略",
@@ -334,9 +334,9 @@ NONPEN_ITEM_STATUS = {
 # 测试项状态 → 允许的操作（后端流转校验 + 前端按钮渲染共用；元组有序，即前端按钮渲染顺序）
 NONPEN_ITEM_ACTIONS = {
     "not_started": ("start", "ignore"),                    # 开始初测 / 忽略
-    "testing": ("done", "direct_done", "ignore"),          # 初测完成(→等待复测) / 直接完成(→复测完成) / 忽略
+    "testing": ("done", "direct_done", "ignore"),          # 完成初测(→初测完成) / 直接完成(→复测完成) / 忽略
     "wait_retest": ("start_retest", "ignore"),             # 发起复测 / 忽略
-    "retesting": ("pass", "fail", "ignore"),               # 复测通过 / 复测未通过(退回等待复测) / 忽略
+    "retesting": ("pass", "fail", "ignore"),               # 复测通过 / 复测未通过(退回初测完成) / 忽略
     "retest_done": ("reset",),                             # 置回未开始
     "ignored": ("unignore",),                              # 取消忽略（次数清零，回未开始）
 }

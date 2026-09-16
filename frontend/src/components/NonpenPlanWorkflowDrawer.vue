@@ -114,7 +114,7 @@ const acting = ref('')
 const FLOW_STATES = [
   { key: 'not_started', label: '未开始' },
   { key: 'testing', label: '初测中' },
-  { key: 'wait_retest', label: '等待复测' },
+  { key: 'wait_retest', label: '初测完成' },
   { key: 'retesting', label: '复测中' },
   { key: 'retest_done', label: '复测完成' },
 ]

@@ -120,7 +120,7 @@ async def resolve_report_plan(
         else:
             plan.status = 50  # 复测中：仍有未修复漏洞待闭环
     else:
-        plan.status = 30  # 初测完成，等待复测
+        plan.status = 30  # 初测完成（等待业务系统提交复测）
         plan.first_test_done_time = report_date or plan.first_test_done_time
     return plan, round_row
 

@@ -46,6 +46,8 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert nonpen_items == {"baseline", "host", "web"}
     assert meta["nonpen"]["actions"]["not_started"] == ["start", "ignore"]
     assert meta["nonpen"]["action_names"]["start"] == "开始初测"
+    # 漏扫测试项状态与渗透工单统一口径（2026-09-16 改名）
+    assert meta["nonpen"]["status"]["wait_retest"] == "初测完成"
 
 
 async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
@@ -517,7 +519,7 @@ async def test_report_import_full_rounds_flow(client: AsyncClient, auth: dict):
     assert result["created"] == 1
     plan = (await client.get("/api/v1/testing-plans", headers=auth,
                              params={"search": system_name})).json()["items"][0]
-    assert plan["status"] == 30  # 初测完成，等待复测
+    assert plan["status"] == 30  # 初测完成（等待业务系统提交复测）
     vuln = await _find_vuln(client, auth, vuln_title)
     assert vuln["status"] == 10 and vuln["is_retest"] is False  # 初测发现漏洞，未修复
 
@@ -1511,6 +1513,8 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     # meta 提供六档状态字典
     meta = (await client.get("/api/v1/meta", headers=auth)).json()
     assert meta["testing_plan_status"]["10"] == "未测试"
+    assert meta["testing_plan_status"]["30"] == "初测完成"
+    assert meta["testing_plan_status"]["40"] == "提请复测"
     assert meta["testing_plan_status"]["60"] == "复测完成"
 
     # ---- 春耕行动 ----
@@ -1806,7 +1810,7 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 400
 
-    # 生成报告并关联计划：报告带 testing_plan_id，计划进入等待复测
+    # 生成报告并关联计划：报告带 testing_plan_id，计划进入初测完成
     resp = await client.post(
         "/api/v1/reports/from-vulns", headers=auth,
         json={"title": "工作台报告", "vul_ids": [vul_a, vul_b], "testing_plan_id": plan_id},
@@ -2169,7 +2173,7 @@ async def test_delete_retest_report_rolls_back_round(client: AsyncClient, auth: 
     )
     vul_a = resp.json()[0]["id"]
 
-    # 生成初测报告 → 漏洞进入修复中，计划进入等待复测
+    # 生成初测报告 → 漏洞进入修复中，计划进入初测完成
     resp = await client.post(
         "/api/v1/reports/from-vulns", headers=auth,
         json={"title": "轮次回退报告", "vul_ids": [vul_a], "testing_plan_id": plan_id},

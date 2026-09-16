@@ -144,16 +144,16 @@ VULNS = [
     ("JWT算法降级绕过签名校验", 3, None, 20, 40, VulStatus.RETESTING, [4], 0, 7, False, 0),
     ("短信验证码暴力破解", 3, None, 20, 45, VulStatus.FIXING, [4], 0, 7, False, 0),
     ("登录错误信息账号枚举", 3, None, 40, 55, VulStatus.FIXING, [4], 0, 7, False, 0),
-    # 工单4 营销活动平台（2026-02，等待复测）
+    # 工单4 营销活动平台（2026-02，初测完成）
     ("优惠券领取接口重放", 4, None, 20, 45, VulStatus.FIXING, [5], 3, 6, False, 0),
     ("活动规则前端校验绕过", 4, None, 30, 45, VulStatus.FIXING, [5], 3, 6, False, 0),
     ("积分商城订单金额篡改", 4, None, 20, 45, VulStatus.UNFIXED, [5], 3, 6, False, 0),
     ("海报图片上传SVG注入", 4, None, 40, 15, VulStatus.FIXING, [5], 3, 6, False, 0),
-    # 工单5 智能客服系统（2026-03，等待复测）
+    # 工单5 智能客服系统（2026-03，初测完成）
     ("坐席附件上传WebShell", 5, None, 10, 60, VulStatus.FIXING, [6], 4, 5, False, 0),
     ("知识库检索EL表达式注入", 5, None, 20, 25, VulStatus.UNFIXED, [6], 1, 5, False, 0),
     ("访客会话固定攻击", 5, None, 30, 45, VulStatus.FIXING, [6], 4, 5, False, 0),
-    # 工单6 数据中台（2026-04，复测申请）
+    # 工单6 数据中台（2026-04，提请复测）
     ("数据服务网关API未鉴权", 6, None, 10, 40, VulStatus.FIXING, [7], 2, 4, False, 0),
     ("ClickHouse接口SQL注入", 6, None, 20, 10, VulStatus.FIXING, [7], 2, 4, False, 0),
     ("元数据接口敏感信息泄露", 6, None, 30, 55, VulStatus.UNFIXED, [7], 2, 4, False, 0),

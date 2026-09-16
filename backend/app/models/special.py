@@ -171,7 +171,7 @@ class NonpenPlan(Base):
     - 工单ID（ticket_id）与测试计划共享当日序号序列：ticket_seq / ticket_id_manual
       语义与 TestingPlan 完全一致（手动指定优先，否则 receive_time 日期 + 当日序号）。
     - items 为 JSON 容器：{key: {status, first_times, retest_times}}，三类测试项
-      （baseline/host/web）独立流转：未开始→初测中→等待复测→复测中→复测完成，
+      （baseline/host/web）独立流转：未开始→初测中→初测完成→复测中→复测完成，
       任意阶段可忽略（ignored，取消忽略回未开始且次数清零）；未勾选项 status='ignored'。
     - testing_plan_id 非空表示由「测试计划」联动创建（列表展示「联动」角标）：
       编辑公共字段与来源测试计划双向同步，删除任一方互相级联。
@@ -217,7 +217,7 @@ class NonpenPlan(Base):
     @property
     def actionable(self) -> bool:
         """「可进行」判定：存在至少一个非忽略测试项处于可测试状态（未开始/初测中/复测中）。
-        等待复测不视作可进行——测试人员在等待业务系统提交复测，无测试人员可执行的操作。"""
+        初测完成不视作可进行——测试人员在等待业务系统提交复测，无测试人员可执行的操作。"""
         for state in (self.items or {}).values():
             if state.get("status") in ("not_started", "testing", "retesting"):
                 return True

@@ -615,7 +615,7 @@ async function generateReport() {
       vul_ids: genVulIds.value,
       testing_plan_id: props.planId,
     })
-    ElMessage.success('报告已生成，计划进入等待复测')
+    ElMessage.success('报告已生成，计划进入初测完成')
     genFormVisible.value = false
     dirty.value = true
     await refresh()

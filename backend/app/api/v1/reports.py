@@ -318,7 +318,7 @@ async def create_report_from_vulns(
     # 漏洞流转（自动进入修复中）会刷新其最后编辑时间，故快照需在流转后采集
     report.vul_edit_snapshot = await _snapshot_vul_edits(session, [v.id for v in vulns])
     if plan is not None:
-        # 报告已生成，计划进入等待复测阶段
+        # 报告已生成，计划进入初测完成阶段
         if vuln_service.can_plan_transition(plan.status, 30):
             plan.status = 30
         if not plan.first_test_done_time:
@@ -615,7 +615,7 @@ async def retest_report(
         plan = await session.get(TestingPlan, report.testing_plan_id)
         if plan is not None:
             if vuln_service.can_plan_transition(plan.status, 50):
-                plan.status = 50  # 等待复测/复测申请 → 复测中
+                plan.status = 50  # 初测完成/提请复测 → 复测中
             round_row = plan_service.start_retest_round(
                 session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
             )
