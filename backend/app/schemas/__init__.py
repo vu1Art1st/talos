@@ -56,6 +56,8 @@ from .knowledge import (
     KnowledgeBatchIn,
     KnowledgeIn,
     KnowledgeOut,
+    KnowledgeSearchItem,
+    KnowledgeSearchOut,
 )
 from .import_ import (
     BatchConfirmIn,

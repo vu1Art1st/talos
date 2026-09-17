@@ -89,7 +89,7 @@
                     </el-button>
                   </template>
                 </el-select>
-                <el-tooltip content="从漏洞模板库套用该类型的标准描述与修复建议" placement="top">
+                <el-tooltip content="从漏洞模板库套用标准描述与修复建议（默认当前类型，可跨模板搜索）" placement="top">
                   <el-button plain @click="applyTemplate(vul)">套用模板</el-button>
                 </el-tooltip>
               </div>
@@ -188,46 +188,21 @@
 
   <AssetFormDialog v-model:visible="assetDialogVisible" :asset="assetPrefill" @saved="onAssetCreated" />
 
-  <!-- 知识库模板选择弹窗 -->
-  <el-dialog
-             :close-on-click-modal="false" v-model="templateVisible" title="选择知识库模板" width="640px" append-to-body>
-    <el-input v-model="templateSearch" placeholder="搜索模板名称 / 标签 / 描述" clearable class="mb-3">
-      <template #prefix><el-icon><Search /></el-icon></template>
-    </el-input>
-    <div v-if="!templateList.length" class="py-8 text-center text-gray-400">该漏洞类型暂无知识库模板</div>
-    <div v-else-if="!filteredTemplateList.length" class="py-8 text-center text-gray-400">
-      未找到匹配「{{ templateSearch }}」的模板
-    </div>
-    <div v-else class="flex flex-col gap-2 max-h-96 overflow-auto">
-      <div v-for="(t, i) in filteredTemplateList" :key="t.id"
-           class="rounded-lg border border-gray-200 hover:border-brand-400 cursor-pointer p-3 transition"
-           @click="applyEntry(t)">
-        <div class="flex items-center gap-2">
-          <span class="tl-tag" :style="levelSoftStyle(t.severity_level)">{{ levelName(t.severity_level) }}</span>
-          <span class="font-medium">{{ t.vulnerability_name }}</span>
-          <span v-if="t.tags?.length" class="text-xs text-gray-400">{{ t.tags.join('、') }}</span>
-        </div>
-        <p class="text-xs text-gray-500 mt-1 line-clamp-2">{{ plainSummary(t) }}</p>
-      </div>
-    </div>
-    <template #footer>
-      <span class="text-xs text-gray-400 mr-auto">共 {{ filteredTemplateList.length }} / {{ templateList.length }} 条</span>
-      <el-button @click="templateVisible = false">取消</el-button>
-    </template>
-  </el-dialog>
+  <!-- 知识库模板选择弹窗（默认当前漏洞类型，可切「全部模板」跨模板全局搜索） -->
+  <TemplatePickerDialog v-model="templateVisible" :vul-type="templateVulType" @select="applyEntry" />
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Plus, Delete, Search } from '@element-plus/icons-vue'
+import { Plus, Delete } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import AssetFormDialog from './AssetFormDialog.vue'
 import CvssCalculator from './CvssCalculator.vue'
+import TemplatePickerDialog from './TemplatePickerDialog.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelName, levelSoftStyle } from '../utils/colors'
 
 // 漏洞录入/编辑表单面板：供独立页（VulnEdit）与测试计划流程抽屉复用。
 // 组件内不做路由跳转，保存成功后仅 emit saved，由宿主决定后续行为。
@@ -363,37 +338,19 @@ function addVuln() {
 }
 
 // ---------- 知识库模板套用 ----------
+// 搜索与筛选统一由 TemplatePickerDialog 承担（默认作用域＝当前漏洞类型，可切全部模板）；
+// 本组件只负责打开弹窗、覆盖确认与回填，弹窗在确认被取消时保持打开以便继续挑选。
 const templateVisible = ref(false)
-const templateList = ref<any[]>([])
-const templateSearch = ref('')
+const templateVulType = ref<number | null>(null)
 let templateTarget: any = null
 
-const filteredTemplateList = computed(() => {
-  const kw = templateSearch.value.trim().toLowerCase()
-  if (!kw) return templateList.value
-  return templateList.value.filter((t) =>
-    (t.vulnerability_name || '').toLowerCase().includes(kw)
-    || (t.tags ?? []).some((tag: string) => tag.toLowerCase().includes(kw))
-    || plainSummary(t).toLowerCase().includes(kw),
-  )
-})
+const typeName = (code: number | null | undefined) =>
+  (code != null ? meta.value?.vul_type?.[code] : '') ?? '未分类'
 
-const plainSummary = (t: any) => {
-  const html = t.description_html || ''
-  return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').slice(0, 80) || '（无描述）'
-}
-
-async function applyTemplate(vul: any) {
+function applyTemplate(vul: any) {
   templateTarget = vul
-  try {
-    const { data } = await client.get(`/knowledge/by-type/${vul.vul_type}`)
-    if (!data.length) return ElMessage.info('该漏洞类型暂无知识库模板')
-    if (data.length === 1) return applyEntry(data[0])
-    templateList.value = data
-    templateVisible.value = true
-  } catch {
-    return // 404 提示由拦截器统一处理
-  }
+  templateVulType.value = vul.vul_type ?? null
+  templateVisible.value = true
 }
 
 // 在漏洞类型下拉中直接新增类型（同步到全局 meta，无需跳转知识库）
@@ -416,7 +373,7 @@ async function applyEntry(entry: any) {
     try {
       await ElMessageBox.confirm('当前已填写漏洞描述或修复建议，套用模板将覆盖这些内容，是否继续？', '套用模板', { type: 'warning' })
     } catch {
-      return
+      return // 取消：弹窗保持打开，用户可继续挑选
     }
   }
   let descHtml = entry.description_html || ''
@@ -426,6 +383,12 @@ async function applyEntry(entry: any) {
   vul.solution_html = entry.solution_html || ''
   vul.solution_json = entry.solution_json
   if (entry.cvss_vector) vul.cvss_vector = entry.cvss_vector
+  // 跨模板套用：模板描述与漏洞类型必须一致，否则按类型统计 / 导出 / 导入回填全部错位
+  const fromType = vul.vul_type
+  if (entry.vul_type != null && entry.vul_type !== fromType) {
+    vul.vul_type = entry.vul_type
+    ElMessage.warning(`漏洞类型已由「${typeName(fromType)}」调整为「${typeName(entry.vul_type)}」`)
+  }
   templateVisible.value = false
   ElMessage.success(`已套用模板「${entry.vulnerability_name}」`)
 }

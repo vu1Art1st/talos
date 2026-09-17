@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .common import HtmlStr
+from .common import HtmlStr, Page
 
 
 class KnowledgeIn(BaseModel):
@@ -58,3 +58,30 @@ class KnowledgeOut(KnowledgeIn):
     username: str = ""
     create_time: datetime | None = None
     update_time: datetime | None = None
+
+
+class KnowledgeSearchItem(BaseModel):
+    """跨模板搜索结果条目（轻量）：只带展示与「要不要套用」决策所需字段。
+
+    富文本正文（描述/危害/修复建议/CVSS 向量）由 GET /knowledge/{id} 按需获取，
+    避免列表响应被整段 HTML 撑大。
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    vulnerability_name: str
+    vul_type: int
+    # 漏洞类型名称：服务端按 vuln_types 表解析（类型是动态字典，不能用 constants 兜底）
+    vul_type_name: str = ""
+    severity_level: int = 30
+    # 描述（缺失时退危害/修复建议）剥离 HTML 后的纯文本摘要，供列表预览与关键词高亮
+    summary: str = ""
+    username: str = ""
+    update_time: datetime | None = None
+    # 命中位置：name（名称/编号）/ references（参考链接）/ content（正文，仅 deep 搜索）
+    matched_field: str = ""
+
+
+class KnowledgeSearchOut(Page[KnowledgeSearchItem]):
+    """跨模板全局搜索结果：分页外壳 + 命中条目。"""

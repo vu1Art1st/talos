@@ -3281,6 +3281,190 @@ async def test_knowledge_default_sorting(client: AsyncClient, auth: dict):
     assert keys == sorted(keys), keys
 
 
+# ---------- 跨模板全局搜索（套用模板入口） ----------
+
+_SEARCH_ENTRIES = [
+    {"vulnerability_name": "搜索用例-SQL注入（CVE-2099-1111）", "vul_type": 10,
+     "severity_level": 10, "description_html": "<p>搜索用例描述：拼接 SQL 语句导致注入。</p>"},
+    {"vulnerability_name": "搜索用例-Shiro认证绕过（CVE-2099-2222）", "vul_type": 40,
+     "severity_level": 20, "description_html": "<p>搜索用例描述：路径规范化不一致。</p>"},
+    {"vulnerability_name": "搜索用例-服务器弱口令", "vul_type": 65, "severity_level": 30,
+     "description_html": "<p>搜索用例描述：默认口令未修改。</p>",
+     "references": ["https://example.com/uniq-ref-3333"]},
+]
+
+
+async def _seed_search_entries(client: AsyncClient, auth: dict) -> list[dict]:
+    created = []
+    for e in _SEARCH_ENTRIES:
+        resp = await client.post("/api/v1/knowledge", headers=auth, json=e)
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json())
+    return created
+
+
+async def test_knowledge_global_search(client: AsyncClient, auth: dict):
+    """跨模板全局搜索：不预选漏洞类型即可按名称 / CVE 编号 / 参考链接命中，并标注所属类型。"""
+    await _seed_search_entries(client, auth)
+
+    # 全局作用域（不带 vul_type）跨类型命中
+    resp = await client.get(
+        "/api/v1/knowledge/search", headers=auth, params={"q": "搜索用例", "size": 100},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] >= 3
+    shiro = next(
+        it for it in body["items"] if it["vulnerability_name"].endswith("（CVE-2099-2222）")
+    )
+    # 所属模板（漏洞类型）名称由服务端按 vuln_types 表解析，供结果标注与路径展示
+    assert shiro["vul_type"] == 40 and shiro["vul_type_name"] == "权限绕过"
+    assert shiro["matched_field"] == "name"
+    assert shiro["username"]  # 维护人随结果返回
+    assert shiro["update_time"]
+    # 列表只返回摘要，不返回正文（正文由详情接口按需获取）
+    assert "description_html" not in shiro and "solution_html" not in shiro
+    assert shiro["summary"].startswith("搜索用例描述")
+
+    # 按编号检索：CVE 编号写在名称后缀，无需预选漏洞类型
+    resp = await client.get(
+        "/api/v1/knowledge/search", headers=auth, params={"q": "cve-2099-1111"},
+    )
+    items = resp.json()["items"]
+    assert [it["vulnerability_name"] for it in items] == ["搜索用例-SQL注入（CVE-2099-1111）"]
+
+    # 参考链接命中（非名称命中）
+    resp = await client.get(
+        "/api/v1/knowledge/search", headers=auth, params={"q": "uniq-ref-3333"},
+    )
+    items = resp.json()["items"]
+    assert len(items) == 1 and items[0]["matched_field"] == "references"
+
+    # 保留原有「模板内搜索」能力：限定 vul_type 的结果集合与 by-type 完全一致
+    by_type = (await client.get("/api/v1/knowledge/by-type/10", headers=auth)).json()
+    scoped = (await client.get(
+        "/api/v1/knowledge/search", headers=auth, params={"vul_type": 10, "size": 100},
+    )).json()
+    assert {e["id"] for e in by_type} == {it["id"] for it in scoped["items"]}
+    assert scoped["total"] == len(by_type)
+
+    # 未登录不可搜索
+    assert (await client.get("/api/v1/knowledge/search")).status_code == 401
+
+
+async def test_knowledge_search_filters_sort_paging(client: AsyncClient, auth: dict):
+    """筛选（类型 / 等级 / 维护人 / 更新时间）+ 排序（相关度 / 等级）+ 分页。"""
+    created = await _seed_search_entries(client, auth)
+    username = created[0]["username"]
+
+    # 漏洞类型多选
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "搜索用例", "vul_type": "10,40", "size": 100})
+    assert resp.status_code == 200, resp.text
+    assert {it["vul_type"] for it in resp.json()["items"]} <= {10, 40}
+
+    # 危害等级筛选
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "搜索用例", "severity_level": 20, "size": 100})
+    assert [it["vul_type"] for it in resp.json()["items"]] == [40]
+
+    # 维护人筛选（存在的维护人命中 / 不存在的为空）
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "搜索用例", "creator": username})).json()["total"] >= 3
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "搜索用例", "creator": "不存在维护人ZZZ"})).json()["total"] == 0
+
+    # 更新时间区间（含当日；区间外为空）
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "搜索用例", "updated_from": "2020-01-01"})).json()["total"] >= 3
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "搜索用例", "updated_to": "2020-01-01"})).json()["total"] == 0
+
+    # 排序：severity_level 升序 / 降序
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "搜索用例", "sort": "severity_level", "order": "asc", "size": 100})
+    lv = [it["severity_level"] for it in resp.json()["items"]]
+    assert lv == sorted(lv) and len(lv) >= 3
+    # 非法 sort 回退默认排序（不报错）
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "搜索用例", "sort": "drop table"})).status_code == 200
+
+    # 分页：size=1 时 total 不变、items 收缩
+    page1 = (await client.get("/api/v1/knowledge/search", headers=auth,
+                              params={"q": "搜索用例", "size": 1, "page": 1})).json()
+    page2 = (await client.get("/api/v1/knowledge/search", headers=auth,
+                              params={"q": "搜索用例", "size": 1, "page": 2})).json()
+    assert len(page1["items"]) == 1 and len(page2["items"]) == 1
+    assert page1["total"] == page2["total"] >= 3
+    assert page1["items"][0]["id"] != page2["items"][0]["id"]
+
+
+async def test_knowledge_search_relevance_ranking(client: AsyncClient, auth: dict):
+    """相关度排序：名称全等 > 名称前缀 > 名称包含。"""
+    for name in ("搜索相关度", "搜索相关度扩展", "前置搜索相关度"):
+        resp = await client.post("/api/v1/knowledge", headers=auth,
+                                 json={"vulnerability_name": name, "vul_type": 75, "severity_level": 30})
+        assert resp.status_code == 200, resp.text
+
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "搜索相关度", "size": 100})
+    names = [it["vulnerability_name"] for it in resp.json()["items"]]
+    assert names[:3] == ["搜索相关度", "搜索相关度扩展", "前置搜索相关度"], names
+
+
+async def test_knowledge_search_deep_and_edge_cases(client: AsyncClient, auth: dict):
+    """正文深度搜索开关、LIKE 通配符转义与非法参数边界。"""
+    await _seed_search_entries(client, auth)
+    resp = await client.post(
+        "/api/v1/knowledge", headers=auth,
+        json={"vulnerability_name": "正文深度搜索用例", "vul_type": 75, "severity_level": 30,
+              "description_html": "<p>深度搜索唯一标记XQZ 仅出现在正文中。</p>"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 默认不搜正文
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "深度搜索唯一标记XQZ"})
+    assert resp.json()["total"] == 0
+    # deep=True 才进正文，且命中位置标注为 content
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "深度搜索唯一标记XQZ", "deep": "true"})
+    body = resp.json()
+    assert body["total"] == 1 and body["items"][0]["matched_field"] == "content"
+
+    # LIKE 通配符按字面处理：输入 % 不得退化为「命中全表」
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"q": "%", "size": 100})
+    hit_names = [it["vulnerability_name"] for it in resp.json()["items"]]
+    assert "搜索用例-SQL注入（CVE-2099-1111）" not in hit_names
+    assert "搜索用例-服务器弱口令" not in hit_names
+
+    # 未知漏洞类型码 → 空集（不报错）
+    resp = await client.get("/api/v1/knowledge/search", headers=auth,
+                            params={"vul_type": 999999})
+    assert resp.status_code == 200 and resp.json()["total"] == 0
+    # order 非法 → 422
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"order": "sideways"})).status_code == 422
+    # q 超长 → 422
+    assert (await client.get("/api/v1/knowledge/search", headers=auth,
+                             params={"q": "x" * 100})).status_code == 422
+
+
+async def test_knowledge_get_entry_detail(client: AsyncClient, auth: dict):
+    """套用模板前按 ID 取完整条目：正文与 CVSS 向量齐备；不存在返回 404。"""
+    created = await _seed_search_entries(client, auth)
+    entry_id = created[1]["id"]
+    resp = await client.get(f"/api/v1/knowledge/{entry_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["vul_type"] == 40
+    assert "路径规范化不一致" in detail["description_html"]
+    assert detail["cvss_vector"] == ""
+
+    assert (await client.get("/api/v1/knowledge/999999", headers=auth)).status_code == 404
+
+
 async def test_plan_complete_no_vuln_flow(client: AsyncClient, auth: dict):
     """无漏洞闭环：无漏洞完结 → 测试通过 + 无漏洞报告 → 重复确认拒绝 → 补录漏洞自动重开。"""
     # meta 字典包含新增的「测试通过」状态
