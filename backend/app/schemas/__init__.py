@@ -70,6 +70,7 @@ from .report import (
     ExportCheckIn,
     ExportCheckOut,
     ExportJobOut,
+    PlanReportBrief,
     ReportListOut,
     ReportMetaIn,
     ReportOut,

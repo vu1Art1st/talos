@@ -78,10 +78,14 @@ async def sync_plan_testers(session: AsyncSession, plan: TestingPlan, testers: l
 
 async def resolve_report_plan(
     session: AsyncSession, batch: ImportBatch, user: User,
-    plan: TestingPlan | None, is_retest: bool, all_fixed: bool,
+    plan: TestingPlan | None, is_retest: bool,
 ) -> tuple[TestingPlan | None, object | None]:
     """报告格式批次的计划编排：未显式指定计划时按系统名自动匹配/创建，
-    再按「初测 / 复测全修复 / 复测未全修复」置计划状态并维护复测轮次。
+    再按「初测 / 复测」置计划状态并维护复测轮次。
+
+    复测批次统一先进入「复测中」并开启新一轮；本批漏洞入库后再由
+    `vuln_service.sync_plan_retest_state` 按**工单全部关联漏洞**是否闭环决定是否进入
+    「复测完成」——单份报告全部修复不再直接判定整单完成（工单含其他未闭环漏洞时保持复测中）。
 
     返回 (计划, 本轮复测轮次)；无系统名且未指定计划时返回 (None, None)，
     此时后续的资产补建与自动报告均不执行（与既有行为一致）。
@@ -111,14 +115,9 @@ async def resolve_report_plan(
     round_row = None
     if is_retest:
         # 每份复测报告代表一轮复测：无论修复与否统一建轮（force 会把上一轮未闭环轮次打点后再开新一轮），
-        # 全部修复才打完成点并置复测完成；否则停留在复测中待后续复测报告闭环
+        # 统一先置复测中，待本批漏洞入库后按「工单全部关联漏洞是否闭环」判定复测完成（见 confirm 收尾）
         round_row = plan_service.start_retest_round(session, plan, "报告导入复测", user.id, force=True)
-        if all_fixed:
-            plan.status = 60  # 复测完成
-            plan.retest_done_time = report_date or plan.retest_done_time
-            plan_service.finish_retest_round(plan)
-        else:
-            plan.status = 50  # 复测中：仍有未修复漏洞待闭环
+        plan.status = 50  # 复测中：待收尾按工单整体闭环判定是否复测完成
     else:
         plan.status = 30  # 初测完成（等待业务系统提交复测）
         plan.first_test_done_time = report_date or plan.first_test_done_time
@@ -633,13 +632,12 @@ async def confirm_batch_internal(
 
     batch_meta = batch.meta_json or {}
     is_retest = batch.doc_kind == "report" and bool(batch_meta.get("is_retest"))
-    all_fixed = all(rec.fixed for rec in records)  # records 恒非空（load_parsed_records 已校验）
 
     # 报告格式批次：确认入库时自动创建/关联测试计划、资产与报告
     report_auto_created = False
     if batch.doc_kind == "report":
         plan, round_row = await resolve_report_plan(
-            session, batch, user, plan, is_retest, all_fixed,
+            session, batch, user, plan, is_retest,
         )
         if plan is not None:
             asset = await resolve_report_asset(session, batch, plan, asset)
@@ -661,6 +659,13 @@ async def confirm_batch_internal(
     await finalize_confirm(
         session, batch, plan, report, report_auto_created, new_vul_ids, user,
     )
+    # 工单级复测状态重算：本批漏洞已入库，按工单**全部关联漏洞**是否闭环判定
+    # 「复测完成 / 复测中」（复测批次沿用报告日期写复测完成时间）
+    if plan is not None:
+        await vuln_service.sync_plan_retest_state(
+            session, plan_ids=[plan.id],
+            done_date=(batch_meta.get("report_date") or "").strip() or None,
+        )
     # 导入自动生成的报告：同步生成 docx 文件并记录导出任务（可下载），
     # 时间取报告标题日期固定 14:00（无 report_date 则留 DB default 当前时间）。
     if report_auto_created and report is not None:

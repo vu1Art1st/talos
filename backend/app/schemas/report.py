@@ -21,6 +21,18 @@ class SectionOut(SectionIn):
     id: int
 
 
+class PlanReportBrief(ReportBrief):
+    """测试计划流程中的报告摘要：附带该报告所含漏洞的闭环进度（派生字段，不落库）。
+
+    供工单流程抽屉区分「本报告漏洞已全部完成」与「仍有未闭环漏洞」的报告；
+    闭环口径与工单复测状态判定一致（已修复 / 已忽略视为已完成）。
+    """
+
+    vul_total: int = 0  # 报告章节关联的漏洞总数
+    vul_closed: int = 0  # 其中已完成（已修复/已忽略）的数量
+    all_closed: bool = False  # 是否全部完成（vul_total > 0 且全部已完成）
+
+
 class ReportMetaIn(BaseModel):
     title: str
     project_name: str = ""

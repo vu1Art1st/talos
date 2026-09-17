@@ -235,6 +235,11 @@
           <div class="flex items-center gap-2">
             <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
             <span class="text-sm font-medium">{{ r.title }}</span>
+            <!-- 报告中漏洞已全部完成（已修复/已忽略）标注：便于与仍有未闭环漏洞的报告区分 -->
+            <el-tooltip v-if="r.all_closed"
+                        :content="`本报告所含漏洞均已修复/已忽略（${r.vul_closed}/${r.vul_total}）`">
+              <span class="tl-tag" :style="statusSoftStyleEx(60)">复测完成</span>
+            </el-tooltip>
             <span class="text-xs text-gray-400">生成于 {{ fmtDateTime(r.create_time) }}</span>
             <div class="flex-1" />
             <el-popconfirm v-if="canOperate"

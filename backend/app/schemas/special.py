@@ -6,7 +6,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.constants import NONPEN_ITEMS
 
 from .asset import AssetBrief
-from .common import ReportBrief, UserBrief, VulBrief, HtmlStr
+from .common import UserBrief, VulBrief, HtmlStr
+from .report import PlanReportBrief
 
 
 class SpringActionVulDraft(BaseModel):
@@ -103,7 +104,7 @@ class TestingPlanOut(TestingPlanIn):
     ticket_id: str = ""  # 工单ID：YYYYMMDD-N
     testers: list[UserBrief] = []
     vuls: list[VulBrief] = []
-    reports: list[ReportBrief] = []
+    reports: list[PlanReportBrief] = []  # 报告摘要（含漏洞闭环进度派生字段，供流程抽屉标注）
     retest_rounds: list[RetestRoundOut] = []
     retest_round_count: int = 0
     create_time: datetime | None = None

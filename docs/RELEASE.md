@@ -25,6 +25,34 @@
 
 ---
 
+## [2.17.1] - 2026-09-17
+
+### 修复
+
+- **工单「复测完成」误置（多漏洞 / 多报告场景）**：复测完成判定由「单份报告的章节漏洞」改为
+  **工单全部关联漏洞**是否闭环（`backend/app/services/vuln_service.py::sync_plan_retest_state`，
+  原 `sync_report_completion`）。此前工单含多份报告或多个漏洞时，单份报告全部闭环会把整单误置
+  「复测完成」，出现「工单复测完成 + 仍有未修复漏洞」的矛盾状态；同时将进入「复测完成」的条件
+  收紧为工单处于「提请复测(40) / 复测中(50)」。
+- **补齐工单「复测完成」的回退触发点**：新增漏洞、批量提交、编辑漏洞变更关联工单、从漏洞库关联
+  漏洞、生成报告（`api/v1/vulns.py`、`api/v1/testing_plan.py`、`api/v1/reports.py`）均按工单级
+  口径重算——已闭环工单出现未闭环漏洞时回退「复测中」、清空复测完成时间并重开最近一轮复测。
+- **报告导入「全部修复」判定口径对齐工单级**（`services/import_service.py`）：复测报告仅覆盖工单
+  部分漏洞且本批全部标记修复时，不再把整单置为「复测完成」，工单状态在批次入库后按工单全部关联
+  漏洞重算。
+- **存量纠偏脚本** `backend/scripts/fix_plan_retest_state.py`：幂等扫描「复测完成但仍存在未闭环
+  漏洞」的工单并回退「复测中」（支持 `--dry-run`，落库前备份至 `storage/backups/`）。
+
+### 新增
+
+- **工单流程抽屉「报告复测完成」标注**：`TestingPlanOut.reports[]` 新增派生字段
+  `vul_total` / `vul_closed` / `all_closed`（`schemas/report.py::PlanReportBrief`、
+  `services/plan_service.py::report_closure_map`，随工单列表 / 详情接口返回，不落库）；
+  前端 `components/PlanWorkflowDrawer.vue` 报告区对「报告所含漏洞已全部完成（已修复 / 已忽略）」
+  的报告追加「复测完成」标签，便于与仍有未闭环漏洞的报告区分。
+
+---
+
 ## [2.17.0] - 2026-09-16
 
 ### 变更

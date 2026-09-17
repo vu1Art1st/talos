@@ -557,6 +557,8 @@ async def create_vuln(
     vuln_service.add_log(session, vul, user, "创建漏洞")
     # 无漏洞闭环重开：已确认「测试通过」的计划新增漏洞时自动回到「初测中」
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
+    # 复测闭环重开：工单已「复测完成」时新增未闭环漏洞，工单回退「复测中」
+    await vuln_service.sync_plan_retest_state(session, plan_ids=[vul.testing_plan_id])
     await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
@@ -593,6 +595,8 @@ async def create_vulns_batch(
         vulns.append(vul)
     for plan_id in plan_ids:
         await plan_service.reopen_passed_plan(session, plan_id)
+        # 复测闭环重开：工单已「复测完成」时新增未闭环漏洞，工单回退「复测中」
+        await vuln_service.sync_plan_retest_state(session, plan_ids=[plan_id])
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     for vul in vulns:
@@ -646,10 +650,15 @@ async def update_vuln(
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
     if new_status is not None and new_status != vul.status:
         await vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
-        done_plans = await vuln_service.sync_report_completion(session, [vul.id])
+        done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
     # 等级或关联计划变化后重算涉及计划的统计；新关联计划若已确认无漏洞则自动重开
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
-    for plan_id in {old_plan_id, vul.testing_plan_id}:
+    affected_plans = {old_plan_id, vul.testing_plan_id}
+    # 关联计划变化时按工单级口径重算复测状态（已「复测完成」工单出现未闭环漏洞则回退「复测中」）
+    await vuln_service.sync_plan_retest_state(
+        session, plan_ids=[pid for pid in affected_plans if pid is not None],
+    )
+    for plan_id in affected_plans:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     await session.refresh(vul)
@@ -728,7 +737,7 @@ async def set_vuln_status(
     old_status = vul.status
     await vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
     # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
-    done_plans = await vuln_service.sync_report_completion(session, [vul.id])
+    done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
     if body.status != old_status:
@@ -765,7 +774,7 @@ async def patch_vuln_fields(
     status_changed = body.status is not None and body.status != vul.status
     if status_changed:
         await vuln_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
-        await vuln_service.sync_report_completion(session, [vul.id])
+        await vuln_service.sync_plan_retest_state(session, [vul.id])
     # 等级变化后重算关联计划的漏洞统计
     if any(f.startswith("漏洞等级") for f in changed_fields):
         await plan_service.refresh_stats(session, vul.testing_plan_id)
@@ -795,7 +804,7 @@ async def transition_vuln(
         retest_submitted=body.retest_html is not None,
     )
     # 状态流转后双向联动报告/测试计划（全部闭环自动标记完成，回退自动重开）
-    done_plans = await vuln_service.sync_report_completion(session, [vul.id])
+    done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
     if body.status != old_status:
@@ -923,7 +932,7 @@ async def create_retest_record(
     # 先聚合复测内容再流转，确保复测结论校验（必须填写复测详情）能够通过。
     if body.status is not None and body.status != vul.status:
         await vuln_service.transition(session, vul, body.status, user, "新增复测记录调整状态")
-        done_plans = await vuln_service.sync_report_completion(session, [vul.id])
+        done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(record)
     await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)

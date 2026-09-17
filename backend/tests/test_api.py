@@ -503,6 +503,44 @@ async def test_report_import_all_fixed_flow(client: AsyncClient, auth: dict):
     assert reports and reports[0]["status"] == "draft"
 
 
+async def test_report_import_all_fixed_keeps_plan_when_other_vuln_open(
+    client: AsyncClient, auth: dict,
+):
+    """复测报告全部修复，但工单仍存在其他未闭环漏洞（未纳入该报告）：工单保持「复测中」。
+
+    回归：导入路径早期以「本批报告是否全部修复」判定整单复测完成，会误置「复测完成」；
+    现按**工单全部关联漏洞**是否闭环判定（与漏洞状态变更路径同口径）。"""
+    system_name = "复测部分覆盖系统QQ"
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth, json={"system_name": system_name},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    # 录入漏洞仅限认领者：先认领该工单
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "复测部分覆盖漏洞QQ", "level": 20, "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+
+    doc = _build_report_docx(
+        system_name, "http://10.6.6.6/qq", "10.6.6.6",
+        sections=[("复测部分覆盖已修复漏洞QQ", "高危", "命令执行漏洞", True)],
+    )
+    _records, result = await _import_report(
+        client, auth, "20260728复测部分覆盖系统QQ渗透测试复测报告.docx", doc,
+    )
+    assert result["created"] == 1
+
+    resp = await client.get("/api/v1/testing-plans", headers=auth, params={"search": system_name})
+    plans = resp.json()["items"]
+    assert len(plans) == 1
+    assert plans[0]["status"] == 50, "工单仍有未闭环漏洞，不得因单份报告全修复而置复测完成"
+    assert plans[0]["retest_done_time"] == ""
+
+
 async def test_report_import_full_rounds_flow(client: AsyncClient, auth: dict):
     """初测 + 两轮复测报告依次导入：漏洞归并为同一条、状态按 未修复→复测未修复→已修复 流转，
     复测轮次=2、计划复测完成(60)、三份报告均自动创建。"""

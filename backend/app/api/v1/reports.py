@@ -323,6 +323,8 @@ async def create_report_from_vulns(
             plan.status = 30
         if not plan.first_test_done_time:
             plan.first_test_done_time = now().date().isoformat()
+        # 工单级复测状态重算：已「复测完成」工单被关联未闭环漏洞（如新增漏洞生成的报告）时回退「复测中」
+        await vuln_service.sync_plan_retest_state(session, plan_ids=[plan.id])
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1
     report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）

@@ -74,7 +74,10 @@ async def list_testing_plans(
         (TestingPlan.receive_time.desc(), TestingPlan.ticket_seq.desc(), TestingPlan.id.desc()),
     )
     total, items = await paginate(session, stmt, page, size)
-    return Page(total=total, items=items)
+    outs = [TestingPlanOut.model_validate(p) for p in items]
+    # 报告漏洞闭环进度（派生字段）：供流程抽屉标注「本报告漏洞已全部完成」
+    await plan_service.fill_report_closure(session, outs)
+    return Page(total=total, items=outs)
 
 
 @router.get("/testing-plans/stats")
@@ -213,7 +216,11 @@ async def get_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """单条计划详情（含测试人员/关联漏洞/关联报告/复测轮次），供流程抽屉刷新。"""
-    return await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    plan = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    out = TestingPlanOut.model_validate(plan)
+    # 报告漏洞闭环进度（派生字段）：供流程抽屉标注「本报告漏洞已全部完成」
+    await plan_service.fill_report_closure(session, [out])
+    return out
 
 
 @router.get("/testing-plans/{row_id}/vuln-order")
@@ -444,6 +451,8 @@ async def attach_vulns_to_plan(
         v.source = 0  # 关联渗透测试工单后漏洞来源固定为「渗透测试工单」（展示层派生）
     # 已确认无漏洞（测试通过）的计划重新关联到漏洞时自动重开为「初测中」
     await plan_service.reopen_passed_plan(session, row_id)
+    # 复测闭环重开：已「复测完成」的工单被关联未闭环漏洞时回退「复测中」
+    await vuln_service.sync_plan_retest_state(session, plan_ids=[row_id])
     await plan_service.refresh_stats(session, row_id)
     await session.commit()
     await session.refresh(row)

@@ -2,12 +2,12 @@
 from app.core.timeutil import now
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import PlanStatus
+from app.constants import PlanStatus, VulStatus
 from app.core.deps import user_permissions
-from app.models import Report, TestingPlan, TestingPlanRetestRound, User, Vul
+from app.models import Report, ReportSection, TestingPlan, TestingPlanRetestRound, User, Vul
 
 
 def can_operate(user: User, plan: TestingPlan) -> bool:
@@ -74,6 +74,49 @@ async def refresh_stats(session: AsyncSession, plan_id: int | None) -> None:
 def is_retest_report_title(title: str) -> bool:
     """按标题判断是否为复测报告：复测报告标题约定含「复测」字样（如「XX渗透测试复测报告」）。"""
     return "复测" in (title or "")
+
+
+async def report_closure_map(
+    session: AsyncSession, report_ids: list[int],
+) -> dict[int, tuple[int, int]]:
+    """报告 → (关联漏洞总数, 已完成数)：已完成口径与工单复测状态一致（已修复/已忽略）。
+
+    一次分组查询供工单流程抽屉标注「本报告漏洞已全部完成」，避免逐报告查询。
+    未关联任何漏洞的报告不会出现在结果中（调用方按 (0, 0) 兜底）。
+    """
+    ids = [rid for rid in dict.fromkeys(report_ids) if rid is not None]
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(
+                ReportSection.report_id,
+                func.count(Vul.id),
+                func.sum(
+                    case((Vul.status.in_((VulStatus.IGNORED, VulStatus.FIXED)), 1), else_=0)
+                ),
+            )
+            .join(Vul, Vul.id == ReportSection.vul_id)
+            .where(ReportSection.report_id.in_(ids))
+            .group_by(ReportSection.report_id)
+        )
+    ).all()
+    return {rid: (int(total or 0), int(closed or 0)) for rid, total, closed in rows}
+
+
+async def fill_report_closure(session: AsyncSession, plans: list) -> None:
+    """为工单响应对象（TestingPlanOut）填充各报告「漏洞闭环进度」派生字段。
+
+    `all_closed` 仅在报告存在关联漏洞且全部完成时为 True（无漏洞/空报告不视为已完成）。
+    """
+    report_ids = [r.id for p in plans for r in (p.reports or [])]
+    closure = await report_closure_map(session, report_ids)
+    for p in plans:
+        for r in (p.reports or []):
+            total, closed = closure.get(r.id, (0, 0))
+            r.vul_total = total
+            r.vul_closed = closed
+            r.all_closed = total > 0 and closed == total
 
 
 async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:

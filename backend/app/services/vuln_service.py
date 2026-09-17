@@ -235,50 +235,74 @@ async def auto_transition(
     return changed
 
 
-async def sync_report_completion(session: AsyncSession, vul_ids: list[int]) -> list:
-    """漏洞状态变化后双向联动测试计划（需求6：报告状态不再由漏洞闭环驱动，
-    仅保留计划「复测完成/复测中」联动；报告状态由导出 Word 与内容变更管理）：
-    - 某报告关联的全部漏洞均为「已修复/已忽略」时，关联计划进入「复测完成」；
-    - 反向：已闭环报告出现未闭环漏洞（如已修复改回未修复）时，关联计划由「复测完成」
-      回退「复测中」并重开最近一轮复测。
+async def sync_plan_retest_state(
+    session: AsyncSession,
+    vul_ids: list[int] | None = None,
+    *,
+    plan_ids: list[int] | None = None,
+    done_date: str | None = None,
+) -> list:
+    """漏洞闭环与工单复测状态双向联动（需求6：报告状态不再由漏洞闭环驱动，
+    仅保留工单「复测完成/复测中」联动；报告状态由导出 Word 与内容变更管理）。
 
-    返回本次新进入「复测完成」的计划对象列表（供路由层在提交后发渠道通知）。"""
+    判定口径为**工单级**：以工单全部关联漏洞（`Vul.testing_plan_id`）是否闭环为准，
+    不按单份报告的章节聚合——工单含多份报告/多个漏洞时，单份报告全部闭环**不会**推动
+    工单进入「复测完成」，必须工单全部漏洞闭环才流转：
+    - 全部漏洞均为「已修复/已忽略」且工单处于「提请复测/复测中」→ 进入「复测完成」，
+      打复测完成时间并给当前复测轮次打完成点；
+    - 存在未闭环漏洞且工单已是「复测完成」→ 回退「复测中」，清完成时间并重开最近一轮复测；
+    - 其余情况不动（幂等，如工单无关联漏洞、状态本已一致）。
+
+    入参：
+    - vul_ids：发生状态变化的漏洞（按漏洞反查其工单与所属报告的工单）；
+    - plan_ids：显式指定需重算的工单（新增/关联漏洞、报告导入等入口使用）；
+    - done_date：写入 `retest_done_time` 的日期（报告导入沿用报告日期，缺省取当天）。
+
+    返回本次新进入「复测完成」的工单对象列表（供路由层在提交后发渠道通知）。"""
     from app.models import Report, ReportSection, TestingPlan
     from app.services import plan_service
 
     completed: list[TestingPlan] = []
-    if not vul_ids:
-        return completed
-    report_ids = (
-        await session.execute(
-            select(ReportSection.report_id)
-            .where(ReportSection.vul_id.in_(vul_ids))
-            .distinct()
+    targets: set[int] = {pid for pid in (plan_ids or []) if pid is not None}
+    ids = [vid for vid in (vul_ids or []) if vid]
+    if ids:
+        targets.update(
+            (
+                await session.execute(
+                    select(Vul.testing_plan_id).where(
+                        Vul.id.in_(ids), Vul.testing_plan_id.is_not(None)
+                    )
+                )
+            ).scalars().all()
         )
-    ).scalars().all()
-    for report_id in report_ids:
-        linked_statuses = (
-            await session.execute(
-                select(Vul.status)
-                .join(ReportSection, ReportSection.vul_id == Vul.id)
-                .where(ReportSection.report_id == report_id)
-            )
-        ).scalars().all()
-        if not linked_statuses:
-            continue
-        report = await session.get(Report, report_id)
-        if report is None:
-            continue
-        all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s in linked_statuses)
-        if report.testing_plan_id is None:
-            continue
-        plan = await session.get(TestingPlan, report.testing_plan_id)
+        targets.update(
+            (
+                await session.execute(
+                    select(Report.testing_plan_id)
+                    .join(ReportSection, ReportSection.report_id == Report.id)
+                    .where(
+                        ReportSection.vul_id.in_(ids),
+                        Report.testing_plan_id.is_not(None),
+                    )
+                )
+            ).scalars().all()
+        )
+    for plan_id in sorted(targets):
+        plan = await session.get(TestingPlan, plan_id)
         if plan is None:
             continue
-        if all_closed and plan.status != PlanStatus.RETEST_DONE:
+        # 工单级闭环判定：统计工单全部关联漏洞（含未纳入任何报告章节的漏洞）
+        statuses = (
+            await session.execute(
+                select(Vul.status).where(Vul.testing_plan_id == plan_id)
+            )
+        ).scalars().all()
+        if not statuses:
+            continue
+        all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s in statuses)
+        if all_closed and plan.status in (PlanStatus.RETEST_APPLY, PlanStatus.RETESTING):
             plan.status = PlanStatus.RETEST_DONE  # 复测完成
-            if not plan.retest_done_time:
-                plan.retest_done_time = now().date().isoformat()
+            plan.retest_done_time = done_date or now().date().isoformat()
             # 当前复测轮次闭环，打完成点
             plan_service.finish_retest_round(plan)
             completed.append(plan)
