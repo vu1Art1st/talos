@@ -36,7 +36,7 @@
 | `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434 |
 | `setup-docker-mirror.sh` | 59 | 活跃·部署前配置 | DEPLOY.md:198,203、RELEASE.md:964 |
 
-### 1.2 后端脚本 `backend/scripts/`（11 个，1 387 行）
+### 1.2 后端脚本 `backend/scripts/`（14 个，1 640 行）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。
 
@@ -44,15 +44,18 @@
 |---|---|---|---|
 | `migrate.py` | 50 | 活跃·发布流程 | `scripts/migrate.sh:10`、DEPLOY.md:121,321 |
 | `backfill_retest.py` | 47 | 活跃·发布流程 | `upgrade.sh:109`（每次升级自动执行）；已改用 `_common.run`（M-2） |
-| `sync_knowledge_templates.py` | 150 | 活跃·常规运维 | USER_GUIDE.md:251-257、RELEASE.md:166 |
+| `sync_knowledge_templates.py` | 154 | 活跃·常规运维 | USER_GUIDE.md:251-257、RELEASE.md:166 |
 | `seed_dev_data.py` | 582 | 活跃·开发辅助 | RELEASE.md:706 |
 | `knowledge_data.py` | 42 | 活跃·共享模块 | 被 `seed_dev_data.py` 导入（模板库数据唯一加载实现） |
 | `_common.py` | 86 | 活跃·共享模块（2026-09-17 新增） | 被 6 个一次性脚本导入（`bootstrap` / `dry_run_flag` / `save_backup` / `run`）；2026-09-18 修正 `save_backup` 落盘目录为 `settings.storage_sub("backups")`（延迟导入 settings） |
+| `_check_imports.py` | 97 | 活跃·开发辅助（2026-09-19 新增） | 静态校验 `scripts/*.py` 对 app 模块的引用是否仍有效（`from app.x import y` 与「模块别名.属性」两类），可 `python -m scripts._check_imports` 自检；守卫 `tests/test_source_guard.py::test_scripts_app_references_resolve`。起因：`backfill_retest.py` 在批次 D 重构后导入断链，脚本不参与测试收集故 CI 未发现 |
 | `fix_retest_section_dup.py` | 98 | 一次性（已写入升级步骤） | DEPLOY.md:139-172、RELEASE.md:253；已改用 `_common`（M-2） |
 | `repair_report_section_order.py` | 83 | 一次性 | RELEASE.md:305；已改用 `_common`（M-2） |
 | `backfill_vul_submit_time.py` | 69 | 一次性 | RELEASE.md:546；已改用 `_common.run` + `dry_run_flag`（M-2） |
 | `migrate_utc_to_utc8.py` | 76 | 一次性 | RELEASE.md:957；已改用 `_common`（M-2） |
 | `fix_plan_retest_state.py` | 100 | 一次性 | RELEASE.md:65；已改用 `_common`（M-2） |
+| `fix_attachment_paths.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；置空春耕行动/远程检测中不符合上传白名单的存量附件路径（`--dry-run` 仅统计，落库前备份 `storage/backups/`） |
+| `fix_retest_title_html.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；转义存量复测记录标题（HTML 注入）并按新口径重算 `vulns.retest_html`（幂等：只处理含 `<`/`>` 的标题） |
 
 ### 1.3 依赖矩阵
 

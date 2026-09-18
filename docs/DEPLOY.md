@@ -20,7 +20,27 @@
    # 编辑 .env，至少填写：
    #   VP_SECRET_KEY     —— >=32 位强随机，生成： openssl rand -hex 32
    #   POSTGRES_PASSWORD —— 数据库口令
+   # 可选（安全相关，默认值已按「浏览器 → 前端 Nginx → API」单层代理校准）：
+   #   VP_NOTIFY_HOST_ALLOWLIST  —— 通知渠道 webhook 主机白名单（逗号分隔）。
+   #     默认只允许公网地址（防 SSRF）；如告警需经企业内网中继转发，在此显式放行该主机名。
+   #   VP_TRUSTED_PROXY_HOPS     —— 本服务前方**可信反向代理层数**（默认 1）。
+   #     客户端 IP 取 X-Forwarded-For 右起第 N 项；外层还有宿主 Nginx/CDN 时调大，
+   #     且每层都必须用 $proxy_add_x_forwarded_for 追加真实对端。0 = 完全不信任转发头。
+   #   VP_COOKIE_SECURE          —— HTTPS 部署时设为 true（图片 Cookie 加 Secure）。
+   #     HTTP 部署下开启会被浏览器拒收，表现为富文本图片不显示。
+   #   VP_ARCHIVE_MAX_*          —— docx/xlsx 解压配额（条目数/解压总量 MB/压缩比），防 zip 炸弹。
    ```
+
+   > **API 端口不得直接对外暴露**：`VP_TRUSTED_PROXY_HOPS` 的正确性依赖「每一层代理都追加
+   > 真实对端」，仅暴露前端（27012）即可；同时 API 侧业务接口均需登录，直连会绕过来源 IP 口径。
+   >
+   > **图片访问需要登录**（安全整改 批次 E）：富文本图片由 `/storage/uploads/images/<name>`
+   > 鉴权下发，浏览器凭证是登录时下发的 `vp_img` Cookie（HttpOnly、作用域限定到该路径）。
+   > 若反向代理改写了 Cookie 域/路径或剥离 Cookie，会导致图片 401（表现为图片不显示）。
+   >
+   > **首次升级到该版本时**：升级前已打开的页面还没有这个 Cookie，会出现「整页图片不显示」，
+   > 让在线用户**刷新一次页面**（或重新登录）即可恢复；新版前端已内置自愈
+   > （图片失败时自动补发凭证并重试一次，见 `frontend/src/utils/imageAuth.ts`）。
 
    > `docker-compose.yml` 对 `VP_SECRET_KEY` / `POSTGRES_PASSWORD` 使用了 `:?` 强校验，
    > 未设置会直接拒绝启动。仓库内 `.env` 若已配置好可直接复用。

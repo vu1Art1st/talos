@@ -85,6 +85,12 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板；聚合筛选（filters JSON）复用 `app/core/filters.py` 引擎。
 - 时间统一 `app/core/timeutil.py` 的 `now()`（UTC+8），禁止散落 `datetime.now()`。
 - 用户输入的富文本入库前必须过 `app/core/sanitize.py` 消毒（schemas 中用 `HtmlStr` 类型别名）。
+- **附件/文件路径必须经 `app/core/storage.py`（2026-09-19 安全整改，新代码强制）**：写入侧 `require_attachment_path(rel, subdir=...)`（白名单 `uploads/<子目录>/<32 位十六进制>.<扩展名>`，非法即 400），读取/删除侧 `resolve_storage_path(rel)`（拒绝绝对路径/盘符/`..`/符号链接越界/不存在，统一 404）。**禁止 `settings.storage_path / <请求体或数据库字段>` 裸拼接**——该形态曾导致任意文件读取与删除（审计 TALOS-2026-001/002）。守卫：`tests/test_source_guard.py`。注意：写入校验放在路由层而非 pydantic 字段类型上，避免 Out 模型继承后对存量脏数据在序列化时判非法（列表/详情 500）。
+- **服务端出站请求必须经 `app/core/outbound.py::assert_public_url()`（2026-09-19，新代码强制）**：目标来自用户输入时（现为通知渠道 webhook）在写入与发送前各校验一次，拒绝回环/私网/链路本地/共享地址/保留段，且不跟随重定向；内网中继用 `VP_NOTIFY_HOST_ALLOWLIST` 显式放行。`app/` 内**禁止直接 `urlopen` / `requests.*`**（守卫同上）。报告导出只内嵌 storage 内已本地化图片，**不再抓取远程图片**（TALOS-2026-004）。
+- **非富文本字段拼进 HTML 前必须 `html.escape()`（2026-09-19）**：`HtmlStr` 仅覆盖富文本字段；纯文本字段（如 `VulRetestRecord.title`）拼接到 HTML 字符串时须显式转义（TALOS-2026-005）。
+- **图片必须经鉴权端点下发（2026-09-19 批次 E，新代码强制）**：`/storage/uploads/images/<name>` 由 `app/api/images.py` 处理，依赖 `core.deps.get_image_viewer`（Cookie `vp_img` 或 Bearer）；**禁止回退为 `StaticFiles` 挂载**（守卫：`tests/test_source_guard.py`）。路径保持不变是刻意为之：报告导出的图片本地化依赖 `/storage/` 前缀，富文本内的 src 也无法逐张改造。浏览器侧凭证在登录/刷新/改密/`GET /auth/me` 时下发（`core/security.set_image_cookie`），退出登录走 `POST /auth/logout`。
+- **用户可控出站目标 / 压缩包解析 / 未改密拦截的口径**：出站见 `core/outbound.py`；上传的 docx/xlsx 解析前必须过 `core/archive.py::assert_archive_quota`（zip 炸弹）；`must_change_password` 账号由 `core/deps._enforce_password_change` 在依赖层拦截（仅放行 `/auth/*` 与 `/meta`，403 带 `X-Must-Change-Password: 1`）。refresh 令牌轮换状态统一走 `core/token_store.py`（`jti` 一次性 + 宽限期，勿在路由里另存状态）。
+- **图片凭证自愈不要删（2026-09-19 生产踩坑）**：`vp_img` Cookie 只在登录/刷新/改密/`GET /auth/me` 时下发，凭 `utils/imageAuth.ts` 在图片加载失败时补发凭证并重试一次——这是「升级后旧标签页整页裂图」以及 Cookie 过期场景的唯一自愈手段，移除会让用户必须手动刷新（该文件有单测 `utils/__tests__/imageAuth.spec.ts`）。
 - Excel 响应统一 `app/core/xlsx.py` 的 `xlsx_response()`。
 - 不留 print 调试语句；本地排查脚本命名 `_*.py` / `tmp_*.py`（已被 .gitignore 通配覆盖，不入库）。
 

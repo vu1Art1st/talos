@@ -49,6 +49,7 @@ frontend/dist_check/
 /backend/tmp_*.py
 /backend/verify_*.py
 frontend/_*.err
+/docs/SECURITY_AUDIT_2026-09-18.md
 
 # ---------- 截图与样例文档（根目录；入库模板在 backend/app/templates/） ----------
 /*.png

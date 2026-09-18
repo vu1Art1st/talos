@@ -29,6 +29,90 @@
 
 （暂无）
 
+## [2.18.1] - 2026-09-19
+
+### 安全
+
+安全审计（`docs/SECURITY_AUDIT_2026-09-18.md`，报告不入库）确认的 6 项漏洞已全部完成修复（TALOS-2026-001~006，批次 A~E）：
+
+- **任意文件读取 / 任意文件删除（TALOS-2026-001/002，高危）**：春耕行动「原始报告附件」与
+  远程检测「申诉附件」的存储路径原由客户端提交并直接落库，下载/删除时以
+  `settings.storage_path / 字段` 裸拼接，可用 `../../` 或绝对路径读取/删除进程可访问的任意文件
+  （生产实测已存在 `../../../../../../../etc/passwd` 记录）。新增 `app/core/storage.py`：
+  写入侧 `require_attachment_path()`（限定 `uploads/<子目录>/<32 位十六进制>.<扩展名>` 白名单，
+  非法即 400）、读取/删除侧 `resolve_storage_path()`（拒绝绝对路径、盘符、`..`、符号链接越界与
+  不存在的目标，统一 404）；两个附件字段不再接受手工填写的路径。
+- **SSRF：通知渠道 webhook（TALOS-2026-003，高危）**：webhook 地址原仅校验 http(s) 前缀，
+  可指向 Docker 内网与云元数据。新增 `app/core/outbound.py::assert_public_url()`（协议白名单 +
+  域名全量解析 + 回环/私网/链路本地/共享地址/保留段判定），在渠道写入（schema）与任务发送前
+  （`send_notify_task`）各校验一次，发送不再跟随重定向；企业自建内网中继可用新增环境变量
+  `VP_NOTIFY_HOST_ALLOWLIST` 显式放行。
+- **SSRF：报告导出远程图片抓取（TALOS-2026-004，高危）**：`htmldocx` 会对 `<img>` 中的
+  http(s) 地址执行 `urllib.request.urlopen`（无超时、无目标限制），最低权限 `vuln:submit`
+  即可在漏洞描述中埋入远程图片，待他人导出时触发，且响应为图片时会被嵌入 docx 回带。
+  `report_builder._drop_unresolvable_images` 改为**只保留 storage 内已本地化且真实存在的图片**，
+  远程图片在交给 htmldocx 前一律移除。生产量化：全库仅 3 处远程图片且均指向本平台自身
+  （可被本地化），实际影响为零。
+- **富文本消毒缺口：复测记录标题 HTML 注入（TALOS-2026-005，中危）**：`VulRetestRecordIn.title`
+  为纯文本字段（不受 `HtmlStr` 覆盖），却被原样拼进 `vul.retest_html`，可注入任意标签
+  （该字段下发给前端渲染并被导出链路当 HTML 解析）。聚合入口收敛为
+  `services/vul_service.py::sync_vul_retest_html`（新增）并在拼接前 `html.escape(title)`。
+- **专项域审计补齐**：春耕行动与远程检测的增删改及附件下载此前无任何审计记录（生产事件无法
+  溯源）。新增审计动作 `spring_action_change` / `remote_testing_change` / `attachment_download` /
+  `logout`。
+- **公开图片目录未授权访问（TALOS-2026-006，低危）**：`/storage/uploads/images` 原为 `StaticFiles`
+  匿名直出，报告截图（常含内网地址、账号、令牌）在 URL 泄露后可被任意人读取。现改为**需登录下发**
+  （`app/api/images.py` + `core/deps.get_image_viewer`）：**URL 路径保持不变**——改前缀会让报告导出的
+  图片本地化（`_localize_images`）失效并丢失图片，且前端渲染的是库内 HTML（`v-html`）无法逐张改造。
+  浏览器靠登录/刷新/改密时下发的 `vp_img` Cookie 自动携带凭证（HttpOnly、`Path=/storage/uploads/images`、
+  SameSite=Lax、Secure 由 `VP_COOKIE_SECURE` 控制），API 客户端可继续用
+  `Authorization: Bearer <access token 或 tlp_ 令牌>`；匿名请求一律 401。
+  新增 `POST /auth/logout`（注销会话并清除该 Cookie：HttpOnly 前端删不掉），`GET /auth/me` 顺带续订
+  Cookie，使升级前已登录的用户无需重新登录即可恢复图片显示。
+- **批次 E 加固落地**：
+  - **refresh token 一次性轮换**（`core/token_store.py`）：refresh 令牌带 `jti`，刷新即轮换、旧令牌
+    立即失效（默认 120 秒宽限供多标签页/并发刷新，`VP_REFRESH_GRACE_SECONDS`），退出登录注销当前
+    会话、改密清空全部会话；多设备会话相互独立（上限 5）。
+  - **可信代理层数显式化**（`VP_TRUSTED_PROXY_HOPS`，默认 1）：客户端 IP 改为「X-Forwarded-For
+    右起第 N 项」，修复旧启发式在客户端伪造**公网** XFF 时被采信的问题（实测伪造
+    `X-Forwarded-For: 1.2.3.4` 会被写进审计日志）。外层还有代理时需相应调大 N。
+  - **压缩包解压配额**（`core/archive.py`）：docx/xlsx 解析前按条目数（2000/500）、解压总量
+    （200MB/100MB）、压缩比（100）判定并拒绝 zip 炸弹——仅校验压缩后大小挡不住「1MB 压缩包
+    解压出数十 GB」的资源耗尽。
+  - **首登改密服务端强制**（`core/deps.py`）：`must_change_password` 账号仅放行 `/auth/*` 与 `/meta`，
+    其余接口 403 并带 `X-Must-Change-Password: 1`；前端据此静默处理（不弹错误提示），由不可关闭的
+    改密弹框接管。此前仅前端弹框引导，直连 API 即可绕过。
+  - **前端 Nginx 安全响应头**：`X-Frame-Options: DENY`（防点击劫持）、`X-Content-Type-Options`、
+    `Referrer-Policy`、`Permissions-Policy`、`server_tokens off`；CSP 以 `Report-Only` 先观察
+    （前端有运行时内联样式与 data: 图片，配置注释给出转强制与启用 HSTS 的条件）。
+
+### 新增
+
+- 一次性脚本 `backend/scripts/fix_attachment_paths.py`（置空存量非法附件路径）与
+  `backend/scripts/fix_retest_title_html.py`（转义存量复测标题并重算 `retest_html`），
+  均支持 `--dry-run` 且落库前备份到 `storage/backups/`。
+- 后端测试：`test_storage_path_guard.py`（路径守卫与接口级回归）、`test_ssrf_guard.py`
+  （出站目标判定与"不发起请求"断言）、`test_retest_title_sanitize.py`、`test_source_guard.py`
+  （源码结构守卫：禁止附件路径裸拼接、禁止 `app/` 内直接出站、要求标题聚合转义）。
+
+### 修复
+
+- **升级后富文本图片全部不可见（图片鉴权引入的空窗，2026-09-19 生产实测）**：图片凭证是登录时
+  下发的 `vp_img` Cookie，而**升级前就已打开的标签页**从未拿到该 Cookie，新版后端上线后这些会话的
+  全部图片请求 401（表现为整页裂图，刷新页面即恢复）。处理：
+  1. 前端新增 `utils/imageAuth.ts`——捕获阶段的图片加载失败监听，静默补发一次凭证
+     （`GET /auth/me` 会续订 Cookie）并带时间戳重试原图一次；整页裂图只补发一次凭证（5s 节流），
+     已重试过的图片不再重试；站外图片与未登录状态不触发；仅识别同源 `/storage/uploads/images/` 路径。
+  2. `GET /auth/me` 已在每次进入页面时续订 Cookie（应用启动即调用），故正常整页加载不受影响。
+  > 升级操作提示：图片鉴权首次上线后，请让在线用户**刷新一次页面**（或重新登录）；此后新版前端可自愈。
+- `report_builder._drop_unresolvable_images` 的 img 标签匹配补全结束尖括号：整体移除不可内嵌
+  图片时不再残留孤立的 `>`。
+- **复测聚合标题回填脚本导入断链**：`scripts/backfill_retest.py` 仍从 `app.api.v1.vulns` 导入批次 D
+  已迁走的 `_sync_vul_retest_html`，`upgrade.sh` 的 [4.5/5] 步骤只打印告警、现象被掩盖，手动执行才暴露
+  `ImportError`（脚本不参与 pytest 收集，CI 无法发现）。已改为 `app.services.vul_service.sync_vul_retest_html`，
+  并新增 `scripts/_check_imports.py` + `tests/test_source_guard.py::test_scripts_app_references_resolve`
+  静态守卫脚本对 app 的引用。
+
 ## [2.18.0] - 2026-09-18
 
 ### 新增
