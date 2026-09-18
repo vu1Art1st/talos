@@ -191,6 +191,10 @@ AUDIT_ACTIONS = {
     "pat_create": "创建访问令牌",
     "pat_revoke": "吊销访问令牌",
     "notify_update": "通知渠道变更",
+    # 专项域审计（2026-09-19 安全整改）：原专项域 CRUD 与附件下载均无审计，路径越界事件无迹可查
+    "spring_action_change": "春耕行动变更",
+    "remote_testing_change": "远程检测变更",
+    "attachment_download": "下载专项附件",
 }
 
 # 通知渠道类型（F3）：webhook 走 httpx 出站 POST，邮件复用 SMTP 任务

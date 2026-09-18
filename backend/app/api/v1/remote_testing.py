@@ -2,23 +2,27 @@
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.deps import require_perm
 from app.core.query import get_or_404, paginate, apply_sort
+from app.core.storage import require_attachment_path, resolve_storage_path
 from app.db import get_session
 from app.models import Asset, RemoteTesting, User, Vul
 from app.schemas import Page, RemoteTestingIn, RemoteTestingOut
 from app.services import vul_service
+from app.services.audit_service import audit
 from app.services.upload_store import save_upload
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["专项管理"])
+
+# 申诉附件子目录：与 upload_remote_appeal 的 save_upload 参数一致，供路径白名单限定
+APPEAL_SUBDIR = "remote_appeal"
 
 
 @router.get("/remote-testings", response_model=Page[RemoteTestingOut])
@@ -82,6 +86,10 @@ async def _resolve_links(
     - 最终存在关联漏洞时，以漏洞标题/类型同步文本快照，保证列表与导出口径一致。
     """
     data = body.model_dump(exclude={"new_vul"})
+    # 附件路径白名单（审计 TALOS-2026-001/002）：仅接受本系统上传接口产物
+    data["appeal_file_path"] = require_attachment_path(
+        data.get("appeal_file_path", ""), subdir=APPEAL_SUBDIR,
+    )
     if body.asset_id and not await session.get(Asset, body.asset_id):
         raise HTTPException(400, "关联资产不存在")
     vul: Vul | None = None
@@ -104,6 +112,7 @@ async def _resolve_links(
 @router.post("/remote-testings", response_model=RemoteTestingOut)
 async def create_remote_testing(
     body: RemoteTestingIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -112,6 +121,9 @@ async def create_remote_testing(
     session.add(row)
     await session.commit()
     await session.refresh(row)
+    await audit(session, request, "remote_testing_change", user, {
+        "op": "create", "target": f"remote-testings/{row.id}", "system": row.system_name,
+    })
     return row
 
 
@@ -119,6 +131,7 @@ async def create_remote_testing(
 async def update_remote_testing(
     row_id: int,
     body: RemoteTestingIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
@@ -131,22 +144,28 @@ async def update_remote_testing(
     if old_path and old_path != row.appeal_file_path:
         _remove_appeal_file(old_path)
     await session.refresh(row)
+    await audit(session, request, "remote_testing_change", user, {
+        "op": "update", "target": f"remote-testings/{row_id}", "system": row.system_name,
+        "attachment_replaced": bool(old_path and old_path != row.appeal_file_path),
+    })
     return row
 
 
 @router.get("/remote-testings/{row_id}/appeal")
 async def download_remote_appeal(
     row_id: int,
-    _: User = Depends(require_perm("special:manage")),
+    request: Request,
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """下载远程检测-申诉报告附件。"""
+    """下载远程检测-申诉报告附件（路径经 storage 边界校验，越界/缺失一律 404）。"""
     row = await get_or_404(session, RemoteTesting, row_id, "远程检测记录不存在")
     if not row.appeal_file_path:
         raise HTTPException(404, "暂无申诉报告附件")
-    path = settings.storage_path / row.appeal_file_path
-    if not path.is_file():
-        raise HTTPException(404, "申诉报告文件已被清理")
+    path = resolve_storage_path(row.appeal_file_path, not_found_detail="申诉报告文件已被清理")
+    await audit(session, request, "attachment_download", user, {
+        "target": f"remote-testings/{row_id}", "file": row.appeal_file_name or path.name,
+    })
     filename = quote(row.appeal_file_name or "appeal")
     return FileResponse(
         path,
@@ -155,9 +174,17 @@ async def download_remote_appeal(
 
 
 def _remove_appeal_file(rel_path: str) -> None:
-    """删除申诉报告附件（尽力而为，文件缺失时忽略）。"""
+    """删除申诉报告附件（尽力而为：路径越界或文件缺失时仅记录，不阻断业务）。
+
+    路径同样走 storage 边界校验（审计 TALOS-2026-002）：DB 老数据可能残留非法路径，
+    此处不得直接 unlink。"""
     try:
-        (settings.storage_path / rel_path).unlink(missing_ok=True)
+        path = resolve_storage_path(rel_path)
+    except HTTPException:
+        logger.warning("跳过删除非法附件路径 path=%s", rel_path)
+        return
+    try:
+        path.unlink(missing_ok=True)
     except OSError as exc:
         # 尽力而为：文件被占用/无权限时仅记录，不阻断删除流程
         logger.warning("删除申诉报告附件失败 path=%s: %s", rel_path, exc)
@@ -166,13 +193,18 @@ def _remove_appeal_file(rel_path: str) -> None:
 @router.delete("/remote-testings/{row_id}")
 async def delete_remote_testing(
     row_id: int,
-    _: User = Depends(require_perm("special:manage")),
+    request: Request,
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await session.get(RemoteTesting, row_id)
     if row:
         if row.appeal_file_path:
             _remove_appeal_file(row.appeal_file_path)
+        system_name = row.system_name
         await session.delete(row)
         await session.commit()
+        await audit(session, request, "remote_testing_change", user, {
+            "op": "delete", "target": f"remote-testings/{row_id}", "system": system_name,
+        })
     return {"msg": "删除成功"}

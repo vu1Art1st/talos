@@ -2,7 +2,7 @@
 import logging
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.deps import require_perm
 from app.core.query import get_or_404, paginate, apply_sort
+from app.core.storage import require_attachment_path, resolve_storage_path
 from app.db import get_session
 from app.models import SpringAction, User
 from app.schemas import (
@@ -20,6 +21,7 @@ from app.schemas import (
     SpringReportParseOut,
 )
 from app.services import vul_service
+from app.services.audit_service import audit
 from app.services.docx_parser import parse_any_docx
 from app.services.upload_store import save_upload
 
@@ -30,6 +32,13 @@ router = APIRouter(tags=["专项管理"])
 # 原始报告附件大小上限与来源口径（VUL_SOURCE 中「春耕行动」）
 MAX_REPORT_FILE_BYTES = 50 * 1024 * 1024
 SPRING_VUL_SOURCE = 20
+# 附件子目录：与 upload_spring_report 的 save_upload 参数一致，供路径白名单限定
+REPORT_SUBDIR = "spring_report"
+
+
+def _safe_report_path(raw: str) -> str:
+    """写入侧附件路径白名单（审计 TALOS-2026-001/002）：仅接受本系统上传产物。"""
+    return require_attachment_path(raw, subdir=REPORT_SUBDIR)
 
 
 @router.get("/spring-actions", response_model=Page[SpringActionOut])
@@ -108,10 +117,13 @@ async def upload_spring_report(
 @router.post("/spring-actions", response_model=SpringActionOut)
 async def create_spring_action(
     body: SpringActionIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    row = SpringAction(**body.model_dump(exclude={"vul_ids", "new_vuls"}), creator_id=user.id)
+    data = body.model_dump(exclude={"vul_ids", "new_vuls"})
+    data["report_file_path"] = _safe_report_path(data.get("report_file_path", ""))
+    row = SpringAction(**data, creator_id=user.id)
     row.vuls = await vul_service.load_vulns_or_400(session, body.vul_ids)
     new_vuls = await vul_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
     if new_vuls:
@@ -119,6 +131,9 @@ async def create_spring_action(
     session.add(row)
     await session.commit()
     await session.refresh(row)
+    await audit(session, request, "spring_action_change", user, {
+        "op": "create", "target": f"spring-actions/{row.id}", "report_no": row.report_no,
+    })
     return row
 
 
@@ -126,12 +141,15 @@ async def create_spring_action(
 async def update_spring_action(
     row_id: int,
     body: SpringActionIn,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, SpringAction, row_id, "春耕行动记录不存在")
     old_path = row.report_file_path
-    for k, v in body.model_dump(exclude={"vul_ids", "new_vuls"}).items():
+    data = body.model_dump(exclude={"vul_ids", "new_vuls"})
+    data["report_file_path"] = _safe_report_path(data.get("report_file_path", ""))
+    for k, v in data.items():
         setattr(row, k, v)
     row.vuls = await vul_service.load_vulns_or_400(session, body.vul_ids)
     new_vuls = await vul_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
@@ -142,22 +160,28 @@ async def update_spring_action(
     if old_path and old_path != row.report_file_path:
         _remove_report_file(old_path)
     await session.refresh(row)
+    await audit(session, request, "spring_action_change", user, {
+        "op": "update", "target": f"spring-actions/{row_id}", "report_no": row.report_no,
+        "attachment_replaced": bool(old_path and old_path != row.report_file_path),
+    })
     return row
 
 
 @router.get("/spring-actions/{row_id}/report")
 async def download_spring_report(
     row_id: int,
-    _: User = Depends(require_perm("special:manage")),
+    request: Request,
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """下载春耕行动-原始报告附件。"""
+    """下载春耕行动-原始报告附件（路径经 storage 边界校验，越界/缺失一律 404）。"""
     row = await get_or_404(session, SpringAction, row_id, "春耕行动记录不存在")
     if not row.report_file_path:
         raise HTTPException(404, "暂无原始报告附件")
-    path = settings.storage_path / row.report_file_path
-    if not path.is_file():
-        raise HTTPException(404, "原始报告文件已被清理")
+    path = resolve_storage_path(row.report_file_path, not_found_detail="原始报告文件已被清理")
+    await audit(session, request, "attachment_download", user, {
+        "target": f"spring-actions/{row_id}", "file": row.report_file_name or path.name,
+    })
     filename = quote(row.report_file_name or "report.docx")
     return FileResponse(
         path,
@@ -166,9 +190,17 @@ async def download_spring_report(
 
 
 def _remove_report_file(rel_path: str) -> None:
-    """删除原始报告附件（尽力而为，文件缺失时忽略）。"""
+    """删除原始报告附件（尽力而为：路径越界或文件缺失时仅记录，不阻断业务）。
+
+    路径同样走 storage 边界校验（审计 TALOS-2026-002）：DB 老数据可能残留非法路径，
+    此处不得直接 unlink。"""
     try:
-        (settings.storage_path / rel_path).unlink(missing_ok=True)
+        path = resolve_storage_path(rel_path)
+    except HTTPException:
+        logger.warning("跳过删除非法附件路径 path=%s", rel_path)
+        return
+    try:
+        path.unlink(missing_ok=True)
     except OSError as exc:
         # 尽力而为：文件被占用/无权限时仅记录，不阻断删除流程
         logger.warning("删除春耕行动报告附件失败 path=%s: %s", rel_path, exc)
@@ -177,13 +209,18 @@ def _remove_report_file(rel_path: str) -> None:
 @router.delete("/spring-actions/{row_id}")
 async def delete_spring_action(
     row_id: int,
-    _: User = Depends(require_perm("special:manage")),
+    request: Request,
+    user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await session.get(SpringAction, row_id)
     if row:
         if row.report_file_path:
             _remove_report_file(row.report_file_path)
+        report_no = row.report_no
         await session.delete(row)
         await session.commit()
+        await audit(session, request, "spring_action_change", user, {
+            "op": "delete", "target": f"spring-actions/{row_id}", "report_no": report_no,
+        })
     return {"msg": "删除成功"}
