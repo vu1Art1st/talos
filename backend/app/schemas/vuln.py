@@ -4,7 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .asset import AssetBrief
-from .common import HtmlStr, OptHtmlStr
+from .common import AffectedUrl, HtmlStr, OptHtmlStr
 
 
 class VulIn(BaseModel):
@@ -13,7 +13,8 @@ class VulIn(BaseModel):
     level: int = 30
     source: int = 0  # 漏洞来源（0=未选择；关联渗透测试工单时固定为「渗透测试工单」，服务端强制置 0）
     layer: int = 10
-    affected_url: str = ""
+    # 影响URL：多值以换行分隔；切分/去重/条数与长度上限见 schemas.common.normalize_affected_url
+    affected_url: AffectedUrl = ""
     description_html: HtmlStr = ""
     description_json: dict | None = None
     reproduce_html: HtmlStr = ""
@@ -32,6 +33,10 @@ class VulIn(BaseModel):
 
 class VulOut(VulIn):
     model_config = ConfigDict(from_attributes=True)
+
+    # 输出侧显式退回普通 str：历史数据可能含空格等不合规内容，输出不应再跑写入校验
+    # （否则列表/详情接口会因存量脏数据直接 500）
+    affected_url: str = ""
 
     id: int
     status: int = 10

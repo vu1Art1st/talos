@@ -36,7 +36,7 @@
             <div class="text-xs text-gray-500 leading-6">
               <div v-for="a in selectedAssets" :key="a.id">
                 {{ a.name }}：部门 {{ a.department || '-' }}；
-                负责人 {{ (a.owners ?? []).map((o: any) => o.name).join('、') || '-' }}；
+                负责人 {{ (a.owners ?? []).map((o) => o.name).join('、') || '-' }}；
                 URL {{ (a.public_urls ?? [])[0]?.url || (a.internal_urls ?? [])[0] || '-' }}
               </div>
             </div>
@@ -68,7 +68,7 @@
             </el-button>
           </div>
         </template>
-        <el-form :ref="(el: any) => setVulFormRef(idx, el)" :model="vul" :rules="vulRules" label-width="90px">
+        <el-form :ref="(el: unknown) => setVulFormRef(idx, el)" :model="vul" :rules="vulRules" label-width="90px">
           <el-form-item label="漏洞名称" prop="title">
             <el-input v-model="vul.title" placeholder="例如：后台登录接口存在SQL注入" />
           </el-form-item>
@@ -111,21 +111,9 @@
                 <el-option v-for="(name, code) in meta?.vul_source" :key="code" :label="name" :value="Number(code)" />
               </el-select>
             </el-form-item>
-            <el-form-item label="影响URL">
-              <div class="w-full flex flex-col gap-2">
-                <div v-for="(_, uidx) in vul.affected_urls" :key="uidx" class="flex items-center gap-2">
-                  <el-input v-model="vul.affected_urls[uidx]" placeholder="https://..." class="flex-1" />
-                  <el-button v-if="vul.affected_urls.length > 1" type="danger" link
-                             @click="vul.affected_urls.splice(uidx, 1)">
-                    <el-icon><Delete /></el-icon>
-                  </el-button>
-                </div>
-                <div>
-                  <el-button size="small" plain @click="vul.affected_urls.push('')">
-                    <el-icon class="mr-1"><Plus /></el-icon>添加URL
-                  </el-button>
-                </div>
-              </div>
+            <el-form-item label="影响URL" prop="affected_url" :show-message="false">
+              <!-- 错误文案由编辑器行内展示，此处仅借 prop 让提交前统一校验拦截并标红 -->
+              <AffectedUrlEditor v-model="vul.affected_url" />
             </el-form-item>
           </div>
           <el-form-item label="CVSS 3.1">
@@ -140,15 +128,15 @@
           </el-form-item>
           <el-form-item label="漏洞描述">
             <RichEditor v-model="vul.description_html" class="w-full"
-                        @update:json="(j: any) => (vul.description_json = j)" />
+                        @update:json="(j: unknown) => (vul.description_json = j)" />
           </el-form-item>
           <el-form-item label="复现步骤">
             <RichEditor v-model="vul.reproduce_html" class="w-full"
-                        @update:json="(j: any) => (vul.reproduce_json = j)" />
+                        @update:json="(j: unknown) => (vul.reproduce_json = j)" />
           </el-form-item>
           <el-form-item label="修复建议">
             <RichEditor v-model="vul.solution_html" class="w-full"
-                        @update:json="(j: any) => (vul.solution_json = j)" />
+                        @update:json="(j: unknown) => (vul.solution_json = j)" />
           </el-form-item>
         </el-form>
       </el-card>
@@ -196,10 +184,13 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
+import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import AssetFormDialog from './AssetFormDialog.vue'
+import AffectedUrlEditor from './AffectedUrlEditor.vue'
+import type { Asset, Items, KnowledgeTemplate, TestingPlan, Vuln, VulnForm } from '../types'
+import { joinAffectedUrl, parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
 import CvssCalculator from './CvssCalculator.vue'
 import TemplatePickerDialog from './TemplatePickerDialog.vue'
 import { useAuthStore } from '../stores/auth'
@@ -211,10 +202,11 @@ const props = defineProps<{
   editId?: number | null   // 编辑态漏洞 ID
   asideActions?: boolean   // 独立编辑页：操作按钮渲染为右侧固定栏（与报告编辑页一致）
 }>()
-const emit = defineEmits<{ (e: 'saved', vulns: any[]): void }>()
+const emit = defineEmits<{ (e: 'saved', vulns: VulnForm[]): void }>()
 
 const auth = useAuthStore()
-const meta = ref<any>(null)
+/** `/meta` 下发的字典映射（码 → 名称）；本组件只按键取值，故按二级 Record 声明 */
+const meta = ref<Record<string, Record<number, string>> | null>(null)
 const saving = ref(false)
 const editId = props.editId ?? null
 const planId = props.planId ?? null
@@ -223,9 +215,10 @@ const planId = props.planId ?? null
 const selectedPlanId = ref<number | null>(planId)
 // 关联渗透测试工单后来源固定为「渗透测试工单」（展示层派生），不落库来源值
 watch(selectedPlanId, (v) => {
-  if (v != null) vulns.value.forEach((x: any) => (x.source = 0))
+  if (v != null) vulns.value.forEach((x) => (x.source = 0))
 })
-const planOptions = ref<any[]>([])
+// 工单下拉项：列表行附带 status_name（loadPlans 内按状态字典就地补充，仅供展示）
+const planOptions = ref<(TestingPlan & { status_name?: string })[]>([])
 const planLoading = ref(false)
 let plansLoaded = false
 const statusMap = ref<Record<number, string>>({})
@@ -235,11 +228,13 @@ async function loadPlans() {
   plansLoaded = true
   planLoading.value = true
   try {
-    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => null)
+    // 请求失败时以 null 兜底（.catch(() => null)），故先取响应再判定
+    const resp = await client.get<Items<TestingPlan>>('/testing-plans', { params: { size: 100 } }).catch(() => null)
+    const data = resp?.data
     if (data) {
       planOptions.value = data.items
       statusMap.value = (await auth.fetchMeta()).testing_plan_status ?? {}
-      planOptions.value.forEach((p: any) => {
+      planOptions.value.forEach((p) => {
         p.status_name = statusMap.value[p.status] ?? ''
       })
     }
@@ -255,12 +250,12 @@ const targetFormRef = ref<FormInstance>()
 const targetRules: FormRules = {
   assetIds: [{ required: true, type: 'array', message: '请选择测试目标资产', trigger: 'change' }],
 }
-const assetOptions = ref<any[]>([])
-const assetCache = ref<Record<number, any>>({})
+const assetOptions = ref<Asset[]>([])
+const assetCache = ref<Record<number, Asset>>({})
 const assetLoading = ref(false)
 const assetKeyword = ref('')
 const assetDialogVisible = ref(false)
-const assetPrefill = ref<any>(null)
+const assetPrefill = ref<{ name: string } | null>(null)
 
 const selectedAssets = computed(() => targetForm.assetIds.map((id) => assetCache.value[id]).filter(Boolean))
 
@@ -268,7 +263,7 @@ async function searchAssets(keyword = '') {
   assetKeyword.value = keyword
   assetLoading.value = true
   try {
-    const { data } = await client.get('/assets', { params: { search: keyword, size: 50 } })
+    const { data } = await client.get<Items<Asset>>('/assets', { params: { search: keyword, size: 50 } })
     assetOptions.value = data.items
     for (const a of data.items) assetCache.value[a.id] = a
   } finally {
@@ -281,7 +276,7 @@ function openCreateAsset() {
   assetDialogVisible.value = true
 }
 
-function onAssetCreated(asset: any) {
+function onAssetCreated(asset: Asset) {
   assetCache.value[asset.id] = asset
   assetOptions.value = [asset, ...assetOptions.value.filter((a) => a.id !== asset.id)]
   targetForm.assetIds = [...targetForm.assetIds, asset.id]
@@ -295,20 +290,20 @@ function onAssetChange() {
   const url = (first.public_urls ?? [])[0]?.url || (first.internal_urls ?? [])[0] || ''
   if (!url) return
   for (const vul of vulns.value) {
-    if (!vul.affected_urls.some((u: string) => u.trim())) vul.affected_urls = [url]
+    if (!vul.affected_url?.trim()) vul.affected_url = url
   }
 }
 
 // ---------- 漏洞表单（新建支持多块，编辑单块） ----------
-const emptyVul = () => ({
-  title: '', level: 30, vul_type: 75, layer: 10, affected_urls: [''],
+const emptyVul = (): VulnForm => ({
+  title: '', level: 30, vul_type: 75, layer: 10, affected_url: '',
   description_html: '', description_json: null,
   reproduce_html: '', reproduce_json: null,
   solution_html: '', solution_json: null,
   source: 0, score: 0, risk_score: 0, left_risk_score: 0, asset_level: 0,
   cvss_vector: '', cvss_sync_level: true,
 })
-const vulns = ref<any[]>([emptyVul()])
+const vulns = ref<VulnForm[]>([emptyVul()])
 
 // 每个漏洞卡片一张独立 el-form（动态多块），函数 ref 按下标收集，提交时逐一校验
 const vulFormRefs: FormInstance[] = []
@@ -320,20 +315,21 @@ function setVulFormRef(idx: number, el: unknown) {
 
 const vulRules: FormRules = {
   title: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
-}
-
-// 影响URL 多值与后端单字段（换行分隔）互转
-const joinUrls = (urls: string[]) => (urls ?? []).map((u) => u.trim()).filter(Boolean).join('\n')
-const splitUrls = (raw: string) => {
-  const arr = (raw ?? '').split('\n').map((u) => u.trim()).filter(Boolean)
-  return arr.length ? arr : ['']
+  // 影响URL 与后端同一口径（条数/单条长度/非法字符），与编辑器行内提示同源
+  affected_url: [{
+    validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+      const result = validateAffectedUrls(parseAffectedUrl(value))
+      result.ok ? callback() : callback(new Error(result.message))
+    },
+    trigger: 'change',
+  }],
 }
 
 function addVuln() {
   const block = emptyVul()
   const first = selectedAssets.value[0]
   const url = (first?.public_urls ?? [])[0]?.url || (first?.internal_urls ?? [])[0] || ''
-  if (url) block.affected_urls = [url]
+  if (url) block.affected_url = url
   vulns.value.push(block)
 }
 
@@ -342,19 +338,19 @@ function addVuln() {
 // 本组件只负责打开弹窗、覆盖确认与回填，弹窗在确认被取消时保持打开以便继续挑选。
 const templateVisible = ref(false)
 const templateVulType = ref<number | null>(null)
-let templateTarget: any = null
+let templateTarget: VulnForm | null = null
 
-const typeName = (code: number | null | undefined) =>
+const vulTypeName = (code: number | null | undefined) =>
   (code != null ? meta.value?.vul_type?.[code] : '') ?? '未分类'
 
-function applyTemplate(vul: any) {
+function applyTemplate(vul: VulnForm) {
   templateTarget = vul
   templateVulType.value = vul.vul_type ?? null
   templateVisible.value = true
 }
 
 // 在漏洞类型下拉中直接新增类型（同步到全局 meta，无需跳转知识库）
-async function addVulnType(vul: any) {
+async function addVulnType(vul: VulnForm) {
   const { value } = await ElMessageBox.prompt('请输入新的漏洞类型名称', '新增漏洞类型', {
     confirmButtonText: '保存', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
   }).catch(() => ({ value: '' }))
@@ -366,7 +362,7 @@ async function addVulnType(vul: any) {
   vul.vul_type = data.code
 }
 
-async function applyEntry(entry: any) {
+async function applyEntry(entry: KnowledgeTemplate) {
   const vul = templateTarget
   if (!vul) return
   if ((vul.description_html || '').trim() || (vul.solution_html || '').trim()) {
@@ -387,7 +383,7 @@ async function applyEntry(entry: any) {
   const fromType = vul.vul_type
   if (entry.vul_type != null && entry.vul_type !== fromType) {
     vul.vul_type = entry.vul_type
-    ElMessage.warning(`漏洞类型已由「${typeName(fromType)}」调整为「${typeName(entry.vul_type)}」`)
+    ElMessage.warning(`漏洞类型已由「${vulTypeName(fromType)}」调整为「${vulTypeName(entry.vul_type)}」`)
   }
   templateVisible.value = false
   ElMessage.success(`已套用模板「${entry.vulnerability_name}」`)
@@ -395,16 +391,16 @@ async function applyEntry(entry: any) {
 
 async function save() {
   // 先校验测试目标，再并行校验每个漏洞卡片，全部通过才提交（错误内联展示在对应字段）
-  const targetValid = await targetFormRef.value.validate().catch(() => false)
+  const targetValid = await targetFormRef.value?.validate().catch(() => false)
   if (!targetValid) return
   const vulResults = await Promise.all(vulFormRefs.map((f) => f.validate().catch(() => false)))
   if (vulResults.some((ok) => !ok)) return
   saving.value = true
   try {
-    // 影响URL 多值序列化为后端单字段（换行分隔），剔除前端临时字段
-    const toPayload = (v: any) => {
-      const { affected_urls, cvss_sync_level, ...rest } = v
-      return { ...rest, affected_url: joinUrls(affected_urls) }
+    // 剔除前端临时字段；影响URL 提交前统一清洗（切分/trim/去空/去重保序），与后端口径一致
+    const toPayload = (v: VulnForm) => {
+      const { cvss_sync_level, ...rest } = v
+      return { ...rest, affected_url: joinAffectedUrl(parseAffectedUrl(v.affected_url)) }
     }
     if (editId) {
       const { data } = await client.put(`/vulns/${editId}`, {
@@ -434,7 +430,7 @@ async function save() {
 // 按资产ID加载并回显资产（供计划关联资产预填与编辑回显复用）
 async function loadAssetsByIds(ids: number[]) {
   if (!ids.length) return
-  const rows = await Promise.all(ids.map((id: number) => client.get(`/assets/${id}`).catch(() => null)))
+  const rows = await Promise.all(ids.map((id) => client.get<Asset>(`/assets/${id}`).catch(() => null)))
   for (const r of rows) {
     const a = r?.data
     if (a && !assetCache.value[a.id]) {
@@ -449,8 +445,24 @@ onMounted(async () => {
   await searchAssets()
   await loadPlans()
   if (editId) {
-    const { data: vul } = await client.get(`/vulns/${editId}`)
-    vulns.value = [{ ...emptyVul(), ...vul, affected_urls: splitUrls(vul.affected_url) }]
+    const { data: vul } = await client.get<Vuln>(`/vulns/${editId}`)
+    // 边界归一：`VulnForm` 要求这些字段是具体值（富文本为 string、vul_type/layer 为 number），
+    // 而服务端空内容返回 null、可选字段可能缺省 —— 此前依赖 `any` 让它们直入表单，
+    // 现按 `emptyVul()` 的默认值兜底（缺省时与新建态一致，语义不变）
+    const base = emptyVul()
+    vulns.value = [{
+      ...base,
+      ...vul,
+      vul_type: vul.vul_type ?? base.vul_type,
+      layer: vul.layer ?? base.layer,
+      source: vul.source ?? base.source,
+      score: vul.score ?? base.score,
+      cvss_vector: vul.cvss_vector ?? '',
+      description_html: vul.description_html ?? '',
+      reproduce_html: vul.reproduce_html ?? '',
+      solution_html: vul.solution_html ?? '',
+      affected_url: vul.affected_url ?? '',
+    }]
     targetForm.assetIds = vul.asset_ids ?? []
     selectedPlanId.value = vul.testing_plan_id ?? null
     await loadAssetsByIds(targetForm.assetIds)

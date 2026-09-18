@@ -44,7 +44,8 @@ class ImportRecord(Base):
     title: Mapped[str] = mapped_column(String(255), default="")
     vul_type: Mapped[int] = mapped_column(Integer, default=75)
     level: Mapped[int] = mapped_column(Integer, default=30)
-    affected_url: Mapped[str] = mapped_column(String(512), default="")
+    # 影响URL：多值以换行分隔存储，用 Text 与 vulns.affected_url 同口径（勿回退为定长列）
+    affected_url: Mapped[str] = mapped_column(Text, default="")
     description_html: Mapped[str] = mapped_column(Text, default="")
     reproduce_html: Mapped[str] = mapped_column(Text, default="")
     solution_html: Mapped[str] = mapped_column(Text, default="")

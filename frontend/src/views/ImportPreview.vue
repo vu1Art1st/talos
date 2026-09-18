@@ -90,7 +90,8 @@
             </el-form-item>
           </div>
           <el-form-item label="影响URL">
-            <el-input v-model="rec.affected_url" />
+            <!-- 与漏洞录入页同一编辑器：支持粘贴多行/分号文本自动切分、去重与行内校验 -->
+            <AffectedUrlEditor v-model="rec.affected_url" />
           </el-form-item>
           <el-form-item>
             <el-button type="primary" size="small" @click="saveRecord(rec)">保存修正</el-button>
@@ -132,27 +133,32 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import AffectedUrlEditor from '../components/AffectedUrlEditor.vue'
 import ImportLevelMismatchDialog from '../components/ImportLevelMismatchDialog.vue'
 import { usePlanAssetLink } from '../composables/usePlanAssetLink'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, importRecordMeta, levelDotStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
+import { joinAffectedUrl, parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
+import type {
+  Asset, ImportBatch, ImportLevelMismatch, ImportRecord, Items, Report, TestingPlan,
+} from '../types'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const batch = ref<any>(null)
-const records = ref<any[]>([])
-const assets = ref<any[]>([])
-const reports = ref<any[]>([])
+const batch = ref<ImportBatch | null>(null)
+const records = ref<ImportRecord[]>([])
+const assets = ref<Asset[]>([])
+const reports = ref<Report[]>([])
 const reportId = ref<number | null>(null)
-const plans = ref<any[]>([])
-const meta = ref<any>(null)
+const plans = ref<TestingPlan[]>([])
+const meta = ref<Record<string, Record<number, string>> | null>(null)
 const editing = ref<number | null>(null)
 const checked = reactive<Record<number, boolean>>({})
 const loading = ref(false)
 // 等级不一致提醒：风险汇总与风险详情等级不一致的记录（仅在首次加载时自动弹窗，横幅可再次查看）
-const mismatchItems = ref<any[]>([])
+const mismatchItems = ref<ImportLevelMismatch[]>([])
 const mismatchVisible = ref(false)
 const mismatchNotified = ref(false)
 
@@ -169,7 +175,9 @@ const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
 async function load() {
   loading.value = true
   try {
-    const { data } = await client.get(`/imports/${route.params.id}`)
+    const { data } = await client.get<{ batch: ImportBatch; records: ImportRecord[] }>(
+      `/imports/${route.params.id}`,
+    )
     batch.value = data.batch
     records.value = data.records
     for (const r of data.records) if (r.status === 'parsed' && checked[r.id] === undefined) checked[r.id] = true
@@ -181,7 +189,7 @@ async function load() {
 
 // 报告存在「风险问题汇总与风险问题详情等级不一致」的记录时提醒用户
 async function loadLevelMismatch() {
-  const { data } = await client.get('/imports/level-mismatches', {
+  const { data } = await client.get<ImportLevelMismatch[]>('/imports/level-mismatches', {
     params: { batch_ids: route.params.id },
   })
   mismatchItems.value = data
@@ -191,23 +199,27 @@ async function loadLevelMismatch() {
   }
 }
 
-async function saveRecord(rec: any) {
+async function saveRecord(rec: ImportRecord) {
+  // 影响URL 与录入页同一口径：不合规时中止提交（错误已由编辑器行内提示，无需弹窗）
+  const parsed = parseAffectedUrl(rec.affected_url)
+  if (!validateAffectedUrls(parsed).ok) return
   await client.put(`/imports/records/${rec.id}`, {
-    title: rec.title, level: rec.level, vul_type: rec.vul_type, affected_url: rec.affected_url,
+    title: rec.title, level: rec.level, vul_type: rec.vul_type,
+    affected_url: joinAffectedUrl(parsed),
   })
   ElMessage.success('修正已保存')
   editing.value = null
   await load()
 }
 
-async function discard(rec: any) {
+async function discard(rec: ImportRecord) {
   await client.post(`/imports/records/${rec.id}/discard`)
   checked[rec.id] = false
   await load()
 }
 
 async function confirm() {
-  const { data } = await client.post(`/imports/${route.params.id}/confirm`, {
+  const { data } = await client.post<{ msg: string }>(`/imports/${route.params.id}/confirm`, {
     record_ids: selected.value,
     asset_id: assetId.value,
     report_id: reportId.value,
@@ -220,11 +232,11 @@ async function confirm() {
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   const [{ data: assetPage }, { data: reportPage }, { data: planPage }] = await Promise.all([
-    client.get('/assets', { params: { size: 100 } }),
+    client.get<Items<Asset>>('/assets', { params: { size: 100 } }),
     // 无报告权限时静默降级为不可关联
-    client.get('/reports', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
+    client.get<Items<Report>>('/reports', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
     // 无专项权限时静默降级为不可关联计划
-    client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
+    client.get<Items<TestingPlan>>('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
   ])
   assets.value = assetPage.items
   reports.value = reportPage.items

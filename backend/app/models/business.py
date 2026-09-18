@@ -36,7 +36,8 @@ class Asset(Base):
     name: Mapped[str] = mapped_column(String(128), index=True)
     sub_system: Mapped[str] = mapped_column(String(128), default="")
     department: Mapped[str] = mapped_column(String(128), default="")
-    system_type: Mapped[str] = mapped_column(String(64), default="")  # 系统类型：自有系统（正式）/自有系统（测试）/DICT系统等
+    # 系统类型：自有系统（正式）/自有系统（测试）/DICT系统等
+    system_type: Mapped[str] = mapped_column(String(64), default="")
     public_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     internal_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     ports: Mapped[list | None] = mapped_column(JSON, default=list)  # 历史字段
@@ -67,7 +68,10 @@ class Vul(Base):
     status: Mapped[int] = mapped_column(Integer, default=10, index=True)
     source: Mapped[int] = mapped_column(Integer, default=0)  # 漏洞来源（0=未选择；关联工单时恒为渗透测试工单，不落库）
     layer: Mapped[int] = mapped_column(Integer, default=10)
-    affected_url: Mapped[str] = mapped_column(String(512), default="")
+    # 影响URL：多值以换行分隔存储（见 schemas.common.normalize_affected_url）。
+    # 用 Text 而非 String(512)：一个漏洞可关联数十条 URL，定长列在 PostgreSQL 下会
+    # 抛 StringDataRightTruncation 导致录入 500（与 import_records.affected_url 同口径）。
+    affected_url: Mapped[str] = mapped_column(Text, default="")
 
     description_html: Mapped[str] = mapped_column(Text, default="")
     description_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -112,7 +116,8 @@ class VulRetestRecord(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     vul_id: Mapped[int] = mapped_column(ForeignKey("vulns.id", ondelete="CASCADE"), index=True)
-    title: Mapped[str | None] = mapped_column(String(255), nullable=True)  # 用户自定义标题；空则聚合时按创建日期自动生成
+    # 用户自定义标题；空则聚合时按创建日期自动生成
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     content_html: Mapped[str] = mapped_column(Text, default="")
     content_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

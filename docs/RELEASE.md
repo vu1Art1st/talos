@@ -29,6 +29,38 @@
 
 ### 新增
 
+- **影响URL 支持批量粘贴自动切分（录入漏洞 / 报告导入修正）**：新增共用组件
+  `frontend/src/components/AffectedUrlEditor.vue`，在两个入口替换原「逐条点添加URL」的输入区。
+  在任意一行粘贴含换行（LF/CRLF）或分号（`;`/`；`）的文本时，自动按分隔符切分、逐条 trim、
+  丢弃空项、去重保序后插入当前行位置，并提示「已识别 N 条、已去重 M 条」；切分结果仍是逐条
+  可编辑、可删除的输入行，可继续点「添加URL」补充。当前行内容被整段选中时按覆盖处理，否则
+  保留原内容并在其后追加（不误删已填数据）；单值粘贴不接管默认行为，保留光标位置。
+- 影响URL 解析与校验纯函数集中在 `frontend/src/utils/urls.ts`（`parseAffectedUrl` /
+  `joinAffectedUrl` / `validateAffectedUrls`），与后端 `app/schemas/common.py` 的
+  `normalize_affected_url` 同一口径；条数上限 100、单条上限 2048 字符，超限或条目含空白/
+  非法字符时在字段下方行内提示（不弹窗、不清空表单），提交前同口径拦截。
+
+### 变更
+
+- **影响URL 存储由 `varchar(512)` 扩宽为 `TEXT`**（`vulns.affected_url`、`import_records.affected_url`，
+  迁移 `d9e0f1a2b3c4`；SQLite 开发库因类型亲和无需重建，由 `db.py` 注释登记双轨）。写入时统一
+  规范化：按换行与分号切分 → trim → 去空 → 去重保序 → 换行拼接。上限校验从数据库列下沉到
+  schema 层（`VulIn` / `ImportRecordUpdateIn` / 春耕行动草稿共用 `AffectedUrl` 类型）。
+  Word 解析器（`docx_parser.py`）移除了对影响URL 的 `[:512]` 硬截断，不再静默丢数据。
+  注意：分号一律视为分隔符（含查询串内的分号），前端粘贴与后端入库行为一致。
+
+### 修复
+
+- **影响URL 录入约 20 条即触发 500**：根因是该列原为 `varchar(512)`，而前端把多条 URL 以换行
+  拼成单个字段提交，约 20 条即溢出，PostgreSQL 在写入时抛 `StringDataRightTruncation`
+  （SQLSTATE 22001），落入兜底 500 并由前端整页跳转错误页、丢失已填表单。除扩宽列与补齐
+  长度校验外，`app/main.py` 新增 `DataError` 处理器把数据长度/数值越界类数据库拒绝归为 400
+  并给出可读文案；`RequestValidationError` 处理器现会透出 schema 层自有校验（`value_error`）
+  的中文提示，超限时返回 422 并说明具体原因（条数 / 条序号与长度 / 非法字符），不再是一句
+  「请求参数校验失败」。
+- 输出侧（`VulOut`）显式退回普通 `str`，不对历史数据跑写入校验，避免存量脏数据导致列表/
+  详情接口 500。
+
 - **漏洞录入「套用模板」支持跨模板全局搜索**：新增 `GET /knowledge/search`
   （`backend/app/api/v1/knowledge.py`），不预选漏洞类型即可按漏洞名称、编号（CVE 等，写在名称
   后缀）/ 参考链接 / 关键字（`deep=true` 时含描述、危害说明、修复建议正文）模糊检索全部模板；

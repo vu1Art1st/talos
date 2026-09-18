@@ -129,6 +129,19 @@ bash scripts/migrate.sh
 > 注意：为保证纳管判断成立，**每次发布后都要执行 `migrate.sh`**；跨多个版本一次性升级时尤其不能跳过，
 > 否则旧库可能被误纳管到 head 而漏掉中间版本的 ALTER。
 
+**放宽列类型（如 `varchar(512)` → `TEXT`）**：`migrate.sh` 会自动应用，无需回填数据、无需停机维护。
+
+```bash
+# 迁移 d9e0f1a2b3c4：vulns.affected_url / import_records.affected_url 由 varchar(512) 放宽为 TEXT
+bash scripts/migrate.sh
+# 核对：两列应显示 text
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "\d vulns" | grep affected_url'
+```
+
+> ⚠️ **回滚注意**：该迁移的 `downgrade` 把列改回 `varchar(512)`，**若库中已存在超过 512 字符的数据，
+> PostgreSQL 会直接拒绝该 DDL**。紧急回滚请只回退应用代码（`git checkout <旧提交> && docker compose up -d --build`）
+> 并**保留 TEXT 列**——列变宽对旧代码完全无害；确需整库回退则用升级前备份走 `scripts/restore.sh`。
+
 ### 3.4 版本相关的一次性数据维护（按需执行）
 
 部分版本除代码与结构迁移外，还需对**存量数据**做一次性规整。已内置脚本的版本见下表；
