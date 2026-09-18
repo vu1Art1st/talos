@@ -171,13 +171,13 @@ pnpm test                               # 前端 vitest
 
 ## 旧数据迁移
 
-从旧版 insight2（MySQL）迁移数据：
+从旧版 insight2（MySQL）迁移的脚本 `backend/scripts/migrate_from_insight2.py` **已删除**：
+其引用的 `App` 模型与 `Asset.value / asset_type / is_open / is_https`、`Vul.app_id` 在
+资产/漏洞模型合并后已不存在，运行必然失败（2026-09-17 代码审计 A-2 实测结论）。
 
-```bash
-python backend/scripts/migrate_from_insight2.py --help
-```
-
-明文密码不会被迁移，旧用户首次登录将被强制重置密码。
+如需迁移旧库数据，请按当前模型重写迁移脚本（`Asset` 已合并原 App 语义，使用
+`name / sub_system / department / system_type / public_urls…`；`Vul` 不再有 `app_id`，
+改为经资产关联），并在 `docs/SCRIPTS.md` 登记其用途、调用方式、依赖与执行场景。
 
 ## 功能规划与版本
 

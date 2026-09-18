@@ -1,6 +1,5 @@
 """远程检测 API：通报口径的检测记录与申诉报告附件管理，统一 special:manage 权限。"""
-import uuid
-from pathlib import Path
+import logging
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
@@ -15,6 +14,9 @@ from app.db import get_session
 from app.models import Asset, RemoteTesting, User, Vul
 from app.schemas import Page, RemoteTestingIn, RemoteTestingOut
 from app.services import vuln_service
+from app.services.upload_store import save_upload
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["专项管理"])
 
@@ -61,20 +63,13 @@ async def upload_remote_appeal(
     _: User = Depends(require_perm("special:manage")),
 ):
     """上传远程检测-申诉报告附件（支持 Word/PDF/图片等），返回文件元信息供表单绑定。"""
-    data = await file.read()
-    if len(data) > MAX_APPEAL_FILE_BYTES:
-        raise HTTPException(400, "申诉报告文件大小不能超过 20MB")
-    if not data:
-        raise HTTPException(400, "文件内容为空")
-    ext = Path(file.filename or "").suffix.lower() or ".bin"
-    name = f"{uuid.uuid4().hex}{ext}"
-    path = settings.storage_sub("uploads", "remote_appeal") / name
-    path.write_bytes(data)
-    return {
-        "name": file.filename or name,
-        "path": str(Path("uploads", "remote_appeal") / name).replace("\\", "/"),
-        "size": len(data),
-    }
+    original_name, rel_path, size = await save_upload(
+        file,
+        "remote_appeal",
+        max_bytes=MAX_APPEAL_FILE_BYTES,
+        size_error="申诉报告文件大小不能超过 20MB",
+    )
+    return {"name": original_name, "path": rel_path, "size": size}
 
 
 async def _resolve_links(
@@ -163,8 +158,9 @@ def _remove_appeal_file(rel_path: str) -> None:
     """删除申诉报告附件（尽力而为，文件缺失时忽略）。"""
     try:
         (settings.storage_path / rel_path).unlink(missing_ok=True)
-    except OSError:
-        pass
+    except OSError as exc:
+        # 尽力而为：文件被占用/无权限时仅记录，不阻断删除流程
+        logger.warning("删除申诉报告附件失败 path=%s: %s", rel_path, exc)
 
 
 @router.delete("/remote-testings/{row_id}")

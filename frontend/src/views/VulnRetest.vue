@@ -8,7 +8,7 @@
             <span class="tl-tag" :style="levelSoftStyle(vul.level)">
               {{ meta?.vul_level?.[vul.level] }}
             </span>
-            <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
+            <span class="tl-tag" :style="statusSoftStyleWithRetest(vul.status, vul.is_retest)">
               {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
             </span>
             <span class="text-xs text-gray-400">共 {{ recordCount }} 条复测记录</span>
@@ -35,7 +35,8 @@ import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, statusLabel, statusSoftStyleEx } from '../utils/colors'
+import { levelSoftStyle, statusLabel, statusSoftStyleWithRetest } from '../utils/colors'
+import type { RetestRecord, Vuln } from '../types'
 
 // 独立复测处理页：记录增删改主体抽取为 VulnRetestPanel（与测试计划流程抽屉复用），
 // 本页保留漏洞信息卡与返回按钮。
@@ -43,15 +44,15 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const vulId = Number(route.params.id)
-const vul = ref<any>(null)
-const meta = ref<any>(null)
+const vul = ref<Vuln | null>(null)
+const meta = ref<Record<string, Record<number, string>> | null>(null)
 const recordCount = ref(0)
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   const [{ data: v }, { data: r }] = await Promise.all([
-    client.get(`/vulns/${vulId}`),
-    client.get(`/vulns/${vulId}/retests`),
+    client.get<Vuln>(`/vulns/${vulId}`),
+    client.get<RetestRecord[]>(`/vulns/${vulId}/retests`),
   ])
   vul.value = v
   recordCount.value = r.length

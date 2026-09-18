@@ -13,6 +13,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处）
 
+# docker 命令前缀（root 直接 docker / 非 root 用 $DOCKER），与备份族脚本统一（审计 S-5）
+# shellcheck source=scripts/docker-cmd.sh
+. "$(dirname "$0")/docker-cmd.sh"
+
 DO_BACKUP=1
 DO_PULL=1
 DO_ANCHOR=0
@@ -47,8 +51,8 @@ echo "========== Talos 升级开始（当前版本 ${OLD_COMMIT}）=========="
 # 默认差异快照（秒级）；--anchor 则生成全量迁移锚点（MAJOR 发版用）。
 BACKUP_PID=""
 if [ "${DO_BACKUP}" -eq 1 ]; then
-  if [ -n "$(sudo docker compose ps -q postgres 2>/dev/null)" ] \
-    && [ -n "$(sudo docker compose ps -q api 2>/dev/null)" ]; then
+  if [ -n "$($DOCKER compose ps -q postgres 2>/dev/null)" ] \
+    && [ -n "$($DOCKER compose ps -q api 2>/dev/null)" ]; then
     sudo mkdir -p backups
     if [ "${DO_ANCHOR}" -eq 1 ]; then
       echo "[1/5] 升级前生成迁移锚点（后台，与镜像重建并行）"
@@ -60,7 +64,7 @@ if [ "${DO_BACKUP}" -eq 1 ]; then
     BACKUP_PID=$!
   else
     echo "[1/5] postgres 或 api 容器未运行，跳过升级前备份（首次部署无需备份）"
-    echo "     如需强制备份，请先执行: sudo docker compose up -d 再重试"
+    echo "     如需强制备份，请先执行: $DOCKER compose up -d 再重试"
   fi
 else
   echo "[1/5] 按参数跳过备份"
@@ -81,13 +85,13 @@ fi
 
 # [3/5] 重建镜像
 echo "[3/5] 重建镜像 docker compose build"
-sudo docker compose build
+$DOCKER compose build
 
 # [3.5/5] 清理过期构建缓存：BuildKit 构建缓存只增不减会撑爆磁盘（见 docs/INCIDENT-20260831-disk-space.md）。
 # 保留最近 7 天（168h）缓存，兼顾构建加速与磁盘占用；清理失败不阻断升级。
 echo "[3.5/5] 清理过期构建缓存（保留最近 7 天）"
-sudo docker builder prune --filter "until=168h" -f \
-  || echo "（构建缓存清理失败，可稍后手动执行：sudo docker builder prune -af）"
+$DOCKER builder prune --filter "until=168h" -f \
+  || echo "（构建缓存清理失败，可稍后手动执行：$DOCKER builder prune -af）"
 
 # [3.6/5] 回收升级前备份 job（fail-open：失败告警但不阻断升级，因有每日差异快照兜底）
 if [ -n "${BACKUP_PID}" ]; then
@@ -106,17 +110,17 @@ sudo bash scripts/migrate.sh
 
 # [4.5/5] 存量复测聚合标题回填（新格式「复测记录yymmdd」；仅重建旧编号标题的漏洞）
 echo "[4.5/5] 复测聚合标题回填"
-sudo docker compose run --rm api python -m scripts.backfill_retest \
-  || echo "（复测标题回填失败，可稍后手动执行：sudo docker compose run --rm api python -m scripts.backfill_retest）"
+$DOCKER compose run --rm api python -m scripts.backfill_retest \
+  || echo "（复测标题回填失败，可稍后手动执行：$DOCKER compose run --rm api python -m scripts.backfill_retest）"
 
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
-sudo docker compose up -d
+$DOCKER compose up -d
 
 echo "========== 升级完成：${OLD_COMMIT} -> ${NEW_COMMIT} =========="
-sudo docker compose ps
+$DOCKER compose ps
 echo "当前数据库迁移版本："
-sudo docker compose exec -T api python -m alembic current 2>/dev/null || echo "（无法读取，可稍后用 docker compose exec api python -m alembic current 查看）"
+$DOCKER compose exec -T api python -m alembic current 2>/dev/null || echo "（无法读取，可稍后用 docker compose exec api python -m alembic current 查看）"
 echo
 echo "如需回滚代码： git checkout ${OLD_COMMIT} && docker compose up -d --build"
 echo "（数据库回滚请用升级前备份 scripts/restore.sh，见 docs/DEPLOY.md）"

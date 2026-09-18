@@ -3,12 +3,9 @@
 # 提供：docker 命令前缀、互斥锁、zstd/gzip 自动选择、SHA256、MANIFEST、webhook 告警、storage 卷路径解析。
 # 注意：本文件只定义函数与变量，不执行顶层逻辑（可安全多次 source）。
 
-# ---- docker 命令前缀（root 直接 docker，否则 sudo docker）----
-if [ "$(id -u)" -eq 0 ]; then
-  DOCKER="docker"
-else
-  DOCKER="sudo docker"
-fi
+# ---- docker 命令前缀（统一实现，见 scripts/docker-cmd.sh）----
+# shellcheck source=scripts/docker-cmd.sh
+. "$(dirname "${BASH_SOURCE[0]}")/docker-cmd.sh"
 
 # ---- 时间与日志 ----
 now_ts() { date +%Y%m%d_%H%M%S; }

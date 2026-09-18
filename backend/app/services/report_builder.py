@@ -7,6 +7,7 @@
 import copy
 import html as _html_mod
 import ipaddress
+import logging
 import re
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +30,8 @@ from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow  # 系统本地时间（UTC+8）；别名避免遮蔽模块内局部变量 now
 from app.services.report_html import RETEST_LABEL_HTML, strip_embedded_retest
+
+logger = logging.getLogger(__name__)
 
 _STORAGE_SRC = re.compile(r'src="/storage/([^"]+)"')
 _IMG_SRC_RE = re.compile(r'<img\b[^>]*\bsrc="([^"]+)"', re.IGNORECASE)
@@ -254,13 +257,13 @@ def _resolve_lexer(code: str, lang: str):
     if lang:
         try:
             return get_lexer_by_name(lang, stripnl=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("代码块语言 %r 无法解析，改为自动猜测: %s", lang, exc)
     if len(code.strip()) > 60:
         try:
             return guess_lexer(code, stripnl=False)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("代码块语言自动猜测失败，退回纯文本: %s", exc)
     return TextLexer(stripnl=False)
 
 

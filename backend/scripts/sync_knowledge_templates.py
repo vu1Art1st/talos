@@ -75,8 +75,16 @@ def _apply(entry, item: dict) -> None:
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="同步漏洞模板库数据（按名称 upsert）")
-    parser.add_argument("--file", default=str(DEFAULT_FILE), help="数据文件路径，默认 backend/knowledge-import-vulnerabilities.json")
-    parser.add_argument("--prune", action="store_true", help="删除数据文件中不存在的存量条目（用于清理改名/合并后的残留）")
+    parser.add_argument(
+        "--file",
+        default=str(DEFAULT_FILE),
+        help="数据文件路径，默认 backend/knowledge-import-vulnerabilities.json",
+    )
+    parser.add_argument(
+        "--prune",
+        action="store_true",
+        help="删除数据文件中不存在的存量条目（用于清理改名/合并后的残留）",
+    )
     parser.add_argument("--dry-run", action="store_true", help="仅打印差异，不写库")
     args = parser.parse_args()
 

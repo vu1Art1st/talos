@@ -2,7 +2,6 @@
 import copy
 
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import (
     NONPEN_ITEM_ACTIONS,

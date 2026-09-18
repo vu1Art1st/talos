@@ -1,9 +1,13 @@
 """专项管理：远程检测 / 测试计划 / 春耕行动。"""
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.core.ticket_id import derive_ticket_id
 from app.core.timeutil import now
 from app.db import Base
 from app.models.business import Asset, Vul
@@ -54,7 +58,8 @@ class RemoteTesting(Base):
     vuln_name: Mapped[str] = mapped_column(String(255), default="")  # 漏洞名称（历史文本快照）
     vuln_type: Mapped[str] = mapped_column(String(64), default="")  # 漏洞类型（历史文本快照）
     vuln_id: Mapped[int | None] = mapped_column(ForeignKey("vulns.id"), nullable=True, index=True)  # 关联漏洞库
-    appeal_status: Mapped[str] = mapped_column(String(16), default="")  # 申诉状态：''未申诉 / success申诉成功 / fail申诉失败
+    # 申诉状态：''未申诉 / success申诉成功 / fail申诉失败
+    appeal_status: Mapped[str] = mapped_column(String(16), default="")
     appeal_method: Mapped[str] = mapped_column(String(64), default="")  # 申诉方式
     appeal_file_name: Mapped[str] = mapped_column(String(255), default="")  # 申诉报告附件原始文件名
     appeal_file_path: Mapped[str] = mapped_column(String(512), default="")  # 附件存储相对路径（storage/ 下）
@@ -135,12 +140,7 @@ class TestingPlan(Base):
     @property
     def ticket_id(self) -> str:
         """工单ID：优先返回手动指定值；否则按需求接收日期自动生成 YYYYMMDD-N。"""
-        if self.ticket_id_manual:
-            return self.ticket_id_manual
-        if not self.receive_time or self.ticket_seq == 0:
-            return ""
-        date_str = self.receive_time.replace("-", "")[:8]
-        return f"{date_str}-{self.ticket_seq}"
+        return derive_ticket_id(self.ticket_id_manual, self.receive_time, self.ticket_seq)
 
 
 class TestingPlanRetestRound(Base):
@@ -202,12 +202,7 @@ class NonpenPlan(Base):
     @property
     def ticket_id(self) -> str:
         """工单ID：优先返回手动指定值；否则按需求接收日期自动生成 YYYYMMDD-N（与测试计划同序列）。"""
-        if self.ticket_id_manual:
-            return self.ticket_id_manual
-        if not self.receive_time or self.ticket_seq == 0:
-            return ""
-        date_str = self.receive_time.replace("-", "")[:8]
-        return f"{date_str}-{self.ticket_seq}"
+        return derive_ticket_id(self.ticket_id_manual, self.receive_time, self.ticket_seq)
 
     @property
     def linked(self) -> bool:

@@ -1,24 +1,14 @@
 // 报告导出任务：重复导出确认、任务提交、文件下载（含目录域提示）、记录删除。
 // 报告列表 / 报告编辑器 / 工单流程抽屉三处共用；各处的任务列表存储结构不同，留在调用方。
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { ElMessageBoxOptions } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import type { ExportJob } from '../types'
 import { saveBlob, saveReportBlob } from '../utils/download'
 
-export interface ExportJob {
-  id: number
-  report_id: number
-  title?: string | null
-  fmt: string
-  status: string
-  version?: number
-  toc_auto_updated?: boolean
-  file_size?: number | null
-  file_name?: string | null
-  create_time?: string
-  finish_time?: string
-  has_file?: boolean
-}
+// 导出记录类型上提到 src/types（审计 E-5）：本文件改为转出，保证「单一来源」
+export type { ExportJob }
 
 export function useExportJobs() {
   /**
@@ -50,8 +40,9 @@ export function useExportJobs() {
         confirmButtonText: '继续导出',
         cancelButtonText: '取消',
         type: 'warning',
+        // Element Plus 运行时支持 width，但该版本的 ElMessageBoxOptions 未声明该字段（故断言）
         width: 460,
-      }).then(() => true).catch(() => false)
+      } as ElMessageBoxOptions).then(() => true).catch(() => false)
     } catch {
       // 检查接口异常时不阻断导出
       return true

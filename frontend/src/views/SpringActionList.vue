@@ -8,7 +8,7 @@
         </el-input>
       </div>
       <template #actions>
-        <el-button type="primary" class="btn-min" @click="openDialog()">
+        <el-button type="primary" class="btn-min" @click="openFormDialog()">
           <el-icon class="mr-1"><Plus /></el-icon>新增春耕行动
         </el-button>
       </template>
@@ -103,7 +103,7 @@
       <el-table-column prop="doc_no" label="公文文号" width="160" show-overflow-tooltip sortable="custom" />
       <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该记录？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -243,9 +243,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, UploadRequestOptions } from 'element-plus'
 import { useRouter } from 'vue-router'
 import client from '../api/client'
+import type { Items, SpringAction, SpringActionForm, Vuln, VulnDraft } from '../types'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useCrudDialog } from '../composables/useCrudDialog'
@@ -256,12 +257,12 @@ import { levelName, levelSoftStyle, levelDotStyle, dotStyle, STAT_CARD_COLORS } 
 
 const router = useRouter()
 const auth = useAuthStore()
-const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage('/spring-actions')
-const vulns = ref<any[]>([])
+const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage<SpringAction>('/spring-actions')
+const vulns = ref<Vuln[]>([])
 
-const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useCrudDialog({
+const { dialogVisible, saving, form, openFormDialog: openCrud, submit: save } = useCrudDialog<SpringActionForm>({
   empty: () => ({
-    id: null as number | null,
+    id: null,
     report_no: '',
     system_name: '',
     year: '',
@@ -271,16 +272,17 @@ const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useC
     est_score_deduction: 0,
     score_deduction: 0,
     doc_no: '',
-    vul_ids: [] as number[],
+    vul_ids: [],
     report_file_name: '',
     report_file_path: '',
     report_file_size: 0,
   }),
   save: async (f) => {
-    const body = { ...f }
-    delete (body as any).vuls
+    // 表单经 openFormDialog 并入了行数据，可能带服务端字段 vuls；提交前剔除
+    const body: SpringActionForm & { new_vuls?: VulnDraft[] } = { ...f }
+    delete body.vuls
     // 勾选的报告漏洞草稿随保存提交，由后端创建并关联
-    ;(body as any).new_vuls = parsedVuls.value.filter((_, i) => importIdx.value.includes(i))
+    body.new_vuls = parsedVuls.value.filter((_, i) => importIdx.value.includes(i))
     if (f.id) {
       await client.put(`/spring-actions/${f.id}`, body)
     } else {
@@ -293,19 +295,20 @@ const { dialogVisible, saving, form, openDialog: openCrud, submit: save } = useC
   afterSave: () => load(),
 })
 
-async function openDialog(row?: any) {
-  openCrud(row ? { ...row, vul_ids: row.vuls?.map((v: any) => v.id) ?? [] } : null)
+async function openFormDialog(row?: SpringAction) {
+  openCrud(row ? { ...row, vul_ids: row.vuls?.map((v) => v.id) ?? [] } : null)
   parsedVuls.value = []
   importIdx.value = []
   if (!vulns.value.length) {
-    const { data } = await client.get('/vulns', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
+    const { data } = await client.get<Items<Vuln>>('/vulns', { params: { size: 100 } })
+      .catch(() => ({ data: { items: [] } }))
     vulns.value = data.items
   }
 }
 
 // ---------- 原始报告上传导入：解析回填系统/年度，漏洞草稿勾选后随保存创建 ----------
 const uploading = ref(false)
-const parsedVuls = ref<any[]>([])
+const parsedVuls = ref<VulnDraft[]>([])
 const importIdx = ref<number[]>([])
 
 const importAll = computed({
@@ -315,12 +318,15 @@ const importAll = computed({
 const importIndeterminate = computed(() =>
   importIdx.value.length > 0 && importIdx.value.length < parsedVuls.value.length)
 
-async function uploadReport(options: any) {
+async function uploadReport(options: UploadRequestOptions) {
   const fd = new FormData()
   fd.append('file', options.file)
   uploading.value = true
   try {
-    const { data } = await client.post('/spring-actions/upload-report', fd)
+    const { data } = await client.post<{
+      name: string; path: string; size: number
+      system_name?: string; report_date?: string; vuls?: VulnDraft[]
+    }>('/spring-actions/upload-report', fd)
     form.value.report_file_name = data.name
     form.value.report_file_path = data.path
     form.value.report_file_size = data.size
@@ -345,8 +351,8 @@ function clearReport() {
   importIdx.value = []
 }
 
-async function downloadReport(row: any) {
-  const { data } = await client.get(`/spring-actions/${row.id}/report`, { responseType: 'blob' })
+async function downloadReport(row: SpringActionForm) {
+  const { data } = await client.get<Blob>(`/spring-actions/${row.id}/report`, { responseType: 'blob' })
   saveBlob(data, row.report_file_name || '原始报告.docx')
 }
 
@@ -375,7 +381,7 @@ async function createVul() {
     // 单独录入且来自春耕行动：来源固定为「春耕行动」（VUL_SOURCE 20）
     const { data } = await client.post('/vulns', { ...quickForm, source: 20 })
     vulns.value = [data, ...vulns.value]
-    form.value.vul_ids = [...form.value.vul_ids, data.id]
+    form.value.vul_ids = [...(form.value.vul_ids ?? []), data.id]
     ElMessage.success('漏洞已新增并关联')
     quickForm.title = ''
     quickAddVisible.value = false
@@ -388,8 +394,11 @@ async function createVul() {
 const layerMap = ref<Record<string, string>>({})
 const layerName = (code: number) => layerMap.value[code] ?? String(code)
 
-function uniqVulValues(row: any, field: 'layer' | 'level'): number[] {
-  return [...new Set((row.vuls ?? []).map((v: any) => v[field]))].sort((a, b) => a - b)
+function uniqVulValues(row: { vuls?: Vuln[] }, field: 'layer' | 'level'): number[] {
+  const values = (row.vuls ?? [])
+    .map((v) => v[field])
+    .filter((n): n is number => typeof n === 'number')
+  return [...new Set(values)].sort((a, b) => a - b)
 }
 
 async function remove(id: number) {

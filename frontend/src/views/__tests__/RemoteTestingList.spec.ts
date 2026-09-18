@@ -3,15 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
-const getMock = vi.fn()
-vi.mock('../../api/client', () => ({
-  default: {
-    get: (...args: unknown[]) => getMock(...args),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
+import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+
+vi.mock('../../api/client', () => clientMockFactory())
 
 // 屏蔽 auth store（其导入链会拉起 router/pinia）：仅需 fetchMeta 返回可用字典结构
 vi.mock('../../stores/auth', () => ({

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import Text, case, cast, delete as sa_delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.query import apply_sort, get_or_404, paginate, parse_int_list
+from app.core.query import apply_sort, delete_by_id_if_exists, get_or_404, paginate, parse_int_list
 from app.constants import VUL_LEVEL
 from app.core.deps import get_current_user, require_perm
 from app.db import get_session
@@ -129,6 +129,82 @@ async def list_entries(
     ).scalars().all()
 
 
+def _apply_search_filters(
+    stmt,
+    *,
+    vul_type: str,
+    severity_level: str,
+    creator: str,
+    updated_from: date | None,
+    updated_to: date | None,
+):
+    """关键词之外的筛选条件（类型 / 等级 / 创建人 / 更新时间区间）。"""
+    if types := parse_int_list(vul_type):
+        stmt = stmt.where(KnowledgeEntry.vul_type.in_(types))
+    if levels := parse_int_list(severity_level):
+        stmt = stmt.where(KnowledgeEntry.severity_level.in_(levels))
+    if creator.strip():
+        stmt = stmt.where(_ilike(KnowledgeEntry.username, creator.strip()))
+    if updated_from:
+        stmt = stmt.where(
+            KnowledgeEntry.update_time >= datetime.combine(updated_from, time.min)
+        )
+    if updated_to:
+        # 区间含当日：用「次日零点」开区间，避免当天 00:00 之后的数据被漏掉
+        stmt = stmt.where(
+            KnowledgeEntry.update_time
+            < datetime.combine(updated_to + timedelta(days=1), time.min)
+        )
+    return stmt
+
+
+def _keyword_match(kw: str, deep: bool):
+    """关键词的匹配条件与相关度打分表达式；kw 为空时返回 (None, None)。
+
+    参考链接为 JSON 列，统一 CAST 成文本参与匹配（SQLite 存 TEXT、PG 为 json 均可转）。
+    """
+    refs = cast(KnowledgeEntry.references, Text)
+    if not kw:
+        return None, None
+    conds = [_ilike(KnowledgeEntry.vulnerability_name, kw), _ilike(refs, kw)]
+    if deep:
+        conds += [
+            _ilike(KnowledgeEntry.description_html, kw),
+            _ilike(KnowledgeEntry.harm_html, kw),
+            _ilike(KnowledgeEntry.solution_html, kw),
+        ]
+    name = KnowledgeEntry.vulnerability_name
+    score = case(
+        (func.lower(name) == kw.lower(), 100),
+        (name.ilike(f"{_esc(kw)}%", escape="\\"), 80),
+        (name.ilike(_like(kw), escape="\\"), 60),
+        (refs.ilike(_like(kw), escape="\\"), 40),
+        else_=20,
+    )
+    return or_(*conds), score
+
+
+def _apply_search_order(stmt, sort: str, order: str, score):
+    """排序：`relevance`（默认）走相关度打分，其余走白名单字段；非法 sort 回退默认排序。"""
+    if sort == "relevance" and score is not None:
+        return stmt.order_by(
+            score.desc(), KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc()
+        )
+    default_order = (
+        (score.desc(), KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc())
+        if score is not None
+        else (KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc())
+    )
+    return apply_sort(
+        stmt,
+        KnowledgeEntry,
+        _SEARCH_SORT_FIELDS.get(sort, ""),
+        order,
+        set(_SEARCH_SORT_FIELDS.values()),
+        default_order,
+    )
+
+
 @router.get("/search", response_model=KnowledgeSearchOut)
 async def search_entries(
     q: str = Query("", max_length=64),
@@ -154,63 +230,18 @@ async def search_entries(
     - 返回轻量条目（含所属漏洞类型名与摘要），完整正文由 `GET /knowledge/{id}` 按需获取。
     """
     kw = q.strip()
-    stmt = select(KnowledgeEntry)
-    if types := parse_int_list(vul_type):
-        stmt = stmt.where(KnowledgeEntry.vul_type.in_(types))
-    if levels := parse_int_list(severity_level):
-        stmt = stmt.where(KnowledgeEntry.severity_level.in_(levels))
-    if creator.strip():
-        stmt = stmt.where(_ilike(KnowledgeEntry.username, creator.strip()))
-    if updated_from:
-        stmt = stmt.where(
-            KnowledgeEntry.update_time >= datetime.combine(updated_from, time.min)
-        )
-    if updated_to:
-        # 区间含当日：用「次日零点」开区间，避免当天 00:00 之后的数据被漏掉
-        stmt = stmt.where(
-            KnowledgeEntry.update_time
-            < datetime.combine(updated_to + timedelta(days=1), time.min)
-        )
-
-    # 参考链接为 JSON 列，统一 CAST 成文本参与匹配（SQLite 存 TEXT、PG 为 json 均可转）
-    refs = cast(KnowledgeEntry.references, Text)
-    score = None
-    if kw:
-        conds = [_ilike(KnowledgeEntry.vulnerability_name, kw), _ilike(refs, kw)]
-        if deep:
-            conds += [
-                _ilike(KnowledgeEntry.description_html, kw),
-                _ilike(KnowledgeEntry.harm_html, kw),
-                _ilike(KnowledgeEntry.solution_html, kw),
-            ]
-        stmt = stmt.where(or_(*conds))
-        name = KnowledgeEntry.vulnerability_name
-        score = case(
-            (func.lower(name) == kw.lower(), 100),
-            (name.ilike(f"{_esc(kw)}%", escape="\\"), 80),
-            (name.ilike(_like(kw), escape="\\"), 60),
-            (refs.ilike(_like(kw), escape="\\"), 40),
-            else_=20,
-        )
-
-    if sort == "relevance" and score is not None:
-        stmt = stmt.order_by(
-            score.desc(), KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc()
-        )
-    else:
-        default_order = (
-            (score.desc(), KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc())
-            if score is not None
-            else (KnowledgeEntry.update_time.desc(), KnowledgeEntry.id.desc())
-        )
-        stmt = apply_sort(
-            stmt,
-            KnowledgeEntry,
-            _SEARCH_SORT_FIELDS.get(sort, ""),
-            order,
-            set(_SEARCH_SORT_FIELDS.values()),
-            default_order,
-        )
+    stmt = _apply_search_filters(
+        select(KnowledgeEntry),
+        vul_type=vul_type,
+        severity_level=severity_level,
+        creator=creator,
+        updated_from=updated_from,
+        updated_to=updated_to,
+    )
+    where_cond, score = _keyword_match(kw, deep)
+    if where_cond is not None:
+        stmt = stmt.where(where_cond)
+    stmt = _apply_search_order(stmt, sort, order, score)
 
     total, rows = await paginate(session, stmt, page, size)
     type_names = await _type_names(session, {r.vul_type for r in rows})
@@ -394,8 +425,6 @@ async def delete_entry(
     _: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    entry = await session.get(KnowledgeEntry, entry_id)
-    if entry:
-        await session.delete(entry)
-        await session.commit()
+    await delete_by_id_if_exists(session, KnowledgeEntry, entry_id)
+    await session.commit()
     return {"msg": "删除成功"}

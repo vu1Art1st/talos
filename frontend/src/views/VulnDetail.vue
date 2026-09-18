@@ -10,15 +10,15 @@
               <span class="tl-tag" :style="levelSoftStyle(vul.level)">
                 {{ meta?.vul_level?.[vul.level] }}
               </span>
-              <span class="tl-tag" :style="vulTypeSoftStyle(vul.vul_type)">{{ meta?.vul_type?.[vul.vul_type] }}</span>
-              <span class="tl-tag" :style="statusSoftStyleEx(vul.status, vul.is_retest)">
+              <span class="tl-tag" :style="vulTypeSoftStyle(vul.vul_type)">{{ meta?.vul_type?.[vul.vul_type ?? 0] ?? vul.vul_type }}</span>
+              <span class="tl-tag" :style="statusSoftStyleWithRetest(vul.status, vul.is_retest)">
                 {{ statusLabel(vul.status, vul.is_retest, meta?.vul_status) }}
               </span>
-              <span v-if="vul.score" class="tl-tag" :style="levelSoftStyle(vul.level)" :title="vul.cvss_vector">
+              <span v-if="vul.score" class="tl-tag" :style="levelSoftStyle(vul.level)" :title="vul.cvss_vector ?? ''">
                 CVSS {{ vul.score.toFixed(1) }}
               </span>
               <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">
-                来源：{{ vul.testing_plan_id ? '渗透测试工单' : (meta?.vul_source?.[vul.source] ?? '-') }}
+                来源：{{ vul.testing_plan_id ? '渗透测试工单' : (meta?.vul_source?.[vul.source ?? 0] ?? '-') }}
               </span>
             </div>
           </div>
@@ -42,7 +42,7 @@
             <span v-else>-</span>
           </el-descriptions-item>
           <el-descriptions-item label="关联资产">
-            {{ (vul.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
+            {{ (vul.assets ?? []).map((a) => a.name).join('、') || '-' }}
           </el-descriptions-item>
           <el-descriptions-item label="渗透测试工单">
             <el-link v-if="vul.testing_plan_id" type="primary"
@@ -98,18 +98,19 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleEx, vulTypeSoftStyle } from '../utils/colors'
+import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleWithRetest, vulTypeSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
+import type { TestingPlan, UserBrief, Vuln, VulnLog, VulnTransition } from '../types'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const vul = ref<any>(null)
-const logs = ref<any[]>([])
-const transitions = ref<any[]>([])
+const vul = ref<Vuln | null>(null)
+const logs = ref<VulnLog[]>([])
+const transitions = ref<VulnTransition[]>([])
 const comment = ref('')
-const meta = ref<any>(null)
+const meta = ref<Record<string, Record<number, string>> | null>(null)
 
 // 影响URL 多值（后端换行分隔存储）逐行展示
 const affectedUrls = computed<string[]>(() =>
@@ -122,12 +123,12 @@ function transitionLabel(t: { status: number; name: string }) {
 }
 
 // 编辑权限：已关联测试计划的漏洞仅已认领该计划的账号可编辑；未关联计划由提交人或漏洞管理员编辑
-const planTesters = ref<any[]>([])
+const planTesters = ref<UserBrief[]>([])
 const canEdit = computed(() => {
   const v = vul.value
   if (!v) return false
   if (v.testing_plan_id) {
-    return planTesters.value.some((u: any) => u.id === auth.user?.id)
+    return planTesters.value.some((u) => u.id === auth.user?.id)
   }
   const me = auth.user
   return auth.hasPerm('vuln:manage') || v.submitter_id === me?.id
@@ -145,9 +146,9 @@ const richSections = computed(() =>
 async function load() {
   const id = route.params.id
   const [v, l, t] = await Promise.all([
-    client.get(`/vulns/${id}`),
-    client.get(`/vulns/${id}/logs`),
-    client.get(`/vulns/${id}/transitions`),
+    client.get<Vuln>(`/vulns/${id}`),
+    client.get<VulnLog[]>(`/vulns/${id}/logs`),
+    client.get<VulnTransition[]>(`/vulns/${id}/transitions`),
   ])
   vul.value = v.data
   logs.value = l.data
@@ -155,7 +156,7 @@ async function load() {
   // 已关联计划时加载计划认领者，用于判定编辑权限
   if (vul.value?.testing_plan_id) {
     try {
-      const planResp = await client.get(`/testing-plans/${vul.value.testing_plan_id}`)
+      const planResp = await client.get<TestingPlan>(`/testing-plans/${vul.value.testing_plan_id}`)
       planTesters.value = planResp.data?.testers ?? []
     } catch {
       // 计划不存在/无权限时降级为空认领者，不阻断详情加载（错误提示由拦截器统一处理）
@@ -175,13 +176,15 @@ async function doTransition(status: number) {
 
 // 将当前漏洞的描述/修复建议沉淀为该类型的知识库模板（存在则覆盖）
 async function saveAsTemplate() {
-  const typeName = meta.value?.vul_type?.[vul.value.vul_type] ?? vul.value.vul_type
+  const v = vul.value
+  if (!v) return
+  const vulTypeName = meta.value?.vul_type?.[v.vul_type ?? 0] ?? v.vul_type
   try {
-    await ElMessageBox.confirm(`将覆盖类型「${typeName}」已有的知识库模板，是否继续？`, '存为模板', { type: 'warning' })
+    await ElMessageBox.confirm(`将覆盖类型「${vulTypeName}」已有的知识库模板，是否继续？`, '存为模板', { type: 'warning' })
   } catch {
     return
   }
-  await client.post(`/knowledge/from-vul/${vul.value.id}`)
+  await client.post(`/knowledge/from-vul/${v.id}`)
   ElMessage.success('已存入漏洞模板库')
 }
 

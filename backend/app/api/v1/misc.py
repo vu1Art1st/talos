@@ -59,36 +59,26 @@ def _is_allowed_image(data: bytes) -> bool:
     )
 
 
-@router.get("/meta")
-async def meta(
-    _: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-):
-    """业务字典，前端下拉框与状态标签统一从此获取（名称 + 颜色 + nonpen 命名空间均在此单源下发）。
-
-    漏洞类型从数据库读取，支持动态新增；colors 命名空间为各字典的展示色值，
-    动态新增的漏洞类型（code≥1000）无内置色值，由前端兜底灰色。
-    """
+async def _name_dicts(session: AsyncSession) -> dict:
+    """名称类字典（含 DB 来源的漏洞类型与系统类型，支持运行时动态新增）。"""
     vuln_types = (
         await session.execute(select(VulnType).order_by(VulnType.sort, VulnType.id))
     ).scalars().all()
-    vul_type_dict = {vt.code: vt.name for vt in vuln_types}
     system_types = (
         await session.execute(
             select(DictOption).where(DictOption.category == "system_type")
             .order_by(DictOption.sort, DictOption.id)
         )
     ).scalars().all()
-    system_type_list = [st.name for st in system_types]
     return {
-        "vul_type": vul_type_dict,
+        "vul_type": {vt.code: vt.name for vt in vuln_types},
         "vul_level": VUL_LEVEL,
         "vul_status": VUL_STATUS,
         "vul_source": VUL_SOURCE,
         "vul_layer": VUL_LAYER,
         "asset_sec_level": ASSET_SEC_LEVEL,
         "asset_status": ASSET_STATUS,
-        "system_type": system_type_list,
+        "system_type": [st.name for st in system_types],
         "url_tag": URL_TAG,
         "testing_plan_status": TESTING_PLAN_STATUS,
         "report_status": REPORT_STATUS_NAME,
@@ -100,30 +90,53 @@ async def meta(
         "audit_actions": AUDIT_ACTIONS,
         "notify_channel_types": NOTIFY_CHANNEL_TYPES,
         "notify_events": NOTIFY_EVENTS,
-        # 各字典的展示色值（key 与上方名称字典一一对应）
-        "colors": {
-            "vul_level": VUL_LEVEL_COLOR,
-            "vul_status": VUL_STATUS_COLOR,
-            "vul_type": VUL_TYPE_COLOR,
-            "testing_plan_status": TESTING_PLAN_STATUS_COLOR,
-            "report_status": REPORT_STATUS_COLOR,
-            "asset_status": ASSET_STATUS_COLOR,
-            "url_tag": URL_TAG_COLOR,
-            "nonpen_item": NONPEN_ITEM_COLORS,
-            "import_batch_status": IMPORT_BATCH_STATUS_COLOR,
-            "import_record_status": IMPORT_RECORD_STATUS_COLOR,
-            "export_job_status": EXPORT_JOB_STATUS_COLOR,
-        },
-        # 漏扫基线工单：测试项 / 状态 / 允许操作（有序，即按钮渲染顺序）与操作文案
-        "nonpen": {
-            "items": [
-                {"key": key, "name": name, "desc": desc}
-                for key, (name, desc) in NONPEN_ITEMS.items()
-            ],
-            "status": NONPEN_ITEM_STATUS,
-            "actions": {status: list(actions) for status, actions in NONPEN_ITEM_ACTIONS.items()},
-            "action_names": NONPEN_ITEM_ACTION_NAMES,
-        },
+    }
+
+
+def _color_dicts() -> dict:
+    """各字典的展示色值（key 与名称字典一一对应）。"""
+    return {
+        "vul_level": VUL_LEVEL_COLOR,
+        "vul_status": VUL_STATUS_COLOR,
+        "vul_type": VUL_TYPE_COLOR,
+        "testing_plan_status": TESTING_PLAN_STATUS_COLOR,
+        "report_status": REPORT_STATUS_COLOR,
+        "asset_status": ASSET_STATUS_COLOR,
+        "url_tag": URL_TAG_COLOR,
+        "nonpen_item": NONPEN_ITEM_COLORS,
+        "import_batch_status": IMPORT_BATCH_STATUS_COLOR,
+        "import_record_status": IMPORT_RECORD_STATUS_COLOR,
+        "export_job_status": EXPORT_JOB_STATUS_COLOR,
+    }
+
+
+def _nonpen_dict() -> dict:
+    """漏扫基线工单：测试项 / 状态 / 允许操作（有序，即按钮渲染顺序）与操作文案。"""
+    return {
+        "items": [
+            {"key": key, "name": name, "desc": desc}
+            for key, (name, desc) in NONPEN_ITEMS.items()
+        ],
+        "status": NONPEN_ITEM_STATUS,
+        "actions": {status: list(actions) for status, actions in NONPEN_ITEM_ACTIONS.items()},
+        "action_names": NONPEN_ITEM_ACTION_NAMES,
+    }
+
+
+@router.get("/meta")
+async def meta(
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """业务字典，前端下拉框与状态标签统一从此获取（名称 + 颜色 + nonpen 命名空间均在此单源下发）。
+
+    漏洞类型从数据库读取，支持动态新增；colors 命名空间为各字典的展示色值，
+    动态新增的漏洞类型（code≥1000）无内置色值，由前端兜底灰色。
+    """
+    return {
+        **await _name_dicts(session),
+        "colors": _color_dicts(),
+        "nonpen": _nonpen_dict(),
     }
 
 

@@ -26,6 +26,9 @@ async def _migrate_lightweight() -> None:
     async with engine.begin() as conn:
         if engine.dialect.name != "sqlite":
             return
+        # 无需处理 vulns.affected_url / import_records.affected_url 的长度：SQLite 的 VARCHAR
+        # 只是类型亲和、不强制长度（且不支持 ALTER COLUMN TYPE），长度约束仅 PostgreSQL 存在，
+        # 由 Alembic d9e0f1a2b3c4 把两列统一改为 TEXT。两轨的守卫见 tests/test_schema_consistency.py。
         vul_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(vulns)"))).fetchall()}
         legacy_plan_status = "testing_plan_id" not in vul_cols  # 本轮升级前的旧库标记
         user_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(users)"))).fetchall()}
@@ -99,7 +102,9 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text("ALTER TABLE spring_actions ADD COLUMN phase VARCHAR(64) NOT NULL DEFAULT ''"))
         batch_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(import_batches)"))).fetchall()}
         if batch_cols and "doc_kind" not in batch_cols:
-            await conn.execute(text("ALTER TABLE import_batches ADD COLUMN doc_kind VARCHAR(16) NOT NULL DEFAULT 'template'"))
+            await conn.execute(text(
+                "ALTER TABLE import_batches ADD COLUMN doc_kind VARCHAR(16) NOT NULL DEFAULT 'template'"
+            ))
         if batch_cols and "meta_json" not in batch_cols:
             await conn.execute(text("ALTER TABLE import_batches ADD COLUMN meta_json JSON"))
         record_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(import_records)"))).fetchall()}
@@ -126,7 +131,12 @@ async def _migrate_lightweight() -> None:
             ))
         # 组织新增系统负责人三字段
         group_cols = {r[1] for r in (await conn.execute(text("PRAGMA table_info(groups)"))).fetchall()}
-        for col, ddl in (("owner_name", "VARCHAR(64)"), ("owner_phone", "VARCHAR(32)"), ("owner_email", "VARCHAR(128)")):
+        owner_columns = (
+            ("owner_name", "VARCHAR(64)"),
+            ("owner_phone", "VARCHAR(32)"),
+            ("owner_email", "VARCHAR(128)"),
+        )
+        for col, ddl in owner_columns:
             if group_cols and col not in group_cols:
                 await conn.execute(text(f"ALTER TABLE groups ADD COLUMN {col} {ddl} NOT NULL DEFAULT ''"))
         # 资产技术信息结构化：端口与服务成对、中间件/数据库多条目带版本

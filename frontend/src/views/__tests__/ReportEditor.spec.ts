@@ -4,6 +4,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 
+import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+
 // mock 路由：报告 ID 来自路由参数。组件经 useAuthStore → stores/auth.ts → router/index.ts
 // 间接依赖 createRouter/createWebHistory，故用 importOriginal 保留真实导出、仅覆盖 hook。
 vi.mock('vue-router', async (importOriginal) => {
@@ -26,15 +28,7 @@ vi.mock('../../composables/useExportJobs', () => ({
 }))
 
 // mock axios client：报告详情返回最小可渲染结构，其余接口返回空数据
-const getMock = vi.fn()
-vi.mock('../../api/client', () => ({
-  default: {
-    get: (...args: unknown[]) => getMock(...args),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
+vi.mock('../../api/client', () => clientMockFactory())
 
 import ReportEditor from '../ReportEditor.vue'
 

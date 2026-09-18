@@ -15,8 +15,6 @@
   换算，不做处理，请人工核对；
 - 全新空库 / 新部署无需执行本脚本。
 """
-import asyncio
-import sys
 from datetime import datetime
 
 import app.models  # noqa: F401  确保全部模型注册，Base.metadata 完整
@@ -24,6 +22,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.db import Base
+from scripts._common import dry_run_flag, run
 
 
 async def migrate(dry_run: bool = False) -> int:
@@ -72,10 +71,6 @@ async def migrate(dry_run: bool = False) -> int:
     return affected
 
 
-def main() -> None:
-    dry_run = "--dry-run" in sys.argv[1:]
-    asyncio.run(migrate(dry_run=dry_run))
-
-
 if __name__ == "__main__":
-    main()
+    # 统一入口：静默 SQLAlchemy 回显 + `--dry-run` 解析（审计 M-2）
+    run(migrate, dry_run=dry_run_flag())

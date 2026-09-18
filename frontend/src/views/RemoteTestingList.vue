@@ -8,7 +8,7 @@
         </el-input>
       </div>
       <template #actions>
-        <el-button type="primary" class="btn-min" @click="openDialog()">
+        <el-button type="primary" class="btn-min" @click="openFormDialog()">
           <el-icon class="mr-1"><Plus /></el-icon>新增远程检测
         </el-button>
       </template>
@@ -69,7 +69,7 @@
       <el-table-column prop="appeal_method" label="申诉方式" width="130" show-overflow-tooltip />
       <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该记录？" @confirm="remove(row)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -150,7 +150,7 @@
                        @click="openVulnDetail(linkedVuln.id)">{{ linkedVuln.title }}</el-button>
             <span v-else class="text-sm">{{ linkedVuln.title }}</span>
             <span class="tl-tag" :style="vulTypeSoftStyle(linkedVuln.vul_type)">
-              {{ meta?.vul_type?.[linkedVuln.vul_type] ?? linkedVuln.vul_type }}
+              {{ meta?.vul_type?.[linkedVuln.vul_type ?? 0] ?? linkedVuln.vul_type }}
             </span>
             <div class="flex-1" />
             <el-button size="small" type="danger" link @click="clearLinkedVuln">移除</el-button>
@@ -228,7 +228,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { FormInstance, FormRules, UploadRequestOptions } from 'element-plus'
 import { Document, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -241,23 +241,24 @@ import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
 import { dotStyle, levelName, levelSoftStyle, STAT_CARD_COLORS, vulTypeSoftStyle } from '../utils/colors'
+import type { Asset, RemoteTesting, RemoteTestingForm, Vuln, VulnDraft } from '../types'
 
 const auth = useAuthStore()
-const meta = ref<any>(null)
-const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage('/remote-testings')
+const meta = ref<Record<string, Record<number, string>> | null>(null)
+const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage<RemoteTesting>('/remote-testings')
 
-const emptyForm = () => ({
-  id: null as number | null,
+const emptyForm = (): RemoteTestingForm => ({
+  id: null,
   system_name: '',
   notice_time: '',
   department: '',
   asset_belong: '',
-  asset_id: null as number | null,
+  asset_id: null,
   notified_unit: '',
   is_external: false,
   vuln_name: '',
   vuln_type: '',
-  vuln_id: null as number | null,
+  vuln_id: null,
   appeal_status: '',
   appeal_method: '',
   appeal_file_name: '',
@@ -269,14 +270,14 @@ const formRules: FormRules = {
   system_name: [{ required: true, whitespace: true, message: '请填写系统名称', trigger: 'blur' }],
 }
 
-// 表单内当前关联漏洞（编辑回显或本次新增草稿预览）与待创建草稿
-const linkedVuln = ref<any>(null)
-const pendingVul = ref<any>(null)
+// 表单内当前关联漏洞（编辑回显为完整漏洞，或本次新增草稿）与待创建草稿
+const linkedVuln = ref<Vuln | VulnDraft | null>(null)
+const pendingVul = ref<VulnDraft | null>(null)
 
-const { dialogVisible, saving, form, openDialog: openCrud, submit: saveForm } = useCrudDialog({
+const { dialogVisible, saving, form, openFormDialog: openCrud, submit: saveForm } = useCrudDialog({
   empty: emptyForm,
   save: async (f) => {
-    const body: any = { ...f, new_vul: pendingVul.value }
+    const body = { ...f, new_vul: pendingVul.value }
     if (f.id) {
       await client.put(`/remote-testings/${f.id}`, body)
     } else {
@@ -286,7 +287,7 @@ const { dialogVisible, saving, form, openDialog: openCrud, submit: saveForm } = 
   afterSave: () => load(),
 })
 
-function openDialog(row?: any) {
+function openFormDialog(row?: RemoteTesting) {
   openCrud(row ?? null)
   linkedVuln.value = row?.vuln ?? null
   pendingVul.value = null
@@ -327,7 +328,7 @@ function onAssetChange(id: number | null) {
   if (asset.department) form.value.department = asset.department
 }
 
-function onAssetSaved(asset: any) {
+function onAssetSaved(asset: Asset) {
   cacheAsset(asset)
   form.value.asset_id = asset.id
   onAssetChange(asset.id)
@@ -387,10 +388,12 @@ const appealStatusColor = (s: string) =>
   s === 'success' ? STAT_CARD_COLORS.green
     : s === 'fail' ? STAT_CARD_COLORS.red : STAT_CARD_COLORS.gray
 
-async function uploadAppeal(options: any) {
+async function uploadAppeal(options: UploadRequestOptions) {
   const fd = new FormData()
   fd.append('file', options.file)
-  const { data } = await client.post('/remote-testings/upload-appeal', fd)
+  const { data } = await client.post<{ name: string; path: string; size: number }>(
+    '/remote-testings/upload-appeal', fd,
+  )
   form.value.appeal_file_name = data.name
   form.value.appeal_file_path = data.path
   form.value.appeal_file_size = data.size
@@ -403,12 +406,12 @@ function clearAppeal() {
   form.value.appeal_file_size = 0
 }
 
-async function downloadAppeal(row: any) {
-  const { data } = await client.get(`/remote-testings/${row.id}/appeal`, { responseType: 'blob' })
+async function downloadAppeal(row: RemoteTestingForm) {
+  const { data } = await client.get<Blob>(`/remote-testings/${row.id}/appeal`, { responseType: 'blob' })
   saveBlob(data, row.appeal_file_name || 'appeal')
 }
 
-async function remove(row: any) {
+async function remove(row: RemoteTesting) {
   await client.delete(`/remote-testings/${row.id}`)
   await load()
 }

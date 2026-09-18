@@ -101,6 +101,7 @@ import { useAuthStore } from '../stores/auth'
 import { levelName, levelSoftStyle } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { highlight } from '../utils/highlight'
+import type { KnowledgeTemplate } from '../types'
 
 // 跨模板搜索弹窗：不预选漏洞类型即可按名称/编号/关键字检索全部模板，
 // 选中后按 ID 取完整正文并 emit select，由宿主决定回填（本组件不关闭自身，便于覆盖确认取消后继续挑选）。
@@ -111,7 +112,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', v: boolean): void
-  (e: 'select', entry: any): void
+  (e: 'select', entry: KnowledgeTemplate): void
 }>()
 
 const auth = useAuthStore()
@@ -258,7 +259,7 @@ function resetFilters() {
 
 async function onOpen() {
   clearTimeout(timer)
-  const meta: any = await auth.fetchMeta()
+  const meta: Record<string, Record<number, string>> | null = await auth.fetchMeta()
   typeOptions.value = meta?.vul_type ?? {}
   levelOptions.value = meta?.vul_level ?? {}
   suppress = true

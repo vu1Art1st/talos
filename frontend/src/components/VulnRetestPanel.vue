@@ -44,7 +44,7 @@
       </template>
       <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复</div>
       <RichEditor v-model="rec.content_html"
-                  @update:json="(j: any) => (rec.content_json = j)" />
+                  @update:json="(j: unknown) => (rec.content_json = j)" />
     </el-card>
 
     <div class="flex items-center gap-2">
@@ -63,7 +63,7 @@
         </div>
         <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复详情</div>
         <RichEditor v-model="addForm.content_html"
-                    @update:json="(j: any) => (addForm.content_json = j)" />
+                    @update:json="(j: unknown) => (addForm.content_json = j)" />
         <el-form-item prop="status" class="mt-3">
           <div class="w-full">
             <div class="text-sm font-medium text-gray-600 mb-2">复测结论</div>
@@ -95,13 +95,14 @@ import client from '../api/client'
 import RichEditor from './RichEditor.vue'
 import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
+import type { RetestRecord, Vuln } from '../types'
 
 // 复测记录增删改面板：供独立复测页（VulnRetest）与测试计划流程抽屉复用。
 // 新增复测记录时可一并选择复测结论（复测未修复/已修复），保存时同步调整漏洞状态。
 const props = defineProps<{ vulId: number }>()
 const emit = defineEmits<{ (e: 'changed', count: number): void }>()
 
-const records = ref<any[]>([])
+const records = ref<RetestRecord[]>([])
 const adding = ref(false)
 const savingId = ref<number | null>(null)
 const addVisible = ref(false)
@@ -110,7 +111,7 @@ const fallbackHtml = ref('')
 // 标题行内编辑状态：正在编辑的记录 id 与草稿值
 const editingTitleId = ref<number | null>(null)
 const titleDraft = ref('')
-const addForm = reactive<{ title: string; content_html: string; content_json: any; status: number | null }>({
+const addForm = reactive<{ title: string; content_html: string; content_json: unknown; status: number | null }>({
   title: '',
   content_html: '',
   content_json: null,
@@ -133,8 +134,9 @@ const addRules: FormRules = {
 // 标题优先取自定义 title；为空按创建日期生成：复测记录yymmdd，同日多条依次追加 -1、-2 后缀
 const titles = computed(() => {
   const dayCount: Record<string, number> = {}
-  return records.value.map((r: any) => {
-    if ((r.title || '').trim()) return r.title.trim()
+  return records.value.map((r) => {
+    const custom = (r.title || '').trim()
+    if (custom) return custom
     const key = r.create_time ? dayjs(r.create_time).format('YYMMDD') : ''
     const n = dayCount[key] ?? 0
     dayCount[key] = n + 1
@@ -143,12 +145,12 @@ const titles = computed(() => {
 })
 
 async function load() {
-  const { data } = await client.get(`/vulns/${props.vulId}/retests`)
+  const { data } = await client.get<RetestRecord[]>(`/vulns/${props.vulId}/retests`)
   records.value = data
   // 记录为空时回退读取漏洞 retest_html，保证报告「复测处理」填写的复测内容可见
   if (!data.length) {
     try {
-      const vul = await client.get(`/vulns/${props.vulId}`)
+      const vul = await client.get<Vuln>(`/vulns/${props.vulId}`)
       fallbackHtml.value = vul.data?.retest_html || ''
     } catch {
       fallbackHtml.value = ''
@@ -163,11 +165,11 @@ watch(() => props.vulId, load, { immediate: true })
 
 // 新增复测记录：填写复测详情并可选择复测结论，一并调整漏洞状态
 async function submitAdd() {
-  const valid = await addFormRef.value.validate().catch(() => false)
+  const valid = await addFormRef.value?.validate().catch(() => false)
   if (!valid) return
   adding.value = true
   try {
-    const { data } = await client.post(`/vulns/${props.vulId}/retests`, {
+    const { data } = await client.post<RetestRecord>(`/vulns/${props.vulId}/retests`, {
       title: addForm.title.trim() || null,
       content_html: addForm.content_html || '',
       content_json: addForm.content_json ?? null,
@@ -187,7 +189,7 @@ async function submitAdd() {
 }
 
 // ---------- 标题行内编辑 ----------
-function startEditTitle(rec: any) {
+function startEditTitle(rec: RetestRecord) {
   editingTitleId.value = rec.id
   titleDraft.value = rec.title || ''
 }
@@ -195,7 +197,7 @@ function cancelEditTitle() {
   editingTitleId.value = null
   titleDraft.value = ''
 }
-async function confirmEditTitle(rec: any) {
+async function confirmEditTitle(rec: RetestRecord) {
   if (editingTitleId.value !== rec.id) return
   editingTitleId.value = null
   // 标题有改动时才提交；回车保存标题，随后可继续编辑内容
@@ -220,7 +222,7 @@ async function confirmEditTitle(rec: any) {
   }
 }
 
-async function saveRecord(rec: any) {
+async function saveRecord(rec: RetestRecord) {
   savingId.value = rec.id
   try {
     const { data } = await client.put(`/vulns/${props.vulId}/retests/${rec.id}`, {
@@ -236,7 +238,7 @@ async function saveRecord(rec: any) {
   }
 }
 
-async function removeRecord(rec: any) {
+async function removeRecord(rec: RetestRecord) {
   await client.delete(`/vulns/${props.vulId}/retests/${rec.id}`)
   records.value = records.value.filter((r) => r.id !== rec.id)
   ElMessage.success('复测记录已删除')

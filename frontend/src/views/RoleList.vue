@@ -70,7 +70,7 @@
               <div class="flex items-center justify-between mb-1">
                 <span class="text-sm font-semibold" style="color: var(--tl-text-2)">{{ g.group }}</span>
                 <el-checkbox :model-value="groupChecked(g)" :indeterminate="groupIndeterminate(g)"
-                             @change="(val: any) => toggleGroup(g, val)">全选本组</el-checkbox>
+                             @change="(val: string | number | boolean) => toggleGroup(g, val)">全选本组</el-checkbox>
               </div>
               <el-checkbox-group v-model="roleForm.permissions" class="flex flex-wrap gap-x-4 gap-y-1">
                 <el-checkbox v-for="it in g.items" :key="it.key" :value="it.key">
@@ -101,17 +101,18 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
+import type { Role, RoleForm } from '../types'
 
 interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }
 
-const roles = ref<any[]>([])
+const roles = ref<Role[]>([])
 const loading = ref(false)
 const catalog = ref<PermGroup[]>([])
 const catalogLoading = ref(false)
 const roleDialog = ref(false)
 const roleSaving = ref(false)
-const roleForm = reactive<any>({ id: null, name: '', permissions: [] as string[], remark: '' })
+const roleForm = reactive<RoleForm>({ id: null, name: '', permissions: [], remark: '' })
 const roleFormRef = ref<FormInstance>()
 const roleRules: FormRules = {
   name: [{ required: true, whitespace: true, message: '请填写角色名称', trigger: 'blur' }],
@@ -127,7 +128,7 @@ const labelMap = computed(() => {
 async function loadRoles() {
   loading.value = true
   try {
-    const { data } = await client.get('/roles')
+    const { data } = await client.get<Role[]>('/roles')
     roles.value = data
   } finally {
     loading.value = false
@@ -158,12 +159,13 @@ function groupIndeterminate(g: PermGroup) {
   return keys.some((k) => roleForm.permissions.includes(k)) && !groupChecked(g)
 }
 
-function toggleGroup(g: PermGroup, checked: boolean) {
+// checked 声明为 el-checkbox 的 change 载荷联合类型（本处未设 true-label/false-label，运行时恒为 boolean）
+function toggleGroup(g: PermGroup, checked: string | number | boolean) {
   const keys = g.items.map((it) => it.key)
   if (checked) {
     roleForm.permissions = Array.from(new Set([...roleForm.permissions, ...keys]))
   } else {
-    roleForm.permissions = roleForm.permissions.filter((k) => !keys.includes(k))
+    roleForm.permissions = roleForm.permissions.filter((k: string) => !keys.includes(k))
   }
 }
 
@@ -175,7 +177,7 @@ function clearAll() {
   roleForm.permissions = []
 }
 
-function openRole(row?: any) {
+function openRole(row?: Role) {
   Object.assign(roleForm, row
     ? { id: row.id, name: row.name, permissions: [...row.permissions], remark: row.remark }
     : { id: null, name: '', permissions: [], remark: '' })
@@ -183,7 +185,7 @@ function openRole(row?: any) {
 }
 
 async function saveRole() {
-  const valid = await roleFormRef.value.validate().catch(() => false)
+  const valid = await roleFormRef.value?.validate().catch(() => false)
   if (!valid) return
   roleSaving.value = true
   try {

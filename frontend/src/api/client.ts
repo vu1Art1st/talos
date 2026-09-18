@@ -2,6 +2,7 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
 import { normalizeRedirect, resolveErrorPolicy, resolvePageCode } from '../utils/errorPage'
+import type { ApiErrorShape } from '../types'
 
 declare module 'axios' {
   export interface AxiosRequestConfig {
@@ -46,7 +47,7 @@ function clearCredentials() {
   localStorage.removeItem('refresh_token')
 }
 
-function toastError(error: any) {
+function toastError(error: ApiErrorShape) {
   const msg = error?.response?.data?.detail || error?.message || '请求失败'
   ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
 }

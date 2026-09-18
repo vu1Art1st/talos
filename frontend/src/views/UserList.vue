@@ -110,27 +110,28 @@ import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { dotStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'
+import type { Role, User, UserForm } from '../types'
 
 interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }
 
 const { items: users, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/users')
 
-const roles = ref<any[]>([])
+const roles = ref<Role[]>([])
 const catalog = ref<PermGroup[]>([])
 const catalogLoading = ref(false)
 const userDialog = ref(false)
 const permDialog = ref(false)
-const permUser = ref<any>(null)
+const permUser = ref<User | null>(null)
 const userSaving = ref(false)
-const userForm = reactive<any>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
+const userForm = reactive<UserForm>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
 const userFormRef = ref<FormInstance>()
 const userRules: FormRules = {
   username: [{ required: true, whitespace: true, message: '请填写用户名', trigger: 'blur' }],
 }
 
 async function loadRoles() {
-  const { data } = await client.get('/roles')
+  const { data } = await client.get<Role[]>('/roles')
   roles.value = data
 }
 
@@ -144,7 +145,7 @@ async function loadCatalog() {
   }
 }
 
-function openUser(row?: any) {
+function openUser(row?: User) {
   Object.assign(userForm, row
     ? { ...row, password: '' }
     : { id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
@@ -152,7 +153,7 @@ function openUser(row?: any) {
 }
 
 async function saveUser() {
-  const valid = await userFormRef.value.validate().catch(() => false)
+  const valid = await userFormRef.value?.validate().catch(() => false)
   if (!valid) return
   userSaving.value = true
   try {
@@ -173,12 +174,12 @@ async function removeUser(id: number) {
   await load()
 }
 
-function userHasPerm(user: any, key: string) {
+function userHasPerm(user: User | null, key: string) {
   const perms = user?.permissions ?? []
   return perms.includes('*') || perms.includes(key)
 }
 
-function openPerm(row: any) {
+function openPerm(row: User) {
   permUser.value = row
   permDialog.value = true
   if (!catalog.value.length) loadCatalog()

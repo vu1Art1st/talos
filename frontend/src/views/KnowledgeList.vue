@@ -15,13 +15,13 @@
         <el-button @click="importVisible = true" class="btn-min">
           <el-icon class="mr-1"><Upload /></el-icon>批量导入
         </el-button>
-        <el-button type="primary" @click="openDialog()" class="btn-min">
+        <el-button type="primary" @click="openFormDialog()" class="btn-min">
           <el-icon class="mr-1"><Plus /></el-icon>新建条目
         </el-button>
       </template>
     </div>
 
-    <el-table v-loading="loading" :data="filteredItems" stripe @selection-change="(rows: any[]) => (selected = rows)">
+    <el-table v-loading="loading" :data="filteredItems" stripe @selection-change="(rows: KnowledgeEntry[]) => (selected = rows)">
       <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
       <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
@@ -50,7 +50,7 @@
       </el-table-column>
       <el-table-column v-if="auth.hasPerm('vuln:manage')" label="操作" width="120" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该条目？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -99,15 +99,15 @@
       </el-form-item>
       <el-form-item label="标准描述">
         <RichEditor v-model="form.description_html" class="w-full"
-                    @update:json="(j: any) => (form.description_json = j)" />
+                    @update:json="(j: unknown) => (form.description_json = j)" />
       </el-form-item>
       <el-form-item label="危害说明">
         <RichEditor v-model="form.harm_html" class="w-full"
-                    @update:json="(j: any) => (form.harm_json = j)" />
+                    @update:json="(j: unknown) => (form.harm_json = j)" />
       </el-form-item>
       <el-form-item label="修复建议">
         <RichEditor v-model="form.solution_html" class="w-full"
-                    @update:json="(j: any) => (form.solution_json = j)" />
+                    @update:json="(j: unknown) => (form.solution_json = j)" />
       </el-form-item>
       <el-form-item label="参考链接">
         <el-input v-model="referencesText" type="textarea" :rows="3"
@@ -154,10 +154,11 @@ import { scoreFromVector, scoreToLevel } from '../utils/cvss'
 import { levelColor } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { saveBlob } from '../utils/download'
+import type { KnowledgeEntry, KnowledgeForm } from '../types'
 
 const auth = useAuthStore()
-const meta = ref<any>(null)
-const items = ref<any[]>([])
+const meta = ref<Record<string, Record<number, string>> | null>(null)
+const items = ref<KnowledgeEntry[]>([])
 const keyword = ref('')
 const filteredItems = computed(() => {
   const k = keyword.value.trim().toLowerCase()
@@ -166,7 +167,7 @@ const filteredItems = computed(() => {
     (r.vulnerability_name || '').toLowerCase().includes(k) ||
     (meta.value?.vul_type?.[r.vul_type] || '').toLowerCase().includes(k))
 })
-const selected = ref<any[]>([])
+const selected = ref<KnowledgeEntry[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -177,8 +178,8 @@ const importing = ref(false)
 const importText = ref('')
 const fileInput = ref<HTMLInputElement>()
 
-const emptyForm = () => ({
-  id: null as number | null,
+const emptyForm = (): KnowledgeForm => ({
+  id: null,
   vulnerability_name: '',
   vul_type: 75, severity_level: 30,
   description_html: '', description_json: null,
@@ -186,7 +187,7 @@ const emptyForm = () => ({
   solution_html: '', solution_json: null,
   cvss_vector: '',
 })
-const form = reactive<any>(emptyForm())
+const form = reactive<KnowledgeForm>(emptyForm())
 
 // CVSS 向量评分预览：合法向量实时展示评分与等级色
 const cvssPreview = computed(() => scoreFromVector(form.cvss_vector))
@@ -213,14 +214,14 @@ function plainText(html: string) {
 async function load() {
   loading.value = true
   try {
-    const { data } = await client.get('/knowledge')
+    const { data } = await client.get<KnowledgeEntry[]>('/knowledge')
     items.value = data
   } finally {
     loading.value = false
   }
 }
 
-function openDialog(row?: any) {
+function openFormDialog(row?: KnowledgeEntry) {
   editing.value = !!row
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(row ?? {})))
   referencesText.value = (row?.references ?? []).join('\n')
@@ -228,7 +229,7 @@ function openDialog(row?: any) {
 }
 
 async function save() {
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   saving.value = true
   try {
@@ -269,7 +270,7 @@ async function removeBatch() {
   await ElMessageBox.confirm(`确认删除选中的 ${selected.value.length} 条知识库条目？`, '批量删除', {
     type: 'warning', confirmButtonText: '删除', confirmButtonClass: 'el-button--danger',
   })
-  const { data } = await client.post('/knowledge/batch-delete', { ids: selected.value.map((r) => r.id) })
+  const { data } = await client.post<{ deleted: number }>('/knowledge/batch-delete', { ids: selected.value.map((r) => r.id) })
   ElMessage.success(`已删除 ${data.deleted} 条`)
   await load()
 }
@@ -300,7 +301,8 @@ function downloadTemplate() {
 }
 
 async function doImport() {
-  let parsed: any
+  // 用户粘贴/上传的 JSON：结构不可静态保证，先按 unknown 收下，再用 Array.isArray 收窄
+  let parsed: unknown
   try {
     parsed = JSON.parse(importText.value)
   } catch {
@@ -313,7 +315,7 @@ async function doImport() {
   }
   importing.value = true
   try {
-    const { data } = await client.post('/knowledge/batch-import', { items: parsed })
+    const { data } = await client.post<{ created: number; updated: number }>('/knowledge/batch-import', { items: parsed })
     ElMessage.success(`导入完成：新增 ${data.created} 条，更新 ${data.updated} 条`)
     importVisible.value = false
     importText.value = ''

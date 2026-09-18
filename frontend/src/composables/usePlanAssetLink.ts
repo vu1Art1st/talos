@@ -3,16 +3,42 @@
 // - planLabel：工单下拉展示「工单ID-计划名称-测试系统」，空值省略对应段
 // - filteredAssets：关联工单后资产候选 = 工单 asset_ids 优先 → system_name 匹配 → 全量（允许手动选）
 // - 选定工单后自动联动默认资产：工单 asset_ids 首个 → 测试系统名匹配首个 → 置空（不自动新建）
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 
-export function usePlanAssetLink(
-  getPlans: () => any[],
-  getAssets: () => any[],
-) {
+/** 工单联动所需的最小子集：调用方直接传各自列表即可，无需构造完整实体 */
+export interface PlanLinkSource {
+  id: number | null
+  ticket_id?: string | null
+  plan_name?: string | null
+  system_name?: string | null
+  asset_ids?: number[] | null
+}
+
+/** 资产联动所需的最小子集 */
+export interface AssetLinkSource {
+  id: number
+  name: string
+}
+
+export interface PlanAssetLinkState<P, A> {
+  planId: Ref<number | null>
+  assetId: Ref<number | null>
+  planLabel: (p: P) => string
+  filteredAssets: ComputedRef<A[]>
+}
+
+/**
+ * 泛型化：`filteredAssets` 的元素类型与调用方传入的资产列表**保持一致**，
+ * 避免宽类型导致调用点丢失 `Asset` 的具体字段（如 `assetLabel(a)` 需要 sub_system/system_type）。
+ */
+export function usePlanAssetLink<P extends PlanLinkSource, A extends AssetLinkSource>(
+  getPlans: () => P[],
+  getAssets: () => A[],
+): PlanAssetLinkState<P, A> {
   const planId = ref<number | null>(null)
   const assetId = ref<number | null>(null)
 
-  function planLabel(p: any) {
+  function planLabel(p: P) {
     return [p.ticket_id, p.plan_name, p.system_name].filter(Boolean).join('-')
   }
 
@@ -35,8 +61,10 @@ export function usePlanAssetLink(
       assetId.value = null
       return
     }
-    if (plan.asset_ids?.length) {
-      const first = getAssets().find((a) => a.id === plan.asset_ids[0])
+    // 先取到局部变量再判长度：可选链的 `.length` 不足以让 TS 收窄可空数组，局部变量可（行为不变）
+    const ids = plan.asset_ids
+    if (ids?.length) {
+      const first = getAssets().find((a) => a.id === ids[0])
       assetId.value = first ? first.id : (getAssets().find((a) => a.name === plan.system_name)?.id ?? null)
     } else {
       assetId.value = plan.system_name

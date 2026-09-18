@@ -55,7 +55,11 @@ import client from '../api/client'
 const props = defineProps<{ modelValue: string; placeholder?: string }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', html: string): void
-  (e: 'update:json', json: any): void
+  /**
+   * TipTap 文档结构（`editor.getJSON()`）：由编辑器写入、后端原样回存，消费方不做结构访问，
+   * 故以 `unknown` 承载（比 `any` 严：必须显式断言才能取属性）。当前 10 处消费方均已按 `unknown` 处理。
+   */
+  (e: 'update:json', json: unknown): void
 }>()
 
 const fileInput = ref<HTMLInputElement>()

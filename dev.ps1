@@ -35,11 +35,19 @@ $backend = Join-Path $root 'backend'
 $frontend = Join-Path $root 'frontend'
 $venvPython = Join-Path $backend '.venv\Scripts\python.exe'
 
-foreach ($cmd in 'python', 'node', 'pnpm') {
+foreach ($cmd in 'node', 'pnpm') {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
         Write-Host "[dev] 未找到 $cmd，请先安装后重试" -ForegroundColor Red
         exit 1
     }
+}
+
+# 后端解释器：优先 uv（可自行管理并下载 Python 3.12，与容器 python:3.12-slim 对齐），
+# 否则需系统已装 python
+$hasUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
+if (-not $hasUv -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
+    Write-Host '[dev] 需要 uv（推荐，https://docs.astral.sh/uv/）或 python 之一' -ForegroundColor Red
+    exit 1
 }
 
 # ---------- 端口检测工具 ----------
@@ -160,9 +168,16 @@ foreach ($check in @(@{ Port = $BackendPort; Name = '后端' }, @{ Port = $Front
 Write-Host "[dev] 端口检查通过：$BackendPort / $FrontendPort 均空闲。" -ForegroundColor Green
 
 if (-not (Test-Path $venvPython)) {
-    Write-Host '[dev] 初始化后端虚拟环境并安装依赖...' -ForegroundColor Cyan
-    python -m venv (Join-Path $backend '.venv')
-    & $venvPython -m pip install -r (Join-Path $backend 'requirements-dev.txt')
+    Write-Host '[dev] 初始化后端虚拟环境（Python 3.12）并安装依赖...' -ForegroundColor Cyan
+    if ($hasUv) {
+        # uv 可直接指定并用自身托管的 3.12 解释器，避免落到系统低版本 python
+        uv venv (Join-Path $backend '.venv') --python 3.12
+        uv pip install --python $venvPython -r (Join-Path $backend 'requirements-dev.txt')
+    } else {
+        Write-Host '[dev] 未检测到 uv，回退 python -m venv（请确保为 Python 3.12）' -ForegroundColor Yellow
+        python -m venv (Join-Path $backend '.venv')
+        & $venvPython -m pip install -r (Join-Path $backend 'requirements-dev.txt')
+    }
 }
 
 if (-not (Test-Path (Join-Path $frontend 'node_modules'))) {

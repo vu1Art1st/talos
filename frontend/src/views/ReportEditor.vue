@@ -46,7 +46,7 @@
         </el-form>
       </el-card>
 
-      <el-card v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`" :id="`section-${i}`"
+      <el-card v-for="(sec, i) in sections" :key="sec.id ?? `n${i}`" :id="`section-${i}`"
                shadow="never" class="scroll-mt-4">
         <template #header>
           <div class="flex items-center gap-2">
@@ -55,7 +55,7 @@
             <span v-if="sec.vul_id" class="ktag">关联漏洞</span>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
-            <el-button size="small" :disabled="i === report.sections.length - 1" @click="move(i, 1)">下移</el-button>
+            <el-button size="small" :disabled="i === sections.length - 1" @click="move(i, 1)">下移</el-button>
             <el-button size="small" type="danger" plain @click="removeSection(i)">删除</el-button>
           </div>
         </template>
@@ -96,7 +96,7 @@
         </el-form>
         <RichEditor v-model="sec.content_html"
                     @update:modelValue="markDirty"
-                    @update:json="(j: any) => { sec.content_json = j; markDirty() }" />
+                    @update:json="(j: unknown) => { sec.content_json = j; markDirty() }" />
 
         <!-- 复测处理：复用 VulnRetestPanel（与渗透测试工单流程抽屉一致），支持结构化复测记录 -->
         <div v-if="sec.vul_id" class="mt-4">
@@ -128,9 +128,9 @@
             </div>
           </div>
         </template>
-        <el-empty v-if="!report.sections.length" description="暂无章节" :image-size="80" />
+        <el-empty v-if="!sections.length" description="暂无章节" :image-size="80" />
         <div v-else ref="navScrollRef" class="max-h-72 overflow-y-auto -mx-1" @dragend="onDragEnd">
-          <template v-for="(sec, i) in report.sections" :key="sec.id ?? `n${i}`">
+          <template v-for="(sec, i) in sections" :key="sec.id ?? `n${i}`">
             <!-- 拖拽指示线：标记目标插入位置 -->
             <div v-if="dropLineIndex === i" class="mx-2 h-0.5 rounded-full bg-brand-500"></div>
             <div class="flex items-center gap-2 px-2 py-1.5 rounded text-sm select-none"
@@ -147,7 +147,7 @@
                  @dragover.prevent="onDragOver(i, $event)"
                  @dragenter="onDragEnter(i)"
                  @dragleave="onDragLeave(i, $event)"
-                 @drop.prevent="onDrop(i)">
+                 @drop.prevent="onDrop()">
               <span class="shrink-0" :class="dragIndex !== null ? 'text-gray-300' : 'text-gray-400'">{{ i + 1 }}.</span>
               <el-icon v-if="dragIndex !== null" class="shrink-0 text-gray-300" :size="12"><Rank /></el-icon>
               <span class="truncate flex-1" :title="sec.title">{{ sec.title || '未命名章节' }}</span>
@@ -157,7 +157,7 @@
               </span>
             </div>
           </template>
-          <div v-if="dropLineIndex === report.sections.length" class="mx-2 h-0.5 rounded-full bg-brand-500"></div>
+          <div v-if="dropLineIndex === sections.length" class="mx-2 h-0.5 rounded-full bg-brand-500"></div>
         </div>
       </el-card>
 
@@ -228,6 +228,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
+import type { ExportJob, ReportDetail, ReportSection, VulnState } from '../types'
 import RichEditor from '../components/RichEditor.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
@@ -252,9 +253,11 @@ const FIELD_LABELS: Record<string, string> = {
 const auth = useAuthStore()
 const route = useRoute()
 const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
-const report = ref<any>(null)
-const meta = ref<any>(null)
-const jobs = ref<any[]>([])
+const report = ref<ReportDetail | null>(null)
+// 章节列表：显式给出元素类型，避免 `v-for` 的索引退化为 `string | number`（E-5 类型门禁暴露）
+const sections = computed<ReportSection[]>(() => report.value?.sections ?? [])
+const meta = ref<Record<string, Record<number, string>> | null>(null)
+const jobs = ref<ExportJob[]>([])
 const saving = ref(false)
 const saveState = ref('已保存')
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
@@ -264,7 +267,7 @@ const vulnFormVisible = ref(false)
 const userOptions = ref<{ id: number; name: string }[]>([])
 const authorNames = ref<string[]>([])
 // 关联漏洞状态与复测详情，key 为 vul_id
-const vulnStates = ref<Record<number, any>>({})
+const vulnStates = ref<Record<number, VulnState>>({})
 
 // 初测报告（标题不含「复测」）章节导航状态标签：修复中(50)显示为「未修复」（与导出报告口径一致，仅展示层）
 const isRetestReport = computed(() => String(report.value?.title ?? '').includes('复测'))
@@ -276,9 +279,10 @@ let jobTimer: number | undefined
 // 测试周期：日期范围选择器与 test_start / test_end 字符串字段互转
 const testRange = computed<[string, string] | null>({
   get: () => (report.value?.test_start || report.value?.test_end)
-    ? [report.value.test_start, report.value.test_end]
+    ? [report.value.test_start, report.value.test_end] as [string, string]
     : null,
-  set: (v) => {
+  set: (v: [string, string] | null) => {
+    if (!report.value) return
     report.value.test_start = v?.[0] ?? ''
     report.value.test_end = v?.[1] ?? ''
     markDirty()
@@ -302,8 +306,8 @@ function markDirty() {
 }
 
 async function loadVulnStates() {
-  const { data } = await client.get(`/reports/${route.params.id}/vuln-states`)
-  const map: Record<number, any> = {}
+  const { data } = await client.get<VulnState[]>(`/reports/${route.params.id}/vuln-states`)
+  const map: Record<number, VulnState> = {}
   for (const v of data) {
     map[v.vul_id] = { ...v }
   }
@@ -388,7 +392,7 @@ function onDragLeave(i: number, e: DragEvent) {
 function onDrop() {
   const from = dragIndex.value
   const line = dropLineIndex.value
-  if (from !== null && line !== null && line !== from) {
+  if (from !== null && line !== null && line !== from && report.value) {
     const arr = report.value.sections
     const [item] = arr.splice(from, 1)
     // 插入到 line 处（deleteCount=0），仅移动不删除任何其他章节
@@ -425,13 +429,14 @@ function syncAuthorNames() {
 }
 
 function onAuthorChange() {
+  if (!report.value) return
   report.value.author = authorNames.value.join('、')
   markDirty()
 }
 
 async function load() {
-  const { data } = await client.get(`/reports/${route.params.id}`)
-  data.sections.sort((a: any, b: any) => a.order - b.order)
+  const { data } = await client.get<ReportDetail>(`/reports/${route.params.id}`)
+  data.sections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   report.value = data
   syncAuthorNames()
   await Promise.all([loadJobs(), loadVulnStates()])
@@ -441,7 +446,7 @@ async function loadJobs() {
   jobs.value = await fetchJobs(route.params.id as string)
 }
 
-async function removeJob(job: any) {
+async function removeJob(job: ExportJob) {
   await deleteExportJob(job.id)
   await loadJobs()
 }
@@ -453,18 +458,19 @@ async function save(auto = false) {
   try {
     const body = {
       ...report.value,
-      sections: report.value.sections.map((s: any, i: number) => ({ ...s, order: i })),
+      sections: report.value.sections.map((s, i) => ({ ...s, order: i })),
     }
-    const { data } = await client.put(`/reports/${report.value.id}`, body)
-    data.sections.sort((a: any, b: any) => a.order - b.order)
+    const { data } = await client.put<ReportDetail>(`/reports/${report.value.id}`, body)
+    data.sections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     report.value = data
     syncAuthorNames()
     saveState.value = '已保存'
     // 保存可能触发新关联漏洞自动进入修复中，同步刷新状态
     await loadVulnStates()
     if (!auto) ElMessage.success('保存成功')
-  } catch (e: any) {
-    if (e?.response?.status === 409) {
+  } catch (e) {
+    // axios 错误结构：仅判定 409（版本冲突），其余交给拦截器统一提示
+    if ((e as { response?: { status?: number } })?.response?.status === 409) {
       await ElMessageBox.confirm('报告已被他人修改，是否加载最新版本？（当前未保存修改将丢失）', '版本冲突', {
         confirmButtonText: '加载最新',
         cancelButtonText: '继续编辑',
@@ -477,6 +483,7 @@ async function save(auto = false) {
 }
 
 function removeSection(i: number) {
+  if (!report.value) return
   report.value.sections.splice(i, 1)
   // 同步修正导航高亮索引，保持与拖拽排序共用同一套索引
   const a = activeSection.value
@@ -486,6 +493,7 @@ function removeSection(i: number) {
 }
 
 function move(i: number, dir: number) {
+  if (!report.value) return
   const arr = report.value.sections
   ;[arr[i], arr[i + dir]] = [arr[i + dir], arr[i]]
   // 同步修正导航高亮索引
@@ -507,11 +515,13 @@ async function onVulnFormSaved() {
 
 async function doExport(fmt: string) {
   if (saveState.value !== '已保存') await save(true)
+  if (!report.value) return
   const ok = await submitExport(route.params.id as string, fmt, report.value.title)
   if (ok) await loadJobs()
 }
 
-function download(job: any) {
+function download(job: ExportJob) {
+  if (!report.value) return
   downloadJob(job, report.value.title)
 }
 

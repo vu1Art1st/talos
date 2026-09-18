@@ -26,6 +26,7 @@ import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
+import type { VulnForm } from '../types'
 
 // 独立漏洞提交/编辑页：表单主体抽取为 VulnFormPanel（与测试计划流程抽屉复用），
 // 本页仅保留路由行为（计划横幅、复测/取消按钮、保存后跳转）。
@@ -36,7 +37,7 @@ const editId = route.name === 'vuln-edit' ? Number(route.params.id) : null
 const planId = !editId && route.query.plan_id ? Number(route.query.plan_id) : null
 const planName = ref('')
 
-function onSaved(vulns: any[]) {
+function onSaved(vulns: VulnForm[]) {
   if (editId) {
     router.push(`/vulns/${editId}`)
   } else {

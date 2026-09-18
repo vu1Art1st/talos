@@ -1,9 +1,7 @@
 """测试计划（渗透测试工单）API：列表/统计/Excel 导入导出与全生命周期流转，统一 special:manage 权限。"""
 import html as html_mod
-from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
-from openpyxl import load_workbook
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +10,7 @@ from app.core.deps import require_any_perm, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.timeutil import mandays_between
 from app.core.timeutil import now as tznow
-from app.core.xlsx import xlsx_response
+from app.core.xlsx import load_xlsx, xlsx_response
 from app.db import get_session
 from app.models import (
     ImportRecord,
@@ -201,14 +199,12 @@ async def import_testing_plans(
     data = await file.read()
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(400, "文件大小不能超过 20MB")
-    try:
-        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
-    except Exception:
-        raise HTTPException(400, "Excel 文件解析失败，请使用导入模板")
+    wb = load_xlsx(data)
     return await plan_io.upsert_plans(session, wb, user)
 
 
-# 注意：需注册在 /testing-plans/stats、/testing-plans/export、/testing-plans/import/template 等静态路径之后，防止路径吞噬
+# 注意：需注册在 /testing-plans/stats、/testing-plans/export、
+# /testing-plans/import/template 等静态路径之后，防止路径吞噬
 @router.get("/testing-plans/{row_id}", response_model=TestingPlanOut)
 async def get_testing_plan(
     row_id: int,
@@ -354,6 +350,44 @@ async def _create_no_vul_report(
     return report
 
 
+async def _ensure_no_vuln_completable(session: AsyncSession, plan: TestingPlan, user: User) -> None:
+    """无漏洞闭环的前置校验：操作权限 / 状态可流转 / 确实无关联漏洞。"""
+    if not plan_service.can_operate(user, plan):
+        raise HTTPException(403, "仅认领者或管理员可确认无漏洞完结")
+    if plan.status == PlanStatus.PASSED:
+        raise HTTPException(400, "该计划已确认无漏洞（测试通过），无需重复操作")
+    if not vuln_service.can_plan_transition(plan.status, PlanStatus.PASSED):
+        raise HTTPException(400, "当前状态不允许确认无漏洞完结")
+    vul_count = (
+        await session.execute(
+            select(func.count(Vul.id)).where(Vul.testing_plan_id == plan.id)
+        )
+    ).scalar_one()
+    if vul_count:
+        raise HTTPException(400, "该计划存在关联漏洞，不能确认无漏洞，请先处理漏洞后走复测流程")
+
+
+def _notify_no_vuln_done(
+    session: AsyncSession, plan: TestingPlan, user: User, report: Report | None
+) -> None:
+    """站内信告知测试人员与计划创建人（去重，排除操作人本人）。"""
+    notice_ids = {u.id for u in plan.testers}
+    if plan.creator_id:
+        notice_ids.add(plan.creator_id)
+    notice_ids.discard(user.id)
+    report_hint = f"，已生成报告《{report.title}》" if report is not None else ""
+    for uid in notice_ids:
+        session.add(Message(
+            user_id=uid,
+            msg_type="plan",
+            title=f"测试计划「{plan.system_name}」已确认无漏洞",
+            content=(
+                f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
+                f"状态流转为「测试通过」{report_hint}"
+            ),
+        ))
+
+
 @router.post("/testing-plans/{row_id}/complete-no-vuln", response_model=TestingPlanOut)
 async def complete_plan_no_vuln(
     row_id: int,
@@ -371,19 +405,7 @@ async def complete_plan_no_vuln(
     - 后续若补录/关联新漏洞，计划自动重开为「初测中」（见 reopen_passed_plan）。
     """
     plan = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
-    if not plan_service.can_operate(user, plan):
-        raise HTTPException(403, "仅认领者或管理员可确认无漏洞完结")
-    if plan.status == PlanStatus.PASSED:
-        raise HTTPException(400, "该计划已确认无漏洞（测试通过），无需重复操作")
-    if not vuln_service.can_plan_transition(plan.status, PlanStatus.PASSED):
-        raise HTTPException(400, "当前状态不允许确认无漏洞完结")
-    vul_count = (
-        await session.execute(
-            select(func.count(Vul.id)).where(Vul.testing_plan_id == row_id)
-        )
-    ).scalar_one()
-    if vul_count:
-        raise HTTPException(400, "该计划存在关联漏洞，不能确认无漏洞，请先处理漏洞后走复测流程")
+    await _ensure_no_vuln_completable(session, plan, user)
 
     # 状态流转与数据记录
     plan.status = PlanStatus.PASSED
@@ -402,22 +424,7 @@ async def complete_plan_no_vuln(
         await session.refresh(plan, attribute_names=["reports"])
         await plan_service.refresh_mandays(session, plan.id)
 
-    # 站内信通知：测试人员与计划创建人（去重，排除操作人本人）
-    notice_ids = {u.id for u in plan.testers}
-    if plan.creator_id:
-        notice_ids.add(plan.creator_id)
-    notice_ids.discard(user.id)
-    report_hint = f"，已生成报告《{report.title}》" if report is not None else ""
-    for uid in notice_ids:
-        session.add(Message(
-            user_id=uid,
-            msg_type="plan",
-            title=f"测试计划「{plan.system_name}」已确认无漏洞",
-            content=(
-                f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
-                f"状态流转为「测试通过」{report_hint}"
-            ),
-        ))
+    _notify_no_vuln_done(session, plan, user, report)
     await session.commit()
     await session.refresh(plan)
     await audit(session, request, "plan_transition", user, {

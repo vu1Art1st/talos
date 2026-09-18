@@ -103,11 +103,13 @@ import { ElMessage } from 'element-plus'
 import { Check, Connection, Key, Monitor } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { nonpenActionLabel, nonpenActions, nonpenItemMeta, nonpenItems, softStyle } from '../utils/colors'
+import type { NonpenPlan } from '../types'
 
 const props = defineProps<{ visible: boolean; planId: number | null }>()
 const emit = defineEmits<{ (e: 'update:visible', v: boolean): void; (e: 'changed'): void }>()
 
-const plan = ref<any>(null)
+const plan = ref<NonpenPlan | null>(null)
+
 const loading = ref(false)
 const acting = ref('')
 
@@ -180,7 +182,7 @@ async function load() {
   if (!props.planId) return
   loading.value = true
   try {
-    const { data } = await client.get(`/nonpen-plans/${props.planId}`)
+    const { data } = await client.get<NonpenPlan>(`/nonpen-plans/${props.planId}`)
     plan.value = data
   } finally {
     loading.value = false

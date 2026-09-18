@@ -97,24 +97,26 @@ def _cell_text(cell: _Cell) -> str:
     return "\n".join(p.text for p in cell.paragraphs).strip()
 
 
-def _map_level(text: str) -> int | None:
+def _map_code(text: str, mapping: dict[str, int]) -> int | None:
+    """字典名 → 码值：先精确匹配，未命中再按「互相包含」做宽松匹配（解析器容错口径）。
+
+    等级与类型共用同一匹配口径，避免两处实现各自演化（审计 B-6）。
+    """
     text = _norm_label(text)
-    if text in VUL_LEVEL_REVERSE:
-        return VUL_LEVEL_REVERSE[text]
-    for name, code in VUL_LEVEL_REVERSE.items():
+    if text in mapping:
+        return mapping[text]
+    for name, code in mapping.items():
         if text and (text in name or name in text):
             return code
     return None
+
+
+def _map_level(text: str) -> int | None:
+    return _map_code(text, VUL_LEVEL_REVERSE)
 
 
 def _map_type(text: str) -> int | None:
-    text = _norm_label(text)
-    if text in VUL_TYPE_REVERSE:
-        return VUL_TYPE_REVERSE[text]
-    for name, code in VUL_TYPE_REVERSE.items():
-        if text and (text in name or name in text):
-            return code
-    return None
+    return _map_code(text, VUL_TYPE_REVERSE)
 
 
 def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[dict]:
@@ -176,7 +178,9 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[di
                 record["vul_type"] = vtype
 
         if "affected_url" in fields:
-            record["affected_url"] = _cell_text(fields["affected_url"])[:512]
+            # 不做长度截断：列表模板一个单元格可能含多条 URL（换行分隔），
+            # 定长截断会静默丢数据；长度上限统一由 schemas.common.normalize_affected_url 校验
+            record["affected_url"] = _cell_text(fields["affected_url"])
 
         for key in ("description_html", "reproduce_html", "solution_html"):
             if key in fields:
@@ -198,7 +202,8 @@ _DETAIL_LEVEL_TRIM = "【】[]（）() \t"
 # 报告文件名：日期 + 公司/系统名 + 渗透测试(复测)报告 + 可选轮次后缀 -N（同日重复发起复测自动追加 -1/-2）
 # 例：20250917中移系统集成有限公司综合办公系统渗透测试复测报告-1.docx → 第二轮复测
 _REPORT_NAME_RE = re.compile(r"^(\d{8})?(.*?)(?:渗透测试)?(复测)?报告(?:-(\d+))?$")
-# 文件名兜底系统名剥离公司前缀：取最后一个「有限公司」之后的部分（如「中移系统集成有限公司综合办公系统」→「综合办公系统」）
+# 文件名兜底系统名剥离公司前缀：取最后一个「有限公司」之后的部分
+# （如「中移系统集成有限公司综合办公系统」→「综合办公系统」）
 _COMPANY_SUFFIX_RE = re.compile(r"(.*?有限公司)(.*)$")
 _COVER_DATE_RE = re.compile(r"^(\d{4})年(\d{1,2})月(\d{1,2})日$")
 _RETEST_LABEL_RE = re.compile(r"^\d*漏洞复测$")
@@ -594,7 +599,7 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
                     bucket = None
                 elif bucket == "affected_url":
                     if inline and not record["affected_url"]:
-                        record["affected_url"] = _clean_url(inline)[:512]
+                        record["affected_url"] = _clean_url(inline)
                     bucket = None
                 else:
                     record[bucket] += _para_to_html(
@@ -611,7 +616,7 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
                 if inner.strip():
                     record[bucket] += f"<p>{inner}</p>"
             elif bucket == "affected_url" and not record["affected_url"] and p.text.strip():
-                record["affected_url"] = _clean_url(p.text)[:512]
+                record["affected_url"] = _clean_url(p.text)
             # status 桶为模板选项占位行（如【超危】【高危】…），测试状态以漏洞字段为准
 
         record["level_detail_text"] = detail_level_text

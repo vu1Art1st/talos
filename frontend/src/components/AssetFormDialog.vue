@@ -138,22 +138,34 @@ import type { FormInstance, FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import type { Asset, AssetForm, Group, GroupMember } from '../types'
 
 const props = defineProps<{
   visible: boolean
-  /** 编辑时传入资产对象；新建传 null。name 字段可预填搜索关键字 */
-  asset?: any | null
+  /**
+   * 编辑时传入资产对象；新建传 null。name 字段可预填搜索关键字。
+   * 声明为 `Partial<Asset>`：该参数只做「合并进表单」的预填（新建场景仅有 name，无 id）。
+   */
+  asset?: Partial<Asset> | null
 }>()
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
-  (e: 'saved', asset: any): void
+  (e: 'saved', asset: Asset): void
 }>()
 
 const auth = useAuthStore()
-const meta = ref<any>(null)
+/**
+ * `/meta` 下发的全局元数据。该载荷是异构字典袋（既有「码 → 名称」映射也有纯字符串列表），
+ * 此处只声明本组件用到的三个键，避免冒充整个契约。
+ */
+const meta = ref<{
+  system_type?: string[]
+  url_tag?: Record<number, string>
+  asset_status?: Record<number, string>
+} | null>(null)
 const saving = ref(false)
-const groups = ref<any[]>([])
-const members = ref<any[]>([])
+const groups = ref<Group[]>([])
+const members = ref<GroupMember[]>([])
 
 // 组织成员（含所属组织名），供资产系统负责人下拉选择快速添加。
 // 需求9：已选择部门时仅展示该部门下的负责人，未选择时展示全部便于快速录入
@@ -167,13 +179,13 @@ const memberOptions = computed(() => {
   }))
 })
 
-const emptyForm = () => ({
+const emptyForm = (): AssetForm => ({
   id: null, name: '', sub_system: '', department: '', system_type: '',
-  public_urls: [] as any[], internal_urls: [] as string[],
-  port_services: [] as any[], middlewares: [] as any[], databases: [] as any[],
-  owners: [] as any[], status: 10, remark: '',
+  public_urls: [], internal_urls: [],
+  port_services: [], middlewares: [], databases: [],
+  owners: [], status: 10, remark: '',
 })
-const form = reactive<any>(emptyForm())
+const form = reactive<AssetForm>(emptyForm())
 const formRef = ref<FormInstance>()
 
 // 系统命名必填（whitespace 拦截纯空格），错误内联展示在字段下方
@@ -188,19 +200,19 @@ function onOpen() {
 }
 
 async function loadGroups() {
-  const { data } = await client.get('/groups')
+  const { data } = await client.get<Group[]>('/groups')
   groups.value = data
 }
 
 async function loadMembers() {
-  const { data } = await client.get('/group-members/all')
+  const { data } = await client.get<GroupMember[]>('/group-members/all')
   members.value = data
 }
 
 function pickMember(idx: number) {
   const o = memberOptions.value[idx]
   if (!o) return
-  if (form.owners.some((x: any) => x.name === o.name && x.phone === o.phone)) {
+  if (form.owners.some((x) => x.name === o.name && x.phone === o.phone)) {
     return ElMessage.info('该负责人已添加')
   }
   form.owners.push({ name: o.name, phone: o.phone, email: o.email })
@@ -234,13 +246,13 @@ async function addSystemType() {
 }
 
 async function save() {
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
-  form.public_urls = form.public_urls.filter((u: any) => u.url.trim())
-  form.port_services = form.port_services.filter((p: any) => (p.port ?? '').trim() || (p.service ?? '').trim())
-  form.middlewares = form.middlewares.filter((m: any) => (m.name ?? '').trim())
-  form.databases = form.databases.filter((d: any) => (d.name ?? '').trim())
-  form.owners = form.owners.filter((o: any) => o.name.trim())
+  form.public_urls = form.public_urls.filter((u) => u.url.trim())
+  form.port_services = form.port_services.filter((p) => (p.port ?? '').trim() || (p.service ?? '').trim())
+  form.middlewares = form.middlewares.filter((m) => (m.name ?? '').trim())
+  form.databases = form.databases.filter((d) => (d.name ?? '').trim())
+  form.owners = form.owners.filter((o) => o.name.trim())
   await persistSystemType()
   saving.value = true
   try {

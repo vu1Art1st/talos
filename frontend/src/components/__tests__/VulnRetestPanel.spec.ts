@@ -3,15 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
-const getMock = vi.fn()
-vi.mock('../../api/client', () => ({
-  default: {
-    get: (...args: unknown[]) => getMock(...args),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
+import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+
+vi.mock('../../api/client', () => clientMockFactory())
 
 // RichEditor 依赖 TipTap（jsdom 下重且与本测试无关），用轻量 stub 替代
 vi.mock('../RichEditor.vue', () => ({

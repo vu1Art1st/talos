@@ -5,7 +5,7 @@
 - 渗透工单覆盖全部 7 种状态（含多轮复测、无漏洞闭环）；漏洞覆盖全部 6 种状态、
   5 类独立来源，等级/类型分布有区分度（支撑等级分布、类型 Top10）；
 - 资产-漏洞-工单-报告关联完整，已修复漏洞带复测记录与操作日志；
-- 知识库直接复用 scripts.seed_knowledge.SEED_DATA（数据源 knowledge-import-vulnerabilities.json）。
+- 知识库直接复用 scripts.knowledge_data.SEED_DATA（数据源 knowledge-import-vulnerabilities.json）。
 
 用法（backend 目录下）：
     python -m scripts.seed_dev_data --reset          # 清空并重建（需显式 --reset）
@@ -33,16 +33,15 @@ from app.constants import (  # noqa: E402
     NONPEN_ITEMS, PlanStatus, VulStatus,
 )
 from app.core.security import hash_password  # noqa: E402
-from app.core.timeutil import now as tznow  # noqa: E402
 from app.db import Base, async_session_maker, engine  # noqa: E402
 from app.models import (  # noqa: E402
-    Asset, DictOption, ExportJob, Group, GroupMember, GroupUser, KnowledgeEntry,
+    Asset, DictOption, Group, GroupMember, KnowledgeEntry,
     Message, NonpenPlan, RemoteTesting, Report, ReportSection, Role, SpringAction,
     TestingPlan, TestingPlanRetestRound, User, Vul, VulLog, VulRetestRecord,
 )
 from app.models.business import vuln_assets  # noqa: E402
 from app.models.special import spring_action_vulns, testing_plan_testers  # noqa: E402
-from scripts.seed_knowledge import SEED_DATA  # noqa: E402
+from scripts.knowledge_data import SEED_DATA  # noqa: E402
 
 # 全部业务表（按外键依赖排序，先子后父）
 ALL_TABLES = [
@@ -451,8 +450,14 @@ async def reset_and_seed() -> None:
         for plan_i, suffix, rstatus, t_start, t_end in REPORT_TMPL:
             plan = plans[plan_i]
             tester_idx = PLANS[plan_i][6]
+            if "复测" in suffix:
+                report_title = f"{plan.system_name}渗透测试报告-{suffix}"
+            else:
+                # 初测报告标题前缀年份：前 3 个工单为 2025 年、其余为 2026 年（覆盖跨年趋势场景）
+                year = "2025" if plan_i < 3 else "2026"
+                report_title = f"{year}{plan.system_name}渗透测试报告"
             report = Report(
-                title=f"{plan.system_name}渗透测试报告-{suffix}" if "复测" in suffix else f"{dt(0,1).strftime('%Y%m%d') if False else '2025' if plan_i < 3 else '2026'}{plan.system_name}渗透测试报告",
+                title=report_title,
                 project_name=plan.plan_name, customer="内部安全测试",
                 author="、".join(testers[i].realname for i in tester_idx) or admin.realname,
                 test_start=t_start, test_end=t_end, status=rstatus,
@@ -468,7 +473,7 @@ async def reset_and_seed() -> None:
             sections = [
                 ReportSection(report_id=report.id, order=0, title="一、测试概述",
                               content_html=para(f"本次测试对象为{plan.system_name}，测试周期 {t_start} 至 {t_end}。",
-                                  f"测试范围覆盖身份认证、业务逻辑、数据接口与部署配置。", "测试方法包括黑盒渗透、逻辑校验与配置核查。")),
+                                  "测试范围覆盖身份认证、业务逻辑、数据接口与部署配置。", "测试方法包括黑盒渗透、逻辑校验与配置核查。")),
                 ReportSection(report_id=report.id, order=1, title="二、测试风险汇总",
                               content_html=para(f"共发现安全风险 {len(plan_vuls)} 项，按等级分布见正文详述。", "全部风险均已同步业务方整改。")),
             ]
@@ -519,7 +524,7 @@ async def reset_and_seed() -> None:
                 await session.execute(spring_action_vulns.insert().values(
                     spring_action_id=sa.id, vul_id=vuls[vi].id))
 
-        # ---------- 知识库（复用 seed_knowledge 的标准模板，HTML 原样入库） ----------
+        # ---------- 知识库（复用 knowledge_data 的标准模板，HTML 原样入库） ----------
         for name, vt, sl, desc_html, harm_html, sol_html, refs in SEED_DATA:
             session.add(KnowledgeEntry(
                 vulnerability_name=name, vul_type=vt, severity_level=sl,
@@ -553,8 +558,25 @@ async def reset_and_seed() -> None:
     print("种子数据完成：" + "，".join(f"{k} {v}" for k, v in stats.items()))
 
 
+def _assert_dev_database() -> None:
+    """目标库守卫：本脚本会 DELETE 全部业务表，只允许作用于本地 SQLite 开发库。
+
+    仅靠 `setdefault` 注入 DSN 并不能防止「环境里已导出 VP_DATABASE_URL」的场景，
+    因此这里显式校验目标库，避免误清测试/生产库（2026-09-17 审计 A-4）。
+    """
+    url = os.environ.get("VP_DATABASE_URL", "")
+    if not url.startswith("sqlite") or not url.rstrip("/").endswith("dev.db"):
+        print(
+            "拒绝执行：本脚本仅用于本地 SQLite 开发库（dev.db）。\n"
+            f"当前 VP_DATABASE_URL={url or '(未设置)'}\n"
+            "如确需在其它库执行，请先显式设置 VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db"
+        )
+        sys.exit(2)
+
+
 if __name__ == "__main__":
     if "--reset" not in sys.argv:
         print("本脚本会清空 dev.db 全部数据！确认请追加 --reset 参数执行。")
         sys.exit(1)
+    _assert_dev_database()
     asyncio.run(reset_and_seed())

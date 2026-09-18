@@ -8,6 +8,8 @@
 __pycache__/
 *.py[co]
 .venv/
+# venv 切换/回退时的备份目录（如 .venv.old310），避免误入库
+.venv.*/
 .pytest_cache/
 
 # ---------- 数据库（本地 SQLite 及备份；dev.db 无路径前缀，覆盖各目录同名文件） ----------

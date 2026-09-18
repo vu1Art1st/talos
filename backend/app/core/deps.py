@@ -81,12 +81,23 @@ async def get_pat_user(
     return pat.user
 
 
+def _has_perm(user: User, perm: str) -> bool:
+    """角色权限包含 perm 或通配符 * 即放行（站内与开放 API 共用同一判定）。"""
+    perms = user_permissions(user)
+    return "*" in perms or perm in perms
+
+
+def _has_any_perm(user: User, required: tuple[str, ...]) -> bool:
+    """满足任一权限（或通配符 *）即放行。"""
+    perms = user_permissions(user)
+    return "*" in perms or bool(perms & set(required))
+
+
 def require_perm(perm: str):
     """权限校验依赖工厂：角色权限包含 perm 或通配符 * 时放行。"""
 
     async def checker(user: User = Depends(get_current_user)) -> User:
-        perms = user_permissions(user)
-        if "*" in perms or perm in perms:
+        if _has_perm(user, perm):
             return user
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"缺少权限: {perm}")
 
@@ -101,8 +112,7 @@ def require_pat_perm(perm: str):
     """
 
     async def checker(user: User = Depends(get_pat_user)) -> User:
-        perms = user_permissions(user)
-        if "*" in perms or perm in perms:
+        if _has_perm(user, perm):
             return user
         raise HTTPException(
             status.HTTP_403_FORBIDDEN, f"当前令牌所属账号缺少权限: {perm}",
@@ -115,8 +125,7 @@ def require_any_perm(*required: str):
     """权限校验依赖工厂：满足任一权限（或通配符 *）即放行。"""
 
     async def checker(user: User = Depends(get_current_user)) -> User:
-        perms = user_permissions(user)
-        if "*" in perms or perms & set(required):
+        if _has_any_perm(user, required):
             return user
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"缺少权限: {' / '.join(required)}")
 

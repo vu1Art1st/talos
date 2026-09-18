@@ -22,9 +22,15 @@ BACKEND_HEALTH_PATH="/api/v1/meta"
 # 前端健康检查路径：Vite 根路径返回 200
 FRONTEND_HEALTH_PATH="/"
 
-for cmd in python3 node pnpm curl; do
+for cmd in node pnpm curl; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "[dev] 未找到 $cmd，请先安装后重试"; exit 1; }
 done
+
+# 后端解释器：优先 uv（可自行管理并下载 Python 3.12，与容器 python:3.12-slim 对齐），否则需系统 python3
+if ! command -v uv >/dev/null 2>&1 && ! command -v python3 >/dev/null 2>&1; then
+  echo "[dev] 需要 uv（推荐，https://docs.astral.sh/uv/）或 python3 之一"
+  exit 1
+fi
 
 # ---------- 端口检测工具（兼容 Linux / macOS） ----------
 
@@ -132,9 +138,16 @@ check_port_free "$FRONTEND_PORT" "前端"
 echo "[dev] 端口检查通过：$BACKEND_PORT / $FRONTEND_PORT 均空闲。"
 
 if [ ! -x "$BACKEND/.venv/bin/python" ]; then
-  echo "[dev] 初始化后端虚拟环境并安装依赖..."
-  python3 -m venv "$BACKEND/.venv"
-  "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements-dev.txt"
+  echo "[dev] 初始化后端虚拟环境（Python 3.12）并安装依赖..."
+  if command -v uv >/dev/null 2>&1; then
+    # uv 可直接指定并用自身托管的 3.12 解释器，避免落到系统低版本 python
+    uv venv "$BACKEND/.venv" --python 3.12
+    uv pip install --python "$BACKEND/.venv/bin/python" -r "$BACKEND/requirements-dev.txt"
+  else
+    echo "[dev] 未检测到 uv，回退 python3 -m venv（请确保为 Python 3.12）"
+    python3 -m venv "$BACKEND/.venv"
+    "$BACKEND/.venv/bin/pip" install -r "$BACKEND/requirements-dev.txt"
+  fi
 fi
 
 if [ ! -d "$FRONTEND/node_modules" ]; then

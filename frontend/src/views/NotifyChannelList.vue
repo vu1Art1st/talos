@@ -5,7 +5,7 @@
         <span class="text-sm font-semibold">通知渠道</span>
         <span class="text-xs text-gray-400">漏洞创建 / 工单认领 / 状态流转 / 复测完成事件推送到企业微信、钉钉或邮箱</span>
         <div class="flex-1" />
-        <el-button type="primary" class="btn-min" @click="openDialog()">
+        <el-button type="primary" class="btn-min" @click="openFormDialog()">
           <el-icon class="mr-1"><Plus /></el-icon>新建渠道
         </el-button>
       </div>
@@ -15,7 +15,7 @@
       <el-table-column prop="name" label="名称" min-width="140" />
       <el-table-column label="类型" width="110">
         <template #default="{ row }">
-          <span class="ktag">{{ typeName(row.type) }}</span>
+          <span class="ktag">{{ channelTypeName(row.type) }}</span>
         </template>
       </el-table-column>
       <el-table-column label="订阅事件" min-width="220">
@@ -41,13 +41,13 @@
       </el-table-column>
       <el-table-column label="启用" width="80">
         <template #default="{ row }">
-          <el-switch :model-value="row.is_active" @change="(v: any) => toggleActive(row, v)" />
+          <el-switch :model-value="row.is_active" @change="(v: string | number | boolean) => toggleActive(row, v)" />
         </template>
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="testSend(row)">测试发送</el-button>
-          <el-button size="small" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该渠道？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -106,13 +106,15 @@ import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'
+import type { NotifyChannel } from '../types'
 
 const auth = useAuthStore()
 const { items, total, page, size, loading, load, onSizeChange } = useListPage('/notify-channels')
 
-const channelTypes = computed<Record<string, string>>(() => (auth.meta as any)?.notify_channel_types ?? {})
-const eventDict = computed<Record<string, string>>(() => (auth.meta as any)?.notify_events ?? {})
-const typeName = (t: string) => channelTypes.value[t] ?? t
+// 异构 meta 边界内取用时收窄为「码 → 名称」字典
+const channelTypes = computed<Record<string, string>>(() => auth.meta?.notify_channel_types ?? {})
+const eventDict = computed<Record<string, string>>(() => auth.meta?.notify_events ?? {})
+const channelTypeName = (t: string) => channelTypes.value[t] ?? t
 const eventName = (e: string) => eventDict.value[e] ?? e
 const typeColor = (t: string) =>
   ({ wecom: STAT_CARD_COLORS.blue, dingtalk: STAT_CARD_COLORS.orange, email: STAT_CARD_COLORS.green })[t] ?? STAT_CARD_COLORS.gray
@@ -125,7 +127,7 @@ const webhookUrl = ref('')
 const recipientsText = ref('')
 const form = reactive({ name: '', type: 'wecom', events: [] as string[], is_active: true })
 
-function openDialog(row?: any) {
+function openFormDialog(row?: NotifyChannel) {
   editing.value = !!row
   editId.value = row?.id ?? null
   form.name = row?.name ?? ''
@@ -139,11 +141,12 @@ function openDialog(row?: any) {
 
 async function save() {
   if (!form.name.trim()) return ElMessage.warning('请填写渠道名称')
-  const config =
+  // 两类渠道共用同一变量承载配置，故显式声明可选字段（原先的联合类型无法安全取用另一分支字段）
+  const config: { recipients?: string[]; url?: string } =
     form.type === 'email'
       ? { recipients: recipientsText.value.split('\n').map((s) => s.trim()).filter(Boolean) }
       : { url: webhookUrl.value.trim() }
-  if (form.type === 'email' && !config.recipients.length) return ElMessage.warning('请至少填写一个收件邮箱')
+  if (form.type === 'email' && !config.recipients?.length) return ElMessage.warning('请至少填写一个收件邮箱')
   if (form.type !== 'email' && !config.url) return ElMessage.warning('请填写 webhook 地址')
   if (!form.events.length) return ElMessage.warning('请至少订阅一个事件')
   saving.value = true
@@ -159,16 +162,18 @@ async function save() {
   }
 }
 
-async function toggleActive(row: any, value: boolean) {
+// value 声明为 el-switch 的 change 载荷联合类型；本处未设 active-value，运行时恒为 boolean，
+// 故 `!!value` 与直接取值等价，同时保证提交给后端的是布尔
+async function toggleActive(row: NotifyChannel, value: string | number | boolean) {
   await client.put(`/notify-channels/${row.id}`, {
-    name: row.name, type: row.type, config: row.config, events: row.events, is_active: value,
+    name: row.name, type: row.type, config: row.config, events: row.events, is_active: !!value,
   })
   ElMessage.success(value ? '已启用' : '已停用')
   await load()
 }
 
-async function testSend(row: any) {
-  const { data } = await client.post(`/notify-channels/${row.id}/test`)
+async function testSend(row: NotifyChannel) {
+  const { data } = await client.post<{ msg: string }>(`/notify-channels/${row.id}/test`)
   ElMessage.success(data.msg)
 }
 

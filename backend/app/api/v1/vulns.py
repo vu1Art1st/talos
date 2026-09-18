@@ -129,6 +129,42 @@ async def _clean_vul_references(session: AsyncSession, vul_ids: list[int]) -> No
     )
 
 
+def _append_in_or_eq(cond: list, col, multi: list | None, single) -> None:
+    """添加「多选 IN / 单选等值」条件：多选非空优先，否则 single 非 None 时按其等值筛选。
+
+    漏洞筛选区的每个维度都成对提供「单选 + 多选」参数，此处统一判定口径，
+    避免各维度各写一套（原实现中文本维度用真值判断、id 维度用 is not None，易混淆）。
+    """
+    if multi:
+        cond.append(col.in_(multi))
+    elif single is not None:
+        cond.append(col == single)
+
+
+def _append_asset_in_or_eq(cond: list, field, multi: list | None, single) -> None:
+    """经「漏洞任一关联资产」添加筛选条件（部门 / 系统类型 / 资产ID 共用）。"""
+    if multi:
+        cond.append(Vul.assets.any(field.in_(multi)))
+    elif single is not None:
+        cond.append(Vul.assets.any(field == single))
+
+
+def _append_test_type(cond: list, test_types: list[str] | None, test_type: str) -> None:
+    """按关联测试计划的「测试类型」筛选（多选优先，单选兜底）。"""
+    if test_types:
+        cond.append(
+            Vul.testing_plan_id.in_(
+                select(TestingPlan.id).where(TestingPlan.test_type.in_(test_types))
+            )
+        )
+    elif test_type:
+        cond.append(
+            Vul.testing_plan_id.in_(
+                select(TestingPlan.id).where(TestingPlan.test_type == test_type)
+            )
+        )
+
+
 def _build_vuln_conditions(
     *,
     search: str = "",
@@ -164,7 +200,7 @@ def _build_vuln_conditions(
     - submit_time_from / submit_time_to：按漏洞录入时间做闭区间范围筛选。
     各单值参数保留以兼容旧调用，列表/多选参数非空时优先使用多选。
     """
-    cond = []
+    cond: list = []
     if search:
         # 关键词同时匹配漏洞标题 / 受影响 URL / 关联资产（系统）名称
         cond.append(
@@ -172,44 +208,18 @@ def _build_vuln_conditions(
             | Vul.affected_url.ilike(f"%{search}%")
             | Vul.assets.any(Asset.name.ilike(f"%{search}%"))
         )
-    if levels:
-        cond.append(Vul.level.in_(levels))
-    elif level is not None:
-        cond.append(Vul.level == level)
-    if statuses:
-        cond.append(Vul.status.in_(statuses))
-    elif status is not None:
-        cond.append(Vul.status == status)
-    if vul_types:
-        cond.append(Vul.vul_type.in_(vul_types))
-    elif vul_type is not None:
-        cond.append(Vul.vul_type == vul_type)
-    if asset_ids:
-        cond.append(Vul.assets.any(Asset.id.in_(asset_ids)))
-    elif asset_id is not None:
-        cond.append(Vul.assets.any(Asset.id == asset_id))
-    if departments:
-        cond.append(Vul.assets.any(Asset.department.in_(departments)))
-    elif department:
-        cond.append(Vul.assets.any(Asset.department == department))
-    if system_types:
-        cond.append(Vul.assets.any(Asset.system_type.in_(system_types)))
-    elif system_type:
-        cond.append(Vul.assets.any(Asset.system_type == system_type))
+    # 文本维度的空串等价「未提供」，统一归一为 None，使各维度共用同一判定口径
+    dept = department or None
+    stype = system_type or None
+    _append_in_or_eq(cond, Vul.level, levels, level)
+    _append_in_or_eq(cond, Vul.status, statuses, status)
+    _append_in_or_eq(cond, Vul.vul_type, vul_types, vul_type)
+    _append_asset_in_or_eq(cond, Asset.id, asset_ids, asset_id)
+    _append_asset_in_or_eq(cond, Asset.department, departments, dept)
+    _append_asset_in_or_eq(cond, Asset.system_type, system_types, stype)
     if testing_plan_id is not None:
         cond.append(Vul.testing_plan_id == testing_plan_id)
-    if test_types:
-        cond.append(
-            Vul.testing_plan_id.in_(
-                select(TestingPlan.id).where(TestingPlan.test_type.in_(test_types))
-            )
-        )
-    elif test_type:
-        cond.append(
-            Vul.testing_plan_id.in_(
-                select(TestingPlan.id).where(TestingPlan.test_type == test_type)
-            )
-        )
+    _append_test_type(cond, test_types, test_type)
     if submit_time_from is not None:
         cond.append(Vul.submit_time >= submit_time_from)
     if submit_time_to is not None:
@@ -290,6 +300,196 @@ FIX_STATUS_DEF = [
 ]
 
 
+async def _count_by(session: AsyncSession, cond: list, column) -> list:
+    """按单列分组计数（用于等级 / 状态等 Vul 自身字段）。"""
+    return (
+        await session.execute(
+            select(column, func.count(Vul.id)).where(*cond).group_by(column)
+        )
+    ).all()
+
+
+async def _count_by_asset(session: AsyncSession, cond: list, *columns) -> list:
+    """按关联资产字段分组计数（漏洞-资产多对多 JOIN）。
+
+    口径与统计页一致：无关联资产的漏洞不计入分组；同一漏洞关联多资产时按关联关系统计。
+    """
+    return (
+        await session.execute(
+            select(*columns, func.count(Vul.id))
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(*columns)
+        )
+    ).all()
+
+
+def _agg_fix_status(status_rows: list) -> list[dict]:
+    """修复情况归并（应用层聚合，避免多次分组查询）。"""
+    fix_agg: dict[str, int] = {}
+    for s, c in status_rows:
+        if s == VulStatus.FIXED:
+            key = "fixed"
+        elif s in (VulStatus.FIXING, VulStatus.RETESTING):
+            key = "fixing"
+        elif s == VulStatus.UNFIXED:
+            key = "unfixed"
+        else:
+            key = "other"
+        fix_agg[key] = fix_agg.get(key, 0) + c
+    return [{"key": k, "name": n, "count": fix_agg.get(k, 0)} for k, n in FIX_STATUS_DEF]
+
+
+async def _vuln_asset_stats(session: AsyncSession, cond: list) -> dict:
+    """按关联资产的分组统计：部门 / 系统类型 / 具体资产（均按计数倒序）。"""
+    dept_rows = await _count_by_asset(session, cond, Asset.department)
+    st_rows = await _count_by_asset(session, cond, Asset.system_type)
+    asset_rows = await _count_by_asset(session, cond, Asset.id, Asset.name)
+    return {
+        "by_department": [
+            {"department": d or "未填写", "count": c}
+            for d, c in sorted(dept_rows, key=lambda x: x[1], reverse=True)
+        ],
+        "by_system_type": [
+            {"system_type": st or "未填写", "count": c}
+            for st, c in sorted(st_rows, key=lambda x: x[1], reverse=True)
+        ],
+        "by_asset": [
+            {"asset_id": aid, "name": name or "未命名", "count": c}
+            for aid, name, c in sorted(asset_rows, key=lambda x: x[2], reverse=True)
+        ],
+    }
+
+
+async def _vuln_group_stats(session: AsyncSession, cond: list) -> dict:
+    """漏洞分组统计：等级 / 状态 / 修复归并 / 部门 / 系统类型 / 资产 / 测试类型。
+
+    测试类型走 LEFT JOIN 测试计划（未关联计划的漏洞计入「未关联」）。
+    """
+    level_rows = await _count_by(session, cond, Vul.level)
+    status_rows = await _count_by(session, cond, Vul.status)
+    tt_rows = (
+        await session.execute(
+            select(TestingPlan.test_type, func.count(Vul.id))
+            .select_from(Vul)
+            .outerjoin(TestingPlan, TestingPlan.id == Vul.testing_plan_id)
+            .where(*cond)
+            .group_by(TestingPlan.test_type)
+        )
+    ).all()
+    return {
+        "by_level": [
+            {"level": lv, "name": VUL_LEVEL.get(lv, str(lv)), "count": c}
+            for lv, c in sorted(level_rows)
+        ],
+        "by_status": [
+            {"status": s, "name": VUL_STATUS.get(s, str(s)), "count": c}
+            for s, c in sorted(status_rows)
+        ],
+        "by_fix_status": _agg_fix_status(status_rows),
+        "by_test_type": [
+            {"test_type": t or "未关联", "count": c}
+            for t, c in sorted(tt_rows, key=lambda x: x[1], reverse=True)
+        ],
+        **(await _vuln_asset_stats(session, cond)),
+    }
+
+
+async def _asset_department_names(session: AsyncSession) -> list[str]:
+    """资产部门去重列表（供「部门+系统组合统计」工具选择部门）。"""
+    dept_names = (
+        await session.execute(
+            select(Asset.department).where(Asset.department.isnot(None)).distinct()
+        )
+    ).scalars().all()
+    return sorted(d for d in dept_names if d.strip())
+
+
+async def _pivot_raw_rows(session: AsyncSession, cond: list) -> list:
+    """交叉表原始粒度：每个 (部门, 资产ID, 资产名, 子系统, 系统类型, 等级, 修复状态) 的漏洞数。"""
+    from sqlalchemy import case
+
+    fix_case = case(
+        (Vul.status == VulStatus.FIXED, "fixed"),
+        (Vul.status.in_((VulStatus.FIXING, VulStatus.RETESTING)), "fixing"),
+        (Vul.status == VulStatus.UNFIXED, "unfixed"),
+        else_="other",
+    ).label("fix_key")
+    return (
+        await session.execute(
+            select(
+                Asset.department,
+                Asset.id.label("asset_id"),
+                Asset.name.label("asset_name"),
+                Asset.sub_system,
+                Asset.system_type,
+                Vul.level,
+                fix_case,
+                func.count(Vul.id).label("cnt"),
+            )
+            .select_from(Vul)
+            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
+            .join(Asset, Asset.id == vuln_assets.c.asset_id)
+            .where(*cond)
+            .group_by(
+                Asset.department, Asset.id, Asset.name,
+                Asset.sub_system, Asset.system_type, Vul.level,
+                fix_case,
+            )
+            .order_by(Asset.department, Asset.name, Vul.level)
+        )
+    ).all()
+
+
+def _new_pivot_row(department: str | None, aid: int, aname: str | None,
+                   sub: str | None, stype: str | None, levels: list[int]) -> dict:
+    """交叉表单行骨架（清零点位表 + 修复率占位）。"""
+    return {
+        "department": department or "未填写",
+        "asset_id": aid,
+        # 实际测试为子系统时，系统列展示「系统-子系统」
+        "asset_name": (f"{aname}-{sub}" if aname and sub else (aname or "未命名")),
+        "system_type": stype or "未填写",
+        "total": 0,
+        "fixed_total": 0,
+        "levels": {lv: {"count": 0, "fixed": 0, "unfixed": 0} for lv in levels},
+    }
+
+
+def _build_pivot(cond_rows: list, levels: list[int]) -> dict:
+    """把原始粒度聚合成前端可消费的透视表（含合计行与每行修复率）。"""
+    row_map: dict[int, dict] = {}
+    for d, aid, aname, sub, stype, lv, fk, cnt in cond_rows:
+        if aid not in row_map:
+            row_map[aid] = _new_pivot_row(d, aid, aname, sub, stype, levels)
+        r = row_map[aid]
+        r["total"] += cnt
+        if fk == "fixed":
+            r["fixed_total"] += cnt
+            r["levels"][lv]["fixed"] += cnt
+        elif fk == "unfixed":
+            r["levels"][lv]["unfixed"] += cnt
+        r["levels"][lv]["count"] += cnt
+
+    # 按 部门 → 资产名 排序，并计算每行修复率
+    rows = sorted(row_map.values(), key=lambda x: (x["department"], x["asset_name"]))
+    for r in rows:
+        r["fix_rate"] = round(r["fixed_total"] / r["total"] * 100) if r["total"] else 0
+
+    totals = {"total": 0, "fixed_total": 0,
+              "levels": {lv: {"count": 0, "fixed": 0, "unfixed": 0} for lv in levels}}
+    for r in rows:
+        totals["total"] += r["total"]
+        totals["fixed_total"] += r["fixed_total"]
+        for lv in levels:
+            for k in ("count", "fixed", "unfixed"):
+                totals["levels"][lv][k] += r["levels"][lv][k]
+    totals["fix_rate"] = round(totals["fixed_total"] / totals["total"] * 100) if totals["total"] else 0
+    return {"rows": rows, "totals": totals}
+
+
 @router.get("/stats")
 async def vuln_stats(
     search: str = "",
@@ -338,202 +538,17 @@ async def vuln_stats(
 
     total = (await session.execute(select(func.count(Vul.id)).where(*cond))).scalar_one()
 
-    level_rows = (
-        await session.execute(
-            select(Vul.level, func.count(Vul.id)).where(*cond).group_by(Vul.level)
-        )
-    ).all()
-    by_level = [
-        {"level": lv, "name": VUL_LEVEL.get(lv, str(lv)), "count": c}
-        for lv, c in sorted(level_rows)
-    ]
-
-    status_rows = (
-        await session.execute(
-            select(Vul.status, func.count(Vul.id)).where(*cond).group_by(Vul.status)
-        )
-    ).all()
-    by_status = [
-        {"status": s, "name": VUL_STATUS.get(s, str(s)), "count": c}
-        for s, c in sorted(status_rows)
-    ]
-
-    # 修复情况归并（应用层聚合，避免多次分组查询）
-    fix_agg: dict[str, int] = {}
-    for s, c in status_rows:
-        if s == VulStatus.FIXED:
-            key = "fixed"
-        elif s in (VulStatus.FIXING, VulStatus.RETESTING):
-            key = "fixing"
-        elif s == VulStatus.UNFIXED:
-            key = "unfixed"
-        else:
-            key = "other"
-        fix_agg[key] = fix_agg.get(key, 0) + c
-    by_fix_status = [
-        {"key": k, "name": n, "count": fix_agg.get(k, 0)} for k, n in FIX_STATUS_DEF
-    ]
-
-    # 按关联资产部门 / 系统类型分组统计（多对多 JOIN，无关联资产的漏洞不计入分组）
-    dept_rows = (
-        await session.execute(
-            select(Asset.department, func.count(Vul.id))
-            .select_from(Vul)
-            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
-            .join(Asset, Asset.id == vuln_assets.c.asset_id)
-            .where(*cond)
-            .group_by(Asset.department)
-        )
-    ).all()
-    by_department = [
-        {"department": d or "未填写", "count": c}
-        for d, c in sorted(dept_rows, key=lambda x: x[1], reverse=True)
-    ]
-
-    st_rows = (
-        await session.execute(
-            select(Asset.system_type, func.count(Vul.id))
-            .select_from(Vul)
-            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
-            .join(Asset, Asset.id == vuln_assets.c.asset_id)
-            .where(*cond)
-            .group_by(Asset.system_type)
-        )
-    ).all()
-    by_system_type = [
-        {"system_type": st or "未填写", "count": c}
-        for st, c in sorted(st_rows, key=lambda x: x[1], reverse=True)
-    ]
-
-    # 按具体资产/系统分组统计（多对多 JOIN，与部门/系统类型同口径，无关联资产的漏洞不计入）
-    asset_rows = (
-        await session.execute(
-            select(Asset.id, Asset.name, func.count(Vul.id))
-            .select_from(Vul)
-            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
-            .join(Asset, Asset.id == vuln_assets.c.asset_id)
-            .where(*cond)
-            .group_by(Asset.id, Asset.name)
-        )
-    ).all()
-    by_asset = [
-        {"asset_id": aid, "name": name or "未命名", "count": c}
-        for aid, name, c in sorted(asset_rows, key=lambda x: x[2], reverse=True)
-    ]
-
-    # 资产归属部门去重列表（供「部门+系统组合统计」工具选择部门，覆盖所有资产部门）
-    dept_names = (
-        await session.execute(
-            select(Asset.department).where(Asset.department.isnot(None)).distinct()
-        )
-    ).scalars().all()
-    departments = sorted(d for d in dept_names if d.strip())
-
-    # 按测试计划测试类型分组统计（LEFT JOIN，未关联计划的漏洞计入「未关联」）
-    tt_rows = (
-        await session.execute(
-            select(TestingPlan.test_type, func.count(Vul.id))
-            .select_from(Vul)
-            .outerjoin(TestingPlan, TestingPlan.id == Vul.testing_plan_id)
-            .where(*cond)
-            .group_by(TestingPlan.test_type)
-        )
-    ).all()
-    by_test_type = [
-        {"test_type": t or "未关联", "count": c}
-        for t, c in sorted(tt_rows, key=lambda x: x[1], reverse=True)
-    ]
-
-    # ---- 交叉表（pivot）：按 部门→系统 分行，列=等级×修复状态 ----
-    # 查询原始粒度：每个 (部门, 资产ID, 资产名, 系统类型, 等级, 修复状态) 的漏洞数
-    from sqlalchemy import case, literal_column
-
-    _fix_case = case(
-        (Vul.status == VulStatus.FIXED, "fixed"),
-        (Vul.status.in_((VulStatus.FIXING, VulStatus.RETESTING)), "fixing"),
-        (Vul.status == VulStatus.UNFIXED, "unfixed"),
-        else_="other",
-    ).label("fix_key")
-
-    pivot_raw = (
-        await session.execute(
-            select(
-                Asset.department,
-                Asset.id.label("asset_id"),
-                Asset.name.label("asset_name"),
-                Asset.sub_system,
-                Asset.system_type,
-                Vul.level,
-                _fix_case,
-                func.count(Vul.id).label("cnt"),
-            )
-            .select_from(Vul)
-            .join(vuln_assets, vuln_assets.c.vul_id == Vul.id)
-            .join(Asset, Asset.id == vuln_assets.c.asset_id)
-            .where(*cond)
-            .group_by(
-                Asset.department, Asset.id, Asset.name,
-                Asset.sub_system, Asset.system_type, Vul.level,
-                _fix_case,
-            )
-            .order_by(Asset.department, Asset.name, Vul.level)
-        )
-    ).all()
-
-    # 聚合为前端可消费的透视表行
-    _LEVELS = [10, 20, 30, 40]
-    _row_map: dict[int, dict] = {}  # asset_id → row dict
-    for d, aid, aname, sub, stype, lv, fk, cnt in pivot_raw:
-        if aid not in _row_map:
-            _row_map[aid] = {
-                "department": d or "未填写",
-                "asset_id": aid,
-                # 实际测试为子系统时，系统列展示「系统-子系统」
-                "asset_name": (f"{aname}-{sub}" if aname and sub else (aname or "未命名")),
-                "system_type": stype or "未填写",
-                "total": 0,
-                "fixed_total": 0,
-                "levels": {lv2: {"count": 0, "fixed": 0, "unfixed": 0} for lv2 in _LEVELS},
-            }
-        r = _row_map[aid]
-        r["total"] += cnt
-        if fk == "fixed":
-            r["fixed_total"] += cnt
-            r["levels"][lv]["fixed"] += cnt
-        elif fk == "unfixed":
-            r["levels"][lv]["unfixed"] += cnt
-        r["levels"][lv]["count"] += cnt
-
-    # 按 部门 → 资产名 排序
-    pivot_rows = sorted(_row_map.values(), key=lambda x: (x["department"], x["asset_name"]))
-    # 计算每行修复率
-    for r in pivot_rows:
-        r["fix_rate"] = round(r["fixed_total"] / r["total"] * 100) if r["total"] else 0
-
-    # 合计行
-    totals = {"total": 0, "fixed_total": 0, "levels": {lv: {"count": 0, "fixed": 0, "unfixed": 0} for lv in _LEVELS}}
-    for r in pivot_rows:
-        totals["total"] += r["total"]
-        totals["fixed_total"] += r["fixed_total"]
-        for lv in _LEVELS:
-            for k in ("count", "fixed", "unfixed"):
-                totals["levels"][lv][k] += r["levels"][lv][k]
-    totals["fix_rate"] = round(totals["fixed_total"] / totals["total"] * 100) if totals["total"] else 0
+    # 分组统计统一由助手查询：三处「漏洞-资产多对多 JOIN」在此收敛为同一实现
+    groups = await _vuln_group_stats(session, cond)
+    departments = await _asset_department_names(session)
+    # 交叉表（pivot）：按 部门→系统 分行，列=等级×修复状态
+    pivot = _build_pivot(await _pivot_raw_rows(session, cond), [10, 20, 30, 40])
 
     return {
         "total": total,
-        "by_level": by_level,
-        "by_status": by_status,
-        "by_fix_status": by_fix_status,
-        "by_department": by_department,
-        "by_asset": by_asset,
+        **groups,
         "departments": departments,
-        "by_system_type": by_system_type,
-        "by_test_type": by_test_type,
-        "pivot": {
-            "rows": pivot_rows,
-            "totals": totals,
-        },
+        "pivot": pivot,
     }
 
 

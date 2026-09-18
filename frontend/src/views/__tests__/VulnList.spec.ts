@@ -4,6 +4,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 
+import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+
 // mock 路由：视图仅在跳转详情时使用 router。组件经 useAuthStore → stores/auth.ts → router/index.ts
 // 间接依赖 createRouter/createWebHistory，故用 importOriginal 保留真实导出、仅覆盖 hook。
 vi.mock('vue-router', async (importOriginal) => {
@@ -15,15 +17,7 @@ vi.mock('vue-router', async (importOriginal) => {
 })
 
 // mock axios client：/meta 下发最小字典，/vulns 列表与统计返回空数据
-const getMock = vi.fn()
-vi.mock('../../api/client', () => ({
-  default: {
-    get: (...args: unknown[]) => getMock(...args),
-    post: vi.fn(),
-    put: vi.fn(),
-    delete: vi.fn(),
-  },
-}))
+vi.mock('../../api/client', () => clientMockFactory())
 
 import VulnList from '../VulnList.vue'
 

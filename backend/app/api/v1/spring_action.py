@@ -1,6 +1,5 @@
 """春耕行动 API：记录 CRUD 与漏洞关联，统一 special:manage 权限。"""
-import uuid
-from pathlib import Path
+import logging
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
@@ -22,6 +21,9 @@ from app.schemas import (
 )
 from app.services import vuln_service
 from app.services.docx_parser import parse_any_docx
+from app.services.upload_store import save_upload
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["专项管理"])
 
@@ -68,34 +70,32 @@ async def upload_spring_report(
     兼容平台报告格式与固定导入模板格式（parse_any_docx 自动识别），
     漏洞草稿不落库，由前端勾选后随记录保存时创建并关联。
     """
-    if not (file.filename or "").lower().endswith(".docx"):
-        raise HTTPException(400, "仅支持 .docx 格式的 Word 文档")
-    data = await file.read()
-    if not data:
-        raise HTTPException(400, "文件内容为空")
-    if len(data) > MAX_REPORT_FILE_BYTES:
-        raise HTTPException(400, "原始报告文件大小不能超过 50MB")
-    if data[:4] != b"PK\x03\x04":  # .docx 本质是 ZIP 包（与导入模块同一魔术字节校验）
-        raise HTTPException(400, "文件不是有效的 .docx 文档")
-    name = f"{uuid.uuid4().hex}.docx"
-    rel_path = Path("uploads", "spring_report") / name
-    path = settings.storage_sub("uploads", "spring_report") / name
-    path.write_bytes(data)
+    original_name, rel_path, size = await save_upload(
+        file,
+        "spring_report",
+        max_bytes=MAX_REPORT_FILE_BYTES,
+        require_ext=".docx",
+        magic=b"PK\x03\x04",  # .docx 本质是 ZIP 包（与导入模块同一魔术字节校验）
+        magic_error="文件不是有效的 .docx 文档",
+        size_error="原始报告文件大小不能超过 50MB",
+    )
     try:
         doc_kind, meta, records = parse_any_docx(
-            str(path),
+            str(settings.storage_path / rel_path),
             str(settings.storage_sub("uploads", "images")),
             "/storage/uploads/images",
-            filename=file.filename or "",
+            filename=original_name,
         )
-    except Exception:
-        _remove_report_file(str(rel_path))
-        raise HTTPException(400, "解析失败，请确认上传的是有效的 Word 文档")
+    except Exception as exc:
+        # 对外统一 400 文案，同时保留堆栈，便于区分「用户文件不可解析」与「服务端缺陷」（审计 C-3）
+        logger.exception("春耕行动报告解析失败 file=%s", original_name)
+        _remove_report_file(rel_path)
+        raise HTTPException(400, "解析失败，请确认上传的是有效的 Word 文档") from exc
     meta = meta or {}  # 固定模板格式无封面元信息（system_name/报告日期为空）
     return SpringReportParseOut(
-        name=file.filename or name,
-        path=str(rel_path).replace("\\", "/"),
-        size=len(data),
+        name=original_name,
+        path=rel_path,
+        size=size,
         system_name=meta.get("system_name", ""),
         report_date=meta.get("report_date", ""),
         vuls=[
@@ -169,8 +169,9 @@ def _remove_report_file(rel_path: str) -> None:
     """删除原始报告附件（尽力而为，文件缺失时忽略）。"""
     try:
         (settings.storage_path / rel_path).unlink(missing_ok=True)
-    except OSError:
-        pass
+    except OSError as exc:
+        # 尽力而为：文件被占用/无权限时仅记录，不阻断删除流程
+        logger.warning("删除春耕行动报告附件失败 path=%s: %s", rel_path, exc)
 
 
 @router.delete("/spring-actions/{row_id}")

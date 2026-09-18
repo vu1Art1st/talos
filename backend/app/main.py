@@ -6,6 +6,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import DataError
 
 from app.api.v1 import api_router
 from app.core.config import settings
@@ -63,7 +64,27 @@ def create_app() -> FastAPI:
     @app.exception_handler(RequestValidationError)
     async def _validation_error_handler(request: Request, exc: RequestValidationError):
         logger.warning("请求参数校验失败 %s %s: %s", request.method, request.url.path, exc.errors())
-        return JSONResponse(status_code=422, content={"detail": "请求参数校验失败，请检查填写内容"})
+        # 自有校验函数（schemas 层的 ValueError，如影响URL 条数/长度上限）应把中文文案透出，
+        # 让用户知道具体哪里不合规；其余（类型/必填等）仍用通用提示，避免暴露内部结构。
+        detail = "请求参数校验失败，请检查填写内容"
+        for err in exc.errors():
+            msg = str(err.get("msg", ""))
+            if err.get("type") == "value_error" and msg.startswith("Value error, "):
+                detail = msg.removeprefix("Value error, ")
+                break
+        return JSONResponse(status_code=422, content={"detail": detail})
+
+    @app.exception_handler(DataError)
+    async def _data_error_handler(request: Request, exc: DataError):
+        # 数据长度/数值越界等数据库层拒绝（如 SQLSTATE 22001 值超长）：属可预期的用户输入问题，
+        # 归为 400 并给出可读文案，不再落入兜底 500（前端 500 会整页跳错误页并丢失表单内容）。
+        logger.warning(
+            "数据写入被数据库拒绝 %s %s: %s", request.method, request.url.path, exc.orig
+        )
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "提交的数据超出允许范围，请检查各字段长度或数值后重试"},
+        )
 
     @app.exception_handler(Exception)
     async def _unhandled_error_handler(request: Request, exc: Exception):

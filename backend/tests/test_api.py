@@ -2236,7 +2236,6 @@ async def test_delete_retest_report_rolls_back_round(client: AsyncClient, auth: 
     # 再次发起复测 → 重新开第 1 轮（进行中）
     resp = await client.post(f"/api/v1/reports/{src_report}/retest", headers=auth)
     assert resp.status_code == 200, resp.text
-    r2_id = resp.json()["id"]
     plan = await _get_plan(client, auth, plan_id)
     assert plan["retest_round_count"] == 1
     assert plan["retest_rounds"][0]["done_time"] is None
@@ -3164,7 +3163,8 @@ async def test_knowledge_batch_import_and_delete(client: AsyncClient, auth: dict
     resp = await client.get("/api/v1/knowledge", headers=auth)
     batch_rows = [e for e in resp.json() if e["vulnerability_name"].startswith("批量-")]
     assert len(batch_rows) == 4
-    assert next(e for e in batch_rows if e["vulnerability_name"] == "批量-SSRF")["description_html"] == "<p>SSRF描述V2</p>"
+    ssrf_row = next(e for e in batch_rows if e["vulnerability_name"] == "批量-SSRF")
+    assert ssrf_row["description_html"] == "<p>SSRF描述V2</p>"
 
     # 批内重名 / 字典码非法：整批拒绝
     resp = await client.post("/api/v1/knowledge/batch-import", headers=auth, json={"items": [
@@ -4278,3 +4278,130 @@ async def test_global_search(client: AsyncClient, auth: dict):
     body = resp.json()
     assert any(a["name"] == "搜索目标系统Alpha" for a in body["assets"])
     assert body["vulns"] == []
+
+
+def _many_urls(count: int, prefix: str = "https://many.example.com/api") -> list[str]:
+    return [f"{prefix}/{i}" for i in range(count)]
+
+
+async def test_affected_url_multi_value_within_limits(client: AsyncClient, auth: dict):
+    """回归：影响URL 录入 20/50/100 条（总远超前 varchar(512)）不再 500，且读回一致。
+
+    旧实现该列是 varchar(512)，PostgreSQL 在 flush 时抛 StringDataRightTruncation →
+    兜底 500；SQLite 不校验长度，故此处用「写入成功 + 读回一致」固化行为。
+    """
+    # 20 条：单漏洞录入
+    urls20 = _many_urls(20)
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "多URL回归20", "level": 20, "affected_url": "\n".join(urls20)},
+    )
+    assert resp.status_code == 200, resp.text
+    vul_id = resp.json()["id"]
+    assert resp.json()["affected_url"] == "\n".join(urls20)
+
+    resp = await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["affected_url"] == "\n".join(urls20)
+
+    # 50 条：批量提交入口
+    urls50 = _many_urls(50)
+    resp = await client.post(
+        "/api/v1/vulns/batch", headers=auth,
+        json={"asset_ids": [], "vulns": [
+            {"title": "多URL回归50", "level": 30, "affected_url": "\n".join(urls50)},
+        ]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()[0]["affected_url"] == "\n".join(urls50)
+
+    # 100 条（上限）：编辑入口
+    urls100 = _many_urls(100)
+    resp = await client.put(
+        f"/api/v1/vulns/{vul_id}", headers=auth,
+        json={"title": "多URL回归20", "level": 20, "affected_url": "\n".join(urls100)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["affected_url"] == "\n".join(urls100)
+    assert len(resp.json()["affected_url"]) > 512  # 远超旧列长
+
+
+async def test_affected_url_input_normalized_on_write(client: AsyncClient, auth: dict):
+    """分号/空白/重复项在写入时统一规范化：切分、trim、去空、去重保序。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={
+            "title": "多URL规范化", "level": 30,
+            "affected_url": " https://b.example.com/1 ; https://a.example.com/2 \n"
+                            "https://b.example.com/1\n\n；\n",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["affected_url"] == "https://b.example.com/1\nhttps://a.example.com/2"
+
+
+async def test_affected_url_over_limit_returns_422_with_readable_detail(client: AsyncClient, auth: dict):
+    """超限（条数/单条长度/非法字符）返回 422 且透出可读中文，而非通用 500/泛化提示。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "超限101条", "level": 30, "affected_url": "\n".join(_many_urls(101))},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "最多 100 条" in resp.json()["detail"]
+
+    too_long = "https://many.example.com/" + "a" * 2048
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "单条超长", "level": 30, "affected_url": too_long},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "超出上限 2048 字符" in resp.json()["detail"]
+
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "含空格", "level": 30, "affected_url": "https://a.example.com/1 描述"},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "含空格或非法字符" in resp.json()["detail"]
+
+    # 编辑入口同口径
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "编辑超限", "level": 30},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.put(
+        f"/api/v1/vulns/{resp.json()['id']}", headers=auth,
+        json={"title": "编辑超限", "level": 30, "affected_url": "\n".join(_many_urls(101))},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+async def test_import_record_affected_url_limits(client: AsyncClient, auth: dict):
+    """导入结果修正页同一口径：长 URL 可保存，超限 422 且文案可读。"""
+    from app.db import async_session_maker
+    from app.models import ImportBatch, ImportRecord
+
+    async with async_session_maker() as session:
+        batch = ImportBatch(filename="影响URL上限测试.docx", file_path="")
+        session.add(batch)
+        await session.flush()
+        record = ImportRecord(batch_id=batch.id, seq=1, title="导入记录URL上限")
+        session.add(record)
+        await session.commit()
+        record_id = record.id
+
+    urls100 = _many_urls(100)
+    resp = await client.put(
+        f"/api/v1/imports/records/{record_id}", headers=auth,
+        json={"affected_url": "；".join(urls100)},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["affected_url"] == "\n".join(urls100)
+
+    resp = await client.put(
+        f"/api/v1/imports/records/{record_id}", headers=auth,
+        json={"affected_url": "\n".join(_many_urls(101))},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "最多 100 条" in resp.json()["detail"]
+

@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.constants import NONPEN_ITEMS
 
 from .asset import AssetBrief
-from .common import UserBrief, VulBrief, HtmlStr
+from .common import UserBrief, VulBrief, AffectedUrl, HtmlStr
 from .report import PlanReportBrief
 
 
@@ -16,7 +16,8 @@ class SpringActionVulDraft(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     level: int = 30
     vul_type: int = 75
-    affected_url: str = ""
+    # 影响URL：多值换行分隔，与漏洞录入同一校验口径（见 schemas.common.normalize_affected_url）
+    affected_url: AffectedUrl = ""
     description_html: HtmlStr = ""
     reproduce_html: HtmlStr = ""
     solution_html: HtmlStr = ""

@@ -24,16 +24,16 @@ beforeEach(() => {
 })
 
 describe('useCrudDialog', () => {
-  it('openDialog 新建：表单为 empty 工厂的全新对象', () => {
-    const { form, dialogVisible, openDialog } = createState()
-    openDialog()
+  it('openFormDialog 新建：表单为 empty 工厂的全新对象', () => {
+    const { form, dialogVisible, openFormDialog } = createState()
+    openFormDialog()
     expect(form.value).toEqual({ id: null, name: '' })
     expect(dialogVisible.value).toBe(true)
   })
 
-  it('openDialog 编辑：empty 重建后合并 row 字段（避免脏数据残留）', () => {
-    const { form, openDialog } = createState()
-    openDialog({ id: 7, name: '远程检测A' })
+  it('openFormDialog 编辑：empty 重建后合并 row 字段（避免脏数据残留）', () => {
+    const { form, openFormDialog } = createState()
+    openFormDialog({ id: 7, name: '远程检测A' })
     expect(form.value).toEqual({ id: 7, name: '远程检测A' })
   })
 
@@ -48,22 +48,22 @@ describe('useCrudDialog', () => {
   })
 
   it('submit 失败：保存抛错时保留弹窗，saving 仍复位', async () => {
-    const { dialogVisible, saving, openDialog, submit } = createState({
+    const { dialogVisible, saving, openFormDialog, submit } = createState({
       save: vi.fn(async () => {
         throw new Error('服务器错误')
       }),
     })
-    openDialog()
+    openFormDialog()
     await expect(submit()).rejects.toThrow('服务器错误')
     expect(dialogVisible.value).toBe(true)
     expect(saving.value).toBe(false)
     expect(ElMessage.success).not.toHaveBeenCalled()
   })
 
-  it('openDialog 再次打开时表单不残留上一次的编辑值', () => {
-    const { form, openDialog } = createState()
-    openDialog({ id: 7, name: '远程检测A' })
-    openDialog()
+  it('openFormDialog 再次打开时表单不残留上一次的编辑值', () => {
+    const { form, openFormDialog } = createState()
+    openFormDialog({ id: 7, name: '远程检测A' })
+    openFormDialog()
     expect(form.value.id).toBeNull()
     expect(form.value.name).toBe('')
   })

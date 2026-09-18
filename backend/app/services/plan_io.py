@@ -104,6 +104,44 @@ async def _load_user_map(session: AsyncSession) -> dict[str, User]:
     return user_map
 
 
+async def _load_occupied_tickets(session: AsyncSession) -> dict[str, int | str]:
+    """库内已占用的工单ID → 工单 id（导入时唯一性校验用）。"""
+    occupied: dict[str, int | str] = {}
+    for p in (await session.execute(select(TestingPlan))).scalars().all():
+        tid = p.ticket_id
+        if tid:
+            occupied[tid] = p.id
+    return occupied
+
+
+def _apply_cells(plan: TestingPlan, cells: list[str], user_map: dict) -> None:
+    """把一行 Excel 单元格写入计划实体（不含序号分配与唯一性校验）。"""
+    plan.plan_name = cells[1]
+    plan.system_name = cells[2]
+    plan.test_type = cells[3]
+    plan.department = cells[4]
+    # cells[5] 工单ID：显式填写则作为手动指定值，未填写则保持原值（新记录由系统自动生成）
+    plan.ticket_id_manual = cells[5] or plan.ticket_id_manual or ""
+    plan.ticket_time = cells[6]
+    plan.status = PLAN_STATUS_REVERSE.get(cells[7], PlanStatus.UNTESTED)
+    plan.receive_time = cells[9]
+    plan.first_test_done_time = cells[10]
+    plan.retest_notice_time = cells[11]
+    plan.retest_done_time = cells[12]
+    plan.est_mandays = to_float(cells[13])
+    plan.actual_mandays = to_float(cells[14])
+    plan.stat_critical = _to_int(cells[15])
+    plan.stat_high = _to_int(cells[16])
+    plan.stat_medium = _to_int(cells[17])
+    plan.stat_low = _to_int(cells[18])
+    matched = [
+        user_map[name] for name in cells[8].split("、")
+        if name.strip() and name.strip() in user_map
+    ]
+    if matched:
+        plan.testers = matched
+
+
 async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResultOut:
     """逐行导入测试计划：按 ID 更新、无 ID 新增，测试人员按姓名/用户名匹配。
 
@@ -111,11 +149,7 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
     重复时整批终止并提示，由调用方统一回滚。
     """
     user_map = await _load_user_map(session)
-    occupied: dict[str, int | str] = {}
-    for p in (await session.execute(select(TestingPlan))).scalars().all():
-        tid = p.ticket_id
-        if tid:
-            occupied[tid] = p.id
+    occupied = await _load_occupied_tickets(session)
 
     ws = wb.active
     result = PlanImportResultOut()
@@ -137,28 +171,7 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
         if is_new:
             plan = TestingPlan(creator_id=user.id)
             session.add(plan)
-
-        plan.plan_name = cells[1]
-        plan.system_name = system_name
-        plan.test_type = cells[3]
-        plan.department = cells[4]
-        # cells[5] 工单ID：显式填写则作为手动指定值，未填写则保持原值（新记录由系统自动生成）
-        plan.ticket_id_manual = cells[5] or plan.ticket_id_manual or ""
-        plan.ticket_time = cells[6]
-        plan.status = PLAN_STATUS_REVERSE.get(cells[7], PlanStatus.UNTESTED)
-        plan.receive_time = cells[9]
-        plan.first_test_done_time = cells[10]
-        plan.retest_notice_time = cells[11]
-        plan.retest_done_time = cells[12]
-        plan.est_mandays = to_float(cells[13])
-        plan.actual_mandays = to_float(cells[14])
-        plan.stat_critical = _to_int(cells[15])
-        plan.stat_high = _to_int(cells[16])
-        plan.stat_medium = _to_int(cells[17])
-        plan.stat_low = _to_int(cells[18])
-        matched = [user_map[name] for name in cells[8].split("、") if name.strip() and name.strip() in user_map]
-        if matched:
-            plan.testers = matched
+        _apply_cells(plan, cells, user_map)
         # 新增或历史数据无序号时按需求接收日期自动补号
         await ticket_service.assign_ticket_seq(session, plan)
 

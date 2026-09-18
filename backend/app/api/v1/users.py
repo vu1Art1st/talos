@@ -6,11 +6,14 @@ from sqlalchemy.orm import selectinload
 from app.api.v1.auth import build_user_out
 from app.constants import PERMISSION_CATALOG, PERMISSIONS
 from app.core.deps import get_current_user, require_any_perm, require_perm
-from app.core.query import get_or_404, paginate, apply_sort
+from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_sort
 from app.core.security import hash_password
 from app.db import get_session
 from app.models import Group, GroupMember, Role, User
-from app.schemas import GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut, PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut
+from app.schemas import (
+    GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut,
+    PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut,
+)
 from app.services.audit_service import audit
 
 router = APIRouter(tags=["用户与权限"])
@@ -253,10 +256,8 @@ async def delete_group(
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    group = await session.get(Group, group_id)
-    if group:
-        await session.delete(group)
-        await session.commit()
+    await delete_by_id_if_exists(session, Group, group_id)
+    await session.commit()
     return {"msg": "删除成功"}
 
 

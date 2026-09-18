@@ -84,15 +84,17 @@ const { items, total, page, size, loading, load, reload, onSizeChange, onSortCha
   }),
 })
 
+/** `/meta.audit_actions` 字典：异构 meta 边界内取用时收窄为「动作码 → 名称」（两处共用） */
+const auditActions = computed<Record<string, string>>(() => auth.meta?.audit_actions ?? {})
+
 const actionOptions = computed<Record<string, string>>(() => {
-  const all = (auth.meta as any)?.audit_actions ?? {}
+  const all = auditActions.value
   return activeTab.value === 'login'
     ? Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith('login_')))
     : all
 })
 
-const actionName = (action: string) =>
-  ((auth.meta as any)?.audit_actions as Record<string, string>)?.[action] ?? action
+const actionName = (action: string) => auditActions.value[action] ?? action
 
 const actionColor = (action: string) => {
   if (action === 'login_success') return STAT_CARD_COLORS.green

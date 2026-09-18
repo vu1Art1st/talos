@@ -11,13 +11,12 @@ from email.mime.text import MIMEText
 import httpx
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy import func, select
-
 from app.constants import ReportStatus
 from app.core.config import settings
 from app.core.timeutil import now
 from app.db import async_session_maker
-from app.models import ImportBatch, ImportRecord, ExportJob, Report, TestingPlan, User, Vul
+from app.models import ImportBatch, ImportRecord, ExportJob, Report, User
+from app.services import report_meta
 from app.services.docx_parser import parse_any_docx
 from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
@@ -73,7 +72,10 @@ async def parse_import_task(ctx, batch_id: int) -> None:
         batch.failed = failed
         if not records:
             batch.status = "failed"
-            batch.error = "未能从文档中解析出漏洞信息：支持标准导入模板或平台导出的渗透测试（复测）报告，请核对格式后重试"
+            batch.error = (
+                "未能从文档中解析出漏洞信息：支持标准导入模板或平台导出的渗透测试（复测）报告，"
+                "请核对格式后重试"
+            )
         else:
             batch.status = "parsed"
         await session.commit()
@@ -92,122 +94,22 @@ async def export_report_task(ctx, job_id: int) -> None:
             if report is None:
                 raise ValueError("报告不存在")
 
-            meta = {
-                "title": report.title,
-                "project_name": report.project_name,
-                "customer": report.customer,
-                "author": report.author,
-                "test_start": report.test_start,
-                "test_end": report.test_end,
-                "target_ip": report.target_ip,
-                "test_account": report.test_account,
-                "status": report.status,
-                # 复测判定口径与 plan_service.is_retest_report_title 一致：标题含「复测」
-                "is_retest": "复测" in (report.title or ""),
-            }
             # 发起导出报告的账号：版本变更记录「修改人」列使用（而非报告作者）
+            generator = None
             if job.creator_id is not None:
                 gu = await session.get(User, job.creator_id)
                 if gu is not None:
-                    meta["generator"] = gu.realname or gu.username or ""
-            # 关联测试计划：参测人员列表 + 版本记录清单（供版本变更记录/人员表格使用）
-            plan = None
-            if report.testing_plan_id is not None:
-                plan = await session.get(TestingPlan, report.testing_plan_id)
-            testers: list[str] = []
-            report_records: list[dict] = []
-            if plan is not None:
-                for u in plan.testers:
-                    name = (u.realname or u.username or "").strip()
-                    if name and name not in testers:
-                        testers.append(name)
-                # 该计划下的全部报告（初测 1 份 + 每轮复测各 1 份），按创建顺序对齐版本记录。
-                # 以「报告」为版本号唯一数据源：手动流转/导入产生的无报告复测轮次不再计入版本号，
-                # 保证版本号与实际复测报告数量严格一致
-                plan_reports = (
-                    await session.execute(
-                        select(Report)
-                        .where(Report.testing_plan_id == plan.id)
-                        .order_by(Report.create_time, Report.id)
-                    )
-                ).scalars().all()
-                # 一次查询这些报告最近一次成功导出的时间
-                report_ids = [pr.id for pr in plan_reports]
-                last_done: dict[int, str] = {}
-                if report_ids:
-                    rows = (
-                        await session.execute(
-                            select(ExportJob.report_id, func.max(ExportJob.finish_time))
-                            .where(
-                                ExportJob.report_id.in_(report_ids),
-                                ExportJob.status == "done",
-                            )
-                            .group_by(ExportJob.report_id)
-                        )
-                    ).all()
-                    for rid, ft in rows:
-                        if ft is not None:
-                            last_done[rid] = ft.strftime("%Y-%m-%d")
-                export_date_str = now().strftime("%Y-%m-%d")
-                for pr in plan_reports:
-                    if pr.id == report.id:
-                        # 当前报告优先取该报告最近一次成功导出的时间（含导入时自动生成的记录，
-                        # 其日期=报告标题日期 14:00），使导入报告的版本记录显示报告自身日期而非本次导出时间
-                        rdate = last_done.get(pr.id) or export_date_str
-                    elif pr.id in last_done:
-                        rdate = last_done[pr.id]
-                    elif pr.create_time is not None:
-                        rdate = pr.create_time.strftime("%Y-%m-%d")
-                    else:
-                        rdate = ""
-                    creator_name = ""
-                    if pr.creator_id is not None:
-                        cu = await session.get(User, pr.creator_id)
-                        if cu is not None:
-                            creator_name = cu.realname or cu.username or ""
-                    if not creator_name:
-                        creator_name = pr.author or ""
-                    report_records.append({
-                        # 复测判定与初测报告标题口径一致：标题含「复测」为复测报告
-                        "is_retest": "复测" in (pr.title or ""),
-                        "creator_name": creator_name,
-                        "date": rdate,
-                    })
-            meta["testers"] = testers
-            meta["report_records"] = report_records
-            sections = [
-                {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
-                for s in report.sections
-            ]
-            vul_ids = [s.vul_id for s in report.sections if s.vul_id]
-            vulns: list[dict] = []
-            assets: list[dict] = []
-            if vul_ids:
-                rows = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
-                by_id = {v.id: v for v in rows}
-                vulns = [
-                    {
-                        "id": v.id,
-                        "title": v.title, "vul_type": v.vul_type, "level": v.level,
-                        "status": v.status, "affected_url": v.affected_url, "is_retest": v.is_retest,
-                        "retest_html": v.retest_html,
-                    }
-                    for vid in vul_ids if (v := by_id.get(vid))
-                ]
-                # 聚合关联资产（去重）供模板「测试目标」表使用
-                seen: set[int] = set()
-                for v in rows:
-                    for a in v.assets:
-                        if a.id in seen:
-                            continue
-                        seen.add(a.id)
-                        assets.append({
-                            "name": a.name,
-                            "public_urls": a.public_urls or [],
-                            "internal_urls": a.internal_urls or [],
-                        })
-            # 工单「被测系统URL」为测试目标表的优先数据源，为空时回退漏洞关联资产聚合
-            plan_urls = [u for u in ((plan.target_urls if plan is not None else None) or []) if u]
+                    generator = gu.realname or gu.username or ""
+            # 关联测试计划（参测人员 / 版本记录清单）与 meta / 章节 / 漏洞与资产构建
+            # 统一走 services.report_meta（与导入后自动导出共用同一实现）。
+            # 手动导出不注入 report_time，封面与版本记录的基准由 report_builder 取当前时间。
+            plan = await report_meta.resolve_plan(session, report)
+            meta = await report_meta.build_export_meta(
+                session, report, plan=plan, generator=generator
+            )
+            sections = report_meta.build_sections(report)
+            vulns, assets = await report_meta.collect_vulns_and_assets(session, sections)
+            plan_urls = report_meta.collect_plan_urls(plan)
 
             export_dir = settings.storage_sub("exports")
             stamp = now().strftime("%Y%m%d%H%M%S")

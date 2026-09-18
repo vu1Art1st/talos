@@ -169,8 +169,8 @@
 
     <!-- 漏洞列表 -->
     <el-card shadow="never" body-style="padding: 0 0 12px">
-      <el-table v-loading="loading" :data="items" stripe @row-click="(row: any) => router.push(`/vulns/${row.id}`)"
-                class="cursor-pointer" @selection-change="(rows: any[]) => (selected = rows)"
+      <el-table v-loading="loading" :data="items" stripe @row-click="(row: Vuln) => router.push(`/vulns/${row.id}`)"
+               class="cursor-pointer" @selection-change="(rows: Vuln[]) => (selected = rows)"
                 @sort-change="onSortChange">
         <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
         <el-table-column type="index" label="序号" width="64" :index="(i: number) => (page - 1) * size + i + 1" />
@@ -197,7 +197,7 @@
         </el-table-column>
         <el-table-column label="关联资产" width="150" show-overflow-tooltip>
           <template #default="{ row }">
-            {{ (row.assets ?? []).map((a: any) => a.name).join('、') || '-' }}
+            {{ (row.assets ?? []).map((a: { name: string }) => a.name).join('、') || '-' }}
           </template>
         </el-table-column>
         <el-table-column label="归属部门" width="140" show-overflow-tooltip>
@@ -235,17 +235,18 @@ import {
   levelColor, levelDotStyle, levelName, STAT_CARD_COLORS, statusDotStyle, statusLabel,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import type { QueryParams, Vuln, VulnPivotRow, VulnStats } from '../types'
 
 const auth = useAuthStore()
 const router = useRouter()
-const meta = ref<any>(null)
-const selected = ref<any[]>([])
+const meta = ref<Record<string, Record<number, string>> | null>(null)
+const selected = ref<Vuln[]>([])
 const query = reactive({
   statuses: [], levels: [], vul_types: [], system_types: [], test_types: [],
   asset_ids: [], departments: [], dateRange: [],
   mine: false,
 })
-const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/vulns', { extraParams: filterParams })
+const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Vuln>('/vulns', { extraParams: filterParams })
 
 // 已启用的筛选维度数（用于「筛选」按钮徽标）
 const activeFilterCount = computed(() => {
@@ -289,7 +290,7 @@ function searchAssets(keyword = '') {
 // 默认闭合（与渗透测试工单/漏扫基线工单的统计概览一致），用户可手动展开
 const statsOpen = ref<string[]>([])
 
-const stats = ref<any>(null)
+const stats = ref<VulnStats | null>(null)
 const statsLoading = ref(false)
 const levelCards = [
   { code: 10, label: '严重', color: levelColor(10) },
@@ -298,19 +299,19 @@ const levelCards = [
   { code: 40, label: '低危', color: levelColor(40) },
 ]
 // 漏洞来源展示：关联渗透测试工单 → 恒为「渗透测试工单」；否则取可选来源值（未选择显示 -）
-const sourceLabel = (row: any) =>
-  row.testing_plan_id ? '渗透测试工单' : (meta.value?.vul_source?.[row.source] ?? '-')
+const sourceLabel = (row: Vuln) =>
+  row.testing_plan_id ? '渗透测试工单' : (meta.value?.vul_source?.[row.source ?? 0] ?? '-')
 
-const levelCount = (code: number) => stats.value?.by_level?.find((x: any) => x.level === code)?.count ?? 0
-const fixedCount = computed(() => stats.value?.by_fix_status?.find((x: any) => x.key === 'fixed')?.count ?? 0)
+const levelCount = (code: number) => stats.value?.by_level?.find((x) => x.level === code)?.count ?? 0
+const fixedCount = computed(() => stats.value?.by_fix_status?.find((x) => x.key === 'fixed')?.count ?? 0)
 const fixRate = computed(() => {
   const t = stats.value?.total ?? 0
   return t ? Math.round((fixedCount.value / t) * 1000) / 10 : 0
 })
 
 // 多选字段统一走逗号分隔字符串下发（与后端 _parse_*_list 对齐）
-function filterParams(): Record<string, any> {
-  const p: Record<string, any> = {
+function filterParams(): QueryParams {
+  const p: QueryParams = {
     search: search.value || undefined,
     mine: query.mine,
   }
@@ -331,7 +332,7 @@ function filterParams(): Record<string, any> {
 async function loadStats() {
   statsLoading.value = true
   try {
-    const { data } = await client.get('/vulns/stats', { params: filterParams() })
+    const { data } = await client.get<VulnStats>('/vulns/stats', { params: filterParams() })
     stats.value = data
   } finally {
     statsLoading.value = false
@@ -362,7 +363,7 @@ const pivotDeptSpans = computed(() => {
   return spans
 })
 
-function pivotSpanMethod({ row, rowIndex, columnIndex }: { row: any; rowIndex: number; columnIndex: number }) {
+function pivotSpanMethod({ row, rowIndex, columnIndex }: { row?: VulnPivotRow | null; rowIndex: number; columnIndex: number }) {
   // 仅对第0列（部门）做合并
   if (columnIndex !== 0) return
   // 合计行（row 为 undefined 或超出数据行）不参与合并，避免隐藏「合计」文本
@@ -372,7 +373,7 @@ function pivotSpanMethod({ row, rowIndex, columnIndex }: { row: any; rowIndex: n
 }
 
 // 合计行自定义方法（show-summary 触发）
-function pivotSummaryMethod({ columns, data }: { columns: any[]; data: any[] }) {
+function pivotSummaryMethod({ columns }: { columns: unknown[]; data: VulnPivotRow[] }) {
   const t = stats.value?.pivot?.totals
   if (!t) return []
   const sums: (string | number)[] = ['合计', '', '', t.total, t.fixed_total, `${t.fix_rate}%`]

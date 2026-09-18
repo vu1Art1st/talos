@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useAssetSelect } from '../useAssetSelect'
+import type { Asset } from '../../types'
 
 // mock axios client：get 按 URL 分发固定数据
 vi.mock('../../api/client', () => ({
@@ -27,9 +28,9 @@ beforeEach(() => {
 describe('useAssetSelect', () => {
   it('assetLabel 拼接：仅系统名 / +（子系统）/ +（系统类型）', () => {
     const { assetLabel } = useAssetSelect()
-    expect(assetLabel({ name: '门户系统' })).toBe('门户系统')
-    expect(assetLabel({ name: '商城系统', sub_system: '订单中心' })).toBe('商城系统（订单中心）')
-    expect(assetLabel({ name: '门户系统', system_type: '自有系统（正式）' })).toBe('门户系统（自有系统（正式））')
+    expect(assetLabel({ id: 1, name: '门户系统' })).toBe('门户系统')
+    expect(assetLabel({ id: 2, name: '商城系统', sub_system: '订单中心' })).toBe('商城系统（订单中心）')
+    expect(assetLabel({ id: 3, name: '门户系统', system_type: '自有系统（正式）' })).toBe('门户系统（自有系统（正式））')
   })
 
   it('searchAssets 写入选项并缓存结果，记录最近关键词', async () => {
@@ -65,8 +66,8 @@ describe('useAssetSelect', () => {
     s.cacheAsset({ id: 5, name: '新系统' })
     s.cacheAsset({ id: 5, name: '新系统' })
     expect(s.assetOptions.value).toEqual([{ id: 5, label: '新系统' }])
-    // 空 id 直接忽略
-    s.cacheAsset(null)
+    // 空值（接口兜底可能传 null）直接忽略：验证运行时守卫
+    s.cacheAsset(null as unknown as Asset)
     expect(s.assetOptions.value).toHaveLength(1)
   })
 

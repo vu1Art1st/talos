@@ -79,6 +79,49 @@ def plan_search_condition(search: str):
     return or_(*conds)
 
 
+# 「当前可测试」判定所用状态：初测中 / 提请复测 / 复测中（测试人视角的进行中状态）
+_TESTER_ACTIVE_STATUSES = [
+    PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
+]
+
+
+def _append_date_range(cond: list, col, date_from: str, date_to: str) -> None:
+    """日期串字段的范围筛选（YYYY-MM-DD 字符串直接比较）。
+
+    上界需先排除空串：空值的字符串比较恒小于任意日期串，不排除会被误纳入结果。
+    """
+    if date_from:
+        cond.append(col >= date_from)
+    if date_to:
+        cond.append(col != "")
+        cond.append(col <= date_to)
+
+
+def _append_tester_scope(cond: list, tester_id: int | None, unclaimed: bool) -> None:
+    """测试人相关筛选（tester_id / unclaimed 三态，二者同开时为并集）。"""
+    if tester_id is None:
+        if unclaimed:
+            cond.append(
+                ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
+            )
+        return
+    assigned = exists().where(
+        testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+        testing_plan_testers.c.user_id == tester_id,
+    )
+    if unclaimed:
+        # 并集：当前可测试系统 OR 无人认领（与其它筛选条件保持 AND）
+        cond.append(
+            or_(
+                and_(TestingPlan.status.in_(_TESTER_ACTIVE_STATUSES), assigned),
+                ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id),
+            )
+        )
+    else:
+        cond.append(TestingPlan.status.in_(_TESTER_ACTIVE_STATUSES))
+        cond.append(assigned)
+
+
 def plan_conditions(
     search: str = "",
     status: int | None = None,
@@ -100,7 +143,7 @@ def plan_conditions(
     pending 为真时过滤「待办流程」：状态为未测试/初测中/复测中。
     两个快捷模式同时启用时按并集处理：满足任一条件的记录均展示。
     """
-    cond = []
+    cond: list = []
     if search:
         cond.append(plan_search_condition(search))
     if status is not None:
@@ -116,50 +159,9 @@ def plan_conditions(
         cond.append(TestingPlan.test_type == test_type)
     if department:
         cond.append(TestingPlan.department == department)
-    if receive_from:
-        cond.append(TestingPlan.receive_time >= receive_from)
-    if receive_to:
-        # 空 receive_time 恒小于任意日期串，仅需上界比较时排除空值
-        cond.append(TestingPlan.receive_time != "")
-        cond.append(TestingPlan.receive_time <= receive_to)
-    if first_test_from:
-        cond.append(TestingPlan.first_test_done_time >= first_test_from)
-    if first_test_to:
-        # 空 first_test_done_time 恒小于任意日期串，仅需上界比较时排除空值
-        cond.append(TestingPlan.first_test_done_time != "")
-        cond.append(TestingPlan.first_test_done_time <= first_test_to)
-    if tester_id is not None and unclaimed:
-        # 并集：当前可测试系统 OR 无人认领（与其他筛选条件保持 AND）
-        cond.append(
-            or_(
-                and_(
-                    TestingPlan.status.in_([
-                        PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
-                    ]),
-                    exists().where(
-                        testing_plan_testers.c.testing_plan_id == TestingPlan.id,
-                        testing_plan_testers.c.user_id == tester_id,
-                    ),
-                ),
-                ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id),
-            )
-        )
-    elif tester_id is not None:
-        cond.append(
-            TestingPlan.status.in_([
-                PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
-            ])
-        )
-        cond.append(
-            exists().where(
-                testing_plan_testers.c.testing_plan_id == TestingPlan.id,
-                testing_plan_testers.c.user_id == tester_id,
-            )
-        )
-    elif unclaimed:
-        cond.append(
-            ~exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
-        )
+    _append_date_range(cond, TestingPlan.receive_time, receive_from, receive_to)
+    _append_date_range(cond, TestingPlan.first_test_done_time, first_test_from, first_test_to)
+    _append_tester_scope(cond, tester_id, unclaimed)
     return cond
 
 
@@ -351,62 +353,57 @@ def _month_range(start: str, end: str) -> list[str]:
     return months
 
 
-async def compute_plan_stats(
-    session: AsyncSession, cond: list, receive_from: str, receive_to: str
-) -> dict:
-    """按筛选条件计算测试计划多维度统计，供 stats 端点与导出汇总共用。"""
-    plan_ids_stmt = select(TestingPlan.id).where(*cond)
-
-    by_status_rows = (
+async def _stats_by_status(session: AsyncSession, cond: list) -> list:
+    """按状态分组的 (status, count) 列表（工单多维度统计的基础数据）。"""
+    return (
         await session.execute(
             select(TestingPlan.status, func.count(TestingPlan.id))
             .where(*cond)
             .group_by(TestingPlan.status)
         )
     ).all()
-    by_status = [
-        {"status": s, "name": TESTING_PLAN_STATUS.get(s, str(s)), "count": c}
-        for s, c in sorted(by_status_rows)
-    ]
-    total_plans = sum(c for _, c in by_status_rows)
-    retest_done_plans = sum(c for s, c in by_status_rows if s == PlanStatus.RETEST_DONE)
-    # 初测次数：达到「初测中」及之后状态的计划各记一次初测
-    first_test_count = sum(c for s, c in by_status_rows if s >= PlanStatus.TESTING)
 
-    retest_count = (
+
+async def _count_retest_rounds(session: AsyncSession, cond: list) -> int:
+    """筛选结果对应的复测轮次总数。"""
+    return (
         await session.execute(
             select(func.count(TestingPlanRetestRound.id)).where(
-                TestingPlanRetestRound.plan_id.in_(plan_ids_stmt)
+                TestingPlanRetestRound.plan_id.in_(select(TestingPlan.id).where(*cond))
             )
         )
     ).scalar_one()
 
-    # 人天统计：预估/实际总和；剩余预估人天仅统计未测试状态计划的预估人天之和
-    est_mandays_total = (
-        await session.execute(select(func.coalesce(func.sum(TestingPlan.est_mandays), 0.0)).where(*cond))
-    ).scalar_one()
-    actual_mandays_total = (
-        await session.execute(select(func.coalesce(func.sum(TestingPlan.actual_mandays), 0.0)).where(*cond))
-    ).scalar_one()
-    remaining_est_mandays = (
-        await session.execute(
-            select(func.coalesce(func.sum(TestingPlan.est_mandays), 0.0)).where(
-                *cond, TestingPlan.status == PlanStatus.UNTESTED
-            )
-        )
-    ).scalar_one()
 
-    # 按月漏洞数：筛选后计划关联漏洞按提交月份聚合（数据库无关：应用层聚合）
+async def _sum_amount(session: AsyncSession, column, cond: list, extra=None) -> float:
+    """按条件求和（空集为 0）；`extra` 为可选附加条件（如「仅未测试状态」）。"""
+    stmt = select(func.coalesce(func.sum(column), 0.0)).where(*cond)
+    if extra is not None:
+        stmt = stmt.where(extra)
+    return float((await session.execute(stmt)).scalar_one())
+
+
+def _month_buckets(receive_from: str, receive_to: str) -> dict[str, int]:
+    """按月分桶容器：给定统计区间取区间月份，否则取最近 12 个月。"""
     months = _month_range(receive_from, receive_to) if receive_from and receive_to else []
     if not months:
         now = tznow()
         months = sorted(
             {(now.replace(day=1) - timedelta(days=30 * i)).strftime("%Y-%m") for i in range(12)}
         )
-    monthly = {m: 0 for m in months}
+    return {m: 0 for m in months}
+
+
+async def _vulns_by_month(
+    session: AsyncSession, cond: list, receive_from: str, receive_to: str
+) -> list[dict]:
+    """筛选后工单关联漏洞按提交月份聚合（应用层聚合，规避方言差异）。"""
+    monthly = _month_buckets(receive_from, receive_to)
     submit_rows = (
         await session.execute(
-            select(Vul.submit_time).where(Vul.testing_plan_id.in_(plan_ids_stmt))
+            select(Vul.submit_time).where(
+                Vul.testing_plan_id.in_(select(TestingPlan.id).where(*cond))
+            )
         )
     ).scalars().all()
     for submit_time in submit_rows:
@@ -415,6 +412,26 @@ async def compute_plan_stats(
         key = submit_time.strftime("%Y-%m")
         if key in monthly:
             monthly[key] += 1
+    return [{"month": m, "count": c} for m, c in monthly.items()]
+
+
+async def compute_plan_stats(
+    session: AsyncSession, cond: list, receive_from: str, receive_to: str
+) -> dict:
+    """按筛选条件计算测试计划多维度统计，供 stats 端点与导出汇总共用。"""
+    by_status_rows = await _stats_by_status(session, cond)
+    total_plans = sum(c for _, c in by_status_rows)
+    retest_done_plans = sum(c for s, c in by_status_rows if s == PlanStatus.RETEST_DONE)
+    # 初测次数：达到「初测中」及之后状态的计划各记一次初测
+    first_test_count = sum(c for s, c in by_status_rows if s >= PlanStatus.TESTING)
+
+    est_mandays_total = await _sum_amount(session, TestingPlan.est_mandays, cond)
+    actual_mandays_total = await _sum_amount(session, TestingPlan.actual_mandays, cond)
+    # 剩余预估人天：仅统计未测试状态计划的预估人天之和
+    remaining_est_mandays = await _sum_amount(
+        session, TestingPlan.est_mandays, cond, TestingPlan.status == PlanStatus.UNTESTED
+    )
+    retest_count = await _count_retest_rounds(session, cond)
 
     return {
         "total_plans": total_plans,
@@ -422,11 +439,97 @@ async def compute_plan_stats(
         "first_test_count": first_test_count,
         "retest_count": retest_count,
         "total_test_count": first_test_count + retest_count,
-        "est_mandays_total": round(float(est_mandays_total), 2),
-        "actual_mandays_total": round(float(actual_mandays_total), 2),
-        "remaining_est_mandays": round(float(remaining_est_mandays), 2),
-        "by_status": by_status,
-        "vulns_by_month": [{"month": m, "count": c} for m, c in monthly.items()],
+        "est_mandays_total": round(est_mandays_total, 2),
+        "actual_mandays_total": round(actual_mandays_total, 2),
+        "remaining_est_mandays": round(remaining_est_mandays, 2),
+        "by_status": [
+            {"status": s, "name": TESTING_PLAN_STATUS.get(s, str(s)), "count": c}
+            for s, c in sorted(by_status_rows)
+        ],
+        "vulns_by_month": await _vulns_by_month(session, cond, receive_from, receive_to),
+    }
+
+
+def _rectify_state(status: int) -> str:
+    """整改状态文案：测试通过 = 未发现安全风险；复测完成 = 已完成整改；其余 = 整改中。"""
+    if status == PlanStatus.PASSED:
+        return "未发现安全风险"
+    if status == PlanStatus.RETEST_DONE:
+        return "已完成整改"
+    return "整改中"
+
+
+def _plan_vuln_count(plan, linked_count: dict[int, int]) -> int:
+    """工单漏洞数：有真实关联漏洞取实际计数，否则回退手填 stat_* 之和（与 stats_service 口径一致）。"""
+    if plan.id in linked_count:
+        return linked_count[plan.id]
+    return plan.stat_critical + plan.stat_high + plan.stat_medium + plan.stat_low
+
+
+def _conclusion_summary(
+    *,
+    departments: int,
+    systems: int,
+    vuln_systems: int,
+    vulns: int,
+    safe_systems: int,
+    fixed_systems: int,
+    fixing_systems: int,
+) -> str:
+    """结论文字（口径与需求确认一致，措辞与顺序勿改）。"""
+    return (
+        f"业务系统方面，统计周期内发现{departments}个部门{systems}个系统的渗透测试，"
+        f"共发现{vuln_systems}个系统存在{vulns}个漏洞，{safe_systems}个系统未发现安全风险。"
+        f"目前{fixed_systems}个系统已完成整改，{fixing_systems}个系统整改中。"
+        "请相关部门尽快完成漏洞修复并提交复测。具体漏洞情况详见附件。"
+    )
+
+
+async def _conclusion_aggregate(session: AsyncSession, cond: list) -> dict:
+    """取工单并按筛选条件聚合结论所需的行数据与计数。"""
+    plans = (
+        await session.execute(
+            select(TestingPlan).where(*cond).order_by(
+                TestingPlan.receive_time.desc(), TestingPlan.ticket_seq.desc(), TestingPlan.id.desc(),
+            )
+        )
+    ).scalars().all()
+    linked_rows = (
+        await session.execute(
+            select(Vul.testing_plan_id, func.count(Vul.id))
+            .where(Vul.testing_plan_id.in_(select(TestingPlan.id).where(*cond)))
+            .group_by(Vul.testing_plan_id)
+        )
+    ).all()
+    linked_count = {pid: c for pid, c in linked_rows}
+
+    departments: set[str] = set()
+    rows: list[dict] = []
+    total_vulns = safe_systems = fixed_systems = 0
+    for p in plans:
+        department = p.department or "未填写"
+        departments.add(department)
+        vul_count = _plan_vuln_count(p, linked_count)
+        total_vulns += vul_count
+        if p.status == PlanStatus.PASSED:
+            safe_systems += 1
+        elif p.status == PlanStatus.RETEST_DONE:
+            fixed_systems += 1
+        rows.append({
+            "ticket_id": p.ticket_id,
+            "department": department,
+            "system_name": p.system_name,
+            "vuln_count": vul_count,
+            "test_type": p.test_type,
+            "rectify_state": _rectify_state(p.status),
+        })
+    return {
+        "rows": rows,
+        "departments": len(departments),
+        "systems": len(rows),
+        "vulns": total_vulns,
+        "safe_systems": safe_systems,
+        "fixed_systems": fixed_systems,
     }
 
 
@@ -439,69 +542,26 @@ async def compute_conclusion(session: AsyncSession, cond: list) -> dict:
     - 未发现安全风险 = 状态测试通过(PASSED)；已完成整改 = 复测完成(RETEST_DONE)；
     - 整改中 = 其余（非通过且非复测完成）。
     """
-    plans = (
-        await session.execute(
-            select(TestingPlan).where(*cond).order_by(
-                TestingPlan.receive_time.desc(), TestingPlan.ticket_seq.desc(), TestingPlan.id.desc(),
-            )
-        )
-    ).scalars().all()
-
-    linked_rows = (
-        await session.execute(
-            select(Vul.testing_plan_id, func.count(Vul.id))
-            .where(Vul.testing_plan_id.in_(select(TestingPlan.id).where(*cond)))
-            .group_by(Vul.testing_plan_id)
-        )
-    ).all()
-    linked_count = {pid: c for pid, c in linked_rows}
-
-    departments: set[str] = set()
-    total_vulns = 0
-    fixed_systems = 0
-    safe_systems = 0
-    rows: list[dict] = []
-    for p in plans:
-        departments.add(p.department or "未填写")
-        if p.id in linked_count:
-            vul_count = linked_count[p.id]
-        else:
-            vul_count = p.stat_critical + p.stat_high + p.stat_medium + p.stat_low
-        total_vulns += vul_count
-        if p.status == PlanStatus.PASSED:
-            safe_systems += 1
-            rectify = "未发现安全风险"
-        elif p.status == PlanStatus.RETEST_DONE:
-            fixed_systems += 1
-            rectify = "已完成整改"
-        else:
-            rectify = "整改中"
-        rows.append({
-            "ticket_id": p.ticket_id,
-            "department": p.department or "未填写",
-            "system_name": p.system_name,
-            "vuln_count": vul_count,
-            "test_type": p.test_type,
-            "rectify_state": rectify,
-        })
-
-    systems = len(rows)
-    vuln_systems = systems - safe_systems
-    fixing_systems = systems - fixed_systems - safe_systems
-    summary = (
-        f"业务系统方面，统计周期内发现{len(departments)}个部门{systems}个系统的渗透测试，"
-        f"共发现{vuln_systems}个系统存在{total_vulns}个漏洞，{safe_systems}个系统未发现安全风险。"
-        f"目前{fixed_systems}个系统已完成整改，{fixing_systems}个系统整改中。"
-        "请相关部门尽快完成漏洞修复并提交复测。具体漏洞情况详见附件。"
-    )
+    agg = await _conclusion_aggregate(session, cond)
+    systems = agg["systems"]
+    vuln_systems = systems - agg["safe_systems"]
+    fixing_systems = systems - agg["fixed_systems"] - agg["safe_systems"]
     return {
-        "summary": summary,
-        "departments": len(departments),
+        "summary": _conclusion_summary(
+            departments=agg["departments"],
+            systems=systems,
+            vuln_systems=vuln_systems,
+            vulns=agg["vulns"],
+            safe_systems=agg["safe_systems"],
+            fixed_systems=agg["fixed_systems"],
+            fixing_systems=fixing_systems,
+        ),
+        "departments": agg["departments"],
         "systems": systems,
         "vuln_systems": vuln_systems,
-        "vulns": total_vulns,
-        "safe_systems": safe_systems,
-        "fixed_systems": fixed_systems,
+        "vulns": agg["vulns"],
+        "safe_systems": agg["safe_systems"],
+        "fixed_systems": agg["fixed_systems"],
         "fixing_systems": fixing_systems,
-        "rows": rows,
+        "rows": agg["rows"],
     }

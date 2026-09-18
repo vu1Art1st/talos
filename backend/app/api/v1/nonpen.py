@@ -5,7 +5,7 @@
 - testing_plan_id 非空表示由测试计划联动创建：编辑公共字段双向同步，删除互相级联；
 - 不关联漏洞 / 报告 / 人天，保持扫描类业务逻辑独立（需求确认）。
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 

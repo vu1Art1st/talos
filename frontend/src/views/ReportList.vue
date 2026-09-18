@@ -154,28 +154,29 @@ import {
   exportJobSoftStyle,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import type { BatchExportResult, ExportJob, Items, Report, TestingPlan, Vuln } from '../types'
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
-const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/reports')
+const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Report>('/reports')
 const { downloadJob, downloadZip, fetchJobs, removeExportJob: deleteExportJob } = useExportJobs()
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')
 const genVulIds = ref<number[]>([])
 const genPlanId = ref<number | null>(null)
-const vulns = ref<any[]>([])
-const plans = ref<any[]>([])
-const selected = ref<any[]>([])
+const vulns = ref<Vuln[]>([])
+const plans = ref<TestingPlan[]>([])
+const selected = ref<Report[]>([])
 const batchDownloading = ref(false)
 const tableRef = ref()
 // 当前展开行的 id 集合（用于标题着色提示，弥补无独立展开箭头后的可发现性）
 const expandedIds = ref(new Set<number>())
 // 报告导出版本历史（展开行懒加载）：{reportId: ExportJob[]}
-const exportJobs = ref<Record<number, any[]>>({})
+const exportJobs = ref<Record<number, ExportJob[]>>({})
 const exportLoading = ref<Record<number, boolean>>({})
 
-function onSelectionChange(rows: any[]) {
+function onSelectionChange(rows: Report[]) {
   selected.value = rows
 }
 
@@ -191,23 +192,23 @@ async function loadExportJobs(reportId: number) {
   }
 }
 
-async function onExpandChange(row: any, expandedRows: any[]) {
+async function onExpandChange(row: Report, expandedRows: Report[]) {
   expandedIds.value = new Set(expandedRows.map((r) => r.id))
   if (expandedRows.some((r) => r.id === row.id)) await loadExportJobs(row.id)
 }
 
 // 点击报告标题展开/收起该行导出记录（替代原独立展开箭头列）
-function toggleExpand(row: any) {
+function toggleExpand(row: Report) {
   tableRef.value?.toggleRowExpansion(row)
 }
 
-async function removeExportJob(row: any, job: any) {
+async function removeExportJob(row: Report, job: ExportJob) {
   await deleteExportJob(job.id)
-  exportJobs.value[row.id] = (exportJobs.value[row.id] || []).filter((j: any) => j.id !== job.id)
+  exportJobs.value[row.id] = (exportJobs.value[row.id] || []).filter((j) => j.id !== job.id)
 }
 
 async function fetchJobStatus(jobIds: string) {
-  const { data } = await client.get('/reports/export-jobs/status', { params: { job_ids: jobIds } })
+  const { data } = await client.get<ExportJob[]>('/reports/export-jobs/status', { params: { job_ids: jobIds } })
   return data
 }
 
@@ -216,26 +217,26 @@ async function batchDownload() {
   if (!ids.length) return
   batchDownloading.value = true
   try {
-    const { data } = await client.post('/reports/batch-export', { report_ids: ids, fmt: 'docx' })
+    const { data } = await client.post<BatchExportResult[]>('/reports/batch-export', { report_ids: ids, fmt: 'docx' })
     if (!data.length) {
       ElMessage.warning('未找到可导出的报告')
       return
     }
-    const jobIds = data.map((j: any) => j.job_id).join(',')
+    const jobIds = data.map((j) => j.job_id).join(',')
     for (let i = 0; i < 120; i++) {
-      const all: any[] = await fetchJobStatus(jobIds)
-      if (all.some((j: any) => j.status === 'pending' || j.status === 'running')) {
+      const all: ExportJob[] = await fetchJobStatus(jobIds)
+      if (all.some((j) => j.status === 'pending' || j.status === 'running')) {
         await new Promise((r) => setTimeout(r, 1500))
         continue
       }
-      const done = all.filter((j: any) => j.status === 'done')
+      const done = all.filter((j) => j.status === 'done')
       if (done.length < all.length) {
         ElMessage.warning(`部分报告导出失败（${all.length - done.length} 份），已跳过失败项`)
       }
       if (done.length) {
         await downloadZip(jobIds)
         // 目录域为占位：提示用户手动更新域或打开 WPS/Word 自动更新（可勾选不再显示）
-        if (done.some((j: any) => j.fmt === 'docx' && !j.toc_auto_updated)) {
+        if (done.some((j) => j.fmt === 'docx' && !j.toc_auto_updated)) {
           showTocNotice()
         }
       } else ElMessage.error('所选报告均导出失败，请检查后重试')
@@ -263,7 +264,7 @@ async function createBlank() {
 async function generate() {
   // 相似性检查：基础信息与所选漏洞最后编辑时间与历史报告完全一致时，需用户确认继续
   try {
-    const { data } = await client.post('/reports/similarity-check', {
+    const { data } = await client.post<{ similar?: boolean }>('/reports/similarity-check', {
       title: genTitle.value,
       vul_ids: genVulIds.value,
       testing_plan_id: genPlanId.value,
@@ -295,16 +296,23 @@ async function remove(id: number) {
   await load()
 }
 
+/** 加载工单下拉选项：请求失败由 client 拦截器统一提示，此处仅置空，
+ *  不伪造成功响应（避免把「请求失败」显示成「工单为空」，审计 C-2） */
+async function loadPlanOptions() {
+  const resp = await client.get<Items<TestingPlan>>('/testing-plans', { params: { size: 100 } }).catch(() => null)
+  plans.value = resp?.data?.items ?? []
+}
+
 // 选中计划后：漏洞列表改为该计划关联漏洞并默认全选，标题预填
 async function onPlanChange(planId: number | null) {
   if (!planId) {
-    const { data } = await client.get('/vulns', { params: { size: 100 } })
+    const { data } = await client.get<Items<Vuln>>('/vulns', { params: { size: 100 } })
     vulns.value = data.items
     return
   }
-  const { data } = await client.get('/vulns', { params: { testing_plan_id: planId, size: 100 } })
+  const { data } = await client.get<Items<Vuln>>('/vulns', { params: { testing_plan_id: planId, size: 100 } })
   vulns.value = data.items
-  genVulIds.value = data.items.map((v: any) => v.id)
+  genVulIds.value = data.items.map((v) => v.id)
   const plan = plans.value.find((p) => p.id === planId)
   // 需求8：自动命名「yyyymmdd+测试系统名称+渗透测试报告」
   if (plan && !genTitle.value) genTitle.value = `${dayjs().format('YYYYMMDD')}${plan.system_name}渗透测试报告`
@@ -313,13 +321,10 @@ async function onPlanChange(planId: number | null) {
 watch(fromVulnsVisible, async (v) => {
   if (!v) return
   if (!vulns.value.length) {
-    const { data } = await client.get('/vulns', { params: { size: 100 } })
+    const { data } = await client.get<Items<Vuln>>('/vulns', { params: { size: 100 } })
     vulns.value = data.items
   }
-  if (!plans.value.length) {
-    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
-    plans.value = data.items
-  }
+  if (!plans.value.length) await loadPlanOptions()
 })
 
 onMounted(async () => {
@@ -330,8 +335,7 @@ onMounted(async () => {
   const genPlan = Number(route.query.gen_plan)
   if (genPlan) {
     fromVulnsVisible.value = true
-    const { data } = await client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } }))
-    plans.value = data.items
+    await loadPlanOptions()
     genPlanId.value = genPlan
     await onPlanChange(genPlan)
   }

@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import PlanStatus, VulStatus
 from app.core.deps import user_permissions
-from app.models import Report, ReportSection, TestingPlan, TestingPlanRetestRound, User, Vul
+from app.models import ReportSection, TestingPlan, TestingPlanRetestRound, User, Vul
 
 
 def can_operate(user: User, plan: TestingPlan) -> bool:

@@ -85,7 +85,7 @@ onMounted(() => {
 })
 
 async function onLogin() {
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   loading.value = true
   try {

@@ -1,4 +1,4 @@
-import { createApp } from 'vue'
+import { createApp, type Component } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
@@ -18,7 +18,7 @@ app.use(pinia)
 app.use(router)
 app.use(ElementPlus, { locale: zhCn })
 for (const [name, comp] of Object.entries(Icons)) {
-  app.component(name, comp as any)
+  app.component(name, comp as Component)
 }
 
 // 主题初始化：应用持久化的明 / 暗设置，注册 ECharts 双主题

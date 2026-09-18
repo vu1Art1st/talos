@@ -118,6 +118,7 @@ import StatCard from '../components/StatCard.vue'
 import { areaGradient, chartThemeName, PALETTE } from '../utils/chartTheme'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
+import type { DashboardDepartment, DashboardStats, IdName, QueryParams } from '../types'
 import { levelColorByName, statusColorByName, vulTypeColor } from '../utils/colors'
 
 // 图表系列色（唯一色源 chartTheme.PALETTE，语义化命名便于系列引用）
@@ -128,15 +129,15 @@ const theme = useThemeStore()
 const trendRef = ref<HTMLElement>()
 const levelRef = ref<HTMLElement>()
 const deptRef = ref<HTMLElement>()
-const deptData = ref<any[]>([])
+const deptData = ref<DashboardDepartment[]>([])
 const charts = shallowRef<echarts.ECharts[]>([])
 const loading = ref(false)
-const lastData = ref<any>(null)
+const lastData = ref<DashboardStats | null>(null)
 
 const byType = computed(() => lastData.value?.by_type ?? [])
 const byStatus = computed(() => lastData.value?.by_status ?? [])
-const typeMax = computed(() => Math.max(1, ...byType.value.map((t: any) => t.count)))
-const statusTotal = computed(() => byStatus.value.reduce((s: number, x: any) => s + x.count, 0))
+const typeMax = computed(() => Math.max(1, ...byType.value.map((t) => t.count)))
+const statusTotal = computed(() => byStatus.value.reduce((s: number, x) => s + x.count, 0))
 const typePct = (n: number) => `${((n / typeMax.value) * 100).toFixed(1)}%`
 const statusPct = (n: number) => `${((n / (statusTotal.value || 1)) * 100).toFixed(2)}%`
 
@@ -170,15 +171,17 @@ function disposeCharts() {
   charts.value = []
 }
 
-function filterParams(): Record<string, any> {
-  const params: Record<string, any> = {}
+/** 查询参数拼装（`QueryParams` 与工单列表同源口径，值为数组/字符串/数字） */
+function filterParams(): QueryParams {
+  const params: QueryParams = {}
   if (dateRange.value?.length === 2) {
     params.date_from = dateRange.value[0]
     params.date_to = dateRange.value[1]
   }
   if (deptFilter.value) params.department = deptFilter.value
-  if (sourceFilter.value !== null && sourceFilter.value !== ('' as any)) params.source = sourceFilter.value
-  if (levelFilter.value !== null && levelFilter.value !== ('' as any)) params.level = levelFilter.value
+  // el-select 清空时值为 ''：以类型判定代替 `!= null && !== ('' as any)` 的宽类型绕过
+  if (typeof sourceFilter.value === 'number') params.source = sourceFilter.value
+  if (typeof levelFilter.value === 'number') params.level = levelFilter.value
   return params
 }
 
@@ -193,17 +196,18 @@ function resetFilters() {
 async function reload() {
   loading.value = true
   try {
-    const { data } = await client.get('/dashboard/stats', { params: filterParams() })
+    // 显式给出响应类型：下方 trend/by_level/by_department 的推导均依赖它（否则回调参数退化为隐式 any）
+    const { data } = await client.get<DashboardStats>('/dashboard/stats', { params: filterParams() })
     lastData.value = data
     cards.value[0].value = data.total_vulns
     cards.value[1].value = data.open_vulns
     cards.value[2].value = `${data.fix_rate}%`
     cards.value[3].value = data.total_assets
     // 迷你趋势线复用 12 个月趋势数据（在管资产暂无独立趋势，沿用提交轮廓）
-    const submitted = data.trend.map((t: any) => t.submitted)
-    const fixed = data.trend.map((t: any) => t.fixed)
+    const submitted = data.trend.map((t) => t.submitted)
+    const fixed = data.trend.map((t) => t.fixed)
     cards.value[0].spark = submitted
-    cards.value[1].spark = data.trend.map((t: any) => Math.max(0, t.submitted - t.fixed))
+    cards.value[1].spark = data.trend.map((t) => Math.max(0, t.submitted - t.fixed))
     cards.value[2].spark = fixed
     cards.value[3].spark = submitted
     deptData.value = data.by_department ?? []
@@ -221,13 +225,13 @@ function renderCharts() {
   disposeCharts()
 
   // 渐变面积趋势图
-  const submitted = data.trend.map((t: any) => t.submitted)
-  const fixed = data.trend.map((t: any) => t.fixed)
+  const submitted = data.trend.map((t) => t.submitted)
+  const fixed = data.trend.map((t) => t.fixed)
   mk(trendRef.value, {
     tooltip: { trigger: 'axis' },
     legend: { data: ['提交', '修复完成'], top: 0 },
     grid: { left: 40, right: 16, top: 40, bottom: 30 },
-    xAxis: { type: 'category', boundaryGap: false, data: data.trend.map((t: any) => t.month) },
+    xAxis: { type: 'category', boundaryGap: false, data: data.trend.map((t) => t.month) },
     yAxis: { type: 'value', minInterval: 1 },
     series: [
       { name: '提交', type: 'line', smooth: true, symbol: 'none', data: submitted,
@@ -238,11 +242,11 @@ function renderCharts() {
   })
 
   // 等级分布：圆角环形 + 中心 KPI 总数 + 右侧图例
-  const levelTotal = data.by_level.reduce((s: number, x: any) => s + x.count, 0)
+  const levelTotal = data.by_level.reduce((s: number, x) => s + x.count, 0)
   mk(levelRef.value, {
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', right: 4, top: 'middle', formatter: (name: string) => {
-      const x = data.by_level.find((l: any) => l.name === name)
+      const x = data.by_level.find((l) => l.name === name)
       return `${name}  ${x ? x.count : ''}`
     } },
     title: {
@@ -255,7 +259,7 @@ function renderCharts() {
       type: 'pie', radius: ['52%', '74%'], center: ['36%', '50%'],
       itemStyle: { borderRadius: 8, borderColor: theme.dark ? '#101513' : '#ffffff', borderWidth: 3 },
       label: { show: false },
-      data: data.by_level.map((x: any) => ({
+      data: data.by_level.map((x) => ({
         name: x.name, value: x.count, itemStyle: { color: levelColorByName(x.name) },
       })),
     }],
@@ -267,17 +271,17 @@ function renderCharts() {
       tooltip: { trigger: 'axis' },
       legend: { data: ['提测次数', '发现漏洞', '已修复', '修复率(%)'], top: 0 },
       grid: { left: 48, right: 48, top: 40, bottom: 30 },
-      xAxis: { type: 'category', data: deptData.value.map((d: any) => d.department) },
+      xAxis: { type: 'category', data: deptData.value.map((d) => d.department) },
       yAxis: [
         { type: 'value', minInterval: 1 },
         { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' }, splitLine: { show: false } },
       ],
       series: [
-        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_MINT }, data: deptData.value.map((d: any) => d.plans) },
-        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_AMBER }, data: deptData.value.map((d: any) => d.vulns) },
-        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_SKY }, data: deptData.value.map((d: any) => d.fixed) },
+        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_MINT }, data: deptData.value.map((d) => d.plans) },
+        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_AMBER }, data: deptData.value.map((d) => d.vulns) },
+        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_SKY }, data: deptData.value.map((d) => d.fixed) },
         { name: '修复率(%)', type: 'line', yAxisIndex: 1, smooth: true, symbolSize: 7,
-          lineStyle: { width: 2.5, color: SERIES_PINK }, itemStyle: { color: SERIES_PINK }, data: deptData.value.map((d: any) => d.fix_rate) },
+          lineStyle: { width: 2.5, color: SERIES_PINK }, itemStyle: { color: SERIES_PINK }, data: deptData.value.map((d) => d.fix_rate) },
       ],
     })
   }
@@ -293,8 +297,8 @@ onMounted(async () => {
   const meta = await auth.fetchMeta()
   sourceMap.value = meta?.vul_source ?? {}
   levelMap.value = meta?.vul_level ?? {}
-  client.get('/groups').then(({ data }) => {
-    departments.value = data.map((g: any) => g.name)
+  client.get<IdName[]>('/groups').then(({ data }) => {
+    departments.value = data.map((g) => g.name)
   }).catch(() => { /* 无权限时部门筛选项置空 */ })
   await reload()
   window.addEventListener('resize', onResize)

@@ -22,16 +22,23 @@ bash dev.sh
 
 # 后端（始终用 backend/.venv 解释器，禁止系统 python）
 cd backend
+uv venv .venv --python 3.12                 # 创建/重建 venv（uv 管理，与容器 python:3.12-slim 对齐）
+uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt   # 安装/同步依赖
 .venv/Scripts/python -m pytest              # 运行全部测试
 .venv/Scripts/python -m uvicorn app.main:app --reload --port 27015
+.venv/Scripts/python -m ruff check app scripts alembic tests   # 静态检查（配置 backend/ruff.toml）
+.venv/Scripts/python -m vulture app --min-confidence 80        # 死代码检查
 
 # 前端（统一 pnpm，勿用 npm/yarn —— 仓库只保留 pnpm-lock.yaml）
 cd frontend
 pnpm install
 pnpm run dev        # http://localhost:27014，代理 /api 与 /storage 到 27015
 pnpm run build
+pnpm typecheck      # 类型检查（vue-tsc --noEmit，配置 tsconfig.json）
 pnpm test           # vitest 单测
 ```
+
+> 前端提交前门禁：`pnpm typecheck` + `pnpm test` + `pnpm run build` 三者全绿（与后端 `ruff` + `pytest` 对应）。
 
 开发态环境变量：`VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db`、`VP_DISABLE_QUEUE=1`、`VP_DEBUG=1`（dev 脚本已内置）。
 
@@ -65,6 +72,13 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 ## 后端编码规范
 
+- **提交前静态检查必须全绿**（2026-09-17 审计引入）：`ruff check app scripts alembic tests` 与 `vulture app --min-confidence 80`。配置见 `backend/ruff.toml`：长行按**显示宽度** 120 计（CJK 记 2 列）；已按文件豁免 `app/schemas/__init__.py` 的 F401（按设计重导出）、`alembic/versions/*` 与 `scripts/seed_dev_data.py` 的 E501（迁移内容冻结 / 中文演示数据），豁免原因写在配置文件注释中。
+- **Python 版本已对齐 3.12（2026-09-17）**：后端 venv 统一由 **uv** 管理，本地 `backend/.venv` 为 **3.12.11**，与容器/生产 `python:3.12-slim` 一致；ruff `target-version = "py312"`。venv 规格变更（重建 / 换版本）一律用 uv：`uv venv backend/.venv --python 3.12` + `uv pip install --python <venv 解释器> -r backend/requirements-dev.txt`。注意 Windows 解释器路径是 `.venv/Scripts/python.exe`（Linux 为 `.venv/bin/python`）；切换 venv 时旧目录保留为 `.venv.oldXXX`（已在 .gitignore 覆盖 `*.venv.*/` 模式）。
+- **漏洞相关命名域（2026-09-17 审计 F-1 固化，新代码强制）**：仓库现状并存 `Vul`/`vulns`/`vul_type`/`vul_id` 与 `VulnType`/`vuln_assets`/`vuln_id`/`vuln_service.py`，缺少成文规则导致新代码只能模仿。规则如下：
+  - 模型类沿用 `Vul`（表 `vulns`）、`VulnType`（字典域类一律 `Vuln*`）；
+  - **实体域新增标识符（字段/模块/变量）统一 `vuln_` 前缀**（与现役 `vuln_service.py`、`vuln_assets`、`import_records.vuln_id` 一致），禁止新增 `vul_id` 形式的新外键或 `Vuln*` 形式的实体类；
+  - 常量一律 `VUL_*`（`VUL_TYPE`/`VUL_LEVEL`/`VUL_SOURCE`）；
+  - 既有 `vul_type` / `vul_id` / `vul_edit_snapshot` 等列名**保持不变**：重命名须连同 Alembic 与 `db.py` 轻量迁移双轨一起做（见「数据库迁移」约定），属独立专项。
 - 字典/枚举与其展示色值只写在 `app/constants.py`，禁止在路由/服务内散落定义；改字典即全端生效（/meta 下发）。
 - 请求/响应模型写入 `app/schemas/` 对应域文件并在 `schemas/__init__.py` 重导出，禁止回填单文件或在路由文件内定义业务模型。
 - 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板；聚合筛选（filters JSON）复用 `app/core/filters.py` 引擎。
@@ -81,6 +95,9 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 时间格式化只用 `src/utils/format.ts`，禁止视图内 slice/replace。
 - 文件下载只用 `src/utils/download.ts` 的 `saveBlob()`。
 - 列表页（分页/排序/加载）、CRUD 弹窗、资产选择器、导出任务必须复用 `src/composables/` 对应组合式函数，禁止再复制样板。
+- 领域类型统一声明在 `src/types/index.ts`（工单/漏洞/报告/导出记录等），页面与 composable 不得就地复制 `any` 或另起同名接口；新增字段先在该文件补声明（字段名与后端 API 一致，snake_case），并同步 `docs/CODE_AUDIT.md` 的 E-5 进度。
+- **弹窗/抽屉打开函数命名统一为 `open<Target>`**（2026-09-17 审计 F-2）：`useCrudDialog` 的打开函数为 `openFormDialog`，业务侧为 `openCreateAsset` / `openWorkflow` 等；组件对外 API 可直接导出 `open`（与 `@closed` 对称）。禁止再引入 `openDialog`、`onOpen` 这类无目标或事件式命名（`onXxx` 仅用于「事件回调」语义，不作为「打开」动作名）。
+- 视图/组件冒烟测试统一复用 `src/__tests__/helpers/clientMock.ts`（`clientMockFactory()` + `getMock`），禁止在各 spec 内重复书写 axios client 的 `vi.mock` 样板。
 - 状态标签统一 `tl-tag` 类 + `softStyle()` 柔和样式；表格行内允许「色点 + 文字」dot-tag 变体（等级/状态语义），色值仍走 colors.ts 字典注册表，禁止视图内硬编码。
 - Tailwind 灰阶类（`text-gray-*` / `bg-gray-*` / `border-gray-*` / `bg-white`）已映射到 `--tl-gray-*` 令牌自动适配暗黑模式，可直接使用；新增样式优先用令牌，保证明暗两态可用。
 - 日期区间选择器（`el-date-picker[type=daterange]`）的根节点即 `.el-input__wrapper`，Element Plus 给该类设了 `flex-grow: 1`；放进 flex 行（`.tl-filterbar` 或自写 `flex` 容器）会被拉伸撑满、`!w-*` 失效。固定宽度必须同时写 `!grow-0`（`flex-grow: 0 !important`）。

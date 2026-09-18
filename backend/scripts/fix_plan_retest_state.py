@@ -15,25 +15,18 @@
     python -m scripts.fix_plan_retest_state            # 执行纠偏（自动备份）
     python -m scripts.fix_plan_retest_state --dry-run  # 仅打印将纠偏的工单，不落库
 """
-import asyncio
-import json
-import logging
 import sys
-from datetime import datetime
 from pathlib import Path
-
-# 静默 SQLAlchemy 调试回显，保持输出简洁
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select  # noqa: E402
 
 from app.constants import PlanStatus, VulStatus  # noqa: E402
-from app.core.config import settings  # noqa: E402
 from app.db import async_session_maker  # noqa: E402
 from app.models import TestingPlan, Vul  # noqa: E402
 from app.services import plan_service  # noqa: E402
+from scripts._common import dry_run_flag, run, save_backup  # noqa: E402
 
 CLOSED_STATUSES = (VulStatus.IGNORED, VulStatus.FIXED)
 
@@ -46,8 +39,8 @@ async def main(dry_run: bool = False) -> None:
             )
         ).scalars().all()
 
-        # 纯数据快照：dry-run 的 rollback 会使会话内 ORM 实例全部过期，此后访问其属性
-        # 会触发同步 IO（异步会话抛 MissingGreenlet），故先取出为普通 dict。
+        # 纯数据快照：dry-run 的 rollback 会使会话内 ORM 实例过期（异步会话再访问会抛
+        # MissingGreenlet），故先取出为普通 dict；约定见 scripts/_common.run() 的 docstring。
         pending: list[dict] = []
         for plan in plans:
             statuses = (
@@ -87,10 +80,7 @@ async def main(dry_run: bool = False) -> None:
             print("[dry-run] 未落库。")
             return
 
-        backup_dir = settings.storage_sub("backups")
-        backup_dir.mkdir(parents=True, exist_ok=True)
-        backup_file = backup_dir / f"plan_retest_state_{datetime.now():%Y%m%d%H%M%S}.json"
-        backup_file.write_text(json.dumps(pending, ensure_ascii=False, indent=2), encoding="utf-8")
+        backup_file = save_backup(pending, "plan_retest_state")
         print(f"原值已备份：{backup_file}")
 
         for row in pending:
@@ -106,4 +96,5 @@ async def main(dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(dry_run="--dry-run" in sys.argv))
+    # 统一入口：静默 SQLAlchemy 回显 + `--dry-run` 解析（审计 M-2）
+    run(main, dry_run=dry_run_flag())

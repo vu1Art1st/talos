@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useExportJobs } from '../useExportJobs'
+import type { ExportJob } from '../useExportJobs'
 
 // mock element-plus：确认框行为由用例内定义，成功提示记录调用
 const confirmMock = vi.fn()
@@ -81,8 +82,8 @@ describe('useExportJobs', () => {
   it('downloadJob 以 blob 拉取文件并交给 saveReportBlob', async () => {
     const blob = { size: 1024 }
     getMock.mockResolvedValueOnce({ data: blob })
-    const job = { id: 5, report_id: 9, fmt: 'docx', status: 'done' }
-    await useExportJobs().downloadJob(job as any, '兜底标题')
+    const job: ExportJob = { id: 5, report_id: 9, fmt: 'docx', status: 'done' }
+    await useExportJobs().downloadJob(job, '兜底标题')
     expect(getMock).toHaveBeenCalledWith('/reports/exports/5/download', { responseType: 'blob' })
     expect(saveReportBlobMock).toHaveBeenCalledWith(blob, job, '兜底标题')
   })

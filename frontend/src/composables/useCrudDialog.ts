@@ -1,4 +1,4 @@
-// CRUD 弹窗三件套：openDialog / 提交保存 / 保存态。消除各列表视图重复的对话框样板。
+// CRUD 弹窗三件套：openFormDialog / 提交保存 / 保存态。消除各列表视图重复的对话框样板。
 import { ref, type Ref } from 'vue'
 import { ElMessage } from 'element-plus'
 
@@ -7,7 +7,7 @@ export interface CrudDialogState<F> {
   saving: Ref<boolean>
   form: Ref<F>
   /** 打开弹窗：传入 row 则为编辑（按 empty 重建后合并 row 字段），否则为新建 */
-  openDialog: (row?: Partial<F> | null) => void
+  openFormDialog: (row?: Partial<F> | null) => void
   /** 提交保存：成功后提示 + 关弹窗 + afterSave 刷新列表；失败保留弹窗 */
   submit: () => Promise<void>
 }
@@ -27,7 +27,7 @@ export function useCrudDialog<F extends object>(options: CrudDialogOptions<F>): 
   const saving = ref(false)
   const form = ref(options.empty()) as Ref<F>
 
-  function openDialog(row?: Partial<F> | null) {
+  function openFormDialog(row?: Partial<F> | null) {
     form.value = { ...options.empty(), ...(row ?? {}) } as F
     dialogVisible.value = true
   }
@@ -44,5 +44,5 @@ export function useCrudDialog<F extends object>(options: CrudDialogOptions<F>): 
     }
   }
 
-  return { dialogVisible, saving, form, openDialog, submit }
+  return { dialogVisible, saving, form, openFormDialog, submit }
 }

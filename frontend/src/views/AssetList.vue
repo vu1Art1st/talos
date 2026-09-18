@@ -56,7 +56,7 @@
       </el-table-column>
       <el-table-column label="负责人" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">
-          {{ (row.owners ?? []).map((o: any) => o.name).join('、') || '-' }}
+          {{ (row.owners ?? []).map((o: { name: string }) => o.name).join('、') || '-' }}
         </template>
       </el-table-column>
       <el-table-column prop="status" label="状态" width="90" sortable="custom">
@@ -103,15 +103,16 @@ import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
 import { assetStatusMeta, dotStyle, urlTagMeta } from '../utils/colors'
+import type { UploadRequestOptions } from 'element-plus'
+import type { Asset } from '../types'
 
 const auth = useAuthStore()
-const meta = ref<any>(null)
-const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage('/assets')
+const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage<Asset>('/assets')
 const importing = ref(false)
 const dialogVisible = ref(false)
-const editing = ref<any>(null)
+const editing = ref<Asset | null>(null)
 
-function openEdit(row?: any) {
+function openEdit(row?: Asset) {
   editing.value = row ?? null
   dialogVisible.value = true
 }
@@ -123,18 +124,18 @@ async function remove(id: number) {
 }
 
 async function downloadTemplate() {
-  const { data } = await client.get('/assets/import/template', { responseType: 'blob' })
+  const { data } = await client.get<Blob>('/assets/import/template', { responseType: 'blob' })
   saveBlob(data, '资产导入模板.xlsx')
 }
 
 async function exportExcel() {
-  const { data } = await client.get('/assets/export', {
+  const { data } = await client.get<Blob>('/assets/export', {
     params: { search: search.value }, responseType: 'blob',
   })
   saveBlob(data, '资产导出.xlsx')
 }
 
-async function importExcel(options: any) {
+async function importExcel(options: UploadRequestOptions) {
   importing.value = true
   try {
     const fd = new FormData()
@@ -155,7 +156,8 @@ async function importExcel(options: any) {
 }
 
 onMounted(async () => {
-  meta.value = await auth.fetchMeta()
+  // 仅刷新字典注册表（模板用的 urlTagMeta / assetStatusMeta 读的是 store 内的 meta），本页不直接消费 meta
+  await auth.fetchMeta()
   await load(1)
 })
 </script>

@@ -48,3 +48,36 @@ def test_lightweight_migration_drops_legacy_appeal_success():
     """
     source = _LIGHTWEIGHT_MIGRATION.read_text(encoding="utf-8")
     assert "DROP COLUMN appeal_success" in source
+
+
+# 影响URL 必须为不限长类型：定长列（曾为 varchar(512)）在录入约 20 条 URL 时溢出，
+# PostgreSQL 抛 StringDataRightTruncation 导致 500（2026-09-18 修复）。
+_URL_TEXT_COLUMNS = (("vulns", "affected_url"), ("import_records", "affected_url"))
+
+
+def test_affected_url_columns_are_text_in_models():
+    """模型侧 affected_url 不得回退为定长 String（长度校验改由 schema 层承担）。"""
+    from sqlalchemy import Text
+
+    tables = Base.metadata.tables
+    for table, column in _URL_TEXT_COLUMNS:
+        col = tables[table].columns[column]
+        assert isinstance(col.type, Text), f"{table}.{column} 应为 Text，当前为 {col.type!r}"
+
+
+def test_affected_url_widened_by_alembic():
+    """PostgreSQL 侧必须有迁移把 affected_url 改为 TEXT（SQLite 不校验长度，无法暴露该问题）。"""
+    source = "\n".join(p.read_text(encoding="utf-8") for p in _MIGRATIONS_DIR.glob("*.py"))
+    for table, column in _URL_TEXT_COLUMNS:
+        pattern = (
+            rf"alter_column\(\s*['\"]{table}['\"]\s*,\s*['\"]{column}['\"]"
+            rf"[\s\S]{{0,400}}?type_=sa\.Text\(\)"
+        )
+        assert re.search(pattern, source), f"{table}.{column} 未在任何 Alembic 迁移中被改为 Text"
+
+
+def test_affected_url_not_truncated_by_docx_parser():
+    """Word 解析器不得对 affected_url 做定长截断，否则多 URL 文本会被静默砍到 512 字符。"""
+    parser_source = (_BACKEND_DIR / "app" / "services" / "docx_parser.py").read_text(encoding="utf-8")
+    truncations = re.findall(r'record\["affected_url"\][^\n]*\[:\d+\]', parser_source)
+    assert not truncations, f"docx_parser 仍在截断 affected_url：{truncations}"

@@ -114,7 +114,10 @@ def test_import_template_roundtrip(tmp_path: Path):
 
 # ---------- 平台报告格式解析 ----------
 
-_SAMPLE_REPORT = Path(__file__).resolve().parents[1] / "storage" / "uploads" / "imports" / "8776123568ad49f885c239c454641a24.docx"
+_SAMPLE_REPORT = (
+    Path(__file__).resolve().parents[1] / "storage" / "uploads" / "imports"
+    / "8776123568ad49f885c239c454641a24.docx"
+)
 
 
 def test_parse_report_filename():

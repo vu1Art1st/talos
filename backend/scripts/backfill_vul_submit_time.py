@@ -9,14 +9,9 @@
     python -m scripts.backfill_vul_submit_time            # 执行回填
     python -m scripts.backfill_vul_submit_time --dry-run  # 仅统计待回填数量，不落库
 """
-import asyncio
-import logging
 import sys
 from datetime import datetime, time as dtime
 from pathlib import Path
-
-# 静默 SQLAlchemy 调试回显，保持回填输出简洁
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -24,6 +19,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app.db import async_session_maker  # noqa: E402
 from app.models import ImportBatch, ImportRecord, Vul  # noqa: E402
+from scripts._common import dry_run_flag, run  # noqa: E402
 
 
 async def main(dry_run: bool = False) -> None:
@@ -69,5 +65,5 @@ async def main(dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    dry_run = "--dry-run" in sys.argv
-    asyncio.run(main(dry_run=dry_run))
+    # 入口统一走 _common.run：静默 SQLAlchemy 回显 + 统一 --dry-run 解析（审计 M-2）
+    run(main, dry_run=dry_run_flag())

@@ -22,7 +22,7 @@
     </div>
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange">
-      <el-table-column type="selection" width="40" :selectable="(row: any) => row.status === 'parsed'" />
+      <el-table-column type="selection" width="40" :selectable="(row: ImportBatch) => row.status === 'parsed'" />
       <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
       <el-table-column prop="filename" label="文件名" min-width="220" show-overflow-tooltip sortable="custom" />
@@ -73,6 +73,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
+import type { UploadFile, UploadUserFile } from 'element-plus'
 import ImportBatchConfirmDialog, { type BatchConfirmResult } from '../components/ImportBatchConfirmDialog.vue'
 import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
 import TlPagination from '../components/TlPagination.vue'
@@ -80,22 +81,23 @@ import { useListPage } from '../composables/useListPage'
 import { saveBlob } from '../utils/download'
 import { dotStyle, importStatusMeta } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import type { ApiErrorShape, ImportBatch } from '../types'
 
 const router = useRouter()
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 const uploadRef = ref()
-const fileList = ref<any[]>([])
+const fileList = ref<UploadUserFile[]>([])
 const uploading = ref(false)
 const uploaded = ref(0)
 let timer: number | undefined
 
-const { items, total, page, size, loading, load, onSortChange, onSizeChange } = useListPage('/imports')
+const { items, total, page, size, loading, load, onSortChange, onSizeChange } = useListPage<ImportBatch>('/imports')
 // 批量关联工单并确认
 const batchDialogVisible = ref(false)
-const selected = ref<any[]>([])
+const selected = ref<ImportBatch[]>([])
 const selectedIds = computed(() => selected.value.map((r) => r.id))
 
-function onSelectionChange(rows: any[]) {
+function onSelectionChange(rows: ImportBatch[]) {
   selected.value = rows
 }
 
@@ -120,11 +122,11 @@ async function onBatchConfirmSuccess(data: BatchConfirmResult) {
   }
 }
 
-function onFileChange(file: any) {
+function onFileChange(file: UploadFile) {
   if (file.status === 'ready') fileList.value.push(file)
 }
 
-function onFileRemove(file: any) {
+function onFileRemove(file: UploadFile) {
   fileList.value = fileList.value.filter((f) => f.uid !== file.uid)
 }
 
@@ -140,13 +142,16 @@ async function doUpload() {
   let failed = 0
   try {
     for (const f of fileList.value) {
+      // 仅 'ready' 的文件会入列（此时必有 raw）；异常态直接跳过，避免把 undefined 塞进 FormData
+      if (!f.raw) continue
       const form = new FormData()
       form.append('file', f.raw)
       try {
         await client.post('/imports', form)
-      } catch (e: any) {
+      } catch (e) {
         failed++
-        ElMessage.error(`「${f.name}」上传失败：${e?.response?.data?.detail || e?.message || '未知错误'}`)
+        const err = e as ApiErrorShape
+        ElMessage.error(`「${f.name}」上传失败：${err?.response?.data?.detail || err?.message || '未知错误'}`)
       }
       uploaded.value++
     }
@@ -165,7 +170,7 @@ async function doUpload() {
 }
 
 async function downloadTemplate() {
-  const resp = await client.get('/imports/template', { responseType: 'blob' })
+  const resp = await client.get<Blob>('/imports/template', { responseType: 'blob' })
   saveBlob(resp.data, '漏洞导入模板.docx')
 }
 

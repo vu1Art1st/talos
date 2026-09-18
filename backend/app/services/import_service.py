@@ -30,7 +30,7 @@ from app.models import (
     Vul,
     VulLog,
 )
-from app.services import plan_service, vuln_service
+from app.services import plan_service, report_meta, vuln_service
 from app.services.report_builder import build_report_docx
 from app.services.report_html import vuln_section_html
 
@@ -435,123 +435,28 @@ async def auto_export_report(
 ) -> None:
     """导入报告确认入库后自动生成 docx 文件并记录导出任务（可下载）。
 
-    构建 meta 与后台导出任务口径一致（版本变更记录 / 参测人员 / 测试账号等），
-    时间取报告标题日期固定 14:00；文件同步生成，不依赖 arq 队列（开发免队列也生效）。
+    meta 与后台导出任务共用 `services.report_meta` 的同一实现（版本变更记录 / 参测人员 /
+    测试账号等），本函数只负责注入导入路径特有的 `report_time`（报告标题日期固定 14:00）；
+    文件同步生成，不依赖 arq 队列（开发免队列也生效）。
     导入新报告无实际改动，导出成功不会改变报告指纹以外的内容，仅导出版本号 +1。
     """
-    meta = {
-        "title": report.title,
-        "project_name": report.project_name,
-        "customer": report.customer,
-        "author": report.author,
-        "test_start": report.test_start,
-        "test_end": report.test_end,
-        "target_ip": report.target_ip,
-        "test_account": report.test_account,
-        "status": report.status,
-        "is_retest": "复测" in (report.title or ""),
+    # meta / 版本记录 / 章节 / 漏洞与资产构建统一由 services.report_meta 提供，
+    # 与后台导出任务（workers/main.export_report_task）共用同一实现，禁止在此重复实现。
+    meta = await report_meta.build_export_meta(
+        session,
+        report,
+        plan=plan,
+        generator=(user.realname or user.username or "") if user is not None else None,
         # 报告时间（导入报告=标题日期 14:00）：封面日期与版本变更记录均以它为基准，而非当前时间
-        "report_time": report.create_time,
-    }
-    if user is not None:
-        meta["generator"] = user.realname or user.username or ""
-    testers: list[str] = []
-    report_records: list[dict] = []
-    plan_urls: list[str] = []
-    if plan is not None:
-        for u in plan.testers:
-            name = (u.realname or u.username or "").strip()
-            if name and name not in testers:
-                testers.append(name)
-        plan_urls = [u for u in (plan.target_urls or []) if u]
-        plan_reports = (
-            (
-                await session.execute(
-                    select(Report)
-                    .where(Report.testing_plan_id == plan.id)
-                    .order_by(Report.create_time, Report.id)
-                )
-            )
-            .scalars()
-            .all()
-        )
-        report_ids = [pr.id for pr in plan_reports]
-        last_done: dict[int, str] = {}
-        if report_ids:
-            rows = (
-                await session.execute(
-                    select(ExportJob.report_id, func.max(ExportJob.finish_time))
-                    .where(
-                        ExportJob.report_id.in_(report_ids),
-                        ExportJob.status == "done",
-                    )
-                    .group_by(ExportJob.report_id)
-                )
-            ).all()
-            for rid, ft in rows:
-                if ft is not None:
-                    last_done[rid] = ft.strftime("%Y-%m-%d")
-        export_date_str = now().strftime("%Y-%m-%d")
-        for pr in plan_reports:
-            if pr.id == report.id:
-                # 当前报告优先取最近成功导出时间；无则取报告自身日期（导入报告=标题日期），
-                # 保证自动导出的版本记录显示报告日期而非当前时间
-                rdate = last_done.get(pr.id) or (
-                    pr.create_time.strftime("%Y-%m-%d") if pr.create_time is not None else ""
-                ) or export_date_str
-            elif pr.id in last_done:
-                rdate = last_done[pr.id]
-            elif pr.create_time is not None:
-                rdate = pr.create_time.strftime("%Y-%m-%d")
-            else:
-                rdate = ""
-            creator_name = ""
-            if pr.creator_id is not None:
-                cu = await session.get(User, pr.creator_id)
-                if cu is not None:
-                    creator_name = cu.realname or cu.username or ""
-            if not creator_name:
-                creator_name = pr.author or ""
-            report_records.append({
-                "is_retest": "复测" in (pr.title or ""),
-                "creator_name": creator_name,
-                "date": rdate,
-            })
-    meta["testers"] = testers
-    meta["report_records"] = report_records
+        report_time=report.create_time,
+    )
+    plan_urls = report_meta.collect_plan_urls(plan)
 
     # 漏洞章节在新报告上为临时对象，flush 后重查确保导出内容完整
     await session.flush()
     await session.refresh(report, attribute_names=["sections"])
-    sections = [
-        {"title": s.title, "content_html": s.content_html, "vul_id": s.vul_id}
-        for s in report.sections
-    ]
-    vul_ids = [s.vul_id for s in report.sections if s.vul_id]
-    vulns: list[dict] = []
-    assets: list[dict] = []
-    if vul_ids:
-        rows = (await session.execute(select(Vul).where(Vul.id.in_(vul_ids)))).scalars().all()
-        by_id = {v.id: v for v in rows}
-        vulns = [
-            {
-                "id": v.id, "title": v.title, "vul_type": v.vul_type, "level": v.level,
-                "status": v.status, "affected_url": v.affected_url, "is_retest": v.is_retest,
-                "retest_html": v.retest_html,
-            }
-            for vid in vul_ids if (v := by_id.get(vid))
-        ]
-        seen: set[int] = set()
-        for v in rows:
-            for a in v.assets:
-                if a.id in seen:
-                    continue
-                seen.add(a.id)
-                assets.append({
-                    "name": a.name,
-                    "public_urls": a.public_urls or [],
-                    "internal_urls": a.internal_urls or [],
-                })
+    sections = report_meta.build_sections(report)
+    vulns, assets = await report_meta.collect_vulns_and_assets(session, sections)
 
     export_dir = settings.storage_sub("exports")
     stamp = now().strftime("%Y%m%d%H%M%S")

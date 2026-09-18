@@ -18,7 +18,7 @@ import {
   softStyle,
   statusColorByName,
   statusLabel,
-  statusSoftStyleEx,
+  statusSoftStyleWithRetest,
   tone,
   vulTypeColor,
   type DictMetaPayload,
@@ -84,10 +84,12 @@ describe('colors 字典注册表（meta 单源）', () => {
   })
 
   it('meta 漏发任一 key 时兜底为空对象而非 undefined，标签查询不抛错（防报告区域消失回归）', () => {
-    const partial = metaFixture() as any
+    // 故意构造「漏发 export_job_status」的不完整 meta（本用例即验证兜底），故顶层与 colors 均放宽为 Partial
+    type PartialMeta = Partial<Omit<DictMetaPayload, 'colors'>> & { colors?: Partial<DictMetaPayload['colors']> }
+    const partial = metaFixture() as PartialMeta
     delete partial.export_job_status
-    delete partial.colors.export_job_status
-    applyDictMeta(partial)
+    delete partial.colors?.export_job_status
+    applyDictMeta(partial as DictMetaPayload)
     expect(exportJobSoftStyle('done')).toEqual(softStyle('#8A968F'))
     expect(exportJobName('done')).toBe('done')
   })
@@ -96,14 +98,14 @@ describe('colors 字典注册表（meta 单源）', () => {
     expect(softStyle('#DC2626')).toEqual({ background: '#DC26261f', color: '#DC2626' })
   })
 
-  it('statusSoftStyleEx 复测未通过覆盖状态色，普通状态走字典色', () => {
-    expect(statusSoftStyleEx(50, true)).toEqual(softStyle('#E11D48'))
-    expect(statusSoftStyleEx(50, false)).toEqual(softStyle('#D97706'))
+  it('statusSoftStyleWithRetest 复测未通过覆盖状态色，普通状态走字典色', () => {
+    expect(statusSoftStyleWithRetest(50, true)).toEqual(softStyle('#E11D48'))
+    expect(statusSoftStyleWithRetest(50, false)).toEqual(softStyle('#D97706'))
   })
 
   it('statusLabel：复测未通过优先，map 参数优先于注册表', () => {
     expect(statusLabel(50, true)).toBe('复测未通过')
-    expect(statusLabel(50, false, { 50: '自定义' } as any)).toBe('自定义')
+    expect(statusLabel(50, false, { 50: '自定义' })).toBe('自定义')
     expect(statusLabel(50, false)).toBe('修复中')
   })
 

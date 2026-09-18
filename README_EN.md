@@ -174,13 +174,14 @@ Without Gotenberg, only PDF preview/export returns 502 with a "conversion servic
 
 ## Legacy Data Migration
 
-To migrate data from the legacy insight2 (MySQL):
+The legacy insight2 (MySQL) migration script `backend/scripts/migrate_from_insight2.py` has been
+**removed**: the `App` model and `Asset.value / asset_type / is_open / is_https`, `Vul.app_id`
+no longer exist after the asset/vulnerability models were merged, so the script always failed at
+import (verified by the 2026-09-17 code audit, A-2).
 
-```bash
-python backend/scripts/migrate_from_insight2.py --help
-```
-
-Plaintext passwords are not migrated; legacy users must reset their password on first login.
+To migrate legacy data, rewrite the migration against the current models (`Asset` now covers the
+former `App` semantics via `name / sub_system / department / system_type / public_urls…`; `Vul`
+has no `app_id` and links to assets instead), and register it in `docs/SCRIPTS.md`.
 
 ## Roadmap & Releases
 

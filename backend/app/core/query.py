@@ -39,6 +39,19 @@ async def get_or_404(session: AsyncSession, model, pk, detail: str = "资源不�
     return obj
 
 
+async def delete_by_id_if_exists(session: AsyncSession, model, pk) -> bool:
+    """按主键删除实体（**幂等**：不存在时返回 False 而不报错）。
+
+    不负责 commit，由调用方决定提交时机；用于「删除成功」语义的删除端点，
+    避免各路由重复 get → if → delete 样板。
+    """
+    obj = await session.get(model, pk)
+    if obj is None:
+        return False
+    await session.delete(obj)
+    return True
+
+
 def parse_int_list(raw: str) -> list[int] | None:
     """逗号分隔字符串转 int 列表；空 / 全空 → None（等价不筛选）。"""
     return [int(x) for x in raw.split(",") if x.strip().isdigit()] or None

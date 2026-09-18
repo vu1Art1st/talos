@@ -1,5 +1,3 @@
-from io import BytesIO
-
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy import cast, func, select, String
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -8,7 +6,7 @@ from app.constants import ASSET_STATUS, URL_TAG
 from app.core.deps import get_current_user, require_perm
 from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
-from app.core.xlsx import xlsx_response
+from app.core.xlsx import load_xlsx, xlsx_response
 from app.db import get_session
 from app.models import Asset, Group, GroupMember, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
@@ -228,13 +226,7 @@ async def import_assets(
     if len(data) > 20 * 1024 * 1024:
         raise HTTPException(400, "文件大小不能超过 20MB")
 
-    from openpyxl import load_workbook
-
-    try:
-        wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
-    except Exception:
-        raise HTTPException(400, "Excel 文件解析失败，请使用导入模板")
-
+    wb = load_xlsx(data)
     ws = wb.active
     result = AssetImportResultOut()
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):

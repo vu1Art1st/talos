@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.vulns import _build_vuln_conditions, build_vul_out
 from app.core.deps import get_pat_user
-from app.core.query import apply_sort, paginate, parse_int_list, parse_str_list
+from app.core.query import apply_sort, paginate, parse_int_list
 from app.core.timeutil import parse_date
 from app.db import get_session
 from app.models import User, Vul

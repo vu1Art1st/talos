@@ -6,5 +6,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.." # 切到仓库根目录（docker-compose.yml 所在处）
 
+# docker 命令前缀（root 直接 docker / 非 root 用 sudo docker），与备份族脚本统一（审计 S-5）
+# shellcheck source=scripts/docker-cmd.sh
+. "$(dirname "$0")/docker-cmd.sh"
+
 # run --rm 起一个临时 api 容器执行迁移命令，复用其环境变量与依赖，完事即删
-sudo docker compose run --rm api python -m scripts.migrate
+$DOCKER compose run --rm api python -m scripts.migrate

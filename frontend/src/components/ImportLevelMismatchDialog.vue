@@ -43,10 +43,11 @@
 
 <script setup lang="ts">
 import { levelDotStyle } from '../utils/colors'
+import type { ImportLevelMismatch } from '../types'
 
 withDefaults(defineProps<{
   modelValue: boolean
-  items: any[]
+  items: ImportLevelMismatch[]
   showBatch?: boolean
   confirmText?: string
   cancelText?: string

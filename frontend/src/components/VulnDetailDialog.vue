@@ -13,13 +13,13 @@
         <div class="flex flex-wrap items-center gap-2 mt-3">
           <span class="tl-tag" :style="levelSoftStyle(vuln.level)">{{ levelName(vuln.level) }}</span>
           <span class="tl-tag" :style="vulTypeSoftStyle(vuln.vul_type)">
-            {{ meta?.vul_type?.[vuln.vul_type] ?? vuln.vul_type }}
+            {{ meta?.vul_type?.[vuln.vul_type ?? 0] ?? vuln.vul_type }}
           </span>
-          <span class="tl-tag" :style="statusSoftStyleEx(vuln.status, vuln.is_retest)">
+          <span class="tl-tag" :style="statusSoftStyleWithRetest(vuln.status, vuln.is_retest)">
             {{ statusLabel(vuln.status, vuln.is_retest, vulStatusMap) }}
           </span>
           <span v-if="vuln.assets?.length" class="tl-tag" :style="softStyle(STAT_CARD_COLORS.gray)">
-            关联资产：{{ vuln.assets.map((a: any) => a.name).join('、') }}
+            关联资产：{{ vuln.assets.map((a) => a.name).join('、') }}
           </span>
         </div>
         <el-descriptions :column="detailCols" border class="mt-4" size="small">
@@ -54,12 +54,13 @@ import { useRouter } from 'vue-router'
 import { Close } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import type { Vuln } from '../types'
 import {
   levelName,
   levelSoftStyle,
   softStyle,
   STAT_CARD_COLORS,
-  statusSoftStyleEx,
+  statusSoftStyleWithRetest,
   statusLabel,
   vulTypeSoftStyle,
 } from '../utils/colors'
@@ -77,8 +78,8 @@ const emit = defineEmits<{
 const router = useRouter()
 const auth = useAuthStore()
 const loading = ref(false)
-const vuln = ref<any>(null)
-const meta = ref<any>(null)
+const vuln = ref<Vuln | null>(null)
+const meta = ref<Record<string, Record<number, string>> | null>(null)
 const vulStatusMap = computed<Record<number, string>>(() => meta.value?.vul_status ?? {})
 
 // 影响URL 多值（后端换行分隔存储）逐行展示
@@ -102,7 +103,7 @@ async function load(id: number) {
   vuln.value = null
   try {
     if (!meta.value?.vul_type) meta.value = await auth.fetchMeta()
-    const { data } = await client.get(`/vulns/${id}`)
+    const { data } = await client.get<Vuln>(`/vulns/${id}`)
     vuln.value = data
   } finally {
     loading.value = false

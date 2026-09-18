@@ -4,7 +4,7 @@
     <div class="flex items-center gap-2 mb-1">
       <span class="text-gray-400 text-sm">组织（组）用于资产归属与用户分组管理</span>
       <div class="flex-1" />
-      <el-button v-if="auth.hasPerm('user:manage')" type="primary" class="btn-min" @click="openDialog()">
+      <el-button v-if="auth.hasPerm('user:manage')" type="primary" class="btn-min" @click="openFormDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新建组织
       </el-button>
     </div>
@@ -21,7 +21,7 @@
       <el-table-column v-if="auth.hasPerm('user:manage')" label="操作" width="160" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openMembers(row)">人员录入</el-button>
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该组织？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -115,9 +115,10 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
+import type { Group, GroupMember } from '../types'
 
 const auth = useAuthStore()
-const items = ref<any[]>([])
+const items = ref<Group[]>([])
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
@@ -133,7 +134,7 @@ const nameRequiredRules: FormRules = {
 const memberDialogVisible = ref(false)
 const memberGroupId = ref(0)
 const memberGroupName = ref('')
-const members = ref<any[]>([])
+const members = ref<GroupMember[]>([])
 const membersLoading = ref(false)
 const memberFormVisible = ref(false)
 const memberSaving = ref(false)
@@ -143,18 +144,21 @@ const memberFormRef = ref<FormInstance>()
 async function load() {
   loading.value = true
   try {
-    const { data } = await client.get('/groups')
+    const { data } = await client.get<Group[]>('/groups')
     // 成员数由前端聚合全部成员统计（组织列表仅展示用）
-    const { data: allMembers } = await client.get('/group-members/all')
+    const { data: allMembers } = await client.get<GroupMember[]>('/group-members/all')
     const countMap = new Map<number, number>()
-    for (const m of allMembers) countMap.set(m.group_id, (countMap.get(m.group_id) ?? 0) + 1)
-    items.value = data.map((g: any) => ({ ...g, member_count: countMap.get(g.id) ?? 0 }))
+    for (const m of allMembers) {
+      if (m.group_id == null) continue // 未归属组织的成员不参与计数（与按 id 取数互不影响）
+      countMap.set(m.group_id, (countMap.get(m.group_id) ?? 0) + 1)
+    }
+    items.value = data.map((g) => ({ ...g, member_count: countMap.get(g.id) ?? 0 }))
   } finally {
     loading.value = false
   }
 }
 
-function openDialog(row?: any) {
+function openFormDialog(row?: Group) {
   form.id = row?.id ?? 0
   form.name = row?.name ?? ''
   form.remark = row?.remark ?? ''
@@ -162,7 +166,7 @@ function openDialog(row?: any) {
 }
 
 async function save() {
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   const body = { name: form.name, remark: form.remark }
   saving.value = true
@@ -190,21 +194,21 @@ async function remove(id: number) {
 async function loadMembers(groupId: number) {
   membersLoading.value = true
   try {
-    const { data } = await client.get(`/groups/${groupId}/members`)
+    const { data } = await client.get<GroupMember[]>(`/groups/${groupId}/members`)
     members.value = data
   } finally {
     membersLoading.value = false
   }
 }
 
-function openMembers(row: any) {
+function openMembers(row: Group) {
   memberGroupId.value = row.id
   memberGroupName.value = row.name
   memberDialogVisible.value = true
   loadMembers(row.id)
 }
 
-function openMemberForm(row?: any) {
+function openMemberForm(row?: GroupMember) {
   memberForm.id = row?.id ?? 0
   memberForm.name = row?.name ?? ''
   memberForm.phone = row?.phone ?? ''
@@ -213,7 +217,7 @@ function openMemberForm(row?: any) {
 }
 
 async function saveMember() {
-  const valid = await memberFormRef.value.validate().catch(() => false)
+  const valid = await memberFormRef.value?.validate().catch(() => false)
   if (!valid) return
   const body = { name: memberForm.name, phone: memberForm.phone, email: memberForm.email }
   memberSaving.value = true

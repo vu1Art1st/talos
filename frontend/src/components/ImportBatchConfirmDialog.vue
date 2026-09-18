@@ -53,6 +53,7 @@ import { ref, watch } from 'vue'
 import client from '../api/client'
 import ImportLevelMismatchDialog from './ImportLevelMismatchDialog.vue'
 import { usePlanAssetLink } from '../composables/usePlanAssetLink'
+import type { Asset, ImportLevelMismatch, Items, TestingPlan } from '../types'
 
 const props = defineProps<{
   modelValue: boolean
@@ -63,11 +64,11 @@ const emit = defineEmits<{
   (e: 'success', result: BatchConfirmResult): void
 }>()
 
-const plans = ref<any[]>([])
-const assets = ref<any[]>([])
+const plans = ref<TestingPlan[]>([])
+const assets = ref<Asset[]>([])
 const submitting = ref(false)
 // 等级不一致提醒：批量入库前先检查并强制确认一次
-const mismatchItems = ref<any[]>([])
+const mismatchItems = ref<ImportLevelMismatch[]>([])
 const mismatchVisible = ref(false)
 const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
   () => plans.value,
@@ -76,9 +77,10 @@ const { planId, assetId, planLabel, filteredAssets } = usePlanAssetLink(
 
 async function loadOptions() {
   const [{ data: assetPage }, { data: planPage }] = await Promise.all([
-    client.get('/assets', { params: { size: 100 } }),
+    client.get<Items<Asset>>('/assets', { params: { size: 100 } }),
     // 无专项权限时静默降级为不可关联计划（与预览确认页行为一致）
-    client.get('/testing-plans', { params: { size: 100 } }).catch(() => ({ data: { items: [] } })),
+    client.get<Items<TestingPlan>>('/testing-plans', { params: { size: 100 } })
+      .catch(() => ({ data: { items: [] } })),
   ])
   assets.value = assetPage.items
   plans.value = planPage.items
@@ -89,7 +91,7 @@ async function submit() {
   // 入库前先检查等级不一致记录；命中则弹窗强制确认一次后再入库
   submitting.value = true
   try {
-    const { data } = await client.get('/imports/level-mismatches', {
+    const { data } = await client.get<ImportLevelMismatch[]>('/imports/level-mismatches', {
       params: { batch_ids: props.batchIds.join(',') },
     })
     if (data.length) {

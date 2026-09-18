@@ -103,6 +103,7 @@ import TlPagination from '../components/TlPagination.vue'
 import { fmtDateTime } from '../utils/format'
 import { renderMarkdown } from '../utils/markdown'
 import guideMd from '../../../docs/OPEN_API_GUIDE.md?raw'
+import type { ApiToken } from '../types'
 
 const { items, total, page, size, loading, load, onSizeChange } = useListPage('/pats')
 
@@ -115,7 +116,8 @@ const tokenVisible = ref(false)
 const createdToken = ref('')
 const createForm = reactive({ name: '', expire_days: 30 })
 
-const isExpired = (row: any) => new Date(row.expires_at).getTime() <= Date.now()
+// 无到期时间视为已过期（`new Date(0)`，与原先 null 入参的强制转换结果一致）
+const isExpired = (row: ApiToken) => new Date(row.expires_at ?? 0).getTime() <= Date.now()
 
 function openCreate() {
   createForm.name = ''

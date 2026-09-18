@@ -7,14 +7,9 @@
 用法（容器内 /app 目录，或 docker compose run --rm api python -m scripts.backfill_retest）：
     python -m scripts.backfill_retest
 """
-import asyncio
-import logging
 import re
 import sys
 from pathlib import Path
-
-# 静默 SQLAlchemy 调试回显，保持回填输出简洁
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -23,6 +18,7 @@ from sqlalchemy import select  # noqa: E402
 from app.api.v1.vulns import _sync_vul_retest_html  # noqa: E402
 from app.db import async_session_maker  # noqa: E402
 from app.models import Vul, VulRetestRecord  # noqa: E402
+from scripts._common import run  # noqa: E402
 
 # 旧式聚合标题：<strong>复测记录 1：</strong>（带序号编号）
 _OLD_TITLE_RE = re.compile(r"复测记录\s*\d+\s*：")
@@ -47,4 +43,5 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # 入口统一走 _common.run：静默 SQLAlchemy 回显（审计 M-2）
+    run(main)

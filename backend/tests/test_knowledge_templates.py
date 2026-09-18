@@ -1,6 +1,6 @@
 """漏洞模板库数据文件（knowledge-import-vulnerabilities.json）完整性测试。
 
-模板库以该 JSON 为唯一权威数据源（scripts.seed_knowledge 与
+模板库以该 JSON 为唯一权威数据源（scripts.knowledge_data 与
 scripts.sync_knowledge_templates 均消费它），本测试固化「命名规范 / 内容质量 /
 组件漏洞拆分 / 参考链接来源」四类要求，防止后续改动回退。
 """

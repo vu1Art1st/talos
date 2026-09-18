@@ -11,10 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import DOCX_MIME
 from app.core.config import settings
-from app.core.query import get_or_404, paginate, apply_sort
+from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_sort
 from app.core.deps import require_perm
 from app.db import get_session
-from app.models import Asset, ExportJob, ImportBatch, ImportRecord, Report, TestingPlan, User
+from app.models import Asset, ImportBatch, ImportRecord, TestingPlan, User
 from app.schemas import (
     BatchConfirmIn,
     BatchConfirmItemOut,
@@ -97,6 +97,65 @@ async def upload_docx(
     return batch
 
 
+async def _precheck_confirm_targets(
+    session: AsyncSession, testing_plan_id: int | None, asset_id: int | None
+) -> None:
+    """前置校验统一工单/资产的存在性，避免逐批次重复查询。"""
+    if testing_plan_id is not None and await session.get(TestingPlan, testing_plan_id) is None:
+        raise HTTPException(400, "指定的渗透测试工单不存在")
+    if asset_id is not None and await session.get(Asset, asset_id) is None:
+        raise HTTPException(400, "指定的资产不存在")
+
+
+async def _count_parsed_records(session: AsyncSession, batch_id: int) -> int:
+    """批次内待入库（parsed）记录数，为 0 表示无可用数据。"""
+    return (
+        await session.execute(
+            select(func.count(ImportRecord.id)).where(
+                ImportRecord.batch_id == batch_id, ImportRecord.status == "parsed",
+            )
+        )
+    ).scalar_one()
+
+
+async def _confirm_one_batch(
+    session: AsyncSession, request: Request, user: User, body: BatchConfirmIn,
+    bid: int, batch: ImportBatch,
+) -> tuple[BatchConfirmItemOut, int | None]:
+    """确认单个批次（失败只回滚该批次，不影响其余批次）。
+
+    返回 `(批次明细, 该批次生成的报告 id)`；无待入库记录时状态为 skipped。
+    """
+    if not await _count_parsed_records(session, bid):
+        return BatchConfirmItemOut(
+            batch_id=bid, filename=batch.filename, status="skipped",
+            detail="没有可入库的记录（可能已全部确认）",
+        ), None
+    try:
+        result = await import_service.confirm_batch_internal(
+            session, batch, user,
+            None, body.asset_id, None, body.testing_plan_id,
+        )
+        await audit(session, request, "import_confirm", user, {
+            "target": f"imports/{bid}", "created": result.created,
+        })
+        return BatchConfirmItemOut(
+            batch_id=bid, filename=batch.filename, status="confirmed", detail=result.msg,
+        ), result.report_id
+    except HTTPException as exc:
+        await session.rollback()
+        return BatchConfirmItemOut(
+            batch_id=bid, filename=batch.filename, status="failed", detail=str(exc.detail),
+        ), None
+    except Exception:
+        await session.rollback()
+        logger.exception("批量确认批次 %s 失败", bid)
+        return BatchConfirmItemOut(
+            batch_id=bid, filename=batch.filename, status="failed",
+            detail="确认失败，请重试或进入预览逐批处理",
+        ), None
+
+
 @router.post("/batch-confirm", response_model=BatchConfirmOut)
 async def batch_confirm_batches(
     body: BatchConfirmIn,
@@ -112,15 +171,7 @@ async def batch_confirm_batches(
     batch_ids = list(dict.fromkeys(body.batch_ids))  # 去重保序
     if not batch_ids:
         raise HTTPException(400, "未选择任何导入批次")
-    # 前置校验统一工单/资产，避免逐批次重复查询
-    if body.testing_plan_id is not None:
-        plan = await session.get(TestingPlan, body.testing_plan_id)
-        if plan is None:
-            raise HTTPException(400, "指定的渗透测试工单不存在")
-    if body.asset_id is not None:
-        asset = await session.get(Asset, body.asset_id)
-        if asset is None:
-            raise HTTPException(400, "指定的资产不存在")
+    await _precheck_confirm_targets(session, body.testing_plan_id, body.asset_id)
 
     details: list[BatchConfirmItemOut] = []
     confirmed = skipped = failed = 0
@@ -138,49 +189,16 @@ async def batch_confirm_batches(
                 batch_id=bid, filename="", status="failed", detail="导入批次不存在",
             ))
             continue
-        # 预检查是否有待入库记录：无则跳过（已确认 / 部分确认后剩余为空 / 解析失败）
-        has_parsed = (
-            await session.execute(
-                select(func.count(ImportRecord.id)).where(
-                    ImportRecord.batch_id == bid, ImportRecord.status == "parsed",
-                )
-            )
-        ).scalar_one()
-        if not has_parsed:
-            skipped += 1
-            details.append(BatchConfirmItemOut(
-                batch_id=bid, filename=batch.filename, status="skipped",
-                detail="没有可入库的记录（可能已全部确认）",
-            ))
-            continue
-        try:
-            result = await import_service.confirm_batch_internal(
-                session, batch, user,
-                None, body.asset_id, None, body.testing_plan_id,
-            )
-            await audit(session, request, "import_confirm", user, {
-                "target": f"imports/{bid}", "created": result.created,
-            })
+        item, report_id = await _confirm_one_batch(session, request, user, body, bid, batch)
+        details.append(item)
+        if item.status == "confirmed":
             confirmed += 1
-            details.append(BatchConfirmItemOut(
-                batch_id=bid, filename=batch.filename, status="confirmed", detail=result.msg,
-            ))
-            if result.report_id is not None:
-                report_ids.append(result.report_id)
-        except HTTPException as exc:
-            await session.rollback()
+        elif item.status == "skipped":
+            skipped += 1
+        else:
             failed += 1
-            details.append(BatchConfirmItemOut(
-                batch_id=bid, filename=batch.filename, status="failed", detail=str(exc.detail),
-            ))
-        except Exception:
-            await session.rollback()
-            logger.exception("批量确认批次 %s 失败", bid)
-            failed += 1
-            details.append(BatchConfirmItemOut(
-                batch_id=bid, filename=batch.filename, status="failed",
-                detail="确认失败，请重试或进入预览逐批处理",
-            ))
+        if report_id is not None:
+            report_ids.append(report_id)
     return BatchConfirmOut(
         confirmed=confirmed, skipped=skipped, failed=failed,
         report_ids=report_ids, details=details,
@@ -349,8 +367,6 @@ async def delete_batch(
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    batch = await session.get(ImportBatch, batch_id)
-    if batch:
-        await session.delete(batch)
-        await session.commit()
+    await delete_by_id_if_exists(session, ImportBatch, batch_id)
+    await session.commit()
     return {"msg": "删除成功"}

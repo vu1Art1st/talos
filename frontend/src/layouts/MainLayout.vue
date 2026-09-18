@@ -237,7 +237,7 @@ function onCommand(cmd: string) {
 }
 
 async function changePassword() {
-  const valid = await pwdFormRef.value.validate().catch(() => false)
+  const valid = await pwdFormRef.value?.validate().catch(() => false)
   if (!valid) return
   await client.post('/auth/password', pwdForm)
   ElMessage.success('密码修改成功，请重新登录')

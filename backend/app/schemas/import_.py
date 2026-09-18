@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from .common import OptHtmlStr
+from .common import OptAffectedUrl, OptHtmlStr
 
 
 class ImportRecordOut(BaseModel):
@@ -35,7 +35,8 @@ class ImportRecordUpdateIn(BaseModel):
     title: str | None = None
     vul_type: int | None = None
     level: int | None = None
-    affected_url: str | None = None
+    # 影响URL：多值与漏洞录入同一口径（切分/去重/上限见 schemas.common.normalize_affected_url）
+    affected_url: OptAffectedUrl = None
     description_html: OptHtmlStr = None
     reproduce_html: OptHtmlStr = None
     solution_html: OptHtmlStr = None

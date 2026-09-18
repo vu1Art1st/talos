@@ -73,7 +73,7 @@
         </template>
       </el-dropdown>
       <input ref="importInputRef" type="file" accept=".xlsx" class="hidden" @change="onImportFileChange" />
-      <el-button type="primary" class="btn-min" @click="openDialog()">
+      <el-button type="primary" class="btn-min" @click="openFormDialog()">
         <el-icon class="mr-1"><Plus /></el-icon>新增渗透测试工单
       </el-button>
       </template>
@@ -93,7 +93,7 @@
             <el-checkbox v-for="d in DIMENSIONS" :key="d.key" :value="d.key">{{ d.label }}</el-checkbox>
           </el-checkbox-group>
           <div v-loading="statsLoading" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-            <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="stats[d.key] ?? 0" />
+            <StatCard v-for="d in cardDims" :key="d.key" :label="d.label" :color="d.color" :value="statValue(d.key)" />
           </div>
           <div v-show="dims.includes('vulns_by_month')" ref="monthChartRef" class="w-full h-64 mt-3" />
         </div>
@@ -184,7 +184,7 @@
       <el-table-column label="测试人员" width="120" show-overflow-tooltip>
         <template #default="{ row }">
           <span v-if="row.testers?.length">
-            {{ row.testers.map((u: any) => u.realname || u.username).join('、') }}
+            {{ row.testers.map((u: { realname?: string | null; username?: string }) => u.realname || u.username).join('、') }}
           </span>
           <span v-else class="text-gray-400">未认领</span>
         </template>
@@ -260,7 +260,7 @@
       <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openWorkflow(row)">流程</el-button>
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm title="确认删除该计划？" @confirm="remove(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -433,16 +433,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Download, Filter, Upload } from '@element-plus/icons-vue'
-import * as echarts from 'echarts'
-import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { useThemeStore } from '../stores/theme'
-import { chartThemeName } from '../utils/chartTheme'
 import {
   levelBadgeStyle,
   levelName,
@@ -456,9 +451,8 @@ import {
   STAT_CARD_COLORS,
 } from '../utils/colors'
 import { fmtDate, fmtDateTime } from '../utils/format'
-import { saveBlob } from '../utils/download'
-import { DATE_RANGE_OPTIONS, computeDateRange } from '../utils/dateRange'
-import { assetUrls, cleanUrls, mergeUrls } from '../utils/urls'
+import { DATE_RANGE_OPTIONS } from '../utils/dateRange'
+import { assetUrls, mergeUrls } from '../utils/urls'
 import PlanWorkflowDrawer from '../components/PlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
@@ -468,119 +462,48 @@ import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
-import type { FilterFieldDef, FilterRule } from '../components/FilterBuilder.vue'
+import type { Asset, QueryParams, TestingPlan } from '../types'
+import { usePlanConclusion } from '../composables/usePlanConclusion'
+import { usePlanCrud } from '../composables/usePlanCrud'
+import { usePlanFilters } from '../composables/usePlanFilters'
+import { usePlanImportExport } from '../composables/usePlanImportExport'
+import { DIMENSIONS as PLAN_STAT_DIMENSIONS, usePlanStats } from '../composables/usePlanStats'
+import type { FilterFieldDef } from '../components/FilterBuilder.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
+// 函数声明提升：筛选条件变化 → 列表回到首页并同步刷新统计（reload 定义见下方）
+function triggerReload() {
+  reload()
+}
+
+// ---------- 筛选状态（审计 E-2：已下沉至 composables/usePlanFilters.ts） ----------
+const {
+  quickFilters, pending, quickFilterCount, onQuickFilterChange,
+  rangeKind, customRange, onRangeChange,
+  filterVisible, rules, filterCount, onFiltersChange,
+  buildParams, disposeFilters,
+} = usePlanFilters(triggerReload)
+
+// 列表查询：extraParams 以函数声明传入（提升），保证「查询参数口径」全站唯一
 const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/testing-plans', {
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: filterParams,
 })
-// 快捷筛选：三项布尔筛选收敛为单个下拉多选，myTests/unclaimed/pending 由勾选项派生
-const quickFilters = ref<string[]>([])
-const myTests = computed(() => quickFilters.value.includes('my_tests'))
-const unclaimed = computed(() => quickFilters.value.includes('unclaimed'))
-const pending = computed(() => quickFilters.value.includes('pending'))
-const quickFilterCount = computed(() => quickFilters.value.length)
-function onQuickFilterChange() {
-  reload()
-}
-const dialogVisible = ref(false)
-const saving = ref(false)
+// dialogVisible / saving 由 usePlanCrud 提供（审计 E-2），此处仅保留弹窗上下文与状态字典
 const statusMap = ref<Record<number, string>>({})
-const dialogRow = ref<any>(null)
+const dialogRow = ref<TestingPlan | null>(null)
 const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
 
-// ---------- 时间范围筛选（按初测完成时间） ----------
-const rangeKind = ref<string>('')
-const customRange = ref<[string, string] | null>(null)
+// 时间范围筛选状态（rangeKind / customRange / onRangeChange）已下沉至 composables/usePlanFilters.ts
 
-function onRangeChange() {
-  if (rangeKind.value !== 'custom') customRange.value = null
-  reload()
-}
+// ---------- 结论输出（审计 E-2：已下沉至 composables/usePlanConclusion.ts） ----------
+const {
+  conclusionPanel, conclusion, conclusionLoading,
+  loadConclusion, copyConclusion, downloadConclusion,
+} = usePlanConclusion(filterParams)
 
-// ---------- 结论输出 ----------
-const conclusionPanel = ref<string[]>([])
-const conclusion = ref<Record<string, any>>({})
-const conclusionLoading = ref(false)
-
-async function loadConclusion() {
-  conclusionLoading.value = true
-  try {
-    const { data } = await client.get('/testing-plans/conclusion', { params: filterParams() })
-    conclusion.value = data
-  } finally {
-    conclusionLoading.value = false
-  }
-}
-
-async function copyConclusion() {
-  const text = conclusion.value?.summary ?? ''
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('结论已复制')
-  } catch {
-    ElMessage.warning('复制失败，请手动选择复制')
-  }
-}
-
-async function downloadConclusion() {
-  const { data } = await client.get('/testing-plans/conclusion/export', {
-    params: filterParams(), responseType: 'blob',
-  })
-  saveBlob(data, '整改情况附件.xlsx')
-}
-
-// ---------- 聚合筛选 ----------
-const filterVisible = ref(false)
-const RULES_KEY = 'testing_plan_filters'
-
-// 聚合筛选可选字段（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
-const FILTER_FIELDS = new Set([
-  'system_name', 'test_type', 'department', 'receive_time',
-  'status', 'first_test_done_time', 'retest_done_time', 'testers',
-])
-
-function loadFilterRules(): FilterRule[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(RULES_KEY) || 'null')
-    if (Array.isArray(saved)) {
-      return saved
-        .filter((r: any) => r && typeof r.field === 'string' && r.field
-          && FILTER_FIELDS.has(r.field) && typeof r.op === 'string')
-        .map((r: any) => ({
-          field: r.field,
-          op: r.op,
-          value: r.value ?? '',
-          not: !!r.not,
-          connector: r.connector === 'or' ? ('or' as const) : ('and' as const),
-        }))
-    }
-  } catch { /* ignore */ }
-  return []
-}
-
-const rules = ref<FilterRule[]>(loadFilterRules())
-function isRuleComplete(r: FilterRule): boolean {
-  if (r.op === 'is_empty' || r.op === 'is_not_empty') return true
-  if (r.op === 'between') {
-    if (!Array.isArray(r.value) || r.value.length !== 2) return false
-    const [lo, hi] = r.value as (string | number | null)[]
-    return lo !== null && lo !== '' && hi !== null && hi !== ''
-  }
-  return r.value !== null && r.value !== ''
-}
-const filterCount = computed(() => rules.value.filter(isRuleComplete).length)
-let filterTimer: ReturnType<typeof setTimeout> | null = null
-
-// 规则变化：持久化 + 防抖刷新列表与统计
-function onFiltersChange() {
-  localStorage.setItem(RULES_KEY, JSON.stringify(rules.value))
-  if (filterTimer) clearTimeout(filterTimer)
-  filterTimer = setTimeout(() => reload(), 250)
-}
+// 聚合筛选（规则持久化 / 完整性判定 / 防抖刷新）已下沉至 composables/usePlanFilters.ts（审计 E-2）
 
 // 支持聚合筛选的列字段定义（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
 const filterFields = computed<FilterFieldDef[]>(() => [
@@ -597,54 +520,12 @@ const filterFields = computed<FilterFieldDef[]>(() => [
   { key: 'testers', label: '测试人员', type: 'text' },
 ])
 
-// ---------- 统计面板 ----------
-const DIMENSIONS = [
-  { key: 'total_plans', label: '工单总数', color: STAT_CARD_COLORS.blue },
-  { key: 'retest_done_plans', label: '复测完成数', color: STAT_CARD_COLORS.green },
-  { key: 'first_test_count', label: '初测次数', color: STAT_CARD_COLORS.orange },
-  { key: 'retest_count', label: '复测次数', color: STAT_CARD_COLORS.red },
-  { key: 'total_test_count', label: '总测试次数', color: STAT_CARD_COLORS.gray },
-  { key: 'est_mandays_total', label: '预估人天总计', color: STAT_CARD_COLORS.blue },
-  { key: 'actual_mandays_total', label: '实际人天总计', color: STAT_CARD_COLORS.green },
-  { key: 'remaining_est_mandays', label: '剩余预估人天', color: STAT_CARD_COLORS.orange },
-  { key: 'vulns_by_month', label: '按月漏洞数', color: STAT_CARD_COLORS.blue },
-] as const
-const STATS_DIMS_KEY = 'testing_plan_stats_dims'
-const statsPanel = ref<string[]>([])
-const dims = ref<string[]>(loadDims())
-const stats = ref<Record<string, number>>({})
-const statsLoading = ref(false)
-const monthChartRef = ref<HTMLElement>()
-let monthChart: echarts.ECharts | null = null
-let monthChartTheme = ''
-
-function loadDims(): string[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STATS_DIMS_KEY) || 'null')
-    if (Array.isArray(saved) && saved.length) return saved
-  } catch { /* ignore */ }
-  return DIMENSIONS.map((d) => d.key)
-}
-
-// 勾选的计数类维度（排除图表维度）以数字卡片展示
-const cardDims = computed(() =>
-  DIMENSIONS.filter((d) => d.key !== 'vulns_by_month' && dims.value.includes(d.key)))
-
-watch(dims, (v) => {
-  localStorage.setItem(STATS_DIMS_KEY, JSON.stringify(v))
-  if (v.includes('vulns_by_month')) nextTick(renderMonthChart)
-})
-
-// 折叠面板展开 / 明暗切换时，按新主题重建月度图表（隐藏态 init 会得到 0 尺寸，需在可见后渲染；
-// 展开动画约 300ms，动画结束后再 resize 一次兜底）
-const theme = useThemeStore()
-watch([statsPanel, () => theme.dark], async ([panel]) => {
-  if (panel.includes('stats') && dims.value.includes('vulns_by_month')) {
-    await nextTick()
-    renderMonthChart()
-    setTimeout(() => monthChart?.resize(), 320)
-  }
-})
+// ---------- 统计面板（审计 E-2：已下沉至 composables/usePlanStats.ts，维度常量随之下沉） ----------
+const {
+  dims, stats, statsLoading, monthChartRef, cardDims, statsPanel,
+  loadStats, resizeChart, disposeChart,
+} = usePlanStats(filterParams)
+const DIMENSIONS = PLAN_STAT_DIMENSIONS
 
 // 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
 const testTypeOptions = computed(() =>
@@ -657,8 +538,8 @@ const departmentOptions = computed(() =>
     : departments.value)
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
-const isTester = (row: any) => row.testers?.some((u: any) => u.id === auth.user?.id) ?? false
-const canOperate = (row: any) => isAdmin.value || isTester(row)
+const isTester = (row: TestingPlan) => row.testers?.some((u) => u.id === auth.user?.id) ?? false
+const canOperate = (row: TestingPlan) => isAdmin.value || isTester(row)
 
 // 状态：新建时仅管理员可指定；编辑时须为认领者或管理员
 const statusEditable = computed(() =>
@@ -667,12 +548,12 @@ const statusEditable = computed(() =>
 const statsAuto = computed(() => (dialogRow.value?.vuls?.length ?? 0) > 0)
 // 有关联初测报告（标题不含「复测」）时实际人天自动计算，禁止手填；复测报告人天不计入统计
 const mandaysAuto = computed(() =>
-  (dialogRow.value?.reports ?? []).some((r: any) => !(r.title || '').includes('复测')))
+  (dialogRow.value?.reports ?? []).some((r) => !(r.title || '').includes('复测')))
 // 自动计算的实际人天：初测报告人天之和（与后端 refresh_mandays 口径一致），取消修正时恢复展示
 const autoMandays = computed(() =>
   (dialogRow.value?.reports ?? [])
-    .filter((r: any) => !(r.title || '').includes('复测'))
-    .reduce((s: number, r: any) => s + (r.actual_mandays ?? 0), 0))
+    .filter((r) => !(r.title || '').includes('复测'))
+    .reduce((s: number, r) => s + (r.actual_mandays ?? 0), 0))
 // 修正：进入手动输入状态，保存后不再被初测报告自动覆盖
 function onCorrectMandays() {
   form.value.actual_mandays_override = true
@@ -683,7 +564,7 @@ function onCancelMandays() {
   form.value.actual_mandays = autoMandays.value
 }
 
-const emptyForm = () => ({
+const emptyForm = (): TestingPlan => ({
   id: null as number | null,
   plan_name: '',
   system_name: '',
@@ -709,7 +590,7 @@ const emptyForm = () => ({
   target_urls: [] as string[],
   detail: '',
 })
-const form = ref(emptyForm())
+const form = ref<TestingPlan>(emptyForm())
 const formRef = ref<FormInstance>()
 
 // 工单表单校验：测试系统必填；联动创建（仅新增时可勾选）的两条跨字段规则与后端校验口径一致
@@ -745,126 +626,40 @@ function toggleNonpenItem(key: string) {
   else form.value.nonpen_test_items.push(key)
 }
 
-function filterParams(): Record<string, any> {
-  const params: Record<string, any> = { search: search.value }
-  const range = computeDateRange(rangeKind.value, customRange.value)
-  if (range) {
-    params.first_test_from = range[0]
-    params.first_test_to = range[1]
-  }
-  const validRules = rules.value.filter(isRuleComplete)
-  if (validRules.length) {
-    params.filters = JSON.stringify({
-      rules: validRules.map(({ field, op, value, not, connector }) => ({
-        field, op, value, not, connector,
-      })),
-    })
-  }
-  if (myTests.value) params.my_tests = true
-  if (unclaimed.value) params.unclaimed = true
-  if (pending.value) params.pending = true
-  if (sort.prop) {
-    params.sort = sort.prop
-    params.order = sort.order
-  }
-  return params
+/** 统计卡数值：仅数值维度参与渲染（`cardDims` 已排除图表维度 vulns_by_month） */
+function statValue(key: string): number {
+  const v = (stats.value as Record<string, unknown>)[key]
+  return typeof v === 'number' ? v : 0
 }
 
-async function loadStats() {
-  statsLoading.value = true
-  try {
-    const { data } = await client.get('/testing-plans/stats', { params: filterParams() })
-    stats.value = data
-    if (dims.value.includes('vulns_by_month')) nextTick(renderMonthChart)
-  } finally {
-    statsLoading.value = false
-  }
+/** 查询参数拼装：列表 / 统计 / 结论 / 导出共用（口径由 usePlanFilters.buildParams 统一）
+ *  注意：useListPage 返回的 `search` 是 Ref、`sort` 是响应式对象（见 ListPageState），取值方式不同 */
+function filterParams(): QueryParams {
+  return buildParams(search.value, sort)
 }
 
-function renderMonthChart() {
-  if (!monthChartRef.value) return
-  const themeName = chartThemeName(theme.dark)
-  if (monthChart && monthChartTheme !== themeName) {
-    monthChart.dispose()
-    monthChart = null
-  }
-  if (!monthChart) {
-    monthChart = echarts.init(monthChartRef.value, themeName)
-    monthChartTheme = themeName
-  }
-  const rows = (stats.value as any).vulns_by_month ?? []
-  monthChart.setOption({
-    tooltip: { trigger: 'axis' },
-    grid: { left: 40, right: 16, top: 30, bottom: 72 },
-    title: { text: '按月漏洞数', textStyle: { fontSize: 12.5, fontWeight: 'normal', color: STAT_CARD_COLORS.gray } },
-    xAxis: {
-      type: 'category', data: rows.map((r: any) => r.month),
-      axisLabel: { rotate: 45, fontSize: 10.5, hideOverlap: true },
-    },
-    yAxis: { type: 'value', minInterval: 1 },
-    series: [{ type: 'bar', data: rows.map((r: any) => r.count), itemStyle: { color: STAT_CARD_COLORS.blue }, barMaxWidth: 32 }],
-  })
-  monthChart.resize()
-}
+// loadStats / renderMonthChart 已下沉至 composables/usePlanStats.ts（审计 E-2）
 
 // 筛选变化：列表回到首页并同步刷新统计
 async function reload() {
   await Promise.all([load(1), loadStats(), loadConclusion()])
 }
 
-async function exportExcel() {
-  const { data } = await client.get('/testing-plans/export', {
-    params: filterParams(), responseType: 'blob',
-  })
-  saveBlob(data, '渗透测试工单导出.xlsx')
+// ---------- 导入导出（审计 E-2：已下沉至 composables/usePlanImportExport.ts） ----------
+const {
+  importing, importInputRef,
+  exportExcel, downloadTemplate, doImport, onImportExport, onImportFileChange,
+} = usePlanImportExport({
+  getFilterParams: filterParams,
+  onImported: reloadAfterImport,
+})
+
+// 函数声明提升：导入完成后回到首页并刷新列表与统计
+function reloadAfterImport() {
+  return Promise.all([load(1), loadStats()])
 }
 
-async function downloadTemplate() {
-  const { data } = await client.get('/testing-plans/import/template', { responseType: 'blob' })
-  saveBlob(data, '渗透测试工单导入模板.xlsx')
-}
-
-const importing = ref(false)
-
-async function doImport(options: any) {
-  importing.value = true
-  try {
-    const fd = new FormData()
-    fd.append('file', options.file)
-    const { data } = await client.post('/testing-plans/import', fd)
-    if (data.failed > 0) {
-      await ElMessageBox.alert(
-        `共 ${data.total} 行，新增 ${data.created} 行，更新 ${data.updated} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}`,
-        '导入结果', { dangerouslyUseHTMLString: true },
-      )
-    } else {
-      ElMessage.success(`导入完成：新增 ${data.created} 条，更新 ${data.updated} 条`)
-    }
-    await Promise.all([load(1), loadStats()])
-  } finally {
-    importing.value = false
-  }
-}
-
-// ---------- 导入导出下拉 ----------
-const importInputRef = ref<HTMLInputElement>()
-
-// 下拉命令分发：分别对应原「导入模板下载 / 导入 Excel / 导出 Excel」，逻辑完全不变
-function onImportExport(command: string) {
-  if (command === 'template') downloadTemplate()
-  else if (command === 'export') exportExcel()
-  else if (command === 'import') importInputRef.value?.click()
-}
-
-// 隐藏文件选择器触发后走原 doImport 逻辑（沿用原 el-upload 的 http-request 入参结构 { file }）
-function onImportFileChange(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (file) doImport({ file })
-  input.value = ''
-}
-
-async function openDialog(row?: any) {
+async function openFormDialog(row?: TestingPlan) {
   dialogRow.value = row ?? null
   form.value = row ? { ...emptyForm(), ...row } : emptyForm()
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
@@ -887,14 +682,15 @@ async function openDialog(row?: any) {
 // ---------- 关联资产 ----------
 const {
   assetOptions, assetLoading, assetCache, assetLabel,
-  searchAssets, loadAssetLabels: loadAssetLabelsRaw, cacheAsset, diffIds, resetBaseline, lastKeyword,
+  searchAssets, loadAssetLabels: loadAssetLabelsUncached, cacheAsset, diffIds, resetBaseline, lastKeyword,
 } = useAssetSelect()
 let assetSearchTimer: ReturnType<typeof setTimeout> | null = null
 const assetDialogVisible = ref(false)
-const assetPrefill = ref<any>(null)
+const assetPrefill = ref<Partial<Asset> | null>(null)
 
 function loadAssetLabels() {
-  return loadAssetLabelsRaw([...form.value.asset_ids])
+  // 显式绕过缓存加载标签：保证编辑态拿到的资产名称与后端一致
+  return loadAssetLabelsUncached([...form.value.asset_ids])
 }
 
 // 新增渗透测试工单时提供"新增资产"入口，保存后自动关联并填充测试系统/所属部门
@@ -903,7 +699,7 @@ function openCreateAsset() {
   assetDialogVisible.value = true
 }
 
-function onAssetCreated(asset: any) {
+function onAssetCreated(asset: Asset) {
   if (!asset?.id) return
   cacheAsset(asset)
   if (!form.value.asset_ids.includes(asset.id)) {
@@ -935,68 +731,25 @@ function onAssetsChange(ids: number[]) {
   form.value.department = asset.department || ''
 }
 
-async function save() {
-  const valid = await formRef.value.validate().catch(() => false)
-  if (!valid) return
-  saving.value = true
-  try {
-    const body = { ...form.value }
-    delete (body as any).testers
-    delete (body as any).vuls
-    delete (body as any).reports
-    delete (body as any).retest_rounds
-    delete (body as any).retest_round_count
-    delete (body as any).ticket_id
-    delete (body as any).ticket_seq
-    body.target_urls = cleanUrls(form.value.target_urls)
-    if (form.value.id) {
-      delete (body as any).create_nonpen
-      delete (body as any).nonpen_test_items
-      await client.put(`/testing-plans/${form.value.id}`, body)
-    } else {
-      await client.post('/testing-plans', body)
-    }
-    ElMessage.success('保存成功')
-    dialogVisible.value = false
-    await Promise.all([load(), loadStats()])
-  } finally {
-    saving.value = false
-  }
-}
+// ---------- 表单写入动作（审计 E-2：已下沉至 composables/usePlanCrud.ts） ----------
+const { dialogVisible, saving, save, remove, addTestType, addDepartment } = usePlanCrud({
+  form,
+  formRef,
+  loadTestTypes,
+  loadDepartments,
+  onSaved: reloadAfterCrud,
+})
 
-async function addTestType() {
-  const { value } = await ElMessageBox.prompt('请输入新的测试类型名称', '新增测试类型', {
-    confirmButtonText: '保存', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
-  }).catch(() => ({ value: '' }))
-  if (!value?.trim()) return
-  await client.post('/dict/test_type', { name: value.trim() })
-  ElMessage.success('测试类型已新增')
-  await loadTestTypes()
-  form.value.test_type = value.trim()
-}
-
-async function addDepartment() {
-  const { value } = await ElMessageBox.prompt('请输入新的部门（组织）名称，保存后同步至组织管理', '新增部门', {
-    confirmButtonText: '保存', cancelButtonText: '取消', inputPattern: /\S+/, inputErrorMessage: '名称不能为空',
-  }).catch(() => ({ value: '' }))
-  if (!value?.trim()) return
-  await client.post('/groups', { name: value.trim(), remark: '' })
-  ElMessage.success('部门已新增')
-  await loadDepartments()
-  form.value.department = value.trim()
-}
-
-async function remove(id: number) {
-  await client.delete(`/testing-plans/${id}`)
-  ElMessage.success('删除成功')
-  await Promise.all([load(), loadStats()])
+// 函数声明提升：保存 / 删除后刷新列表与统计（不重置分页）
+function reloadAfterCrud() {
+  return Promise.all([load(), loadStats()])
 }
 
 // ---------- 流程抽屉 ----------
 const workflowVisible = ref(false)
 const workflowPlanId = ref<number | null>(null)
 
-function openWorkflow(row: any) {
+function openWorkflow(row: TestingPlan) {
   workflowPlanId.value = row.id
   workflowVisible.value = true
 }
@@ -1007,7 +760,7 @@ async function onWorkflowChanged() {
 }
 
 function onResize() {
-  monthChart?.resize()
+  resizeChart()
 }
 
 onMounted(async () => {
@@ -1018,10 +771,9 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
-  if (filterTimer) clearTimeout(filterTimer)
+  disposeFilters()
   window.removeEventListener('resize', onResize)
-  monthChart?.dispose()
-  monthChart = null
+  disposeChart()
 })
 </script>
 

@@ -12,7 +12,7 @@
         <el-option label="仅可进行" :value="true" />
       </el-select>
       <template #actions>
-        <el-button type="primary" class="btn-min" @click="openDialog()">
+        <el-button type="primary" class="btn-min" @click="openFormDialog()">
           <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
         </el-button>
       </template>
@@ -71,7 +71,7 @@
       <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link @click="openWorkflow(row)">流程</el-button>
-          <el-button size="small" type="primary" link @click="openDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
           <el-popconfirm :title="row.linked ? '确认删除？将同步删除其来源渗透测试工单' : '确认删除该漏扫基线工单？'"
                          @confirm="remove(row)">
             <template #reference>
@@ -124,8 +124,8 @@
           <div class="w-full">
             <el-input v-model="form.ticket_id_manual" placeholder="留空则按需求接收日期自动生成（如 20260810-1）"
                       clearable />
-            <div v-if="form.id && !form.ticket_id_manual && form.ticket_id"
-                 class="text-xs mt-1" style="color: var(--tl-text-3)">当前自动生成：{{ form.ticket_id }}，留空保存即保持该值</div>
+            <div v-if="form.id && !form.ticket_id_manual && autoTicketId"
+                 class="text-xs mt-1" style="color: var(--tl-text-3)">当前自动生成：{{ autoTicketId }}，留空保存即保持该值</div>
           </div>
         </el-form-item>
         <el-form-item label="工单提起">
@@ -176,6 +176,7 @@ import { dotStyle, nonpenItemMeta, nonpenItems, STAT_CARD_COLORS } from '../util
 import { fmtDate } from '../utils/format'
 import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
 import StatCard from '../components/StatCard.vue'
+import type { NonpenPlan, NonpenPlanForm } from '../types'
 
 const actionable = ref(false)
 const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/nonpen-plans', {
@@ -199,8 +200,12 @@ const emptyForm = () => ({
   test_items: [] as string[],
   detail: '',
 })
-const form = ref(emptyForm())
+// 显式声明表单模型类型：编辑回显是「emptyForm() + 行数据」的合并，需允许服务端返回的可空字段
+const form = ref<NonpenPlanForm>(emptyForm())
 const formRef = ref<FormInstance>()
+
+// 工单ID：服务端按需求接收日期派生，仅用于编辑态回显，不属于表单模型（保存时不回写）
+const autoTicketId = computed(() => (form.value as { ticket_id?: string }).ticket_id ?? '')
 
 // 工单表单校验：测试系统必填；工单ID必须有来源——需求接收日期（自动生成）或手动工单ID二者至少其一（与后端校验一致）
 const requireTicketSource: FormItemRule['validator'] = (_rule, _value, callback) => {
@@ -240,7 +245,7 @@ function toggleTestItem(key: string) {
   else form.value.test_items.push(key)
 }
 
-function openDialog(row?: any) {
+function openFormDialog(row?: NonpenPlan) {
   form.value = row
     ? { ...emptyForm(), ...row, test_items: selectedItems(row) }
     : emptyForm()
@@ -252,7 +257,7 @@ function openDialog(row?: any) {
 }
 
 // 编辑回显：非忽略（有效）测试项即为已勾选项
-function selectedItems(row: any): string[] {
+function selectedItems(row: NonpenPlan): string[] {
   const itemsMap = row.items ?? {}
   return nonpenItems()
     .filter((t) => itemsMap[t.key] && itemsMap[t.key].status !== 'ignored')
@@ -262,11 +267,11 @@ function selectedItems(row: any): string[] {
 const saving = ref(false)
 
 async function save() {
-  const valid = await formRef.value.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   saving.value = true
   try {
-    const body: any = { ...form.value }
+    const body: Partial<NonpenPlanForm> = { ...form.value }
     delete body.id
     delete body.ticket_id
     delete body.ticket_seq
@@ -289,7 +294,7 @@ async function save() {
   }
 }
 
-async function remove(row: any) {
+async function remove(row: NonpenPlan) {
   if (row.linked) {
     await ElMessageBox.confirm(
       `该计划由渗透测试工单联动创建，删除将同步删除其来源渗透测试工单（互相级联），确认删除「${row.plan_name || row.system_name}」？`,
@@ -302,10 +307,11 @@ async function remove(row: any) {
 }
 
 // ---------- 关联资产（composable） ----------
-const { assetOptions, assetLoading, assetCache, searchAssets, loadAssetLabels: loadAssetLabelsRaw, diffIds, resetBaseline } = useAssetSelect()
+const { assetOptions, assetLoading, assetCache, searchAssets, loadAssetLabels: loadAssetLabelsUncached, diffIds, resetBaseline } = useAssetSelect()
 
 function loadAssetLabels() {
-  return loadAssetLabelsRaw([...form.value.asset_ids])
+  // 显式绕过缓存加载标签：保证编辑态拿到的资产名称与后端一致
+  return loadAssetLabelsUncached([...(form.value.asset_ids ?? [])])
 }
 
 // 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
@@ -323,7 +329,7 @@ function onAssetsChange(ids: number[]) {
 const workflowVisible = ref(false)
 const workflowPlanId = ref<number | null>(null)
 
-function openWorkflow(row: any) {
+function openWorkflow(row: NonpenPlan) {
   workflowPlanId.value = row.id
   workflowVisible.value = true
 }

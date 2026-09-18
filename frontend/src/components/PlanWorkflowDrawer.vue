@@ -40,7 +40,7 @@
           <span>
             <span class="text-gray-400 mr-1">测试人员</span>
             <span v-if="plan.testers?.length">
-              {{ plan.testers.map((u: any) => u.realname || u.username).join('、') }}
+              {{ plan.testers.map((u) => u.realname || u.username).join('、') }}
             </span>
             <span v-else class="text-gray-400">未认领</span>
           </span>
@@ -110,7 +110,7 @@
           </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
-              <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
+              <span class="tl-tag" :style="statusSoftStyleWithRetest(row.status, row.is_retest)">
                 {{ statusLabel(row.status, row.is_retest, vulStatusMap) }}
               </span>
             </template>
@@ -165,8 +165,8 @@
           </el-select>
         </div>
         <el-table v-loading="pickerLoading" :data="pickerVulns" size="small" row-key="id"
-                  max-height="380" @selection-change="(rows: any[]) => pickerSelection = rows">
-          <el-table-column type="selection" :selectable="(r: any) => !pickerLinkedIds.includes(r.id)" width="40" />
+                  max-height="380" @selection-change="(rows: Vuln[]) => pickerSelection = rows">
+                    <el-table-column type="selection" :selectable="(r: Vuln) => !pickerLinkedIds.includes(r.id)" width="40" />
           <el-table-column label="等级" width="70">
             <template #default="{ row }">
               <span class="tl-tag" :style="levelSoftStyle(row.level)">{{ levelName(row.level) }}</span>
@@ -180,7 +180,7 @@
           </el-table-column>
           <el-table-column label="状态" width="90">
             <template #default="{ row }">
-              <span class="tl-tag" :style="statusSoftStyleEx(row.status, row.is_retest)">
+              <span class="tl-tag" :style="statusSoftStyleWithRetest(row.status, row.is_retest)">
                 {{ statusLabel(row.status, row.is_retest, vulStatusMap) }}
               </span>
             </template>
@@ -238,7 +238,7 @@
             <!-- 报告中漏洞已全部完成（已修复/已忽略）标注：便于与仍有未闭环漏洞的报告区分 -->
             <el-tooltip v-if="r.all_closed"
                         :content="`本报告所含漏洞均已修复/已忽略（${r.vul_closed}/${r.vul_total}）`">
-              <span class="tl-tag" :style="statusSoftStyleEx(60)">复测完成</span>
+              <span class="tl-tag" :style="statusSoftStyleWithRetest(60)">复测完成</span>
             </el-tooltip>
             <span class="text-xs text-gray-400">生成于 {{ fmtDateTime(r.create_time) }}</span>
             <div class="flex-1" />
@@ -336,12 +336,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import dayjs from 'dayjs'
 import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
-import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   exportJobColor,
@@ -354,12 +351,16 @@ import {
   reportStatusSoftStyle,
   softStyle,
   STAT_CARD_COLORS,
-  statusSoftStyleEx,
+  statusSoftStyleWithRetest,
   statusLabel,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
-import { sortPlanVulns } from '../utils/vulnOrder'
-import { useExportJobs } from '../composables/useExportJobs'
+import type { Vuln } from '../types'
+import { usePlanDetail } from '../composables/usePlanDetail'
+import { usePlanReports } from '../composables/usePlanReports'
+import { usePlanVulnFlow } from '../composables/usePlanVulnFlow'
+import { usePlanVulnPicker } from '../composables/usePlanVulnPicker'
+import { useReportExports } from '../composables/useReportExports'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
@@ -379,58 +380,79 @@ const emit = defineEmits<{
 const auth = useAuthStore()
 const router = useRouter()
 
-const plan = ref<any>(null)
-const vulns = ref<any[]>([])
-const loading = ref(false)
-const dirty = ref(false)
-const statusMap = ref<Record<number, string>>({})
-const vulStatusMap = ref<Record<number, string>>({})
+// ---------- 数据与动作（审计 E-1：按职责下沉为 5 个 composable，此处仅组合） ----------
+const {
+  plan, vulns, loading, dirty, statusMap, vulStatusMap,
+  refresh, ensureStatusDict, reloadAfterChange, claim, quit,
+} = usePlanDetail(() => props.planId, prefetchReportExports)
 
+const {
+  exportJobs,
+  exporting,
+  expandedExportId,
+  loadJobs,
+  toggleExportList,
+  stopPolling,
+  doExport,
+  download,
+  removeExportJob,
+  dropReport,
+  resetExportState,
+} = useReportExports(() => plan.value?.system_name ?? 'report')
+
+// 函数声明提升：`loadJobs` 来自上方解构，仅在 refresh() 实际执行时被访问
+function prefetchReportExports(reportId: number) {
+  return loadJobs(reportId)
+}
+
+const {
+  vulnPickerVisible, pickerLoading, pickerSearch, pickerLevel, pickerVulns,
+  pickerSelection, pickerAttaching, pickerLinkedIds,
+  openVulnPicker, loadPickerVulns, attachPickerVulns,
+} = usePlanVulnPicker(
+  () => props.planId,
+  () => vulns.value.map((v) => v.id),
+  reloadAfterChange,
+)
+
+const { transitionsMap, loadTransitions, transition } = usePlanVulnFlow(
+  (status: number) => vulStatusMap.value[status] ?? String(status),
+  reloadAfterChange,
+)
+
+const {
+  genFormVisible, genTitle, genVulIds, generating,
+  noVulnVisible, noVulnConclusion, noVulnGenReport, noVulnTitle, noVulnSubmitting,
+  toggleGenForm, generateReport, removeReport, startRetest, openNoVulnDialog, completeNoVuln,
+} = usePlanReports({
+  getPlanId: () => props.planId,
+  getSystemName: () => plan.value?.system_name ?? '',
+  getNoVulConclusion: () => plan.value?.no_vul_conclusion || '',
+  getVulnIds: () => vulns.value.map((v) => v.id),
+  onChanged: reloadAfterChange,
+  onReportRemoved: dropReport,
+})
+
+// ---------- 仅剩的组件内展示态 ----------
 const vulnFormVisible = ref(false)
-const transitionsMap = ref<Record<number, { status: number; name: string }[]>>({})
-
-const genFormVisible = ref(false)
-const genTitle = ref('')
-const genVulIds = ref<number[]>([])
-const generating = ref(false)
-
-// 无漏洞闭环完结表单状态
-const noVulnVisible = ref(false)
-const noVulnConclusion = ref('')
-const noVulnGenReport = ref(true)
-const noVulnTitle = ref('')
-const noVulnSubmitting = ref(false)
-
-const vulnPickerVisible = ref(false)
-const pickerLoading = ref(false)
-const pickerSearch = ref('')
-const pickerLevel = ref<number | ''>('')
-const pickerVulns = ref<any[]>([])
-const pickerSelection = ref<any[]>([])
-const pickerAttaching = ref(false)
-// 已关联当前计划的漏洞 ID，用于选择器禁用与标记
-const pickerLinkedIds = computed(() => vulns.value.map((v: any) => v.id))
 
 // ---------- 漏洞详情弹窗（公共组件 VulnDetailDialog） ----------
 const vulnDetailVisible = ref(false)
 const detailVulnId = ref<number | null>(null)
 
-const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
-const exportJobs = ref<Record<number, any[]>>({})
-const exporting = ref<Record<number, string>>({})
-// 当前展开导出历史的报告 ID（点击箭头展示该报告的导出版本列表）
-const expandedExportId = ref<number | null>(null)
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
-let pollTimer: number | undefined
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
-const isTester = computed(() => plan.value?.testers?.some((u: any) => u.id === auth.user?.id) ?? false)
+const isTester = computed(() => plan.value?.testers?.some((u) => u.id === auth.user?.id) ?? false)
 // 需求：录入漏洞阶段仅认领该计划的账号可录入/编辑/流转漏洞；管理员未认领也不放行
 const canManageVulns = computed(() => isTester.value)
 // 计划级操作（生成报告、发起复测等）：认领者或管理员
 const canOperate = computed(() => isAdmin.value || isTester.value)
 // 无漏洞完结仅允许在测试开始前/初测中两个状态发起（后端同步校验无关联漏洞）
-const canCompleteNoVuln = computed(() => [10, 20].includes(plan.value?.status))
+const canCompleteNoVuln = computed(() => {
+  const s = plan.value?.status
+  return s === 10 || s === 20
+})
 
 // 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60/70→全部完成（含无漏洞闭环）
 const stepActive = computed(() => {
@@ -442,68 +464,8 @@ const stepActive = computed(() => {
   return plan.value?.testers?.length ? 1 : 0
 })
 
-// 工单漏洞的导入解析序号映射 {vul_id: seq}：历史导入数据（修复前 id 与原报告序号错位）的排序纠偏依据
-const importSeq = ref<Record<number, number>>({})
-
-async function refresh() {
-  if (!props.planId) return
-  loading.value = true
-  try {
-    const [planResp, vulResp, seqResp] = await Promise.all([
-      client.get(`/testing-plans/${props.planId}`),
-      // 需求5：漏洞默认按危害等级降序（level 升序）展示
-      client.get('/vulns', { params: { testing_plan_id: props.planId, size: 100, sort: 'level', order: 'asc' } }),
-      // 导入解析序号映射：同等级内优先按原报告序号排序（端点对旧数据兼容，无映射时回退 submit_time/id）
-      client.get(`/testing-plans/${props.planId}/vuln-order`).catch(() => undefined),
-    ])
-    plan.value = planResp.data
-    importSeq.value = seqResp?.data ?? {}
-    vulns.value = sortPlanVulns(vulResp.data.items, importSeq.value)
-    // 预取各报告的导出历史，保证「导出历史（N）」计数准确（未展开前即可看到真实数量）
-    const reports = planResp.data.reports || []
-    await Promise.all(reports.map((r: any) => loadJobs(r.id).catch(() => undefined)))
-  } finally {
-    loading.value = false
-  }
-}
-
-// ---------- 从漏洞库选择 ----------
-async function openVulnPicker() {
-  vulnPickerVisible.value = true
-  pickerSearch.value = ''
-  pickerLevel.value = ''
-  await loadPickerVulns()
-}
-
-async function loadPickerVulns() {
-  if (!vulnPickerVisible.value) return
-  pickerLoading.value = true
-  try {
-    // 注意：后端 /vulns 的 size 上限为 100，超出会返回 422
-    const params: Record<string, any> = { size: 100, sort: 'level', order: 'asc' }
-    if (pickerSearch.value.trim()) params.search = pickerSearch.value.trim()
-    if (pickerLevel.value) params.level = pickerLevel.value
-    const { data } = await client.get('/vulns', { params })
-    pickerVulns.value = sortPlanVulns(data.items)
-  } finally {
-    pickerLoading.value = false
-  }
-}
-
-async function attachPickerVulns() {
-  pickerAttaching.value = true
-  try {
-    await client.post(`/testing-plans/${props.planId}/attach-vulns`, {
-      vul_ids: pickerSelection.value.map((v: any) => v.id),
-    })
-    ElMessage.success(`已添加 ${pickerSelection.value.length} 个漏洞到当前计划`)
-    vulnPickerVisible.value = false
-    dirty.value = true
-    await refresh()
-  } finally {
-    pickerAttaching.value = false
-  }
-}
+// 数据加载（refresh）与漏洞选择器（openVulnPicker / loadPickerVulns / attachPickerVulns）
+// 已下沉至 composables/usePlanDetail.ts 与 composables/usePlanVulnPicker.ts（审计 E-1）
 
 watch(
   () => [props.visible, props.planId] as const,
@@ -515,13 +477,8 @@ watch(
     genFormVisible.value = false
     noVulnVisible.value = false
     transitionsMap.value = {}
-    exportJobs.value = {}
-    expandedExportId.value = null
-    if (!Object.keys(statusMap.value).length) {
-      const meta = await auth.fetchMeta()
-      statusMap.value = meta?.testing_plan_status ?? {}
-      vulStatusMap.value = meta?.vul_status ?? {}
-    }
+    resetExportState()
+    await ensureStatusDict()
     await refresh()
   },
   { immediate: true },
@@ -536,46 +493,16 @@ function onClosed() {
   if (dirty.value) emit('changed')
 }
 
-// ---------- 认领 ----------
-async function claim() {
-  await client.post(`/testing-plans/${props.planId}/claim`)
-  ElMessage.success('认领成功，已加入测试人员')
-  dirty.value = true
-  await refresh()
-}
-
-async function quit() {
-  await client.post(`/testing-plans/${props.planId}/quit`)
-  ElMessage.success('已退出该计划')
-  dirty.value = true
-  await refresh()
-}
-
 // ---------- 漏洞 ----------
+// 录入漏洞保存 / 复测记录增删改后重载：选择复测结论（已修复/复测未修复）会同步流转漏洞状态，
+// 刷新计划与漏洞列表保证状态列、复测轮数实时联动（与「流转」行为一致）
 async function onVulnSaved() {
   vulnFormVisible.value = false
-  dirty.value = true
-  await refresh()
+  await reloadAfterChange()
 }
 
-// 复测记录增删改后重拉数据：选择复测结论（已修复/复测未修复）会同步流转漏洞状态，
-// 刷新计划与漏洞列表保证状态列、复测轮数实时联动（与「流转」行为一致）
 async function onRetestChanged() {
-  dirty.value = true
-  await refresh()
-}
-
-async function loadTransitions(row: any) {
-  // 后端返回 [{status, name}]，直接作为下拉候选
-  const { data } = await client.get(`/vulns/${row.id}/transitions`)
-  transitionsMap.value[row.id] = data
-}
-
-async function transition(row: any, status: number) {
-  await client.post(`/vulns/${row.id}/transition`, { status })
-  ElMessage.success(`已流转为「${vulStatusMap.value[status] ?? status}」`)
-  dirty.value = true
-  await refresh()
+  await reloadAfterChange()
 }
 
 // ---------- 漏洞详情弹窗 ----------
@@ -584,150 +511,8 @@ function openVulnDetail(id: number) {
   vulnDetailVisible.value = true
 }
 
-// ---------- 报告 ----------
-function toggleGenForm() {
-  genFormVisible.value = !genFormVisible.value
-  if (genFormVisible.value) {
-    // 需求8：自动命名「yyyymmdd+测试系统名称+渗透测试报告」
-    genTitle.value = `${dayjs().format('YYYYMMDD')}${plan.value?.system_name ?? ''}渗透测试报告`
-    genVulIds.value = vulns.value.map((v) => v.id)
-  }
-}
-
-async function generateReport() {
-  generating.value = true
-  try {
-    // 相似性检查：基础信息与所选漏洞最后编辑时间与历史报告完全一致时，需用户确认继续
-    try {
-      const { data } = await client.post('/reports/similarity-check', {
-        title: genTitle.value.trim(),
-        vul_ids: genVulIds.value,
-        testing_plan_id: props.planId,
-      })
-      if (data.similar) {
-        const ok = await ElMessageBox.confirm(
-          `检测到与历史报告《${genTitle.value.trim()}》高度相似（标题、所选漏洞及漏洞最后编辑时间均未变化），是否仍要继续生成？`,
-          '生成高度相似报告',
-          { confirmButtonText: '仍要生成', cancelButtonText: '取消', type: 'warning' },
-        ).then(() => true).catch(() => false)
-        if (!ok) return
-      }
-    } catch {
-      // 检查接口异常时不阻断生成流程
-    }
-    await client.post('/reports/from-vulns', {
-      title: genTitle.value.trim(),
-      vul_ids: genVulIds.value,
-      testing_plan_id: props.planId,
-    })
-    ElMessage.success('报告已生成，计划进入初测完成')
-    genFormVisible.value = false
-    dirty.value = true
-    await refresh()
-  } finally {
-    generating.value = false
-  }
-}
-
-async function removeReport(r: any) {
-  await client.delete(`/reports/${r.id}`)
-  delete exportJobs.value[r.id]
-  if (expandedExportId.value === r.id) expandedExportId.value = null
-  ElMessage.success('报告已删除')
-  dirty.value = true
-  await refresh()
-}
-
-async function removeExportJob(r: any, job: any) {
-  await deleteExportJob(job.id)
-  exportJobs.value[r.id] = (exportJobs.value[r.id] || []).filter((j: any) => j.id !== job.id)
-}
-
-async function startRetest(r: any) {
-  await client.post(`/reports/${r.id}/retest`)
-  ElMessage.success('已发起复测，漏洞进入复测中，已自动生成复测报告')
-  dirty.value = true
-  await refresh()
-}
-
-// ---------- 无漏洞闭环 ----------
-function openNoVulnDialog() {
-  noVulnConclusion.value = plan.value?.no_vul_conclusion || ''
-  noVulnGenReport.value = true
-  // 自动命名：yyyymmdd+测试系统名称+渗透测试报告（无漏洞）
-  noVulnTitle.value = `${dayjs().format('YYYYMMDD')}${plan.value?.system_name ?? ''}渗透测试报告（无漏洞）`
-  noVulnVisible.value = true
-}
-
-async function completeNoVuln() {
-  noVulnSubmitting.value = true
-  try {
-    await client.post(`/testing-plans/${props.planId}/complete-no-vuln`, {
-      conclusion: noVulnConclusion.value,
-      generate_report: noVulnGenReport.value,
-      title: noVulnGenReport.value ? noVulnTitle.value.trim() : '',
-    })
-    ElMessage.success('已确认无漏洞，计划流转为「测试通过」')
-    noVulnVisible.value = false
-    dirty.value = true
-    await refresh()
-  } finally {
-    noVulnSubmitting.value = false
-  }
-}
-
-// ---------- 导出（提交后轮询任务列表至完成） ----------
-async function loadJobs(reportId: number) {
-  exportJobs.value[reportId] = await fetchJobs(reportId)
-  return exportJobs.value[reportId]
-}
-
-// 展开/收起报告的导出历史版本列表；首次展开时懒加载导出记录
-async function toggleExportList(r: any) {
-  if (expandedExportId.value === r.id) {
-    expandedExportId.value = null
-    return
-  }
-  expandedExportId.value = r.id
-  if (!exportJobs.value[r.id]?.length) {
-    await loadJobs(r.id)
-  }
-}
-
-function stopPolling() {
-  if (pollTimer) {
-    window.clearInterval(pollTimer)
-    pollTimer = undefined
-  }
-}
-
-function pollJobs(reportId: number) {
-  stopPolling()
-  let ticks = 0
-  pollTimer = window.setInterval(async () => {
-    ticks += 1
-    const jobs = await loadJobs(reportId)
-    const pending = jobs.some((j) => j.status !== 'done' && j.status !== 'failed')
-    if (!pending || ticks >= 30) stopPolling()
-  }, 2000)
-}
-
-async function doExport(r: any, fmt: string) {
-  exporting.value[r.id] = fmt
-  try {
-    const ok = await submitExport(r.id, fmt, r.title || plan.value?.system_name || 'report')
-    if (ok) {
-      await loadJobs(r.id)
-      pollJobs(r.id)
-    }
-  } finally {
-    delete exporting.value[r.id]
-  }
-}
-
-function download(job: any) {
-  downloadJob(job, plan.value?.system_name || 'report')
-}
-
-onBeforeUnmount(stopPolling)
+// ---------- 认领 / 漏洞流转 / 报告 / 无漏洞闭环 / 导出 ----------
+// 认领与退出认领、漏洞状态流转、报告动作（生成含相似性检查、删除、发起复测、无漏洞闭环完结）、
+// 导出历史列表与轮询均已下沉至 composables/（审计 E-1）：
+//   usePlanDetail.ts · usePlanVulnFlow.ts · usePlanReports.ts · useReportExports.ts
 </script>

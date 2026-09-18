@@ -1,5 +1,5 @@
 """通知渠道管理（F3）：企业微信/钉钉 webhook 与邮件渠道的后台配置。"""
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

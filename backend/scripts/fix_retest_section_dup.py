@@ -15,24 +15,17 @@
     python -m scripts.fix_retest_section_dup            # 执行清理（自动备份）
     python -m scripts.fix_retest_section_dup --dry-run  # 仅统计将清理的章节数，不落库
 """
-import asyncio
-import json
-import logging
 import sys
-from datetime import datetime
 from pathlib import Path
-
-# 静默 SQLAlchemy 调试回显，保持输出简洁
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select  # noqa: E402
 
-from app.core.config import settings  # noqa: E402
 from app.db import async_session_maker  # noqa: E402
 from app.models import ReportSection, Vul  # noqa: E402
 from app.services.report_html import RETEST_LABEL_HTML, strip_embedded_retest  # noqa: E402
+from scripts._common import dry_run_flag, run, save_backup  # noqa: E402
 
 
 async def main(dry_run: bool = False) -> None:
@@ -57,9 +50,9 @@ async def main(dry_run: bool = False) -> None:
             retest_by_vul = {vid: (html or "") for vid, html in rows}
 
         pending: list[tuple[ReportSection, str]] = []
-        # 纯数据快照：dry-run 需在 rollback 之后打印，而 rollback 会使会话内 ORM 实例全部过期，
-        # 此后访问 s.id 等属性会触发同步 IO，在异步会话中直接抛 MissingGreenlet；
-        # 故先把要展示 / 备份的值取出为普通 dict（同时供备份文件复用）。
+        # 纯数据快照：dry-run 需在 rollback 之后打印，而 rollback 会使会话内 ORM 实例过期
+        # （再访问 s.id 等属性会抛 MissingGreenlet），故先把要展示 / 备份的值取出为普通 dict
+        # （同时供备份文件复用）；约定见 scripts/_common.run() 的 docstring。
         records: list[dict] = []
         emptied: list[int] = []
         for s in sections:
@@ -87,17 +80,9 @@ async def main(dry_run: bool = False) -> None:
                 )
             print(f"[dry-run] 待清理 {len(records)} 个章节（未落库）")
         else:
-            backup_path = ""
-            if records:
-                backup_dir = settings.storage_sub("backups")
-                backup_dir.mkdir(parents=True, exist_ok=True)
-                backup_file = backup_dir / (
-                    f"report_sections_retest_{datetime.now():%Y%m%d%H%M%S}.json"
-                )
-                backup_file.write_text(
-                    json.dumps(records, ensure_ascii=False), encoding="utf-8"
-                )
-                backup_path = str(backup_file)
+            # 备份沿用原紧凑 JSON 格式（indent=None）；records 为空时 save_backup 返回 None，不打印路径
+            backup_file = save_backup(records, "report_sections_retest", indent=None)
+            backup_path = str(backup_file) if backup_file else ""
             for s, new_html in pending:
                 s.content_html = new_html
             await session.commit()
@@ -109,4 +94,5 @@ async def main(dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main(dry_run="--dry-run" in sys.argv))
+    # 统一入口：静默 SQLAlchemy 回显 + `--dry-run` 解析（审计 M-2）
+    run(main, dry_run=dry_run_flag())

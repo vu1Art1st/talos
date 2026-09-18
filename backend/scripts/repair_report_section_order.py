@@ -10,13 +10,8 @@
     python -m scripts.repair_report_section_order            # 执行修复
     python -m scripts.repair_report_section_order --dry-run  # 仅统计将被修正的章节数，不落库
 """
-import asyncio
-import logging
 import sys
 from pathlib import Path
-
-# 静默 SQLAlchemy 调试回显，保持修复输出简洁
-logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -24,6 +19,7 @@ from sqlalchemy import select  # noqa: E402
 
 from app.db import async_session_maker  # noqa: E402
 from app.models import ImportRecord, Report, ReportSection  # noqa: E402
+from scripts._common import dry_run_flag, run  # noqa: E402
 
 
 async def main(dry_run: bool = False) -> None:
@@ -83,5 +79,5 @@ async def main(dry_run: bool = False) -> None:
 
 
 if __name__ == "__main__":
-    dry_run = "--dry-run" in sys.argv
-    asyncio.run(main(dry_run=dry_run))
+    # 统一入口：静默 SQLAlchemy 回显 + `--dry-run` 解析（审计 M-2）
+    run(main, dry_run=dry_run_flag())

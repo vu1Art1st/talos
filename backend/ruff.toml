@@ -1,0 +1,32 @@
+# Ruff 配置（2026-09-17 代码审计引入，见 docs/CODE_AUDIT.md §六「工具链建议」）
+#
+# 运行（在 backend/ 目录，使用项目 venv）：
+#   .venv/Scripts/python.exe -m ruff check app scripts alembic tests      # Windows
+#   .venv/bin/python -m ruff check app scripts alembic tests              # Linux/macOS
+#
+# venv 由 uv 管理（Python 3.12，与容器 python:3.12-slim 一致）：
+#   uv venv .venv --python 3.12
+#   uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt
+#
+# 设计原则：只启用「与项目约定强相关、且当前可全绿」的规则，避免一次性引入大量噪声
+# 后再被长期 ignore，反而失去约束力（当前实测：select 下 0 处问题）。
+
+line-length = 120
+# 开发 venv 已由 uv 对齐到 Python 3.12（3.12.11），与容器/生产 python:3.12-slim 一致 → 取 py312。
+target-version = "py312"
+
+[lint]
+# F    = pyflakes：未使用导入/变量、未定义名、f-string 无占位符等
+# E501 = 长行（按**显示宽度**计，CJK 字符记 2 列，与屏幕可读性一致）
+select = ["F", "E501"]
+
+[lint.per-file-ignores]
+# app/schemas/__init__.py 是「按设计的重导出入口」（AGENTS.md：调用方统一 from app.schemas import ...），
+# 其导入名在本文件内不出现属预期，不计为 unused-import。
+"app/schemas/__init__.py" = ["F401"]
+# Alembic 迁移脚本内容冻结（改动历史迁移会破坏已发布版本的升级路径），长行豁免。
+# 见 docs/CODE_AUDIT.md D-1。
+"alembic/versions/*" = ["E501"]
+# 开发种子数据：中文数据字面量按显示宽度必然超过 120，且整改属纯格式 churn（无逻辑收益）。
+# 逻辑代码不受此豁免影响。
+"scripts/seed_dev_data.py" = ["E501"]
