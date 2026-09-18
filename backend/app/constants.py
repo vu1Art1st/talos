@@ -172,6 +172,7 @@ AUDIT_ACTIONS = {
     "login_success": "登录成功",
     "login_failure": "登录失败",
     "login_locked": "登录锁定",
+    "logout": "退出登录",
     "password_change": "修改密码",
     "user_create": "创建用户",
     "user_update": "编辑用户",

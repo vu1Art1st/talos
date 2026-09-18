@@ -6,9 +6,9 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import DataError
 
+from app.api.images import router as images_router
 from app.api.v1 import api_router
 from app.core.config import settings
 from app.db import init_db
@@ -103,9 +103,9 @@ def create_app() -> FastAPI:
         return JSONResponse(status_code=500, content={"detail": "服务器内部错误，请稍后重试"})
 
     app.include_router(api_router, prefix="/api/v1")
-    # 仅公开图片子目录：导出/导入原始文档/预览等敏感文件不再静态暴露，改走鉴权接口
-    images_dir = settings.storage_sub("uploads", "images")
-    app.mount("/storage/uploads/images", StaticFiles(directory=str(images_dir)), name="images")
+    # 图片需登录下发（安全审计 批次 E-1）：路径保持 /storage/uploads/images/<name> 不变，
+    # 但不再是静态直出——导出/导入原始文档/预览等敏感文件同样只走鉴权接口
+    app.include_router(images_router)
 
     @app.get("/api/health")
     async def health():

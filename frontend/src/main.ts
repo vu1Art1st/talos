@@ -11,6 +11,7 @@ import App from './App.vue'
 import router from './router'
 import { useThemeStore } from './stores/theme'
 import { registerChartThemes } from './utils/chartTheme'
+import { installImageAuthHealer } from './utils/imageAuth'
 
 const app = createApp(App)
 const pinia = createPinia()
@@ -24,6 +25,9 @@ for (const [name, comp] of Object.entries(Icons)) {
 // 主题初始化：应用持久化的明 / 暗设置，注册 ECharts 双主题
 useThemeStore(pinia).init()
 registerChartThemes()
+
+// 富文本图片凭证自愈：Cookie 缺失/过期导致的裂图无需用户手动刷新即可恢复
+installImageAuthHealer()
 
 // 全局兜底：渲染 / setup 阶段的异常会留下空白或残缺界面，统一落到 500 错误页；
 // 事件回调 / 侦听器等阶段仅保留控制台日志（保持原有交互与提示，避免误清屏）。

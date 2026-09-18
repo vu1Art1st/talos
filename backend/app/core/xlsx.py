@@ -10,6 +10,8 @@ from fastapi.responses import StreamingResponse
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 
+from app.core.archive import assert_archive_quota
+
 logger = logging.getLogger(__name__)
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -34,8 +36,11 @@ def xlsx_response(wb, filename: str) -> StreamingResponse:
 def load_xlsx(data: bytes):
     """解析上传的 .xlsx 字节流（只读、取计算值）。
 
-    解析失败统一抛 `HTTPException(400)` 并记录原始异常，供导入类接口复用。
+    解析前先做 ZIP 解压配额校验（安全审计 批次 E-5：xlsx 是高压缩比 ZIP，仅校验压缩后大小
+    不足以挡住解压炸弹）；解析失败统一抛 `HTTPException(400)` 并记录原始异常，供导入类复用。
     """
+    # 表格类文件条目少、体积可控：比 docx 更严（见 core/archive.py 的阈值口径）
+    assert_archive_quota(data, max_entries=500, max_uncompressed_mb=100)
     try:
         return load_workbook(BytesIO(data), read_only=True, data_only=True)
     except EXCEL_PARSE_ERRORS as exc:

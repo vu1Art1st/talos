@@ -22,6 +22,7 @@ from docx.oxml.ns import qn
 from docx.table import _Cell
 
 from app.constants import IMPORT_LABEL_MAP, VUL_LEVEL_EXPORT, VUL_LEVEL_REVERSE, VUL_TYPE_REVERSE
+from app.core.archive import assert_archive_quota
 
 _A_BLIP = qn("a:blip")
 _R_EMBED = qn("r:embed")
@@ -123,8 +124,9 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[di
     """解析文档，返回记录列表。单条记录解析失败不影响整批。
 
     每条记录: {title, level, vul_type, affected_url,
-               description_html, reproduce_html, solution_html, errors: [str]}
+              description_html, reproduce_html, solution_html, errors: [str]}
     """
+    assert_archive_quota(file_path)  # 解压配额（批次 E-5），坏包交由下方的 docx 解析错误处理
     doc = Document(file_path)
     part = doc.part
     img_dir = Path(image_dir)
@@ -509,6 +511,7 @@ def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
     meta: {system_name, report_date, is_retest, target_url, target_ip}
     records 字段与 parse_docx 一致，另含 retest_html / fixed。
     """
+    assert_archive_quota(file_path)  # 解压配额（批次 E-5），坏包交由下方的 docx 解析错误处理
     doc = Document(file_path)
     part = doc.part
     img_dir = Path(image_dir)

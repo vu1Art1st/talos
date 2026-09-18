@@ -435,6 +435,23 @@ async def _find_vuln(client: AsyncClient, auth: dict, keyword: str) -> dict:
     return items[0]
 
 
+async def _login_ready(client: AsyncClient, username: str, password: str) -> dict:
+    """登录新建账号并完成首次改密，返回可用请求头。
+
+    新建用户默认 `must_change_password=True`，服务端会拦截除 `/auth/*` 之外的一切接口
+    （安全审计 批次 E-6：前端弹框强制的服务端兜底），故测试须先改密再调用业务接口。
+    """
+    resp = await client.post("/api/v1/auth/login", data={"username": username, "password": password})
+    assert resp.status_code == 200, resp.text
+    headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    resp = await client.post(
+        "/api/v1/auth/password", headers=headers,
+        json={"old_password": password, "new_password": f"{password}x"},
+    )
+    assert resp.status_code == 200, resp.text
+    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+
+
 async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict):
     """复测报告含未修复漏洞：计划应为复测中(50)、未修复漏洞置「复测未修复」(50+is_retest)、自动建资产与报告。"""
     system_name = "综合办公系统ZZ"
@@ -1901,10 +1918,7 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
               "email": "", "phone": "", "is_active": True, "role_id": role_id},
     )
     assert resp.status_code == 200, resp.text
-    resp = await client.post(
-        "/api/v1/auth/login", data={"username": "plan_tester", "password": "Tester@123"},
-    )
-    auth2 = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    auth2 = await _login_ready(client, "plan_tester", "Tester@123")
 
     plan_body = {k: plan[k] for k in (
         "system_name", "test_type", "department", "receive_time", "first_test_done_time",
@@ -2058,10 +2072,7 @@ async def test_group_create_by_special_manage(client: AsyncClient, auth: dict):
               "email": "", "phone": "", "is_active": True, "role_id": role_id},
     )
     assert resp.status_code == 200, resp.text
-    resp = await client.post(
-        "/api/v1/auth/login", data={"username": "special_user", "password": "Sp@123456"},
-    )
-    auth_sp = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    auth_sp = await _login_ready(client, "special_user", "Sp@123456")
 
     resp = await client.post("/api/v1/groups", headers=auth_sp, json={"name": "网络安全部", "remark": ""})
     assert resp.status_code == 200, resp.text
@@ -3867,10 +3878,7 @@ async def test_open_api_plan_write(client: AsyncClient, auth: dict):
               "email": "", "phone": "", "is_active": True, "role_id": role_id},
     )
     assert resp.status_code == 200, resp.text
-    resp = await client.post(
-        "/api/v1/auth/login", data={"username": "open_api_writer", "password": "Writer@123"},
-    )
-    weak_auth = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    weak_auth = await _login_ready(client, "open_api_writer", "Writer@123")
     resp = await client.post(
         "/api/v1/pats", headers=weak_auth, json={"name": "无权限令牌", "expire_days": 7},
     )
@@ -4099,6 +4107,25 @@ async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dic
         json={"name": "缺地址", "type": "wecom", "config": {}, "events": ["vuln_created"]},
     )
     assert resp.status_code == 422
+    # 出站目标必须是公网地址（审计 TALOS-2026-003）：内网/元数据地址与无法解析的主机一律拒绝
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={
+            "name": "内网地址", "type": "wecom",
+            "config": {"url": "http://169.254.169.254/latest/meta-data/"},
+            "events": ["vuln_created"],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    resp = await client.post(
+        "/api/v1/notify-channels", headers=auth,
+        json={
+            "name": "不可解析主机", "type": "wecom",
+            "config": {"url": "https://qyapi.example.com/hook"},
+            "events": ["vuln_created"],
+        },
+    )
+    assert resp.status_code == 422, resp.text
     # 邮箱渠道缺收件人被拒
     resp = await client.post(
         "/api/v1/notify-channels", headers=auth,
@@ -4106,12 +4133,12 @@ async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dic
     )
     assert resp.status_code == 422
 
-    # 正常创建 / 编辑 / 测试发送 / 删除
+    # 正常创建 / 编辑 / 测试发送 / 删除（webhook 地址用公网 IP 字面量：不依赖 DNS，判定确定）
     resp = await client.post(
         "/api/v1/notify-channels", headers=auth,
         json={
             "name": "安全群机器人", "type": "wecom",
-            "config": {"url": "https://qyapi.example.com/hook"},
+            "config": {"url": "https://1.1.1.1/hook"},
             "events": ["vuln_created", "retest_completed"], "is_active": True,
         },
     )
@@ -4123,7 +4150,7 @@ async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dic
         f"/api/v1/notify-channels/{channel['id']}", headers=auth,
         json={
             "name": "安全群机器人", "type": "wecom",
-            "config": {"url": "https://qyapi.example.com/hook2"},
+            "config": {"url": "https://1.1.1.1/hook2"},
             "events": ["vuln_transition"], "is_active": False,
         },
     )

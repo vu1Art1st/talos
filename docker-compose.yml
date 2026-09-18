@@ -54,6 +54,15 @@ services:
       VP_SMTP_USER: ${VP_SMTP_USER:-}
       VP_SMTP_PASS: ${VP_SMTP_PASS:-}
       VP_SMTP_FROM: ${VP_SMTP_FROM:-}
+      # 安全整改（批次 E）：可信反向代理层数（默认 1＝浏览器 → 前端 Nginx → API）；
+      # 外层还有宿主 Nginx/CDN 时调大，且每一层都必须用 $proxy_add_x_forwarded_for 追加真实对端
+      VP_TRUSTED_PROXY_HOPS: ${VP_TRUSTED_PROXY_HOPS:-1}
+      # HTTPS 部署时设为 true（图片 Cookie 加 Secure）；HTTP 下开启会被浏览器拒收导致图片不显示
+      VP_COOKIE_SECURE: ${VP_COOKIE_SECURE:-false}
+      # 压缩包（docx/xlsx）解压配额：条目数 / 解压总量(MB) / 压缩比，防 zip 炸弹
+      VP_ARCHIVE_MAX_ENTRIES: ${VP_ARCHIVE_MAX_ENTRIES:-2000}
+      VP_ARCHIVE_MAX_UNCOMPRESSED_MB: ${VP_ARCHIVE_MAX_UNCOMPRESSED_MB:-200}
+      VP_ARCHIVE_MAX_RATIO: ${VP_ARCHIVE_MAX_RATIO:-100}
     volumes:
       - storage_data:/app/storage
     depends_on:

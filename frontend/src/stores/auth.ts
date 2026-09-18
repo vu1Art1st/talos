@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { defineStore } from 'pinia'
 import client from '../api/client'
 import router from '../router'
@@ -53,7 +54,17 @@ export const useAuthStore = defineStore('auth', {
       const perms = this.user?.permissions ?? []
       return perms.includes('*') || perms.includes(perm)
     },
-    logout() {
+    async logout() {
+      // 服务端注销：作废当前会话的 refresh token 并清除 HttpOnly 图片 Cookie
+      // （Cookie 由服务端下发，前端 JS 读不到也删不掉，必须走接口）。
+      // 令牌可能已过期，失败不阻塞本地登出；用裸 axios 避免触发拦截器的刷新/错误页逻辑。
+      try {
+        await axios.post('/api/v1/auth/logout', {
+          refresh_token: localStorage.getItem('refresh_token'),
+        })
+      } catch {
+        /* 忽略：本地登出必须完成 */
+      }
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       this.user = null

@@ -109,6 +109,12 @@ client.interceptors.response.use(
       return Promise.reject(error)
     }
 
+    // 未改密账号的 403（服务端拦截，见 core/deps.py::_enforce_password_change）：
+    // 由不可关闭的改密弹框接管，静默处理避免整页接口集体弹提示刷屏
+    if (status === 403 && response?.headers?.['x-must-change-password'] === '1') {
+      return Promise.reject(error)
+    }
+
     const policy = resolveErrorPolicy({ status, method, skipErrorPage: config?.meta?.skipErrorPage === true })
     if (policy === 'page' && status != null) {
       goErrorPage(status, { from: normalizeRedirect(router.currentRoute.value.fullPath) })

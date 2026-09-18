@@ -23,6 +23,23 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 120
     # refresh token 空闲滑动窗口：每次触发 /auth/refresh 轮换即重置，空闲超时强制重新登录
     REFRESH_TOKEN_EXPIRE_HOURS: int = 24
+    # refresh token 轮换宽限期（秒）：多标签页/并发刷新会在极短时间内用同一个旧令牌换两次，
+    # 该窗口内允许「刚被轮换掉的 jti」再换一次，避免自己把自己挤下线；窗口外的旧 jti 一律 401
+    REFRESH_GRACE_SECONDS: int = 120
+
+    # 图片下发 Cookie（HttpOnly + Path 限定到图片路径）：Secure 需在 HTTPS 部署时开启，
+    # HTTP 部署下开启会导致浏览器拒收（图片不显示）
+    COOKIE_SECURE: bool = False
+
+    # 可信反向代理层数：客户端真实 IP 取自 X-Forwarded-For 右起第 N 项（N=本值），
+    # 0 = 完全不信任转发头（仅用 socket 对端地址）。默认 1，对应「浏览器 → 前端 Nginx → API」。
+    # 调大前必须确认外层每一层代理都使用 $proxy_add_x_forwarded_for 追加真实对端。
+    TRUSTED_PROXY_HOPS: int = 1
+
+    # 压缩包解析配额（zip 炸弹防护）：条目数上限 / 声明解压总量上限（MB）/ 压缩比上限
+    ARCHIVE_MAX_ENTRIES: int = 2000
+    ARCHIVE_MAX_UNCOMPRESSED_MB: int = 200
+    ARCHIVE_MAX_RATIO: int = 100
 
     # 内置 admin 初始口令：留空则首次启动随机生成并打印到日志（仅显示一次）
     INITIAL_ADMIN_PASSWORD: str = ""
@@ -32,6 +49,10 @@ class Settings(BaseSettings):
 
     # 个人访问令牌（PAT）限流：每令牌每分钟最大请求数（开放 API 只读接口）
     PAT_RATE_LIMIT: int = 120
+
+    # 出站请求（通知渠道 webhook）主机白名单：逗号分隔，命中的主机跳过「禁止内网地址」判定。
+    # 默认留空＝只允许公网地址；企业自建内网中继等确需访问内网的场景再显式放行（见 core/outbound.py）。
+    NOTIFY_HOST_ALLOWLIST: str = ""
 
     # 允许携带凭证的跨域来源白名单（前端部署地址），生产环境务必按实际域名收窄
     CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27014"]

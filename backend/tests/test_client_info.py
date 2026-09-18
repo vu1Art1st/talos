@@ -1,8 +1,14 @@
-"""客户端信息解析测试：真实 IP / User-Agent 的取址逻辑。"""
+"""客户端信息解析测试：真实 IP / User-Agent 的取址逻辑。
+
+2026-09-19（批次 E-4）改为**显式可信代理层数**口径 `VP_TRUSTED_PROXY_HOPS`：
+客户端 IP = X-Forwarded-For 右起第 N 项（N=层数）；链条不足或非法 → X-Real-IP → socket 对端。
+旧口径（右起第一个非内网地址）在客户端伪造公网 XFF 时会被采信，故被替换。
+"""
 import pytest
 from fastapi import Request
 
 from app.core.client_info import get_client_ip, get_user_agent
+from app.core.config import settings
 
 
 def _make_request(headers: dict[str, str] | None = None, client_host: str = "172.18.0.5") -> Request:
@@ -28,49 +34,75 @@ def test_no_proxy_headers_falls_back_to_client_host():
     assert get_client_ip(request) == "203.0.113.10"
 
 
-def test_single_hop_xff_returns_public_ip():
-    # 浏览器直连 docker Nginx：XFF 由 $proxy_add_x_forwarded_for 追加
+def test_single_hop_takes_last_entry():
+    # 默认 hops=1（浏览器 → 前端 Nginx → API）：取链尾，即 Nginx 追加的 $remote_addr
     request = _make_request({"X-Forwarded-For": "203.0.113.10, 172.18.0.5"})
-    assert get_client_ip(request) == "203.0.113.10"
+    assert get_client_ip(request) == "172.18.0.5"
 
 
-def test_multi_hop_xff_skips_inner_proxy():
-    # 宿主 Nginx → docker Nginx：链尾为宿主内网地址，应跳过取用户公网 IP
+def test_two_hops_takes_second_from_right(monkeypatch):
+    # 宿主 Nginx → docker Nginx：链尾是内层代理看到的对端，客户端在右起第 2 项
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 2)
+    request = _make_request({"X-Forwarded-For": "203.0.113.10, 127.0.0.1, 172.18.0.5"})
+    assert get_client_ip(request) == "127.0.0.1"
+
+
+def test_three_hops_reaches_client(monkeypatch):
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 3)
     request = _make_request({"X-Forwarded-For": "203.0.113.10, 127.0.0.1, 172.18.0.5"})
     assert get_client_ip(request) == "203.0.113.10"
 
 
-def test_xff_with_spoofed_private_first():
-    # 伪造 XFF 前缀内网地址，链尾仍是真实对端追加的公网地址
+def test_spoofed_public_prefix_is_ignored():
+    # 回归（批次 E-4）：客户端伪造公网地址时，链尾（可信代理写入）优先，伪造值不得被采信
+    request = _make_request({"X-Forwarded-For": "1.2.3.4, 203.0.113.10"})
+    assert get_client_ip(request) == "203.0.113.10"
     request = _make_request({"X-Forwarded-For": "10.0.0.66, 203.0.113.10"})
     assert get_client_ip(request) == "203.0.113.10"
 
 
-def test_xff_all_private_takes_last():
-    # 内网办公场景：全部为保留地址时取最右（离本服务最近）一项
+def test_hops_zero_ignores_forward_headers(monkeypatch):
+    # 完全不信任转发头（API 直接暴露的形态）：只认 socket 对端
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 0)
+    request = _make_request({"X-Forwarded-For": "1.2.3.4, 5.6.7.8"}, client_host="192.0.2.7")
+    assert get_client_ip(request) == "192.0.2.7"
+
+
+def test_internal_chain_last_entry_kept():
+    # 内网办公场景：链尾为保留地址也照常返回（不再做「跳过内网」特判）
     request = _make_request({"X-Forwarded-For": "10.0.0.10, 192.168.1.50"})
     assert get_client_ip(request) == "192.168.1.50"
 
 
-def test_xff_entry_with_port_stripped():
+def test_xff_entry_with_port_stripped(monkeypatch):
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 2)
     request = _make_request({"X-Forwarded-For": "203.0.113.10:8080, 172.18.0.5"})
     assert get_client_ip(request) == "203.0.113.10"
 
 
-def test_xff_ipv6_with_port_stripped():
-    # 2606:4700::/48 为公网 IPv6（Cloudflare），链尾是 docker Nginx 追加的内网对端
+def test_xff_ipv6_with_port_stripped(monkeypatch):
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 2)
     request = _make_request({"X-Forwarded-For": "[2606:4700:4700::1111]:8080, 172.18.0.5"})
     assert get_client_ip(request) == "2606:4700:4700::1111"
 
 
-def test_x_real_ip_fallback():
-    request = _make_request({"X-Real-IP": "203.0.113.10"})
+def test_x_real_ip_fallback_when_chain_too_short(monkeypatch):
+    # XFF 项数不足 hops（上层裁剪）→ 退回 X-Real-IP
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_HOPS", 2)
+    request = _make_request({"X-Forwarded-For": "172.18.0.5", "X-Real-IP": "203.0.113.10"})
     assert get_client_ip(request) == "203.0.113.10"
+
+
+def test_invalid_entry_falls_back_to_peer():
+    # 选中项不是合法 IP（伪造非 IP 字符串）→ 退回 socket 对端，不把脏值写进审计
+    request = _make_request({"X-Forwarded-For": "unknown"}, client_host="172.18.0.5")
+    assert get_client_ip(request) == "172.18.0.5"
 
 
 def test_prefers_xff_over_x_real_ip():
-    request = _make_request({"X-Real-IP": "198.51.100.9", "X-Forwarded-For": "203.0.113.10, 172.18.0.5"})
-    assert get_client_ip(request) == "203.0.113.10"
+    # 两者都存在且一致时以 XFF 为准；不一致时同样取可信链尾（X-Real-IP 与链尾同源，正常应相同）
+    request = _make_request({"X-Real-IP": "172.18.0.5", "X-Forwarded-For": "203.0.113.10, 172.18.0.5"})
+    assert get_client_ip(request) == "172.18.0.5"
 
 
 def test_empty_headers_returns_empty():

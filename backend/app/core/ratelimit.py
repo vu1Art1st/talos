@@ -32,6 +32,14 @@ async def _get_redis():
     return _redis
 
 
+async def get_shared_redis():
+    """供其它模块复用同一 Redis 客户端（连接池/超时口径唯一，见 tests/test_ratelimit_timeout.py 的 G7 守卫）。
+
+    Redis 不可用时返回 None，调用方须自行降级（refresh token 轮换状态见 core/token_store.py）。
+    """
+    return await _get_redis()
+
+
 async def get_failures(key: str, window: int) -> int:
     try:
         r = await _get_redis()
