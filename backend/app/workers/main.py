@@ -5,6 +5,7 @@
 import asyncio
 import logging
 import smtplib
+from dataclasses import replace
 from email.header import Header
 from email.mime.text import MIMEText
 
@@ -209,6 +210,11 @@ TASK_FUNCS = {
 class WorkerSettings:
     functions = list(TASK_FUNCS.values())
     cron_jobs = [cron(cleanup_previews_task, minute=set(range(0, 60, 10)))]
-    redis_settings = RedisSettings.from_dsn(settings.REDIS_URL)
+    # 每次连接尝试的超时统一取 settings.REDIS_TIMEOUT（避免无超时挂起，见 G7）；
+    # 重试次数保持 arq 默认（worker 需容忍 Redis 短暂不可用，属既有容错语义，不改）
+    redis_settings = replace(
+        RedisSettings.from_dsn(settings.REDIS_URL),
+        conn_timeout=int(settings.REDIS_TIMEOUT),
+    )
     max_jobs = 4
     job_timeout = 600

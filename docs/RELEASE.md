@@ -27,6 +27,10 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [2.18.0] - 2026-09-18
+
 ### 新增
 
 - **影响URL 支持批量粘贴自动切分（录入漏洞 / 报告导入修正）**：新增共用组件
@@ -39,28 +43,6 @@
   `joinAffectedUrl` / `validateAffectedUrls`），与后端 `app/schemas/common.py` 的
   `normalize_affected_url` 同一口径；条数上限 100、单条上限 2048 字符，超限或条目含空白/
   非法字符时在字段下方行内提示（不弹窗、不清空表单），提交前同口径拦截。
-
-### 变更
-
-- **影响URL 存储由 `varchar(512)` 扩宽为 `TEXT`**（`vulns.affected_url`、`import_records.affected_url`，
-  迁移 `d9e0f1a2b3c4`；SQLite 开发库因类型亲和无需重建，由 `db.py` 注释登记双轨）。写入时统一
-  规范化：按换行与分号切分 → trim → 去空 → 去重保序 → 换行拼接。上限校验从数据库列下沉到
-  schema 层（`VulIn` / `ImportRecordUpdateIn` / 春耕行动草稿共用 `AffectedUrl` 类型）。
-  Word 解析器（`docx_parser.py`）移除了对影响URL 的 `[:512]` 硬截断，不再静默丢数据。
-  注意：分号一律视为分隔符（含查询串内的分号），前端粘贴与后端入库行为一致。
-
-### 修复
-
-- **影响URL 录入约 20 条即触发 500**：根因是该列原为 `varchar(512)`，而前端把多条 URL 以换行
-  拼成单个字段提交，约 20 条即溢出，PostgreSQL 在写入时抛 `StringDataRightTruncation`
-  （SQLSTATE 22001），落入兜底 500 并由前端整页跳转错误页、丢失已填表单。除扩宽列与补齐
-  长度校验外，`app/main.py` 新增 `DataError` 处理器把数据长度/数值越界类数据库拒绝归为 400
-  并给出可读文案；`RequestValidationError` 处理器现会透出 schema 层自有校验（`value_error`）
-  的中文提示，超限时返回 422 并说明具体原因（条数 / 条序号与长度 / 非法字符），不再是一句
-  「请求参数校验失败」。
-- 输出侧（`VulOut`）显式退回普通 `str`，不对历史数据跑写入校验，避免存量脏数据导致列表/
-  详情接口 500。
-
 - **漏洞录入「套用模板」支持跨模板全局搜索**：新增 `GET /knowledge/search`
   （`backend/app/api/v1/knowledge.py`），不预选漏洞类型即可按漏洞名称、编号（CVE 等，写在名称
   后缀）/ 参考链接 / 关键字（`deep=true` 时含描述、危害说明、修复建议正文）模糊检索全部模板；
@@ -75,9 +57,44 @@
 - 套用模板时若条目漏洞类型与当前漏洞卡片不一致，自动同步漏洞类型并提示（跨模板套用一致性）；
   新增 `frontend/src/api/knowledge.ts` 接口封装与 `frontend/src/utils/highlight.ts` 高亮工具。
 
+### 变更
+
+- **影响URL 存储由 `varchar(512)` 扩宽为 `TEXT`**（`vulns.affected_url`、`import_records.affected_url`，
+  迁移 `d9e0f1a2b3c4`；SQLite 开发库因类型亲和无需重建，由 `db.py` 注释登记双轨）。写入时统一
+  规范化：按换行与分号切分 → trim → 去空 → 去重保序 → 换行拼接。上限校验从数据库列下沉到
+  schema 层（`VulIn` / `ImportRecordUpdateIn` / 春耕行动草稿共用 `AffectedUrl` 类型）。
+  Word 解析器（`docx_parser.py`）移除了对影响URL 的 `[:512]` 硬截断，不再静默丢数据。
+  注意：分号一律视为分隔符（含查询串内的分号），前端粘贴与后端入库行为一致。
+- **漏洞命名域收口（内部一致性，无用户可见变化）**：`backend/app/services/vuln_service.py` →
+  **`vul_service.py`**（8 文件 / 45 处引用同步，不留兼容壳）；`AGENTS.md` 的命名域规则修订为
+  「实体域新增标识符统一 `vul_`」并附实测依据（`vul_id` 外键列 6 处 : `vuln_id` 1 处）与 6 项
+  既成事实例外（字典域仍 `Vuln*`）。**不改动任何数据库列**。
+- **前端列表页类型收敛**：全部列表页改为泛型 `useListPage<T>`（本次补齐 `UserList` / `TokenList` /
+  `TestingPlanList` / `NotifyChannelList` / `NonpenPlanList` / `AuditLog`，累计 12 页），
+  `pnpm typecheck` 保持 0 错误；纯类型改动，无运行时行为变化。
+- **文档收口与治理规则成文**：删除 5 份已完成的任务型文档（代码审计报告、审计修复执行记录、
+  备份优化方案、磁盘告警复盘、单次排查报告），其中有长期价值的结论归并到 `AGENTS.md`
+  （函数体量口径与「合理长」保留形态、验收口径、文档治理规则）与 `DEPLOY.md`（§五 备份重写为
+  「锚点 + 差异快照」、附「文件与磁盘」补磁盘排查双视角）。
+
 ### 修复
 
+- **影响URL 录入约 20 条即触发 500**：根因是该列原为 `varchar(512)`，而前端把多条 URL 以换行
+  拼成单个字段提交，约 20 条即溢出，PostgreSQL 在写入时抛 `StringDataRightTruncation`
+  （SQLSTATE 22001），落入兜底 500 并由前端整页跳转错误页、丢失已填表单。除扩宽列与补齐
+  长度校验外，`app/main.py` 新增 `DataError` 处理器把数据长度/数值越界类数据库拒绝归为 400
+  并给出可读文案；`RequestValidationError` 处理器现会透出 schema 层自有校验（`value_error`）
+  的中文提示，超限时返回 422 并说明具体原因（条数 / 条序号与长度 / 非法字符），不再是一句
+  「请求参数校验失败」。
+- 输出侧（`VulOut`）显式退回普通 `str`，不对历史数据跑写入校验，避免存量脏数据导致列表/
+  详情接口 500。
 - 移除套用模板弹窗中恒失效的 `tags` 匹配/展示分支（后端模板条目并无该字段）。
+- **Redis 不可达时登录 / PAT 鉴权会无限挂起**：`app/core/ratelimit.py` 的 Redis 客户端未设连接/
+  读写超时 —— 当 Redis 被防火墙 DROP（而非主动拒绝连接）时连接停在 TCP 握手，`try/except`
+  的降级分支永不触发，登录失败计数与 PAT 限流整条鉴权链卡死（实测：全量测试卡在 PAT 限流用例）。
+  现显式设置 2s 连接/读写超时（`VP_REDIS_TIMEOUT`），arq 连接池超时同源、重试收敛为 1 次
+  （`conn_timeout` / `conn_retries`；worker 保留默认重试以容忍 Redis 短暂不可用），并新增
+  `VP_DISABLE_REDIS` 供无 Redis 的单机与测试环境直接走进程内计数（不再依赖外部 Redis）。
 
 ## [2.17.1] - 2026-09-17
 

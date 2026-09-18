@@ -13,7 +13,7 @@ from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import Asset, RemoteTesting, User, Vul
 from app.schemas import Page, RemoteTestingIn, RemoteTestingOut
-from app.services import vuln_service
+from app.services import vul_service
 from app.services.upload_store import save_upload
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ async def _resolve_links(
         raise HTTPException(400, "关联资产不存在")
     vul: Vul | None = None
     if body.new_vul:
-        created = await vuln_service.create_draft_vulns(
+        created = await vul_service.create_draft_vulns(
             session, [body.new_vul], user, body.new_vul.source,
         )
         vul = created[0]

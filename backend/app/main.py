@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import replace
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -25,7 +26,15 @@ async def lifespan(app: FastAPI):
             from arq import create_pool
             from arq.connections import RedisSettings
 
-            app.state.arq = await create_pool(RedisSettings.from_dsn(settings.REDIS_URL))
+            # 连接超时取 settings.REDIS_TIMEOUT、重试 1 次：Redis 不可达时尽快失败并降级为进程内
+            # 执行（arq 默认 1s 超时 × 5 次重试 + 每次 1s 退避 ≈ 10s 的启动阻塞，见 G7）
+            app.state.arq = await create_pool(
+                replace(
+                    RedisSettings.from_dsn(settings.REDIS_URL),
+                    conn_timeout=int(settings.REDIS_TIMEOUT),
+                    conn_retries=1,
+                )
+            )
         except Exception as exc:
             logger.warning("Redis 连接失败，后台任务将在进程内执行: %s", exc)
     yield

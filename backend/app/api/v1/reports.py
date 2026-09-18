@@ -28,7 +28,7 @@ from app.schemas import (
     ReportSimilarityOut,
     ReportVulnStateOut,
 )
-from app.services import plan_service, vuln_service
+from app.services import plan_service, vul_service
 from app.services.audit_service import audit
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.services.notify_service import notify
@@ -45,7 +45,7 @@ async def _get_report(session: AsyncSession, report_id: int) -> Report:
 
 async def _auto_mark_fixing(session: AsyncSession, vul_ids: list[int], user: User, report_title: str) -> None:
     """漏洞关联生成报告后自动流转为「修复中」（仅对处于未修复等可流转状态的漏洞生效）。"""
-    await vuln_service.auto_transition(
+    await vul_service.auto_transition(
         session, vul_ids, 50, user, f"关联报告《{report_title}》，自动进入修复中",
     )
 
@@ -241,12 +241,12 @@ async def create_report_from_vulns(
     report.vul_edit_snapshot = await snapshot_vul_edits(session, [v.id for v in vulns])
     if plan is not None:
         # 报告已生成，计划进入初测完成阶段
-        if vuln_service.can_plan_transition(plan.status, 30):
+        if vul_service.can_plan_transition(plan.status, 30):
             plan.status = 30
         if not plan.first_test_done_time:
             plan.first_test_done_time = now().date().isoformat()
         # 工单级复测状态重算：已「复测完成」工单被关联未闭环漏洞（如新增漏洞生成的报告）时回退「复测中」
-        await vuln_service.sync_plan_retest_state(session, plan_ids=[plan.id])
+        await vul_service.sync_plan_retest_state(session, plan_ids=[plan.id])
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1
     report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）
@@ -527,7 +527,7 @@ async def retest_report(
             raise HTTPException(400, "复测结果未更新，无需生成新的复测报告")
     # 需求：发起复测仅对未修复漏洞生效，已修复(60)漏洞保持原状态，不重新进入复测中
     unfixed_vul_ids = [v.id for v in vulns if v.status != VulStatus.FIXED]
-    changed = await vuln_service.auto_transition(
+    changed = await vul_service.auto_transition(
         session, unfixed_vul_ids, 55, user, f"报告《{report.title}》发起复测，自动进入复测中",
     )
     # 对于已处于复测中(55)的漏洞，虽未在 changed 中但同样视为复测流程已发起
@@ -538,7 +538,7 @@ async def retest_report(
     if effective_changed and report.testing_plan_id is not None:
         plan = await session.get(TestingPlan, report.testing_plan_id)
         if plan is not None:
-            if vuln_service.can_plan_transition(plan.status, 50):
+            if vul_service.can_plan_transition(plan.status, 50):
                 plan.status = 50  # 初测完成/提请复测 → 复测中
             round_row = plan_service.start_retest_round(
                 session, plan, f"报告《{report.title}》发起复测", user.id, force=True,

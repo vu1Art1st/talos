@@ -35,7 +35,7 @@ from app.schemas import (
     VulTransitionIn,
     VulUpdateIn,
 )
-from app.services import plan_service, vuln_service
+from app.services import plan_service, vul_service
 from app.services.audit_service import audit, resolve_realnames
 from app.services.notify_service import notify
 
@@ -569,11 +569,11 @@ async def create_vuln(
     vul.assets = await _fetch_assets(session, asset_ids)
     session.add(vul)
     await session.flush()
-    vuln_service.add_log(session, vul, user, "创建漏洞")
+    vul_service.add_log(session, vul, user, "创建漏洞")
     # 无漏洞闭环重开：已确认「测试通过」的计划新增漏洞时自动回到「初测中」
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
     # 复测闭环重开：工单已「复测完成」时新增未闭环漏洞，工单回退「复测中」
-    await vuln_service.sync_plan_retest_state(session, plan_ids=[vul.testing_plan_id])
+    await vul_service.sync_plan_retest_state(session, plan_ids=[vul.testing_plan_id])
     await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
@@ -606,12 +606,12 @@ async def create_vulns_batch(
         vul.assets = await _fetch_assets(session, merged_ids)
         session.add(vul)
         await session.flush()
-        vuln_service.add_log(session, vul, user, "创建漏洞", "批量提交")
+        vul_service.add_log(session, vul, user, "创建漏洞", "批量提交")
         vulns.append(vul)
     for plan_id in plan_ids:
         await plan_service.reopen_passed_plan(session, plan_id)
         # 复测闭环重开：工单已「复测完成」时新增未闭环漏洞，工单回退「复测中」
-        await vuln_service.sync_plan_retest_state(session, plan_ids=[plan_id])
+        await vul_service.sync_plan_retest_state(session, plan_ids=[plan_id])
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     for vul in vulns:
@@ -660,17 +660,17 @@ async def update_vuln(
     if vul.testing_plan_id is not None:
         vul.source = 0
     vul.assets = await _fetch_assets(session, asset_ids)
-    vuln_service.add_log(session, vul, user, "编辑漏洞")
+    vul_service.add_log(session, vul, user, "编辑漏洞")
     done_plans: list = []
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
     if new_status is not None and new_status != vul.status:
-        await vuln_service.set_status(session, vul, new_status, user, "编辑页调整状态")
-        done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
+        await vul_service.set_status(session, vul, new_status, user, "编辑页调整状态")
+        done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     # 等级或关联计划变化后重算涉及计划的统计；新关联计划若已确认无漏洞则自动重开
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
     affected_plans = {old_plan_id, vul.testing_plan_id}
     # 关联计划变化时按工单级口径重算复测状态（已「复测完成」工单出现未闭环漏洞则回退「复测中」）
-    await vuln_service.sync_plan_retest_state(
+    await vul_service.sync_plan_retest_state(
         session, plan_ids=[pid for pid in affected_plans if pid is not None],
     )
     for plan_id in affected_plans:
@@ -750,9 +750,9 @@ async def set_vuln_status(
     """直接设置漏洞状态（报告编辑页状态标签点选），不受状态机流转限制。"""
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     old_status = vul.status
-    await vuln_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
+    await vul_service.set_status(session, vul, body.status, user, body.comment or "报告编辑页调整状态")
     # 状态任意变化均双向联动报告/测试计划（闭环标记与回退）
-    done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
+    done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
     if body.status != old_status:
@@ -785,11 +785,11 @@ async def patch_vuln_fields(
         setattr(vul, field, value)
         changed_fields.append(f"{label} {dicts[field][old]} → {dicts[field][value]}")
     if changed_fields:
-        vuln_service.add_log(session, vul, user, "报告编辑页调整字段", "；".join(changed_fields))
+        vul_service.add_log(session, vul, user, "报告编辑页调整字段", "；".join(changed_fields))
     status_changed = body.status is not None and body.status != vul.status
     if status_changed:
-        await vuln_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
-        await vuln_service.sync_plan_retest_state(session, [vul.id])
+        await vul_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
+        await vul_service.sync_plan_retest_state(session, [vul.id])
     # 等级变化后重算关联计划的漏洞统计
     if any(f.startswith("漏洞等级") for f in changed_fields):
         await plan_service.refresh_stats(session, vul.testing_plan_id)
@@ -814,12 +814,12 @@ async def transition_vuln(
         vul.retest_html = body.retest_html
         vul.retest_json = body.retest_json
         comment = comment or "复测详情已更新"
-    await vuln_service.transition(
+    await vul_service.transition(
         session, vul, body.status, user, comment,
         retest_submitted=body.retest_html is not None,
     )
     # 状态流转后双向联动报告/测试计划（全部闭环自动标记完成，回退自动重开）
-    done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
+    done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
     if body.status != old_status:
@@ -841,7 +841,7 @@ async def delay_vuln(
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     vul.delay_days = body.delay_days
     vul.delay_reason = body.delay_reason
-    vuln_service.add_log(session, vul, user, "延期处理", f"延期{body.delay_days}天：{body.delay_reason}")
+    vul_service.add_log(session, vul, user, "延期处理", f"延期{body.delay_days}天：{body.delay_reason}")
     await session.commit()
     await session.refresh(vul)
     return build_vul_out(vul)
@@ -938,7 +938,7 @@ async def create_retest_record(
         creator_id=user.id, username=user.username,
     )
     session.add(record)
-    vuln_service.add_log(session, vul, user, "新增复测记录")
+    vul_service.add_log(session, vul, user, "新增复测记录")
     await session.flush()
     await _sync_vul_retest_html(session, vul)
     old_status = vul.status
@@ -946,8 +946,8 @@ async def create_retest_record(
     # 创建复测记录时可一并调整漏洞状态（复测未修复回修复中 / 已修复）：
     # 先聚合复测内容再流转，确保复测结论校验（必须填写复测详情）能够通过。
     if body.status is not None and body.status != vul.status:
-        await vuln_service.transition(session, vul, body.status, user, "新增复测记录调整状态")
-        done_plans = await vuln_service.sync_plan_retest_state(session, [vul.id])
+        await vul_service.transition(session, vul, body.status, user, "新增复测记录调整状态")
+        done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(record)
     await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
@@ -984,7 +984,7 @@ async def delete_retest_record(
     record = await _get_retest_record(session, vul_id, record_id)
     vul = await session.get(Vul, vul_id)
     if vul is not None:
-        vuln_service.add_log(session, vul, user, "删除复测记录", f"记录 #{record_id}")
+        vul_service.add_log(session, vul, user, "删除复测记录", f"记录 #{record_id}")
     await session.delete(record)
     await session.flush()
     if vul is not None:

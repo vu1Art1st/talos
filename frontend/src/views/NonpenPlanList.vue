@@ -179,7 +179,7 @@ import StatCard from '../components/StatCard.vue'
 import type { NonpenPlan, NonpenPlanForm } from '../types'
 
 const actionable = ref(false)
-const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/nonpen-plans', {
+const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage<NonpenPlan>('/nonpen-plans', {
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: () => (actionable.value ? { actionable: true } : {}),
 })

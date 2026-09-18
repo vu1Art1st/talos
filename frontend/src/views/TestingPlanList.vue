@@ -486,7 +486,7 @@ const {
 } = usePlanFilters(triggerReload)
 
 // 列表查询：extraParams 以函数声明传入（提升），保证「查询参数口径」全站唯一
-const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage('/testing-plans', {
+const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage<TestingPlan>('/testing-plans', {
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: filterParams,
 })

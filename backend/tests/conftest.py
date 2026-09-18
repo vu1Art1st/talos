@@ -7,6 +7,9 @@ _DB_FILE = _TESTS_DIR / "test_vp.db"
 # 必须在导入 app 之前设置环境变量（settings 为模块级单例）
 os.environ["VP_DATABASE_URL"] = f"sqlite+aiosqlite:///{_DB_FILE.as_posix()}"
 os.environ["VP_DISABLE_QUEUE"] = "1"
+# 测试不依赖外部 Redis：限流/锁定计数直接走进程内内存（等价于「Redis 不可用」的降级路径）。
+# 否则每次调用都要付连接超时（G7 保证有界，但仍会显著拖慢全量测试）
+os.environ["VP_DISABLE_REDIS"] = "1"
 os.environ["VP_STORAGE_DIR"] = str(_TESTS_DIR / "test_storage")
 # 使用 >=32 字符的密钥以通过生产校验；固定内置 admin 初始口令供登录夹具使用
 os.environ["VP_SECRET_KEY"] = "test-secret-key-0123456789abcdef-0123456789"

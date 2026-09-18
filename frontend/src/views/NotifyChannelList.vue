@@ -109,7 +109,7 @@ import TlPagination from '../components/TlPagination.vue'
 import type { NotifyChannel } from '../types'
 
 const auth = useAuthStore()
-const { items, total, page, size, loading, load, onSizeChange } = useListPage('/notify-channels')
+const { items, total, page, size, loading, load, onSizeChange } = useListPage<NotifyChannel>('/notify-channels')
 
 // 异构 meta 边界内取用时收窄为「码 → 名称」字典
 const channelTypes = computed<Record<string, string>>(() => auth.meta?.notify_channel_types ?? {})

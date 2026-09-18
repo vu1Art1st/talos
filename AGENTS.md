@@ -74,11 +74,12 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 - **提交前静态检查必须全绿**（2026-09-17 审计引入）：`ruff check app scripts alembic tests` 与 `vulture app --min-confidence 80`。配置见 `backend/ruff.toml`：长行按**显示宽度** 120 计（CJK 记 2 列）；已按文件豁免 `app/schemas/__init__.py` 的 F401（按设计重导出）、`alembic/versions/*` 与 `scripts/seed_dev_data.py` 的 E501（迁移内容冻结 / 中文演示数据），豁免原因写在配置文件注释中。
 - **Python 版本已对齐 3.12（2026-09-17）**：后端 venv 统一由 **uv** 管理，本地 `backend/.venv` 为 **3.12.11**，与容器/生产 `python:3.12-slim` 一致；ruff `target-version = "py312"`。venv 规格变更（重建 / 换版本）一律用 uv：`uv venv backend/.venv --python 3.12` + `uv pip install --python <venv 解释器> -r backend/requirements-dev.txt`。注意 Windows 解释器路径是 `.venv/Scripts/python.exe`（Linux 为 `.venv/bin/python`）；切换 venv 时旧目录保留为 `.venv.oldXXX`（已在 .gitignore 覆盖 `*.venv.*/` 模式）。
-- **漏洞相关命名域（2026-09-17 审计 F-1 固化，新代码强制）**：仓库现状并存 `Vul`/`vulns`/`vul_type`/`vul_id` 与 `VulnType`/`vuln_assets`/`vuln_id`/`vuln_service.py`，缺少成文规则导致新代码只能模仿。规则如下：
-  - 模型类沿用 `Vul`（表 `vulns`）、`VulnType`（字典域类一律 `Vuln*`）；
-  - **实体域新增标识符（字段/模块/变量）统一 `vuln_` 前缀**（与现役 `vuln_service.py`、`vuln_assets`、`import_records.vuln_id` 一致），禁止新增 `vul_id` 形式的新外键或 `Vuln*` 形式的实体类；
-  - 常量一律 `VUL_*`（`VUL_TYPE`/`VUL_LEVEL`/`VUL_SOURCE`）；
-  - 既有 `vul_type` / `vul_id` / `vul_edit_snapshot` 等列名**保持不变**：重命名须连同 Alembic 与 `db.py` 轻量迁移双轨一起做（见「数据库迁移」约定），属独立专项。
+- **漏洞相关命名域（2026-09-18 修订，取代 2026-09-17 版；新代码强制）**：仓库现状并存两套写法，缺少成文规则会让新代码只能模仿。经**模型层实测校订**（旧版称"与 `import_records.vuln_id` 一致"，实测该列是 **`vul_id`**；全仓 `vul_id` 外键列 6 处、`vuln_id` 列仅 1 处）：
+  - **实体域**（漏洞实体及其字段、模块、变量）新增标识符统一 **`vul_`** 前缀，新增外键列统一 **`vul_id`** —— 与现役 6 处 `vul_id` 外键列（`vuln_assets` / `vul_logs` / `vul_retest_records` / `import_records` / `report_sections` / `spring_action_vulns`）、模型 `Vul`、常量 `VUL_*` 一致；禁止新增 `vuln_id` 形式的列/字段，禁止新增 `Vuln*` 形式的实体类或 `vuln_*` 形式的实体域模块。
+  - **字典域**（漏洞类型等字典）继续用 `Vuln*`：类 `VulnType`、表 `vuln_types`。字典域与实体域是两条轴，不得互相套用。
+  - 常量一律 `VUL_*`（`VUL_TYPE`/`VUL_LEVEL`/`VUL_SOURCE`）。
+  - **既成事实例外（保持现状，禁止在新增代码中扩散）**：表名 `vulns`（实体表）与 `vuln_assets`（关联表，其列名为 `vul_id`）；列 `remote_testings.vuln_id`；路由前缀 `/vulns` 与路由模块 `app/api/v1/vulns.py`（对外契约名，模块名与资源名一致）；Pydantic 模块 `app/schemas/vuln.py`（内部模型已是 `VulIn`/`VulOut`）；前端 `Vuln*` 族（前端命名约定 = **API 资源名**，与 `Report`/`Asset`/`Group` 同族、镜像路由 `/vulns`）。
+  - 既有列名（`vul_type` / `vul_id` / `vul_edit_snapshot` / `remote_testings.vuln_id`）**保持不变**：库表列重命名须连同 Alembic 与 `db.py` 轻量迁移双轨一起做（见「数据库迁移」约定），属独立专项；**当前决策：不做**（2026-09-18）。
 - 字典/枚举与其展示色值只写在 `app/constants.py`，禁止在路由/服务内散落定义；改字典即全端生效（/meta 下发）。
 - 请求/响应模型写入 `app/schemas/` 对应域文件并在 `schemas/__init__.py` 重导出，禁止回填单文件或在路由文件内定义业务模型。
 - 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板；聚合筛选（filters JSON）复用 `app/core/filters.py` 引擎。
@@ -86,6 +87,18 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 用户输入的富文本入库前必须过 `app/core/sanitize.py` 消毒（schemas 中用 `HtmlStr` 类型别名）。
 - Excel 响应统一 `app/core/xlsx.py` 的 `xlsx_response()`。
 - 不留 print 调试语句；本地排查脚本命名 `_*.py` / `tmp_*.py`（已被 .gitignore 通配覆盖，不入库）。
+
+> **函数体量口径**：单函数 **≤ 60 行**（AST 口径 `end_lineno - lineno + 1`）为常态；超出时优先拆分。**已成文的「合理长」保留形态**（已逐项复评，**不要重复提议拆分**）：
+>
+> | 保留形态 | 现存例子 | 保留理由 |
+> |---|---|---|
+> | 幂等 DDL 顺序表 | `db.py::_migrate_lightweight` | 逐列「查 PRAGMA → ALTER」直线逻辑；拆分会反复传 `conn`/列集合，破坏「一段一表」的顺序可读性 |
+> | 建表 → 迁移 → 种子三段直线 | `db.py::init_db` | 无嵌套分支 |
+> | 解析状态机主循环 | `services/docx_parser.py::parse_report_docx` / `parse_docx` | 各段共享 meta / records / 样式上下文，拆分会引入大量跨函数状态传递 |
+> | 语义敏感的状态同步 | `services/vul_service.py::sync_plan_retest_state` | 工单级复测口径的唯一实现且有回归护栏，可读性收益 < 误改风险 |
+> | 单批事务主流程 | `services/import_service.py::confirm_batch_internal` | 拆分点会跨越 `commit` 边界（批量需按批次独立提交/回滚） |
+> | 薄编排 / 响应组装 | `workers/main.py::export_report_task`、`api/v1/reports.py::retest_report` | 编排已下沉服务层，剩余为参数校验与组装 |
+> | 以参数面/文档为主 | `api/v1/vulns.py::_build_vuln_conditions` | 逻辑体已拆净；若要再压应引入 `VulFilterQuery` 数据类，而非继续切函数 |
 
 ## 前端编码规范
 
@@ -95,7 +108,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 时间格式化只用 `src/utils/format.ts`，禁止视图内 slice/replace。
 - 文件下载只用 `src/utils/download.ts` 的 `saveBlob()`。
 - 列表页（分页/排序/加载）、CRUD 弹窗、资产选择器、导出任务必须复用 `src/composables/` 对应组合式函数，禁止再复制样板。
-- 领域类型统一声明在 `src/types/index.ts`（工单/漏洞/报告/导出记录等），页面与 composable 不得就地复制 `any` 或另起同名接口；新增字段先在该文件补声明（字段名与后端 API 一致，snake_case），并同步 `docs/CODE_AUDIT.md` 的 E-5 进度。
+- 领域类型统一声明在 `src/types/index.ts`（工单/漏洞/报告/导出记录等），页面与 composable 不得就地复制 `any` 或另起同名接口；新增字段先在该文件补声明（字段名与后端 API 一致，snake_case）。**新增代码不得引入 `any`**：确属边界（第三方写入的结构、用户输入 JSON）用 `unknown`，或在原处写明理由保留；类型收敛**不得改变运行时数据流**（`{...base, ...detail}` 必须保留 spread，只在边界做 `?? base.x` 归一）。`pnpm typecheck` 必须保持 **0 错误**。
 - **弹窗/抽屉打开函数命名统一为 `open<Target>`**（2026-09-17 审计 F-2）：`useCrudDialog` 的打开函数为 `openFormDialog`，业务侧为 `openCreateAsset` / `openWorkflow` 等；组件对外 API 可直接导出 `open`（与 `@closed` 对称）。禁止再引入 `openDialog`、`onOpen` 这类无目标或事件式命名（`onXxx` 仅用于「事件回调」语义，不作为「打开」动作名）。
 - 视图/组件冒烟测试统一复用 `src/__tests__/helpers/clientMock.ts`（`clientMockFactory()` + `getMock`），禁止在各 spec 内重复书写 axios client 的 `vi.mock` 样板。
 - 状态标签统一 `tl-tag` 类 + `softStyle()` 柔和样式；表格行内允许「色点 + 文字」dot-tag 变体（等级/状态语义），色值仍走 colors.ts 字典注册表，禁止视图内硬编码。
@@ -130,6 +143,24 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 测试不得依赖仓库外/外部文件（后端 docx 样例在测试内用 python-docx 现造，参考 `test_parser.py` 的 `_make_docx`）。
 - 测试产物（db / 临时文件）必须由 fixture teardown 自清理（参考 `conftest.py` 的 session 收尾），禁止依赖 .gitignore 兜底。
 - 前端纯逻辑（composables / utils）为单测优先覆盖对象；组件测试按需引入 `@vue/test-utils`。
+
+**验收口径（改动涉及运行时必做）**：
+
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **189 passed / 1 skipped**）。
+- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **24 files / 138 passed**）+ `pnpm run build`。
+- **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
+- **接口探针**（容器内执行）：`docker compose exec -T api python - < 探针脚本`（脚本用完即删；`_*.py` 已被 .gitignore 覆盖）。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`，`username=admin1&password=123456`），取 token 后依次 GET 22 个关键接口：`/meta`、`/vulns`、`/vulns/stats`、`/reports`、`/testing-plans`、`/testing-plans/stats`、`/testing-plans/conclusion`、`/nonpen-plans`、`/nonpen-plans/stats`、`/remote-testings`、`/spring-actions`、`/knowledge`、`/knowledge/search?q=注入`、`/search?q=a`、`/assets`、`/users`、`/roles`、`/groups`、`/pats`、`/notify-channels`、`/audit/logs`、`/imports` —— **全部 200 视为通过**。
+- **浏览器冒烟**（前端改动）：Chrome DevTools 逐页检查**控制台 0 错误/警告** + 关键 DOM（表格行、抽屉步骤条等）渲染；**默认不执行写操作**，避免污染共享数据。
+
+## 文档治理
+
+- `docs/` 只保留**长期有效**的文档：`DEPLOY.md`（部署/备份/回滚/排障）、`RELEASE.md`（发布史，唯一真相源）、`ROADMAP.md`（未来计划）、`SCRIPTS.md`（脚本清单）、`OPEN_API_GUIDE.md`、`USER_GUIDE.md`，以及**尚未闭环**的专项报告。
+- **任务型文档**（审计报告、事故复盘、单次排查报告、批次执行记录）在满足以下三条后**删除**，删除前先归并内容：
+  1. **任务闭环** —— 验收项全部打勾，或未打勾项已明确转为待办；
+  2. **有价值结论已归并** —— 规范/阈值/坑 → 本文件；运维与排障操作 → `DEPLOY.md`；脚本用途 → `SCRIPTS.md`；跨会话事实 → `.codebuddy/memory/`；
+  3. **引用点已修正** —— 用 `rg <文档名>` 确认无悬空引用（含代码/配置注释）。
+- 删除写进当次提交信息；**git 历史即归档**（`git show <sha>:docs/<name>.md` 可取回）。
+- **未闭环的专项报告不得删除**：如 `docs/SECURITY_AUDIT_*.md` 在漏洞修复 + 负责人复验完成前必须保留（它是修复行动的唯一真相源）。
 
 ## 发布约定
 

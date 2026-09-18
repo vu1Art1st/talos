@@ -15,10 +15,20 @@ _mem: dict[str, tuple[int, float]] = {}
 
 async def _get_redis():
     global _redis
-    if aioredis is None:
+    # DISABLE_REDIS：明确不使用 Redis（测试 / 无 Redis 的单机环境）→ 直接走进程内降级。
+    # G7 的超时保证"不可达时有界"，本开关让"已知无 Redis"的场景零成本（不再逐次尝试连接）
+    if aioredis is None or settings.DISABLE_REDIS:
         return None
     if _redis is None:
-        _redis = aioredis.from_url(settings.REDIS_URL, encoding="utf-8", decode_responses=True)
+        # 必须显式设置连接/读写超时：Redis 不可达但对端 DROP 报文（而非主动拒绝）时，
+        # 无超时的客户端会停在 TCP 握手阶段无限挂起，下方 except 的降级分支将永不触发（G7）
+        _redis = aioredis.from_url(
+            settings.REDIS_URL,
+            encoding="utf-8",
+            decode_responses=True,
+            socket_connect_timeout=settings.REDIS_TIMEOUT,
+            socket_timeout=settings.REDIS_TIMEOUT,
+        )
     return _redis
 
 

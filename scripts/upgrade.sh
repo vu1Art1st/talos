@@ -87,7 +87,7 @@ fi
 echo "[3/5] 重建镜像 docker compose build"
 $DOCKER compose build
 
-# [3.5/5] 清理过期构建缓存：BuildKit 构建缓存只增不减会撑爆磁盘（见 docs/INCIDENT-20260831-disk-space.md）。
+# [3.5/5] 清理过期构建缓存：BuildKit 构建缓存只增不减会撑爆磁盘（判据见 DEPLOY.md 附「文件与磁盘」）。
 # 保留最近 7 天（168h）缓存，兼顾构建加速与磁盘占用；清理失败不阻断升级。
 echo "[3.5/5] 清理过期构建缓存（保留最近 7 天）"
 $DOCKER builder prune --filter "until=168h" -f \

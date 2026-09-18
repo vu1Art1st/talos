@@ -1,7 +1,7 @@
 # Talos 脚本清单与运维手册
 
 > 建立日期：2026-09-17 · 依据：对仓库内 22 个脚本（11 个 shell + 11 个 Python）的实际读取，以及全仓库引用关系检索。
-> 配套文档：代码质量审计见 [`CODE_AUDIT.md`](./CODE_AUDIT.md)；部署流程见 [`DEPLOY.md`](./DEPLOY.md)；备份方案演进见 [`BACKUP_OPTIMIZATION.md`](./BACKUP_OPTIMIZATION.md)。
+> 配套文档：部署、备份与排障流程见 [`DEPLOY.md`](./DEPLOY.md)（§五 备份、附「文件与磁盘」）；发布史见 [`RELEASE.md`](./RELEASE.md)；规范与门禁见仓库根 `AGENTS.md`。
 >
 > **本文档是脚本用途/调用/依赖/场景的唯一登记处**：新增脚本必须在此登记；脚本改参数、改路径、改调用方时必须同步本文档。
 
@@ -32,8 +32,8 @@
 | `restore.sh` | 77 | 活跃·常规运维 | README.md:85、DEPLOY.md:258 |
 | `notify.sh` | 27 | 活跃·库依赖 | `backup-common.sh:45-49`、`upgrade.sh:99` |
 | `install-cron.sh` | 27 | 活跃·一次性安装 | RELEASE.md:385 |
-| `disk-usage.sh` | 127 | 活跃·排障工具 | DEPLOY.md:432、INCIDENT-20260831:28-31,94 |
-| `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434、INCIDENT-20260831:28 |
+| `disk-usage.sh` | 127 | 活跃·排障工具 | DEPLOY.md 附「文件与磁盘」（磁盘排查双视角判据） |
+| `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434 |
 | `setup-docker-mirror.sh` | 59 | 活跃·部署前配置 | DEPLOY.md:198,203、RELEASE.md:964 |
 
 ### 1.2 后端脚本 `backend/scripts/`（11 个，1 387 行）
@@ -149,7 +149,7 @@
 - **用途**：按占用降序输出前 N 大目录/文件，并单列大于阈值的大文件；结果同时输出终端与日志。
 - **调用**：`sudo bash scripts/disk-usage.sh [-d 目录] [-l 日志] [-n 前N名] [-s 大文件阈值]`（默认 `/`、`/var/log/disk_usage_analysis.log`、20、`100M`）。
 - **依赖**：`df`/`du`/`find`/`awk`；`-xdev` 限定同一文件系统（不跨挂载点，见 35-37 行说明）。
-- **执行场景**：磁盘告警排障（`INCIDENT-20260831-disk-space.md` 即为本脚本实战记录）、配置每日巡检。
+- **执行场景**：磁盘告警排障（判据见 `DEPLOY.md` 附「文件与磁盘」的「双视角」说明）、配置每日巡检。
 - **容错**：日志目录不可写时自动降级为仅终端输出（72-78 行）。
 
 ### 2.10 `swap-manager.sh` — swap 开关
@@ -158,7 +158,7 @@
 - **调用**：`sudo bash scripts/swap-manager.sh <on|off|status>`（`enable|start`、`disable|stop`、`show` 为别名，191-193 行）。
 - **依赖**：`fallocate`（失败自动回退 `dd`）/`mkswap`/`swapon`/`swapoff`/`free`。
 - **安全设计**：已有活动 swap 时拒绝创建（66-72 行）；创建/删除前二次人工确认（`confirm()`）；改 `/etc/fstab` 前自动备份为 `/etc/fstab.bak.<时间戳>`（115、151 行）。
-- **执行场景**：VPS 内存不足导致构建 OOM 时临时扩容（`INCIDENT-20260831` 记录）。
+- **执行场景**：VPS 内存不足导致构建 OOM 时临时扩容。
 
 ### 2.11 `setup-docker-mirror.sh` — Docker 镜像加速
 
@@ -213,7 +213,7 @@
 - **环境处理**：`setdefault` 方式注入 `VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db`、`VP_DISABLE_QUEUE=1`、`VP_SECRET_KEY=dev-…`（26-28 行，必须在导入 app 之前设置）。
 - **破坏性**：先 `create_all` 再对 `ALL_TABLES`（48-56 行，26 张业务表）逐表 `DELETE`。
 - **账号**：`admin / admin123`（管理员）；其余测试账号密码统一 `Talos@2026`。
-- **⚠ 风险（P1）**：`os.environ.setdefault("VP_DATABASE_URL", …)`（26 行）**只在变量缺失时生效**；若环境中已导出指向生产/测试 PostgreSQL 的 `VP_DATABASE_URL`，本脚本会清空该库并写入演示数据，且脚本内**没有「必须为 SQLite」的守卫**。建议加固：启动时断言 DSN 为 sqlite 或库名为 `dev.db`，否则拒绝执行（修复方案见 `CODE_AUDIT.md` A-4）。
+- **✅ 目标库守卫（原 P1 风险，2026-09-17 已修复）**：`os.environ.setdefault("VP_DATABASE_URL", …)`（26 行）**只在变量缺失时生效**；若环境中已导出指向生产/测试 PostgreSQL 的 DSN，本脚本会清空该库并写入演示数据。现已在启动时调用 `_assert_dev_database()`：目标非本地 `sqlite...dev.db` 时以**退出码 2 拒绝执行**（守卫用例 `tests/test_seed_dev_data_guard.py`）。
 
 ### 3.5 `knowledge_data.py` — 模板库数据加载（活跃·共享模块）
 
@@ -304,7 +304,7 @@
 |---|---|---|
 | **S-5（问题）** | `scripts/migrate.sh`、`scripts/upgrade.sh` 硬编码 `sudo docker` | ✅ **2026-09-17 已修复**：新增 `scripts/docker-cmd.sh`（13 行，root → `docker`、非 root → `sudo docker`、尊重调用方预设的 `$DOCKER`）；`backup-common.sh:6-8` 改为 source 该文件（保留原 `$DOCKER` 语义），`migrate.sh`/`upgrade.sh` 同步 source 并把 12 处硬编码改为 `$DOCKER`。**验证**：`bash -n` 4 个脚本全过；`backup-common.sh`/`docker-cmd.sh` 在非 root 下实测得到 `DOCKER=[sudo docker]`；显式预设 `DOCKER=podman` 时被尊重；`grep -rn 'sudo docker' scripts/` 已无真实调用点（仅注释与本地赋值）。 |
 | **S-6（不合并）** | `install-cron.sh`（23 行）、`notify.sh`（21 行） | 体量虽小但职责独立：`notify.sh` 被 `backup-common.sh:47` 作为库依赖调用，`install-cron.sh` 是一次性安装器。合并会引入无谓耦合。 |
-| **S-7（不合并）** | `disk-usage.sh`、`swap-manager.sh`、`setup-docker-mirror.sh` 合并为 `ops.sh <sub>` | 三者均被文档/事故报告以完整命令形式单独引用（`DEPLOY.md:198,203,432`；`INCIDENT-20260831-disk-space.md:28-31,94`；`RELEASE.md:434,964`），合并会使文档中所有可复制命令失效，收益（减少 2 个文件）远低于迁移成本。保持独立，仅在本文档集中登记。 |
+| **S-7（不合并）** | `disk-usage.sh`、`swap-manager.sh`、`setup-docker-mirror.sh` 合并为 `ops.sh <sub>` | 三者均被文档以完整命令形式单独引用（`DEPLOY.md:198,203` 与附「文件与磁盘」；`RELEASE.md:434,964`），合并会使文档中所有可复制命令失效，收益（减少 2 个文件）远低于迁移成本。保持独立，仅在本文档集中登记。 |
 
 ### 4.4 一次性脚本的处置方式（推荐轻量方案）
 
@@ -321,6 +321,6 @@
 1. **单一入口**：新增运维能力优先扩展既有脚本的子命令或参数，而不是新建文件；确需新建时，同步更新本文档总览表与详述章节。
 2. **幂等优先**：数据类脚本必须支持重复执行（参考 `sync_knowledge_templates`、`fix_*` 系列），并提供 `--dry-run`；`migrate_utc_to_utc8.py` 属例外，其头部已明确「只能执行一次」。
 3. **破坏性操作三件套**：显式确认参数（如 `--reset`）+ 落库前备份到 `storage/backups/`（或 `/etc/fstab.bak.*`）+ 打印将变更的对象清单。
-4. **敏感环境防护**：涉及清库/大批量写库的脚本必须校验目标 DSN（参照 `CODE_AUDIT.md` A-4 对 `seed_dev_data.py` 的加固建议），禁止仅依赖 `setdefault`。
+4. **敏感环境防护**：涉及清库/大批量写库的脚本必须校验目标 DSN（参照 `seed_dev_data.py::_assert_dev_database()` 的实现与 `tests/test_seed_dev_data_guard.py`），禁止仅依赖 `setdefault`。
 5. **文档同步**：脚本的参数、产物路径、调用方发生变化时，必须同时更新 `docs/DEPLOY.md`（现场操作）、`docs/RELEASE.md`（版本记录）与本文档。
 6. **命名**：一次性/纠偏脚本统一 `fix_*` / `backfill_*` / `repair_*` / `migrate_*` 前缀（现状已符合）；shell 脚本用短横线（`backup-incremental.sh`），Python 模块用下划线。

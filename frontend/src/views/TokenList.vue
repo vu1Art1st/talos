@@ -105,7 +105,7 @@ import { renderMarkdown } from '../utils/markdown'
 import guideMd from '../../../docs/OPEN_API_GUIDE.md?raw'
 import type { ApiToken } from '../types'
 
-const { items, total, page, size, loading, load, onSizeChange } = useListPage('/pats')
+const { items, total, page, size, loading, load, onSizeChange } = useListPage<ApiToken>('/pats')
 
 const guideVisible = ref(false)
 const guideHtml = computed(() => renderMarkdown(guideMd))

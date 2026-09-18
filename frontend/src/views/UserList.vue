@@ -115,7 +115,7 @@ import type { Role, User, UserForm } from '../types'
 interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }
 
-const { items: users, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage('/users')
+const { items: users, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<User>('/users')
 
 const roles = ref<Role[]>([])
 const catalog = ref<PermGroup[]>([])

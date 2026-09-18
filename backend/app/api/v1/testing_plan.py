@@ -23,7 +23,7 @@ from app.models import (
     Vul,
 )
 from app.schemas import CompleteNoVulnIn, Page, TestingPlanIn, TestingPlanOut
-from app.services import plan_crud, plan_io, plan_query, plan_service, vuln_service
+from app.services import plan_crud, plan_io, plan_query, plan_service, vul_service
 from app.services.audit_service import audit
 from app.services.notify_service import notify
 
@@ -356,7 +356,7 @@ async def _ensure_no_vuln_completable(session: AsyncSession, plan: TestingPlan, 
         raise HTTPException(403, "仅认领者或管理员可确认无漏洞完结")
     if plan.status == PlanStatus.PASSED:
         raise HTTPException(400, "该计划已确认无漏洞（测试通过），无需重复操作")
-    if not vuln_service.can_plan_transition(plan.status, PlanStatus.PASSED):
+    if not vul_service.can_plan_transition(plan.status, PlanStatus.PASSED):
         raise HTTPException(400, "当前状态不允许确认无漏洞完结")
     vul_count = (
         await session.execute(
@@ -452,14 +452,14 @@ async def attach_vulns_to_plan(
     vul_ids = [int(i) for i in (body.get("vul_ids") or [])]
     if not vul_ids:
         raise HTTPException(400, "请选择要关联的漏洞")
-    vulns = await vuln_service.load_vulns_or_400(session, vul_ids)
+    vulns = await vul_service.load_vulns_or_400(session, vul_ids)
     for v in vulns:
         v.testing_plan_id = row_id
         v.source = 0  # 关联渗透测试工单后漏洞来源固定为「渗透测试工单」（展示层派生）
     # 已确认无漏洞（测试通过）的计划重新关联到漏洞时自动重开为「初测中」
     await plan_service.reopen_passed_plan(session, row_id)
     # 复测闭环重开：已「复测完成」的工单被关联未闭环漏洞时回退「复测中」
-    await vuln_service.sync_plan_retest_state(session, plan_ids=[row_id])
+    await vul_service.sync_plan_retest_state(session, plan_ids=[row_id])
     await plan_service.refresh_stats(session, row_id)
     await session.commit()
     await session.refresh(row)

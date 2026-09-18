@@ -1,6 +1,6 @@
 """存量工单复测状态纠偏：把「已复测完成但仍存在未闭环漏洞」的工单回退为「复测中」。
 
-背景：早期 `vuln_service.sync_plan_retest_state`（原 `sync_report_completion`）以「单份报告的
+背景：早期 `vul_service.sync_plan_retest_state`（原 `sync_report_completion`）以「单份报告的
 章节漏洞」为口径判定工单复测完成，工单含多份报告/多个漏洞（如复测期间新录入、尚未纳入任何
 报告章节的漏洞）时会把整单误置「复测完成」，出现「工单复测完成 + 仍有未修复漏洞」的矛盾状态。
 

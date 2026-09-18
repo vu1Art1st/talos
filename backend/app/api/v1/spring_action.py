@@ -19,7 +19,7 @@ from app.schemas import (
     SpringActionVulDraft,
     SpringReportParseOut,
 )
-from app.services import vuln_service
+from app.services import vul_service
 from app.services.docx_parser import parse_any_docx
 from app.services.upload_store import save_upload
 
@@ -112,8 +112,8 @@ async def create_spring_action(
     session: AsyncSession = Depends(get_session),
 ):
     row = SpringAction(**body.model_dump(exclude={"vul_ids", "new_vuls"}), creator_id=user.id)
-    row.vuls = await vuln_service.load_vulns_or_400(session, body.vul_ids)
-    new_vuls = await vuln_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
+    row.vuls = await vul_service.load_vulns_or_400(session, body.vul_ids)
+    new_vuls = await vul_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
     if new_vuls:
         row.vuls = list(row.vuls) + new_vuls
     session.add(row)
@@ -133,8 +133,8 @@ async def update_spring_action(
     old_path = row.report_file_path
     for k, v in body.model_dump(exclude={"vul_ids", "new_vuls"}).items():
         setattr(row, k, v)
-    row.vuls = await vuln_service.load_vulns_or_400(session, body.vul_ids)
-    new_vuls = await vuln_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
+    row.vuls = await vul_service.load_vulns_or_400(session, body.vul_ids)
+    new_vuls = await vul_service.create_draft_vulns(session, body.new_vuls, user, SPRING_VUL_SOURCE)
     if new_vuls:
         row.vuls = list(row.vuls) + new_vuls
     await session.commit()

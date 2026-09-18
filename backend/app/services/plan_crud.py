@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import NONPEN_ITEMS, PlanStatus
 from app.models import NonpenPlan, TestingPlan, User, Vul
-from app.services import nonpen_service, plan_service, ticket_service, vuln_service
+from app.services import nonpen_service, plan_service, ticket_service, vul_service
 
 
 async def create_plan(session: AsyncSession, data: dict, user: User) -> TestingPlan:
@@ -64,7 +64,7 @@ async def update_plan(
     new_status = data.get("status", row.status)
     if new_status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
-    if new_status != row.status and not vuln_service.can_plan_transition(row.status, new_status):
+    if new_status != row.status and not vul_service.can_plan_transition(row.status, new_status):
         raise HTTPException(400, "不允许从当前状态流转到目标状态")
     # 编辑页直接流转为「测试通过」时，同样要求计划无关联漏洞（与无漏洞完结接口口径一致）
     if new_status == PlanStatus.PASSED and row.status != PlanStatus.PASSED:

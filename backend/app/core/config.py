@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.17.1"
+    APP_VERSION: str = "2.18.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -38,6 +38,13 @@ class Settings(BaseSettings):
 
     DATABASE_URL: str = "postgresql+asyncpg://vuln:vulnpass@localhost:5432/vulnplatform"
     REDIS_URL: str = "redis://localhost:6379/0"
+    # Redis 连接/读写超时（秒，必须 > 0）：Redis 不可达但被防火墙 DROP（而非主动拒绝）时，
+    # 无超时的客户端会停在 TCP 握手阶段无限挂起，使进程内降级逻辑（登录失败计数、arq 任务）
+    # 永不触发（2026-09-18 实测复现：全量测试曾卡在 PAT 限流用例）
+    REDIS_TIMEOUT: float = 2.0
+    # 为 True 时完全不使用 Redis（限流/锁定计数直接走进程内内存），避免"已知无 Redis"的
+    # 环境为每次调用支付连接超时代价 —— 测试与无 Redis 的单机部署应开启（与 DISABLE_QUEUE 对称）
+    DISABLE_REDIS: bool = False
     # 为 True 时不连接 arq 队列，后台任务在 API 进程内执行（测试/单机部署）
     DISABLE_QUEUE: bool = False
 

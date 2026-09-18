@@ -30,7 +30,7 @@ from app.models import (
     Vul,
     VulLog,
 )
-from app.services import plan_service, report_meta, vuln_service
+from app.services import plan_service, report_meta, vul_service
 from app.services.report_builder import build_report_docx
 from app.services.report_html import vuln_section_html
 
@@ -84,7 +84,7 @@ async def resolve_report_plan(
     再按「初测 / 复测」置计划状态并维护复测轮次。
 
     复测批次统一先进入「复测中」并开启新一轮；本批漏洞入库后再由
-    `vuln_service.sync_plan_retest_state` 按**工单全部关联漏洞**是否闭环决定是否进入
+    `vul_service.sync_plan_retest_state` 按**工单全部关联漏洞**是否闭环决定是否进入
     「复测完成」——单份报告全部修复不再直接判定整单完成（工单含其他未闭环漏洞时保持复测中）。
 
     返回 (计划, 本轮复测轮次)；无系统名且未指定计划时返回 (None, None)，
@@ -412,7 +412,7 @@ async def finalize_confirm(
     if report is not None and not report_auto_created:
         report.revision += 1  # 追加章节属编辑操作，仅自增编辑锁；导出版本号只在导出成功时 +1
         # 与报告编辑关联漏洞的行为一致：自动进入修复中
-        await vuln_service.auto_transition(
+        await vul_service.auto_transition(
             session, new_vul_ids, 50, user, f"关联报告《{report.title}》，自动进入修复中",
         )
     if plan is not None:
@@ -567,7 +567,7 @@ async def confirm_batch_internal(
     # 工单级复测状态重算：本批漏洞已入库，按工单**全部关联漏洞**是否闭环判定
     # 「复测完成 / 复测中」（复测批次沿用报告日期写复测完成时间）
     if plan is not None:
-        await vuln_service.sync_plan_retest_state(
+        await vul_service.sync_plan_retest_state(
             session, plan_ids=[plan.id],
             done_date=(batch_meta.get("report_date") or "").strip() or None,
         )

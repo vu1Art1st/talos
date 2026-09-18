@@ -65,13 +65,14 @@ import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
+import type { AuditLogEntry } from '../types'
 
 const auth = useAuthStore()
 const activeTab = ref<'login' | 'operation' | 'all'>('login')
 const dateRange = ref<[string, string] | null>(null)
 const filters = reactive({ username: '', action: '', ip: '' })
 
-const { items, total, page, size, loading, load, reload, onSizeChange, onSortChange } = useListPage('/audit/logs', {
+const { items, total, page, size, loading, load, reload, onSizeChange, onSortChange } = useListPage<AuditLogEntry>('/audit/logs', {
   // 注意：此处 order 用接口词典（asc/desc），Element Plus 的 ascending/descending 只用于表格 :default-sort
   defaultSort: { prop: 'create_time', order: 'desc' },
   extraParams: () => ({

@@ -1,4 +1,4 @@
-# Ruff 配置（2026-09-17 代码审计引入，见 docs/CODE_AUDIT.md §六「工具链建议」）
+# Ruff 配置（2026-09-17 静态检查门禁；约定见 AGENTS.md「后端编码规范」）
 #
 # 运行（在 backend/ 目录，使用项目 venv）：
 #   .venv/Scripts/python.exe -m ruff check app scripts alembic tests      # Windows
@@ -25,7 +25,7 @@ select = ["F", "E501"]
 # 其导入名在本文件内不出现属预期，不计为 unused-import。
 "app/schemas/__init__.py" = ["F401"]
 # Alembic 迁移脚本内容冻结（改动历史迁移会破坏已发布版本的升级路径），长行豁免。
-# 见 docs/CODE_AUDIT.md D-1。
+# 约定见 AGENTS.md「后端编码规范」。
 "alembic/versions/*" = ["E501"]
 # 开发种子数据：中文数据字面量按显示宽度必然超过 120，且整改属纯格式 churn（无逻辑收益）。
 # 逻辑代码不受此豁免影响。

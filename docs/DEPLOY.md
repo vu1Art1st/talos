@@ -232,20 +232,35 @@ sudo docker compose cp api:/app/storage/backups/report_sections_retest_<时间�
 
 ---
 
-## 五、备份
+## 五、备份（迁移锚点 + 每日差异快照）
+
+实现为「**全量锚点 + 差异快照**」：数据库每次全量 `pg_dump`，`storage` 卷用 `rsync --link-dest` 硬链接复用未变文件，因此每日只增量占盘。脚本细节见 `docs/SCRIPTS.md` §2.3~2.8。
 
 在运行中的服务器、仓库根目录执行：
 
 ```bash
-bash scripts/backup.sh
+bash scripts/backup.sh              # 迁移锚点（全量自包含）：每月 1 日 03:00 / MAJOR 发版 / 跨机迁移前
+bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgrade.sh 升级前（默认）
 ```
 
-产物在 `backups/<时间戳>/`：
+产物（均在 `backups/`，已 `.gitignore`）：
 
-- `db.sql.gz`：PostgreSQL 逻辑备份（`pg_dump`，与镜像 / DB 版本无关，可跨机恢复）
-- `storage.tar.gz`：`storage_data` 卷中的上传文件
+| 路径 | 内容 | 保留策略 |
+|---|---|---|
+| `backups/anchors/<年>/<月>/<时间戳>/` | `db.sql.zst`（或 `.gz`）+ `storage.tar.zst` + `MANIFEST.json` | 只保留**最近 3 份**锚点；清空旧产物前先完成新锚点与基线校验 |
+| `backups/baseline/storage/` | 差异比对基线（由最近锚点重建） | 随锚点更新 |
+| `backups/snapshots/<年>/<月>/<时间戳>/` | `db.sql.zst` + `storage/`（硬链接差异）+ `MANIFEST.json` | 生成新锚点时清空旧差异 |
+| `backups/latest` | 指向最近一次备份的软链 | — |
 
-建议用 cron 定期执行并把 `backups/` 同步到异地存储。`backups/` 已加入 `.gitignore`，不会误入库。
+要点：
+
+- **必须先有锚点**：`backups/baseline/storage` 缺失时 `backup-incremental.sh` 会自动降级为锚点备份（脚本 22-25 行），不会静默什么都不做。
+- **定时**：`sudo bash scripts/install-cron.sh` 幂等安装两条 root crontab（每日差异 + 每月锚点），日志 `backups/cron.log`；**必须在仓库根目录执行**（cron 行取执行时的 `pwd`）。
+- **告警**：`.env` 配置 `BACKUP_WEBHOOK_URL`（企业微信机器人）后，备份失败/升级异常经 `scripts/notify.sh` 推送；未配置则静默跳过，不影响主流程。
+- **并发保护**：备份三件套用 `flock`，保证同一时刻只有一份备份在跑。
+- **恢复 / 回滚**：`bash scripts/restore.sh <备份目录>`（锚点或差异快照皆可）→ 完成后**必须先 `bash scripts/migrate.sh`** 再访问页面。注意 `restore.sh` 是**破坏性**的（`DROP SCHEMA public CASCADE`），目标库现有数据全部清除。
+- **异地**：建议定期把 `backups/` 同步到异地存储。
+- **`zstd` 为可选依赖**：缺失时自动回退 gzip（仅提示变慢），不影响可用性。
 
 > 备份不含 `.env`（内含密钥）。迁移 / 灾备时请另行安全保管 `.env`。
 
@@ -446,6 +461,10 @@ bash scripts/disk-usage.sh                                     # 磁盘占用概
 sudo docker system df                                           # 镜像 / 卷 / 缓存占用
 sudo docker builder prune --filter "until=168h" -f              # 清理 7 天前的构建缓存
 ```
+
+> **磁盘排查必须「双视角」**（2026-08-31 VPS 事故复盘固化）：`du` 只能定位到目录级；Docker 的**构建缓存**以碎片 blob 形式藏在 `/var/lib/containerd` 内容库里，`du` 无法归因 —— 必须同时看 `docker system df` 的 **Build Cache / RECLAIMABLE** 一栏。当时 `du` 统计 39G 而 `df` 为 34G（差额为 containerd 快照硬链接被重复统计），最终根因是 BuildKit 缓存累积 **12.95GB（可回收 12.47GB，ACTIVE=0）**，`docker builder prune -af` 一次回收。
+> **升级流程已内置回收**：`scripts/upgrade.sh` 在重建镜像后会执行 `docker builder prune`，故正常升级不会让缓存无限累积；只有手工 `docker compose build` 时才需自行清理。
+> 其他易涨项与处置：`/var/log`（建议配 journald `SystemMaxUse`）、`/app/storage/exports`（导出产物，可定期清理过期文件）、过期备份（锚点保留 3 份由 `backup.sh` 自动裁剪）、snap/apt/Homebrew 缓存（定期维护）。
 
 ### 只重建单个服务
 
