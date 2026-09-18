@@ -175,25 +175,27 @@ def _compress_images(html: str) -> str:
     return _IMG_SRC_RE.sub(repl, html or "")
 
 
-# img 标签匹配（src 单双引号均可，仅用于缺失判定，取值含引号内完整 src）
+# img 标签匹配（src 单双引号均可，用于缺失判定，取值含引号内完整 src）。
+# 末尾 [^>]*> 保证匹配**完整标签**：整体移除时不留孤立的 ">"（此前只匹配到引号为止）。
 _IMG_SRC_ANY_QUOTE = re.compile(
-    r"<img\b[^>]*?\bsrc\s*=\s*(['\"])(.*?)\1", re.IGNORECASE | re.DOTALL
+    r"<img\b[^>]*?\bsrc\s*=\s*(['\"])(.*?)\1[^>]*>", re.IGNORECASE | re.DOTALL
 )
 
 
 def _drop_unresolvable_images(html: str) -> str:
-    """移除 src 既非本地文件也非 http(s) URL 的 img 标签，杜绝链接式占位导出。
+    """只保留指向本地已存在文件的 img 标签，其余（含远程 http(s) URL）一律移除。
 
-    htmldocx 对无法读取的本地图片会输出 `<image: 文件名>` 占位段落（即「图片以链接形式导出」）。
-    此处先过滤掉本地化/压缩后仍解析失败的 img；http(s) 远程图片保留交由 htmldocx 下载，
-    下载失败产生的占位由 build_report_docx 末尾的安全网统一清理。"""
+    两个目的：
+    1. 安全（审计 TALOS-2026-004）：htmldocx 对 http(s) 图片会直接 `urllib.request.urlopen`
+       抓取（无超时、无目标限制），可被用作 SSRF 与「把内网响应嵌入 docx 回带」。本函数在
+       把 HTML 交给 htmldocx **之前**移除全部远程图片，使导出只内嵌 storage 内已本地化的文件；
+       `_localize_images` 仍是唯一的本地化入口（同时负责把 /storage 与指向本平台的绝对 URL 转为本地路径）。
+    2. 版式：htmldocx 对无法读取的本地图片会输出 `<image: 文件名>` 占位段落（链接式导出），
+       本地化/压缩后仍解析失败的 img 在此一并移除，由 build_report_docx 末尾的安全网兜底。"""
+
     def repl(m: re.Match) -> str:
         src = m.group(2)
-        if src.startswith(("http://", "https://")):
-            return m.group(0)
-        if Path(src).exists():
-            return m.group(0)
-        return ""
+        return m.group(0) if Path(src).exists() else ""
 
     return _IMG_SRC_ANY_QUOTE.sub(repl, html or "")
 

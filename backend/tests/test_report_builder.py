@@ -24,6 +24,7 @@ from app.constants import VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow
 from app.services.report_builder import (
+    _drop_unresolvable_images,
     _localize_images,
     FIXED_STATUS_COLOR,
     build_report_docx,
@@ -553,3 +554,48 @@ def test_export_retest_detail_appended_when_absent(tmp_path):
     blob = "\n".join(p.text for p in doc.paragraphs)
     assert "复测详情" in blob
     assert "复测已修复" in blob
+
+
+# ---------- SSRF 修复：远程图片不再交由 htmldocx 抓取（审计 TALOS-2026-004） ----------
+def test_drop_unresolvable_images_removes_remote_urls(tmp_path, monkeypatch):
+    """_drop_unresolvable_images 只保留本地已存在文件：远程 http(s) 一律移除。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    local = tmp_path / "uploads" / "images" / "keep.png"
+    local.parent.mkdir(parents=True)
+    Image.new("RGB", (4, 4), "white").save(local)
+
+    assert _drop_unresolvable_images('<img src="http://169.254.169.254/latest/meta-data/">') == ""
+    assert _drop_unresolvable_images('<img src="https://example.com/a.png">') == ""
+    assert _drop_unresolvable_images('<p>x<img src="/storage/uploads/images/missing.png"></p>') == "<p>x</p>"
+    assert "<img" in _drop_unresolvable_images(f'<img src="{local}">')
+
+
+def test_remote_image_dropped_from_export(tmp_path, monkeypatch):
+    """回归：远程图片不得进入导出文档（此前会由 htmldocx 出站抓取）。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    sections = [{
+        "title": "远程图片章节", "vul_id": None,
+        "content_html": '<p>正文<img src="http://100.64.0.1/probe.png"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    assert not [s for s in doc.inline_shapes if not _shape_in_table(s)], "远程图片不应被嵌入导出文档"
+    body = [p.text for p in doc.paragraphs]
+    assert not any(t.strip().startswith("<image:") for t in body), body
+    assert any("正文" in t for t in body), body
+
+
+def test_absolute_self_url_image_still_embedded(tmp_path, monkeypatch):
+    """指向本平台自身的绝对 URL（生产存量形态）仍本地化并嵌入，修复不损版式。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    img_dir = tmp_path / "uploads" / "images"
+    img_dir.mkdir(parents=True)
+    name = "9fefc627bf1b4926b6fb4cf13aef7a4d.png"
+    Image.new("RGB", (20, 20), "red").save(img_dir / name)
+    sections = [{
+        "title": "绝对URL图片", "vul_id": None,
+        "content_html": f'<p>图<img src="http://1.15.101.44:27012/storage/uploads/images/{name}"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    assert [s for s in doc.inline_shapes if not _shape_in_table(s)], (
+        "指向本平台自身的绝对 URL 图片应仍被本地化嵌入"
+    )

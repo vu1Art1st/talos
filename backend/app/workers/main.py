@@ -14,6 +14,7 @@ from arq import cron
 from arq.connections import RedisSettings
 from app.constants import ReportStatus
 from app.core.config import settings
+from app.core.outbound import assert_public_url
 from app.core.timeutil import now
 from app.db import async_session_maker
 from app.models import ImportBatch, ImportRecord, ExportJob, Report, User
@@ -170,17 +171,26 @@ async def send_mail_task(ctx, to: list[str], subject: str, body: str) -> None:
 
 
 async def send_notify_task(ctx, channel_type: str, config: dict, title: str, body: str) -> None:
-    """渠道通知（F3）：企业微信/钉钉 webhook 与邮件，尽力而为（失败仅告警不重试）。"""
+    """渠道通知（F3）：企业微信/钉钉 webhook 与邮件，尽力而为（失败仅告警不重试）。
+
+    出站前再次校验 webhook 目标（审计 TALOS-2026-003）：写入侧校验无法覆盖「存量渠道配置」
+    与「DNS 记录事后变化」两种情况，故发送前再判一次；不允许跟随重定向（重定向目标同样可能
+    指向内网）。校验不通过仅告警并跳过，不影响业务主流程。"""
     try:
         if channel_type in ("wecom", "dingtalk"):
             url = (config or {}).get("url") or ""
             if not url:
                 return
+            try:
+                url = assert_public_url(url, field="webhook 地址")
+            except ValueError as exc:
+                logger.warning("webhook 目标被拒绝，已跳过发送 type=%s: %s", channel_type, exc)
+                return
             if channel_type == "wecom":
                 payload = {"msgtype": "markdown", "markdown": {"content": f"**{title}**\n{body}"}}
             else:
                 payload = {"msgtype": "markdown", "markdown": {"title": title, "text": f"#### {title}\n\n{body}"}}
-            async with httpx.AsyncClient(timeout=10) as client:
+            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
                 resp = await client.post(url, json=payload)
                 if resp.status_code != 200:
                     logger.warning("webhook 通知发送失败 type=%s status=%s", channel_type, resp.status_code)

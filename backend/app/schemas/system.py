@@ -4,6 +4,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from app.constants import NOTIFY_CHANNEL_TYPES, NOTIFY_EVENTS
+from app.core.outbound import assert_public_url
 
 
 # ---------- 审计日志（F7） ----------
@@ -83,8 +84,11 @@ class NotifyChannelIn(BaseModel):
     def _check_config(cls, v: dict, info) -> dict:
         ctype = info.data.get("type")
         if ctype in ("wecom", "dingtalk"):
-            if not str(v.get("url") or "").startswith(("http://", "https://")):
-                raise ValueError("webhook 地址必须以 http(s):// 开头")
+            # 出站目标校验（审计 TALOS-2026-003）：除协议外还要求解析结果为公网地址，
+            # 阻断「webhook 指向内网/回环/云元数据」的 SSRF；内网中继场景用
+            # VP_NOTIFY_HOST_ALLOWLIST 显式放行（见 core/outbound.py）。
+            url = assert_public_url(str(v.get("url") or ""), field="webhook 地址")
+            v["url"] = url
         elif ctype == "email":
             recipients = v.get("recipients")
             if not isinstance(recipients, list) or not recipients:
