@@ -876,36 +876,6 @@ async def _get_retest_record(session: AsyncSession, vul_id: int, record_id: int)
     return record
 
 
-async def _sync_vul_retest_html(session: AsyncSession, vul: Vul) -> None:
-    """将该漏洞全部复测记录聚合写入 Vul.retest_html，保持详情页/报告读取口径一致。
-
-    标题优先取记录自定义 title；为空时按创建日期自动生成「复测记录yymmdd」：
-    同日新增的第一条不带后缀，同一天内新增的多条依次追加 -1、-2 后缀
-    （如复测记录250813、复测记录250813-1）。
-    """
-    records = (
-        await session.execute(
-            select(VulRetestRecord).where(VulRetestRecord.vul_id == vul.id)
-            .order_by(VulRetestRecord.create_time, VulRetestRecord.id)
-        )
-    ).scalars().all()
-    parts: list[str] = []
-    day_counts: dict[str, int] = {}
-    for r in records:
-        if not r.content_html:
-            continue
-        if (r.title or "").strip():
-            title = r.title.strip()
-        else:
-            date_key = r.create_time.strftime("%y%m%d") if r.create_time else ""
-            n = day_counts.get(date_key, 0)
-            day_counts[date_key] = n + 1
-            title = f"复测记录{date_key}" if n == 0 else f"复测记录{date_key}-{n}"
-        parts.append(f"<p><strong>{title}：</strong></p>{r.content_html}")
-    vul.retest_html = "".join(parts)
-    vul.retest_json = None
-
-
 @router.get("/{vul_id}/retests", response_model=list[VulRetestRecordOut])
 async def list_retest_records(
     vul_id: int,
@@ -940,7 +910,7 @@ async def create_retest_record(
     session.add(record)
     vul_service.add_log(session, vul, user, "新增复测记录")
     await session.flush()
-    await _sync_vul_retest_html(session, vul)
+    await vul_service.sync_vul_retest_html(session, vul)
     old_status = vul.status
     done_plans: list = []
     # 创建复测记录时可一并调整漏洞状态（复测未修复回修复中 / 已修复）：
@@ -968,7 +938,7 @@ async def update_retest_record(
     record.content_json = body.content_json
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
     await session.flush()
-    await _sync_vul_retest_html(session, vul)
+    await vul_service.sync_vul_retest_html(session, vul)
     await session.commit()
     await session.refresh(record)
     return record
@@ -988,6 +958,6 @@ async def delete_retest_record(
     await session.delete(record)
     await session.flush()
     if vul is not None:
-        await _sync_vul_retest_html(session, vul)
+        await vul_service.sync_vul_retest_html(session, vul)
     await session.commit()
     return {"msg": "删除成功"}

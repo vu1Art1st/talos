@@ -1,4 +1,6 @@
 """漏洞生命周期状态机（简化版：未修复 → 修复中 → 复测中 → 已修复/已忽略/暂不处理）。"""
+import html as html_mod
+
 from app.core.timeutil import now
 
 from fastapi import HTTPException
@@ -312,3 +314,41 @@ async def sync_plan_retest_state(
             # 撤销完成点，重开最近一轮复测
             plan_service.reopen_retest_round(plan)
     return completed
+
+
+async def sync_vul_retest_html(session: AsyncSession, vul: Vul) -> None:
+    """将该漏洞全部复测记录聚合写入 `Vul.retest_html`，保持详情页/报告读取口径一致。
+
+    标题优先取记录自定义 title；为空时按创建日期自动生成「复测记录yymmdd」：
+    同日新增的第一条不带后缀，同一天内新增的多条依次追加 -1、-2 后缀
+    （如复测记录250813、复测记录250813-1）。
+
+    安全（审计 TALOS-2026-005）：`title` 是**纯文本**字段（`VulRetestRecordIn.title` 为普通 str，
+    不受 `HtmlStr` 消毒覆盖），拼接进 HTML 前必须 `html.escape`；否则可把任意标签注入
+    `vul.retest_html`——该字段既下发给前端渲染，又被报告导出链路当作 HTML 解析
+    （实测可经其构造服务端出站请求，见审计报告 TALOS-2026-004 路径 b）。
+    自产标题（复测记录+日期）仅含数字与中文，无需转义。
+
+    本函数由 `api/v1/vulns.py` 的复测记录增删改调用，同时供存量清理脚本复用（唯一实现）。
+    """
+    records = (
+        await session.execute(
+            select(VulRetestRecord).where(VulRetestRecord.vul_id == vul.id)
+            .order_by(VulRetestRecord.create_time, VulRetestRecord.id)
+        )
+    ).scalars().all()
+    parts: list[str] = []
+    day_counts: dict[str, int] = {}
+    for r in records:
+        if not r.content_html:
+            continue
+        if (r.title or "").strip():
+            title = html_mod.escape(r.title.strip())
+        else:
+            date_key = r.create_time.strftime("%y%m%d") if r.create_time else ""
+            n = day_counts.get(date_key, 0)
+            day_counts[date_key] = n + 1
+            title = f"复测记录{date_key}" if n == 0 else f"复测记录{date_key}-{n}"
+        parts.append(f"<p><strong>{title}：</strong></p>{r.content_html}")
+    vul.retest_html = "".join(parts)
+    vul.retest_json = None
