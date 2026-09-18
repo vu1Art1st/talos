@@ -1,6 +1,6 @@
 """存量复测聚合标题回填：将旧格式「复测记录 N」重建为「复测记录yymmdd」（同日 -N 后缀）。
 
-背景：_sync_vul_retest_html 仅在复测记录增/改/删时触发聚合，历史数据仍保留旧编号标题。
+背景：`vul_service.sync_vul_retest_html` 仅在复测记录增/改/删时触发聚合，历史数据仍保留旧编号标题。
 本脚本幂等扫描全部漏洞，仅重算 retest_html 中含有旧式编号标题（复测记录 N）的漏洞，
 避免误改「报告复测处理」直接写入的 retest_html 内容。
 
@@ -15,9 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import select  # noqa: E402
 
-from app.api.v1.vulns import _sync_vul_retest_html  # noqa: E402
 from app.db import async_session_maker  # noqa: E402
 from app.models import Vul, VulRetestRecord  # noqa: E402
+from app.services import vul_service  # noqa: E402
 from scripts._common import run  # noqa: E402
 
 # 旧式聚合标题：<strong>复测记录 1：</strong>（带序号编号）
@@ -36,7 +36,7 @@ async def main() -> None:
                 continue
             if not _OLD_TITLE_RE.search(vul.retest_html or ""):
                 continue
-            await _sync_vul_retest_html(session, vul)
+            await vul_service.sync_vul_retest_html(session, vul)
             changed += 1
         await session.commit()
         print(f"复测聚合标题回填完成：共处理 {len(vul_ids)} 个含复测记录的漏洞，重建 {changed} 个")
