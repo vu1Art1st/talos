@@ -100,6 +100,42 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
     wrapper.unmount()
   })
 
+  it('报告列表按复测状态标注：未发起复测 / 复测中 / 复测完成', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/testing-plans/1') {
+        return {
+          data: {
+            ...planFixture(),
+            status: 50,
+            reports: [
+              {
+                id: 101, title: '商城系统渗透测试报告', status: 'final',
+                vul_total: 2, vul_closed: 2, all_closed: true, is_retest: false, retest_state: 'done',
+              },
+              {
+                id: 102, title: '商城系统渗透测试复测报告', status: 'draft',
+                vul_total: 2, vul_closed: 1, all_closed: false, is_retest: true, retest_state: 'ongoing',
+              },
+              {
+                id: 103, title: '商城系统渗透测试报告-新', status: 'draft',
+                vul_total: 1, vul_closed: 0, all_closed: false, is_retest: false, retest_state: 'none',
+              },
+            ],
+          },
+        }
+      }
+      if (url === '/testing-plans/1/vuln-order') return { data: {} }
+      return { data: { items: [], total: 0 } }
+    })
+    const wrapper = mountDrawer()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('复测完成')
+    expect(wrapper.text()).toContain('复测中')
+    expect(wrapper.text()).toContain('未发起复测')
+    wrapper.unmount()
+  })
+
   it('点击「生成报告」展开表单并预填标题与全部漏洞', async () => {
     const wrapper = mountDrawer()
     await flushPromises()

@@ -1,13 +1,21 @@
 import { computed, ref } from 'vue'
 
-import type { FilterRule } from '../components/FilterBuilder.vue'
-import type { QueryParams } from '../types'
-import { computeDateRange } from '../utils/dateRange'
+import type { FilterGroup, QueryParams } from '../types'
+import { DATE_RANGE_OPTIONS, computeDateRange } from '../utils/dateRange'
+import {
+  cloneFilterNode,
+  countFilterRules,
+  createFilterGroup,
+  filterTreeToPayload,
+  normalizeFilterTree,
+  pruneFilterTree,
+} from '../utils/filterTree'
 
 /**
  * 工单列表的筛选状态与查询参数拼装（审计 E-2 从 views/TestingPlanList.vue 抽出）。
  *
- * 覆盖三类筛选：快捷筛选（多选下拉）、时间区间（按初测完成时间）、聚合筛选规则（可持久化）。
+ * 覆盖三类筛选：快捷筛选（多选下拉）、统计周期（初测完成 / 复测发起 / 复测完成 / 复测报告生成）、
+ * 聚合筛选条件树（分组嵌套，可持久化）。
  * `buildParams()` 是**列表 / 统计 / 结论 / 导出四处唯一的参数口径**，避免各调用点各拼一份导致筛选不一致。
  *
  * @param onChange 任一筛选条件变化时的回调（由调用方落到列表回到首页 + 刷新统计）
@@ -24,7 +32,7 @@ export function usePlanFilters(onChange: () => void) {
     onChange()
   }
 
-  // ---------- 时间范围筛选（按初测完成时间） ----------
+  // ---------- 统计周期筛选（初测完成 / 复测发起 / 复测完成 / 复测报告生成） ----------
   const rangeKind = ref<string>('')
   const customRange = ref<[string, string] | null>(null)
 
@@ -33,7 +41,17 @@ export function usePlanFilters(onChange: () => void) {
     onChange()
   }
 
-  // ---------- 聚合筛选 ----------
+  /**
+   * 当前周期名称（仅快捷项有值；自定义区间留空，由后端按起止日期输出）。
+   * 供结论文字括注「（本周）」/「（2026-09-11 - 2026-09-17）」，不参与列表查询参数。
+   */
+  const periodLabel = computed(() => (
+    rangeKind.value && rangeKind.value !== 'custom'
+      ? DATE_RANGE_OPTIONS.find((o) => o.value === rangeKind.value)?.label ?? ''
+      : ''
+  ))
+
+  // ---------- 聚合筛选（条件树：分组 + 嵌套 + 组内/组间 且或非） ----------
   const filterVisible = ref(false)
   const RULES_KEY = 'testing_plan_filters'
 
@@ -43,52 +61,28 @@ export function usePlanFilters(onChange: () => void) {
     'status', 'first_test_done_time', 'retest_done_time', 'testers',
   ])
 
-  /** localStorage 中的历史规则（不可信来源）：字段名按后端白名单、操作符按字符串校验后才使用 */
-  type StoredRule = { field: string; op: string; value?: unknown; not?: unknown; connector?: unknown }
-  const isStoredRule = (r: unknown): r is StoredRule => {
-    if (!r || typeof r !== 'object') return false
-    const o = r as Record<string, unknown>
-    return typeof o.field === 'string' && o.field !== ''
-      && FILTER_FIELDS.has(o.field) && typeof o.op === 'string'
-  }
-
-  function loadFilterRules(): FilterRule[] {
+  /**
+   * localStorage 中的历史条件（不可信来源）：字段名按白名单过滤后才进入条件树。
+   * 兼容两种历史形态 —— 旧扁平规则数组（按 connector 左结合折叠）与新版分组树。
+   */
+  function loadFilterTree(): FilterGroup {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(RULES_KEY) || 'null')
-      if (Array.isArray(saved)) {
-        return saved
-          .filter(isStoredRule)
-          .map(({ field, op, value, not, connector }) => ({
-            field,
-            op,
-            // value 形态由 FilterBuilder 写入；历史/手改数据不可信，非法值由 isRuleComplete 在使用处兜底
-            value: (value ?? '') as FilterRule['value'],
-            not: !!not,
-            connector: connector === 'or' ? ('or' as const) : ('and' as const),
-          }))
-      }
-    } catch { /* ignore */ }
-    return []
-  }
-
-  const rules = ref<FilterRule[]>(loadFilterRules())
-
-  function isRuleComplete(r: FilterRule): boolean {
-    if (r.op === 'is_empty' || r.op === 'is_not_empty') return true
-    if (r.op === 'between') {
-      if (!Array.isArray(r.value) || r.value.length !== 2) return false
-      const [lo, hi] = r.value as (string | number | null)[]
-      return lo !== null && lo !== '' && hi !== null && hi !== ''
+      return normalizeFilterTree(saved, FILTER_FIELDS)
+    } catch {
+      return createFilterGroup()
     }
-    return r.value !== null && r.value !== ''
   }
 
-  const filterCount = computed(() => rules.value.filter(isRuleComplete).length)
+  const filterTree = ref<FilterGroup>(loadFilterTree())
+
+  /** 实际参与查询的条件条数（未填完整的条件与随之变空的分组不计入） */
+  const filterCount = computed(() => countFilterRules(pruneFilterTree(filterTree.value)))
   let filterTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 规则变化：持久化 + 防抖刷新列表与统计
+  // 条件变化：持久化 + 防抖刷新列表与统计
   function onFiltersChange() {
-    localStorage.setItem(RULES_KEY, JSON.stringify(rules.value))
+    localStorage.setItem(RULES_KEY, JSON.stringify(cloneFilterNode(filterTree.value)))
     if (filterTimer) clearTimeout(filterTimer)
     filterTimer = setTimeout(() => onChange(), 250)
   }
@@ -112,13 +106,9 @@ export function usePlanFilters(onChange: () => void) {
       params.first_test_from = range[0]
       params.first_test_to = range[1]
     }
-    const validRules = rules.value.filter(isRuleComplete)
-    if (validRules.length) {
-      params.filters = JSON.stringify({
-        rules: validRules.map(({ field, op, value, not, connector }) => ({
-          field, op, value, not, connector,
-        })),
-      })
+    const pruned = pruneFilterTree(filterTree.value)
+    if (countFilterRules(pruned)) {
+      params.filters = JSON.stringify(filterTreeToPayload(pruned))
     }
     if (myTests.value) params.my_tests = true
     if (unclaimed.value) params.unclaimed = true
@@ -140,9 +130,9 @@ export function usePlanFilters(onChange: () => void) {
     rangeKind,
     customRange,
     onRangeChange,
+    periodLabel,
     filterVisible,
-    rules,
-    isRuleComplete,
+    filterTree,
     filterCount,
     onFiltersChange,
     disposeFilters,

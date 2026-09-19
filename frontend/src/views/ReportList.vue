@@ -79,6 +79,14 @@
         </template>
       </el-table-column>
       <el-table-column prop="project_name" label="测试系统" width="160" show-overflow-tooltip sortable="custom" />
+      <el-table-column label="复测状态" width="110">
+        <template #default="{ row }">
+          <!-- 未发起复测 / 复测中 / 复测完成（后端按源报告关联与章节漏洞闭环派生） -->
+          <span class="tl-tag" :style="retestStateSoftStyle(row.retest_state)">
+            {{ retestStateName(row.retest_state) }}
+          </span>
+        </template>
+      </el-table-column>
       <el-table-column prop="author" label="作者" width="120" sortable="custom" />
       <el-table-column prop="create_time" label="生成时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
@@ -152,6 +160,8 @@ import {
   exportJobColor,
   exportJobName,
   exportJobSoftStyle,
+  retestStateName,
+  retestStateSoftStyle,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import type { BatchExportResult, ExportJob, Items, Report, TestingPlan, Vuln } from '../types'

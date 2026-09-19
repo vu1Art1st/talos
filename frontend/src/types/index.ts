@@ -534,7 +534,14 @@ export interface Report {
   all_closed?: boolean
   vul_closed?: number
   vul_total?: number
+  /** 报告自身是否为复测报告（标题含「复测」） */
+  is_retest?: boolean
+  /** 报告维度复测状态（后端派生，`plan_service.retest_state_of`） */
+  retest_state?: RetestState
 }
+
+/** 报告维度复测状态：none 未发起复测 / ongoing 复测中 / done 复测完成 */
+export type RetestState = 'none' | 'ongoing' | 'done'
 
 /**
  * 报告详情（报告编辑器用）：在列表字段基础上补基础信息与章节。
@@ -611,8 +618,20 @@ export interface TestingPlan {
   testers?: UserBrief[]
   vuls?: Vuln[]
   reports?: Report[]
+  retest_rounds?: RetestRound[]
   retest_round_count?: number
   no_vul_conclusion?: string
+}
+
+/** 复测轮次记录（工单「复测轮数」弹层展示） */
+export interface RetestRound {
+  id: number
+  round_no: number
+  start_time?: string | null
+  done_time?: string | null
+  source?: string
+  /** 发起本轮的源报告（初测报告）ID；旧数据可能为空 */
+  src_report_id?: number | null
 }
 
 /** 工单统计聚合（`GET /testing-plans/stats`） */
@@ -627,6 +646,43 @@ export interface PlanStats {
   remaining_est_mandays?: number
   vulns_by_month?: { month: string; count: number }[]
 }
+
+// ---------- 聚合筛选（条件树：分组嵌套 + 组内/组间 且或非） ----------
+
+/** 聚合筛选字段的枚举/字典候选 */
+export interface FilterFieldOption {
+  label: string
+  value: string | number
+}
+
+/** 聚合筛选可选字段定义（与后端字段白名单一一对应） */
+export interface FilterFieldDef {
+  key: string
+  label: string
+  type: 'text' | 'number' | 'date' | 'enum'
+  options?: FilterFieldOption[]
+}
+
+/** 单条筛选条件（叶子节点）；`_uid` 仅供前端渲染 key，不参与请求 */
+export interface FilterRule {
+  kind: 'rule'
+  field: string
+  op: string
+  value: string | number | (string | number | null)[] | null
+  not: boolean
+  _uid?: number
+}
+
+/** 条件分组（容器节点）：children 按 logic 连接，not 作用于整组 */
+export interface FilterGroup {
+  kind: 'group'
+  logic: 'and' | 'or'
+  not: boolean
+  children: FilterNode[]
+  _uid?: number
+}
+
+export type FilterNode = FilterRule | FilterGroup
 
 /** 报告章节（报告编辑器用） */
 export interface ReportSection {
@@ -648,19 +704,31 @@ export interface PlanConclusionRow {
   system_name: string
   vuln_count: number
   test_type?: string
+  first_test_done_time?: string
+  retest_done_time?: string
   rectify_state?: string
 }
 
-/** 结论聚合（`GET /testing-plans/conclusion`）；各字段可空 —— 组件以 `{}` 初始化，未加载时无值 */
+/**
+ * 结论聚合（`GET /testing-plans/conclusion`）；各字段可空 —— 组件以 `{}` 初始化，未加载时无值。
+ *
+ * 口径（2026-09-19）：统计周期命中 = 初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期；
+ * `systems` 为命中工单数（按工单去重），`first_test_*` 与 `retest_*` 分别对应周期内的初测与复测动作。
+ */
 export interface PlanConclusion {
   summary?: string
+  /** 周期括注文字（快捷项名称或起止日期） */
+  period_text?: string
   departments?: number
+  department_names?: string[]
   systems?: number
-  vuln_systems?: number
-  vulns?: number
-  safe_systems?: number
-  fixed_systems?: number
-  fixing_systems?: number
+  first_test_systems?: number
+  first_test_vulns?: number
+  retest_systems?: number
+  retest_fixed_systems?: number
+  retest_unfixed_systems?: number
+  retest_started_systems?: number
+  retest_report_count?: number
   rows?: PlanConclusionRow[]
 }
 

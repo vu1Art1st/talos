@@ -12,6 +12,7 @@ from app.db import get_session
 from app.models import (
     Asset,
     ImportRecord,
+    RemoteTesting,
     ReportSection,
     TestingPlan,
     User,
@@ -96,6 +97,20 @@ async def _check_vul_edit_access(session: AsyncSession, vul: Vul, user: User) ->
         raise HTTPException(403, "只有提交人或漏洞管理员可以编辑")
 
 
+async def _check_vul_delete_access(session: AsyncSession, vul: Vul, user: User) -> None:
+    """漏洞删除权限：漏洞管理员（含 `*`）保持原有「可删任意漏洞」能力，
+    其余账号与编辑口径一致（关联工单：认领者；未关联：提交人本人）。
+
+    与 `_check_vul_edit_access` 的差异是刻意为之：编辑侧严格认领（管理员未认领也不放行，
+    避免绕过认领关系改动工单漏洞），而删除侧保留管理员的存量清理能力，
+    并与前端 `VulnList.canDeleteVuln`（`vuln:manage || submitter_id === 我`）逐条对齐，
+    避免「按钮可见但点击 403」。"""
+    perms = user_permissions(user)
+    if "*" in perms or "vuln:manage" in perms:
+        return
+    await _check_vul_edit_access(session, vul, user)
+
+
 async def _fetch_assets(session: AsyncSession, asset_ids: list[int]) -> list[Asset]:
     if not asset_ids:
         return []
@@ -110,8 +125,12 @@ async def _fetch_assets(session: AsyncSession, asset_ids: list[int]) -> list[Ass
 async def _clean_vul_references(session: AsyncSession, vul_ids: list[int]) -> None:
     """删除漏洞前解除外键引用，避免生产库（PostgreSQL 强制外键）删除失败返回 500。
 
-    - report_sections.vul_id / import_records.vul_id：置空，保留报告章节与导入记录；
-    - spring_action_vulns：删除春耕行动-漏洞关联行。"""
+    - report_sections.vul_id / import_records.vul_id / remote_testings.vuln_id：置空，
+      保留报告章节、导入记录与远程检测记录（三者另有文本快照兜底展示）；
+    - spring_action_vulns：删除春耕行动-漏洞关联行。
+
+    无需在此处理的引用：vul_logs 由 ORM 级联（`Vul.logs` 为 `all, delete-orphan`）、
+    vul_retest_records 与 vuln_assets 的外键带 `ondelete="CASCADE"`。"""
     if not vul_ids:
         return
     await session.execute(
@@ -123,6 +142,11 @@ async def _clean_vul_references(session: AsyncSession, vul_ids: list[int]) -> No
         ImportRecord.__table__.update()
         .where(ImportRecord.vul_id.in_(vul_ids))
         .values(vul_id=None)
+    )
+    await session.execute(
+        RemoteTesting.__table__.update()
+        .where(RemoteTesting.vuln_id.in_(vul_ids))
+        .values(vuln_id=None)
     )
     await session.execute(
         spring_action_vulns.delete().where(spring_action_vulns.c.vul_id.in_(vul_ids))
@@ -685,19 +709,29 @@ async def update_vuln(
 async def delete_vuln(
     vul_id: int,
     request: Request,
-    operator: User = Depends(require_perm("vuln:manage")),
+    user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
+    """删除单个漏洞：漏洞管理员（含 `*`）可删任意漏洞，其余账号与编辑口径一致
+    （工单认领者 / 提交人本人），详见 `_check_vul_delete_access`。
+
+    幂等：漏洞不存在时同样返回删除成功。删除关联工单的漏洞后，
+    按工单级口径重算复测闭环状态（与编辑/状态变更联动口径一致）。"""
     vul = await session.get(Vul, vul_id)
-    if vul:
-        title = vul.title
-        plan_id = vul.testing_plan_id
-        await _clean_vul_references(session, [vul_id])
-        await session.delete(vul)
-        await session.flush()
-        await plan_service.refresh_stats(session, plan_id)
-        await session.commit()
-        await audit(session, request, "vuln_delete", operator, {"target": f"vulns/{vul_id}", "title": title})
+    if vul is None:
+        return {"msg": "删除成功"}
+    await _check_vul_delete_access(session, vul, user)
+    title = vul.title
+    plan_id = vul.testing_plan_id
+    await _clean_vul_references(session, [vul_id])
+    await session.delete(vul)
+    await session.flush()
+    await vul_service.sync_plan_retest_state(
+        session, plan_ids=[plan_id] if plan_id is not None else [],
+    )
+    await plan_service.refresh_stats(session, plan_id)
+    await session.commit()
+    await audit(session, request, "vuln_delete", user, {"target": f"vulns/{vul_id}", "title": title})
     return {"msg": "删除成功"}
 
 
@@ -708,7 +742,7 @@ async def delete_vulns_batch(
     operator: User = Depends(require_perm("vuln:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """批量删除漏洞，删除后重算涉及测试计划的统计。"""
+    """批量删除漏洞，删除后重算涉及测试计划的统计与复测闭环状态。"""
     vulns = (
         await session.execute(select(Vul).where(Vul.id.in_(body.ids)))
     ).scalars().all()
@@ -717,6 +751,10 @@ async def delete_vulns_batch(
     for v in vulns:
         await session.delete(v)
     await session.flush()
+    # 删除漏洞可能改变工单闭环口径（全部漏洞已修复/已忽略才判复测完成），与单删/编辑同口径联动
+    await vul_service.sync_plan_retest_state(
+        session, plan_ids=[pid for pid in plan_ids if pid is not None],
+    )
     for plan_id in plan_ids:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()

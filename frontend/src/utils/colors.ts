@@ -261,3 +261,19 @@ export const STAT_CARD_COLORS = {
   red: '#DC2626',
   gray: '#8A968F',
 } as const
+
+/* ============================================================
+   报告复测状态（派生展示语义，非字典：后端 plan_service.retest_state_of）
+   ============================================================ */
+
+// none 未发起复测 / ongoing 复测中 / done 复测完成
+const RETEST_STATE_META: Record<string, { name: string; color: string }> = {
+  none: { name: '未发起复测', color: STAT_CARD_COLORS.gray },
+  ongoing: { name: '复测中', color: STAT_CARD_COLORS.orange },
+  done: { name: '复测完成', color: STAT_CARD_COLORS.green },
+}
+
+export const retestStateName = (state?: string | null) =>
+  RETEST_STATE_META[state ?? 'none']?.name ?? RETEST_STATE_META.none.name
+export const retestStateSoftStyle = (state?: string | null) =>
+  softStyle(RETEST_STATE_META[state ?? 'none']?.color ?? RETEST_STATE_META.none.color)

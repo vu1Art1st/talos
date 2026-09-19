@@ -135,6 +135,9 @@ async def list_reports(
                 await session.execute(select(TestingPlan).where(TestingPlan.id.in_(plan_ids)))
             ).scalars().all()
         }
+    retest_states = await plan_service.report_retest_state_map(
+        session, [(r.id, r.title) for r in items]
+    )
     result = []
     for r in items:
         plan = plan_map.get(r.testing_plan_id) if r.testing_plan_id else None
@@ -154,6 +157,7 @@ async def list_reports(
             "testing_plan_id": r.testing_plan_id,
             "ticket_id": plan.ticket_id if plan else "",
             "ticket_system_name": plan.system_name if plan else "",
+            "retest_state": retest_states.get(r.id, "none"),
             "create_time": r.create_time,
             "update_time": r.update_time,
         })
@@ -542,6 +546,7 @@ async def retest_report(
                 plan.status = 50  # 初测完成/提请复测 → 复测中
             round_row = plan_service.start_retest_round(
                 session, plan, f"报告《{report.title}》发起复测", user.id, force=True,
+                src_report_id=report.id,
             )
     # 自动生成复测报告（记录本次发起复测后漏洞状态快照供下次对比；同日标题重复自动加 -1/-2 后缀）
     retest = await create_retest_report(

@@ -7,19 +7,19 @@
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <el-select v-model="rangeKind" placeholder="时间范围" class="!w-28" clearable @change="onRangeChange">
+      <el-select v-model="rangeKind" placeholder="统计周期" class="!w-28" clearable @change="onRangeChange">
         <el-option v-for="o in DATE_RANGE_OPTIONS" :key="o.value" :label="o.label" :value="o.value" />
       </el-select>
       <!-- daterange 根节点即 .el-input__wrapper（自带 flex-grow:1），在 .tl-filterbar 内会被拉伸撑满，
            必须显式 grow-0 才能让 !w-64 的固定宽度生效 -->
       <el-date-picker v-if="rangeKind === 'custom'" v-model="customRange" type="daterange"
-                      value-format="YYYY-MM-DD" class="!w-64 !grow-0" start-placeholder="初测完成起"
-                      end-placeholder="初测完成止" @change="reload" />
+                      value-format="YYYY-MM-DD" class="!w-64 !grow-0" start-placeholder="周期开始"
+                      end-placeholder="周期结束" @change="reload" />
       <el-popover
         :visible="filterVisible"
         trigger="manual"
         placement="bottom-start"
-        :width="880"
+        :width="960"
       >
         <template #reference>
           <el-button :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
@@ -28,11 +28,8 @@
           </el-button>
         </template>
         <div class="filter-panel">
-          <div class="mb-2 text-sm font-medium">聚合筛选</div>
-          <FilterBuilder v-model="rules" :fields="filterFields" @change="onFiltersChange" />
-          <div class="mt-2 text-xs text-gray-400">
-            多条件之间用「且 / 或」连接；点「非」对单个条件取反（排除满足该条件的记录）
-          </div>
+          <div class="mb-2 text-sm font-medium">聚合筛选（支持条件分组与嵌套）</div>
+          <FilterBuilder v-model="filterTree" :fields="filterFields" @change="onFiltersChange" />
         </div>
       </el-popover>
       <!-- 快捷筛选：三项布尔筛选收纳为下拉多选，勾选任意条件即触发筛选 -->
@@ -105,21 +102,25 @@
         <template #title>
           <span class="tl-collapse-title">
             <span class="tl-collapse-title__main">结论输出</span>
-            <span class="tl-collapse-title__sub">（按初测完成时间筛选后生成，可复制 / 下载附件）</span>
+            <span class="tl-collapse-title__sub">
+              （按统计周期生成：初测完成 / 复测发起 / 复测完成 / 复测报告生成，可复制 / 下载附件）
+            </span>
           </span>
         </template>
         <div v-loading="conclusionLoading" class="px-2 py-1">
           <div class="conclusion-box">
             <p class="conclusion-text">{{ conclusion.summary || '暂无符合条件的渗透测试工单，请先调整筛选条件' }}</p>
           </div>
-          <div class="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3 mt-3">
+          <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mt-3">
             <StatCard label="部门数" :color="STAT_CARD_COLORS.blue" :value="conclusion.departments ?? 0" />
-            <StatCard label="系统数" :color="STAT_CARD_COLORS.green" :value="conclusion.systems ?? 0" />
-            <StatCard label="存在漏洞系统" :color="STAT_CARD_COLORS.red" :value="conclusion.vuln_systems ?? 0" />
-            <StatCard label="漏洞数" :color="STAT_CARD_COLORS.red" :value="conclusion.vulns ?? 0" />
-            <StatCard label="未发现安全风险" :color="STAT_CARD_COLORS.green" :value="conclusion.safe_systems ?? 0" />
-            <StatCard label="已完成整改" :color="STAT_CARD_COLORS.green" :value="conclusion.fixed_systems ?? 0" />
-            <StatCard label="整改中" :color="STAT_CARD_COLORS.orange" :value="conclusion.fixing_systems ?? 0" />
+            <StatCard label="完成系统数" :color="STAT_CARD_COLORS.green" :value="conclusion.systems ?? 0" />
+            <StatCard label="初测完成系统" :color="STAT_CARD_COLORS.blue" :value="conclusion.first_test_systems ?? 0" />
+            <StatCard label="初测发现漏洞" :color="STAT_CARD_COLORS.red" :value="conclusion.first_test_vulns ?? 0" />
+            <StatCard label="复测完成系统" :color="STAT_CARD_COLORS.orange" :value="conclusion.retest_systems ?? 0" />
+            <StatCard label="已完成整改" :color="STAT_CARD_COLORS.green" :value="conclusion.retest_fixed_systems ?? 0" />
+            <StatCard label="未完成整改" :color="STAT_CARD_COLORS.red" :value="conclusion.retest_unfixed_systems ?? 0" />
+            <StatCard label="周期内发起复测" :color="STAT_CARD_COLORS.orange" :value="conclusion.retest_started_systems ?? 0" />
+            <StatCard label="周期内复测报告" :color="STAT_CARD_COLORS.blue" :value="conclusion.retest_report_count ?? 0" />
           </div>
           <div class="flex gap-2 mt-3">
             <el-button type="primary" :disabled="!conclusion.summary" @click="copyConclusion">复制结论</el-button>
@@ -215,13 +216,17 @@
       </el-table-column>
       <el-table-column label="关联报告" width="110">
         <template #default="{ row }">
-          <el-popover v-if="row.reports?.length" placement="right" width="360" trigger="hover">
+          <el-popover v-if="row.reports?.length" placement="right" width="440" trigger="hover">
             <template #reference>
               <el-button size="small" type="success" link>{{ row.reports.length }} 份</el-button>
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="r in row.reports" :key="r.id" class="flex items-center gap-2">
                 <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
+                <!-- 复测状态（未发起复测 / 复测中 / 复测完成）：区分已复测与未复测的报告 -->
+                <span class="tl-tag" :style="retestStateSoftStyle(r.retest_state)">
+                  {{ retestStateName(r.retest_state) }}
+                </span>
                 <el-button size="small" type="primary" link class="!p-0"
                            @click="router.push(`/reports/${r.id}`)">{{ r.title }}</el-button>
               </div>
@@ -232,7 +237,7 @@
       </el-table-column>
       <el-table-column label="复测轮数" width="110">
         <template #default="{ row }">
-          <el-popover v-if="row.retest_round_count" placement="left" width="380" trigger="hover">
+          <el-popover v-if="row.retest_round_count" placement="left" width="480" trigger="hover">
             <template #reference>
               <el-button size="small" type="primary" link>{{ row.retest_round_count }} 轮</el-button>
             </template>
@@ -248,6 +253,9 @@
                   <span v-if="!r.done_time" class="tl-tag" :style="softStyle(STAT_CARD_COLORS.orange)">进行中</span>
                   <span v-else>{{ fmtDateTime(r.done_time) }}</span>
                 </template>
+              </el-table-column>
+              <el-table-column label="源报告" show-overflow-tooltip>
+                <template #default="{ row: r }">{{ reportTitleById(row, r.src_report_id) }}</template>
               </el-table-column>
               <el-table-column label="来源" show-overflow-tooltip>
                 <template #default="{ row: r }">{{ r.source || '-' }}</template>
@@ -447,6 +455,8 @@ import {
   planStatusSoftStyle,
   reportStatusName,
   reportStatusSoftStyle,
+  retestStateName,
+  retestStateSoftStyle,
   softStyle,
   STAT_CARD_COLORS,
 } from '../utils/colors'
@@ -462,13 +472,12 @@ import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
-import type { Asset, QueryParams, TestingPlan } from '../types'
+import type { Asset, FilterFieldDef, QueryParams, TestingPlan } from '../types'
 import { usePlanConclusion } from '../composables/usePlanConclusion'
 import { usePlanCrud } from '../composables/usePlanCrud'
 import { usePlanFilters } from '../composables/usePlanFilters'
 import { usePlanImportExport } from '../composables/usePlanImportExport'
 import { DIMENSIONS as PLAN_STAT_DIMENSIONS, usePlanStats } from '../composables/usePlanStats'
-import type { FilterFieldDef } from '../components/FilterBuilder.vue'
 
 const auth = useAuthStore()
 const router = useRouter()
@@ -481,8 +490,8 @@ function triggerReload() {
 const {
   quickFilters, pending, quickFilterCount, onQuickFilterChange,
   rangeKind, customRange, onRangeChange,
-  filterVisible, rules, filterCount, onFiltersChange,
-  buildParams, disposeFilters,
+  filterVisible, filterTree, filterCount, onFiltersChange,
+  periodLabel, buildParams, disposeFilters,
 } = usePlanFilters(triggerReload)
 
 // 列表查询：extraParams 以函数声明传入（提升），保证「查询参数口径」全站唯一
@@ -501,7 +510,7 @@ const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOption
 const {
   conclusionPanel, conclusion, conclusionLoading,
   loadConclusion, copyConclusion, downloadConclusion,
-} = usePlanConclusion(filterParams)
+} = usePlanConclusion(conclusionParams)
 
 // 聚合筛选（规则持久化 / 完整性判定 / 防抖刷新）已下沉至 composables/usePlanFilters.ts（审计 E-2）
 
@@ -636,6 +645,17 @@ function statValue(key: string): number {
  *  注意：useListPage 返回的 `search` 是 Ref、`sort` 是响应式对象（见 ListPageState），取值方式不同 */
 function filterParams(): QueryParams {
   return buildParams(search.value, sort)
+}
+
+/** 结论专用参数：在列表口径上附加周期名称（供结论文案括注「（本周）」，仅结论两个接口使用） */
+function conclusionParams(): QueryParams {
+  return { ...filterParams(), period_label: periodLabel.value }
+}
+
+/** 复测轮次的「源报告」标题：由 src_report_id 在工单关联报告中反查（旧数据无关联时显示 -） */
+function reportTitleById(row: TestingPlan, reportId?: number | null): string {
+  if (!reportId) return '-'
+  return row.reports?.find((r) => r.id === reportId)?.title ?? '-'
 }
 
 // loadStats / renderMonthChart 已下沉至 composables/usePlanStats.ts（审计 E-2）

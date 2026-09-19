@@ -113,6 +113,11 @@ echo "[4.5/5] 复测聚合标题回填"
 $DOCKER compose run --rm api python -m scripts.backfill_retest \
   || echo "（复测标题回填失败，可稍后手动执行：$DOCKER compose run --rm api python -m scripts.backfill_retest）"
 
+# [4.6/5] 存量复测轮次回填「源报告」（报告维度复测三态依赖它；按 source 文本匹配，幂等）
+echo "[4.6/5] 复测轮次源报告回填"
+$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report \
+  || echo "（源报告回填失败，可稍后手动执行：$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report）"
+
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
 $DOCKER compose up -d

@@ -1,4 +1,5 @@
-// 时间范围快捷项计算：按「初测完成时间」筛选渗透测试工单（周一起始），供结论输出使用
+// 统计周期快捷项计算（周一起始）：产出周期起止日期，供工单列表 / 统计 / 结论 / 导出共用。
+// 命中口径为「初测完成 ∪ 复测发起 ∪ 复测完成 ∪ 复测报告生成」，实现见后端 plan_query._period_condition
 import dayjs, { type Dayjs } from 'dayjs'
 
 export const DATE_RANGE_OPTIONS = [

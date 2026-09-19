@@ -15,6 +15,8 @@ import {
   nonpenActions,
   nonpenItemMeta,
   nonpenItems,
+  retestStateName,
+  retestStateSoftStyle,
   softStyle,
   statusColorByName,
   statusLabel,
@@ -153,5 +155,15 @@ describe('colors 字典注册表（meta 单源）', () => {
     expect(nonpenActions('unknown')).toEqual([])
     expect(nonpenActionLabel('start')).toBe('开始初测')
     expect(nonpenActionLabel('unknown')).toBe('unknown')
+  })
+
+  it('报告复测状态：三态名称与柔和样式（未知/缺省回落「未发起复测」）', () => {
+    expect(retestStateName('none')).toBe('未发起复测')
+    expect(retestStateName('ongoing')).toBe('复测中')
+    expect(retestStateName('done')).toBe('复测完成')
+    expect(retestStateName(undefined)).toBe('未发起复测')
+    expect(retestStateName('unknown')).toBe('未发起复测')
+    expect(retestStateSoftStyle('done')).toEqual(softStyle('#059669'))
+    expect(retestStateSoftStyle(null)).toEqual(softStyle('#8A968F'))
   })
 })

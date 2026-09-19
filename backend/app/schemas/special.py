@@ -68,6 +68,7 @@ class RetestRoundOut(BaseModel):
     start_time: datetime | None = None
     done_time: datetime | None = None
     source: str = ""
+    src_report_id: int | None = None  # 发起本轮的源报告（初测报告）ID
 
 
 class TestingPlanIn(BaseModel):

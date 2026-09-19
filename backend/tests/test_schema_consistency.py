@@ -81,3 +81,19 @@ def test_affected_url_not_truncated_by_docx_parser():
     parser_source = (_BACKEND_DIR / "app" / "services" / "docx_parser.py").read_text(encoding="utf-8")
     truncations = re.findall(r'record\["affected_url"\][^\n]*\[:\d+\]', parser_source)
     assert not truncations, f"docx_parser 仍在截断 affected_url：{truncations}"
+
+
+# 复测轮次「源报告」外键（2026-09-19）：报告维度复测状态依赖它，新增列必须双轨同步，
+# 否则 PostgreSQL 侧缺列 → 发起复测直接 500（SQLite 开发库却一切正常）。
+def test_retest_round_src_report_column_in_both_tracks():
+    from app.models import TestingPlanRetestRound
+
+    assert "src_report_id" in TestingPlanRetestRound.__table__.columns, "模型缺少 src_report_id"
+
+    migrations = "\n".join(p.read_text(encoding="utf-8") for p in _MIGRATIONS_DIR.glob("*.py"))
+    assert re.search(
+        r"add_column\(\s*['\"]testing_plan_retest_rounds['\"][\s\S]{0,200}?src_report_id", migrations,
+    ), "Alembic 未新增 testing_plan_retest_rounds.src_report_id"
+
+    lightweight = _LIGHTWEIGHT_MIGRATION.read_text(encoding="utf-8")
+    assert "ADD COLUMN src_report_id" in lightweight, "db.py 轻量迁移未新增 src_report_id"

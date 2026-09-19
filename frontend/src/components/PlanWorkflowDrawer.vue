@@ -115,7 +115,7 @@
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="170">
+          <el-table-column label="操作" width="200">
             <template #default="{ row }">
               <div class="flex items-center gap-2">
                 <el-dropdown v-if="canManageVulns" trigger="click"
@@ -139,6 +139,12 @@
                            @click="router.push(`/vulns/${row.id}/edit`)">
                   编辑
                 </el-button>
+                <el-popconfirm v-if="canManageVulns" title="确认删除该漏洞？删除后不可恢复" width="220"
+                               @confirm="removeVuln(row)">
+                  <template #reference>
+                    <el-button size="small" type="danger" link>删除</el-button>
+                  </template>
+                </el-popconfirm>
               </div>
             </template>
           </el-table-column>
@@ -235,10 +241,11 @@
           <div class="flex items-center gap-2">
             <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
             <span class="text-sm font-medium">{{ r.title }}</span>
-            <!-- 报告中漏洞已全部完成（已修复/已忽略）标注：便于与仍有未闭环漏洞的报告区分 -->
-            <el-tooltip v-if="r.all_closed"
-                        :content="`本报告所含漏洞均已修复/已忽略（${r.vul_closed}/${r.vul_total}）`">
-              <span class="tl-tag" :style="statusSoftStyleWithRetest(60)">复测完成</span>
+            <!-- 复测状态（未发起复测 / 复测中 / 复测完成）：区分已复测与未复测的报告 -->
+            <el-tooltip :content="retestStateTip(r)">
+              <span class="tl-tag" :style="retestStateSoftStyle(r.retest_state)">
+                {{ retestStateName(r.retest_state) }}
+              </span>
             </el-tooltip>
             <span class="text-xs text-gray-400">生成于 {{ fmtDateTime(r.create_time) }}</span>
             <div class="flex-1" />
@@ -338,7 +345,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
+import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   exportJobColor,
@@ -349,13 +358,15 @@ import {
   planStatusSoftStyle,
   reportStatusName,
   reportStatusSoftStyle,
+  retestStateName,
+  retestStateSoftStyle,
   softStyle,
   STAT_CARD_COLORS,
   statusSoftStyleWithRetest,
   statusLabel,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
-import type { Vuln } from '../types'
+import type { Report, Vuln } from '../types'
 import { usePlanDetail } from '../composables/usePlanDetail'
 import { usePlanReports } from '../composables/usePlanReports'
 import { usePlanVulnFlow } from '../composables/usePlanVulnFlow'
@@ -454,6 +465,14 @@ const canCompleteNoVuln = computed(() => {
   return s === 10 || s === 20
 })
 
+/** 报告复测状态提示：已发起复测时附上该报告章节漏洞的闭环进度 */
+function retestStateTip(r: Report): string {
+  const progress = `${r.vul_closed ?? 0}/${r.vul_total ?? 0}`
+  if (r.retest_state === 'none') return '该报告尚未发起复测'
+  if (r.retest_state === 'done') return `该报告章节漏洞已全部闭环（${progress}），复测完成`
+  return `该报告已发起复测，仍有未闭环漏洞（${progress}）`
+}
+
 // 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60/70→全部完成（含无漏洞闭环）
 const stepActive = computed(() => {
   const s = plan.value?.status
@@ -502,6 +521,14 @@ async function onVulnSaved() {
 }
 
 async function onRetestChanged() {
+  await reloadAfterChange()
+}
+
+// ---------- 漏洞删除（行内） ----------
+// 权限与编辑口径一致（工单认领者）：删除后联动重算工单复测闭环状态与统计
+async function removeVuln(row: Vuln) {
+  await client.delete(`/vulns/${row.id}`)
+  ElMessage.success('漏洞已删除')
   await reloadAfterChange()
 }
 

@@ -71,9 +71,28 @@ async def refresh_stats(session: AsyncSession, plan_id: int | None) -> None:
     plan.stat_low = counts.get(40, 0)
 
 
+# 复测报告标题标记：Python 判定与 SQL 条件（结论的「周期内生成复测报告」）共用同一来源
+RETEST_TITLE_MARK = "复测"
+
+
 def is_retest_report_title(title: str) -> bool:
     """按标题判断是否为复测报告：复测报告标题约定含「复测」字样（如「XX渗透测试复测报告」）。"""
-    return "复测" in (title or "")
+    return RETEST_TITLE_MARK in (title or "")
+
+
+def retest_state_of(*, is_retest: bool, triggered: bool, all_closed: bool) -> str:
+    """报告维度的复测状态：`none` 未发起复测 / `ongoing` 复测中 / `done` 复测完成。
+
+    - is_retest：报告自身即复测报告（标题含「复测」）；
+    - triggered：存在由该报告发起的复测轮次（`TestingPlanRetestRound.src_report_id` 指向它）；
+    - all_closed：该报告章节内漏洞是否全部闭环（已修复/已忽略）。
+
+    两者皆不成立 → 未发起复测；已发起但仍有未闭环漏洞 → 复测中；章节漏洞全部闭环 → 复测完成。
+    与工单级「复测完成」口径不同：工单还包含未纳入本报告章节的漏洞，二者可能不同步（符合预期）。
+    """
+    if not (is_retest or triggered):
+        return "none"
+    return "done" if all_closed else "ongoing"
 
 
 async def report_closure_map(
@@ -105,18 +124,64 @@ async def report_closure_map(
 
 
 async def fill_report_closure(session: AsyncSession, plans: list) -> None:
-    """为工单响应对象（TestingPlanOut）填充各报告「漏洞闭环进度」派生字段。
+    """为工单响应对象（TestingPlanOut）填充各报告「漏洞闭环进度」与「复测状态」派生字段。
 
-    `all_closed` 仅在报告存在关联漏洞且全部完成时为 True（无漏洞/空报告不视为已完成）。
+    `all_closed` 仅在报告存在关联漏洞且全部完成时为 True（无漏洞/空报告不视为已完成）；
+    `retest_state` 口径见 `retest_state_of`（是否已发起复测取自轮次 `src_report_id`）。
     """
     report_ids = [r.id for p in plans for r in (p.reports or [])]
     closure = await report_closure_map(session, report_ids)
+    triggered = set(
+        (
+            await session.execute(
+                select(TestingPlanRetestRound.src_report_id).where(
+                    TestingPlanRetestRound.plan_id.in_([p.id for p in plans]),
+                    TestingPlanRetestRound.src_report_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
     for p in plans:
         for r in (p.reports or []):
             total, closed = closure.get(r.id, (0, 0))
             r.vul_total = total
             r.vul_closed = closed
             r.all_closed = total > 0 and closed == total
+            r.is_retest = is_retest_report_title(r.title)
+            r.retest_state = retest_state_of(
+                is_retest=r.is_retest, triggered=r.id in triggered, all_closed=r.all_closed,
+            )
+
+
+async def report_retest_state_map(
+    session: AsyncSession, reports: list[tuple[int, str]],
+) -> dict[int, str]:
+    """报告管理页批量取复测状态：入参 `[(report_id, title)]`，返回 `{report_id: none|ongoing|done}`。
+
+    一次取章节漏洞闭环与「由该报告发起的轮次」，避免逐报告查询。
+    """
+    ids = [rid for rid, _ in reports if rid is not None]
+    if not ids:
+        return {}
+    closure = await report_closure_map(session, ids)
+    triggered = set(
+        (
+            await session.execute(
+                select(TestingPlanRetestRound.src_report_id).where(
+                    TestingPlanRetestRound.src_report_id.in_(ids)
+                )
+            )
+        ).scalars().all()
+    )
+    states: dict[int, str] = {}
+    for rid, title in reports:
+        total, closed = closure.get(rid, (0, 0))
+        states[rid] = retest_state_of(
+            is_retest=is_retest_report_title(title),
+            triggered=rid in triggered,
+            all_closed=total > 0 and closed == total,
+        )
+    return states
 
 
 async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
@@ -149,12 +214,15 @@ async def refresh_mandays(session: AsyncSession, plan_id: int | None) -> None:
 def start_retest_round(
     session: AsyncSession, plan: TestingPlan, source: str,
     user_id: int | None = None, force: bool = False, report_id: int | None = None,
+    src_report_id: int | None = None,
 ) -> TestingPlanRetestRound | None:
     """发起复测时记录新一轮，返回新轮次（幂等跳过时返回 None）。
 
     - force=False（手动流转）：已有进行中轮次则幂等跳过，防止重复计数；
     - force=True（报告实际发起复测）：上一轮未闭环即结束（视为复测未通过后再测），并开启新一轮；
-    - report_id：本轮次关联的复测报告，删除该报告时据此回退轮次，保持复测轮数与报告一致。
+    - report_id：本轮次关联的复测报告，删除该报告时据此回退轮次，保持复测轮数与报告一致；
+    - src_report_id：发起本轮的**源报告**（初测报告），供报告维度判定「是否已发起复测」；
+      手动流转与报告导入复测无源报告，保持为空。
     """
     unfinished = [r for r in plan.retest_rounds if r.done_time is None]
     if unfinished:
@@ -165,7 +233,7 @@ def start_retest_round(
     next_no = max((r.round_no for r in plan.retest_rounds), default=0) + 1
     round_row = TestingPlanRetestRound(
         plan_id=plan.id, round_no=next_no, source=source,
-        creator_id=user_id, report_id=report_id,
+        creator_id=user_id, report_id=report_id, src_report_id=src_report_id,
     )
     session.add(round_row)
     return round_row

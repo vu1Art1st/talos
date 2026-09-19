@@ -36,9 +36,9 @@
 | `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434 |
 | `setup-docker-mirror.sh` | 59 | 活跃·部署前配置 | DEPLOY.md:198,203、RELEASE.md:964 |
 
-### 1.2 后端脚本 `backend/scripts/`（14 个，1 640 行）
+### 1.2 后端脚本 `backend/scripts/`（15 个，1 728 行）
 
-> 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。
+> 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
 | 脚本 | 行数 | 状态 | 调用方 / 出处 |
 |---|---|---|---|
@@ -54,6 +54,7 @@
 | `backfill_vul_submit_time.py` | 69 | 一次性 | RELEASE.md:546；已改用 `_common.run` + `dry_run_flag`（M-2） |
 | `migrate_utc_to_utc8.py` | 76 | 一次性 | RELEASE.md:957；已改用 `_common`（M-2） |
 | `fix_plan_retest_state.py` | 100 | 一次性 | RELEASE.md:65；已改用 `_common`（M-2） |
+| `backfill_retest_src_report.py` | 88 | 活跃·发布流程（2026-09-19 新增） | `upgrade.sh:118`（每次升级自动执行，失败不阻断）；按 `source` 文本回填 `testing_plan_retest_rounds.src_report_id`，使报告复测三态对存量和新数据一致（幂等、`--dry-run`） |
 | `fix_attachment_paths.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；置空春耕行动/远程检测中不符合上传白名单的存量附件路径（`--dry-run` 仅统计，落库前备份 `storage/backups/`） |
 | `fix_retest_title_html.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；转义存量复测记录标题（HTML 注入）并按新口径重算 `vulns.retest_html`（幂等：只处理含 `<`/`>` 的标题） |
 
@@ -81,13 +82,13 @@
 
 ### 2.1 `upgrade.sh` — 一键升级编排
 
-- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 重启服务。
+- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 重启服务。
 - **调用**：`bash scripts/upgrade.sh [--no-backup] [--no-pull] [--anchor]`（仓库根目录，见脚本 3-8 行）。
-- **依赖**：`.env`（33 行强制校验）、`git`、`docker`；内部依次调用 `scripts/backup.sh` 或 `backup-incremental.sh`（55/58 行）、`scripts/notify.sh`（99 行）、`scripts/migrate.sh`（105 行）、`python -m scripts.backfill_retest`（109 行）。
+- **依赖**：`.env`（33 行强制校验）、`git`、`docker`；内部依次调用 `scripts/backup.sh` 或 `backup-incremental.sh`（55/58 行）、`scripts/notify.sh`（99 行）、`scripts/migrate.sh`（109 行）、`python -m scripts.backfill_retest`（113 行）、`python -m scripts.backfill_retest_src_report`（118 行）。
 - **执行场景**：服务器版本升级；**不要**只 `git pull` 后 `up -d`（DEPLOY.md:336）。
 - **关键顺序约定**：数据库迁移在 api 启动**之前**用一次性容器执行（脚本 10-11 行注释），避免 `create_all` 抢先建表导致迁移冲突。
-- **失败影响**：升级前备份失败不阻断流程（fail-open，由每日差异快照兜底，92-101 行）；`backfill_retest` 失败仅打印提示（110 行）。
-- **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码（50-51、84、105、109、114、119 行）全部改为 `$DOCKER`，并在脚本第 15-17 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
+- **失败影响**：升级前备份失败不阻断流程（fail-open，由每日差异快照兜底，92-101 行）；两个回填步骤仅打印提示（114/119 行）。
+- **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码（50-51、84、105、113、120、126 行）全部改为 `$DOCKER`，并在脚本第 15-17 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
 
 ### 2.2 `migrate.sh` — 生产库结构迁移
 

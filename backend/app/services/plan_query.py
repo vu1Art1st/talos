@@ -8,21 +8,21 @@
 receive_time(YYYY-MM-DD) + ticket_seq 派生 YYYYMMDD-N。
 """
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
 from sqlalchemy import String, and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import TESTING_PLAN_STATUS, PlanStatus
+from app.constants import TESTING_PLAN_STATUS, PlanStatus, VulStatus
 from app.core.filters import (
-    ALLOWED_FILTER_OPS,
     build_filter_expr,
-    combine_rules,
-    parse_filter_rules,
+    build_tree_condition,
+    parse_filter_tree,
     split_range,
     to_float,
 )
+from app.services.plan_service import RETEST_TITLE_MARK
 from app.core.timeutil import now as tznow
 from app.models import (
     NonpenPlan,
@@ -122,6 +122,81 @@ def _append_tester_scope(cond: list, tester_id: int | None, unclaimed: bool) -> 
         cond.append(assigned)
 
 
+def _day_start(value: str) -> datetime:
+    """`YYYY-MM-DD` → 当天 00:00（naive 本地时间，与库内 DateTime 存储口径一致）。"""
+    return datetime.fromisoformat(f"{value}T00:00:00")
+
+
+def _datetime_date_range(col, start: datetime | None, end: datetime | None):
+    """DateTime 列的**日期**区间：`[开始日 00:00, 结束日次日 00:00)` 半开区间。
+
+    **禁止改回 `func.date(col) >= '<日期串>'`**：那样日期串会按 VARCHAR 绑定，PostgreSQL
+    不存在 `date >= character varying` 算子，asyncpg 直接抛 UndefinedFunctionError（线上 500：
+    `operator does not exist: date >= character varying`）；而 SQLite 因两侧都是文本「看似通过」，
+    属典型 SQLite/PG 差异陷阱。半开区间同时不在列上套函数，可利用 start_time 等索引。
+    """
+    conds = [col.is_not(None)]
+    if start is not None:
+        conds.append(col >= start)
+    if end is not None:
+        conds.append(col < end)
+    return and_(*conds)
+
+
+def _period_condition(date_from: str, date_to: str):
+    """统计周期命中条件：初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期。
+
+    为什么不能只看完成点（2026-09-19 实测）：`retest_done_time` 与轮次 `done_time` 只在
+    **工单全部漏洞闭环**时才写入，回退复测时还会清空（见 `vul_service.sync_plan_retest_state`）。
+    仅依赖它们会让「周期内已完成的复测」漏统计（实例：工单 20260721-1 初测完成 7-30、
+    复测轮次 9-16 发起且复测报告 9-16 生成，但两个完成点均为空）。
+
+    日期串列（`first_test_done_time` / `retest_notice_time` / `retest_done_time` 为 YYYY-MM-DD 文本）
+    按文本比较，上界需先排除空串；轮次与报告为 DateTime 列，按 `_datetime_date_range`
+    的日期半开区间比较。
+    """
+    if not date_from and not date_to:
+        return None
+    try:
+        start = _day_start(date_from) if date_from else None
+        end = _day_start(date_to) + timedelta(days=1) if date_to else None
+    except ValueError:
+        raise HTTPException(400, "统计周期日期格式错误，需为 YYYY-MM-DD")
+
+    def _text_range(col, *, guard_empty: bool = True):
+        conds = [col.is_not(None)]
+        if date_from:
+            conds.append(col >= date_from)
+        if date_to:
+            if guard_empty:
+                conds.append(col != "")
+            conds.append(col <= date_to)
+        return and_(*conds)
+
+    def _datetime_range(col):
+        return _datetime_date_range(col, start, end)
+
+    retest_report = exists().where(
+        Report.testing_plan_id == TestingPlan.id,
+        Report.title.ilike(f"%{RETEST_TITLE_MARK}%"),
+        _datetime_range(Report.create_time),
+    )
+    return or_(
+        _text_range(TestingPlan.first_test_done_time),
+        _text_range(TestingPlan.retest_notice_time),
+        _text_range(TestingPlan.retest_done_time),
+        exists().where(
+            TestingPlanRetestRound.plan_id == TestingPlan.id,
+            _datetime_range(TestingPlanRetestRound.start_time),
+        ),
+        exists().where(
+            TestingPlanRetestRound.plan_id == TestingPlan.id,
+            _datetime_range(TestingPlanRetestRound.done_time),
+        ),
+        retest_report,
+    )
+
+
 def plan_conditions(
     search: str = "",
     status: int | None = None,
@@ -135,8 +210,11 @@ def plan_conditions(
     unclaimed: bool = False,
     pending: bool = False,
 ) -> list:
-    """测试计划筛选条件，供列表/统计/导出/结论输出共用。receive_time / first_test_done_time
-    均为 YYYY-MM-DD 字符串，直接比较。
+    """测试计划筛选条件，供列表/统计/导出/结论输出共用。receive_time 等为 YYYY-MM-DD 字符串，直接比较。
+
+    first_test_from / first_test_to 为**统计周期**起止（参数名沿用历史）：命中口径见
+    `_period_condition`（初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期），
+    不再是「初测完成时间」单列过滤，保证周期内完成的复测能被纳入。
 
     tester_id 非空时过滤「当前可测试系统」：当前用户为测试人且状态为初测中/提请复测/复测中。
     unclaimed 为真时过滤「无人认领的测试」：测试人员列表为空。
@@ -160,7 +238,9 @@ def plan_conditions(
     if department:
         cond.append(TestingPlan.department == department)
     _append_date_range(cond, TestingPlan.receive_time, receive_from, receive_to)
-    _append_date_range(cond, TestingPlan.first_test_done_time, first_test_from, first_test_to)
+    period = _period_condition(first_test_from, first_test_to)
+    if period is not None:
+        cond.append(period)
     _append_tester_scope(cond, tester_id, unclaimed)
     return cond
 
@@ -301,40 +381,40 @@ def _plan_count_expr(field: str, op: str, value) -> object:
     raise HTTPException(400, f"计数字段不支持操作符：{op}")
 
 
-def plan_filters_condition(filters: str) -> list:
-    """解析聚合筛选 JSON（rules + 规则间 and/or 连接 + 单规则 not 取反），返回与现有条件 AND 的条件列表。
+def _plan_leaf_condition(field: str, op: str, value) -> object:
+    """单条规则 → 表达式（字段白名单 + 派生/关联字段特化；取反由条件树统一施加）。"""
+    if field not in PLAN_FILTER_FIELDS:
+        raise HTTPException(400, f"不支持的筛选字段：{field}")
+    if field == "ticket_id":
+        return _ticket_id_filter_expr(op, value)
+    if field == "testers":
+        return _testers_filter_expr(op, value)
+    if field in ("vul_count", "report_count", "retest_round_count"):
+        return _plan_count_expr(field, op, value)
+    column, ftype, is_datetime = PLAN_FILTER_FIELDS[field]
+    return build_filter_expr(getattr(TestingPlan, column), ftype, is_datetime, op, value)
 
-    请求格式示例：
-        {"rules": [
-            {"field": "status", "op": "eq", "value": 20, "not": false, "connector": "and"},
-            {"field": "system_name", "op": "contains", "value": "商城", "not": true, "connector": "or"},
+
+def plan_filters_condition(filters: str) -> list:
+    """聚合筛选 JSON → 条件列表（与固定参数按 AND 组合），支持条件分组与任意嵌套。
+
+    请求格式（v2，推荐）——组内逻辑、整组取反、组间逻辑由嵌套层级显式表达：
+        {"logic": "and", "not": false, "children": [
+            {"kind": "rule", "field": "receive_time", "op": "gt", "value": "2026-01-01"},
+            {"kind": "group", "logic": "or", "not": false, "children": [
+                {"kind": "rule", "field": "status", "op": "eq", "value": 30},
+                {"kind": "rule", "field": "status", "op": "eq", "value": 40},
+            ]},
         ]}
-    rules 按顺序组合：首条规则的 connector 忽略，其余规则的 connector 表示其与上一条之间的逻辑。
+    即「需求接收晚于 2026-01-01 且（状态为初测完成 或 提请复测）」。
+
+    历史扁平格式（{"rules": [...]}，规则间 connector 左结合）继续兼容，解析细节见
+    core/filters.parse_filter_tree；空分组被忽略，条件树整体为空时不追加任何条件。
     """
-    expr = None
-    for r in parse_filter_rules(filters):
-        if not isinstance(r, dict):
-            continue
-        field = str(r.get("field", ""))
-        op = str(r.get("op", ""))
-        if op not in ALLOWED_FILTER_OPS:
-            raise HTTPException(400, f"不支持的操作符：{op}")
-        if field not in PLAN_FILTER_FIELDS:
-            raise HTTPException(400, f"不支持的筛选字段：{field}")
-        _, ftype, is_datetime = PLAN_FILTER_FIELDS[field]
-        if field == "ticket_id":
-            cond = _ticket_id_filter_expr(op, r.get("value"))
-        elif field == "testers":
-            cond = _testers_filter_expr(op, r.get("value"))
-        elif field in ("vul_count", "report_count", "retest_round_count"):
-            cond = _plan_count_expr(field, op, r.get("value"))
-        else:
-            cond = build_filter_expr(
-                getattr(TestingPlan, PLAN_FILTER_FIELDS[field][0]), ftype, is_datetime, op, r.get("value")
-            )
-        if r.get("not"):
-            cond = ~cond
-        expr = combine_rules(expr, cond, str(r.get("connector") or "and").lower())
+    root = parse_filter_tree(filters)
+    if root is None:
+        return []
+    expr = build_tree_condition(root, _plan_leaf_condition)
     return [expr] if expr is not None else []
 
 
@@ -466,27 +546,88 @@ def _plan_vuln_count(plan, linked_count: dict[int, int]) -> int:
     return plan.stat_critical + plan.stat_high + plan.stat_medium + plan.stat_low
 
 
-def _conclusion_summary(
-    *,
-    departments: int,
-    systems: int,
-    vuln_systems: int,
-    vulns: int,
-    safe_systems: int,
-    fixed_systems: int,
-    fixing_systems: int,
-) -> str:
-    """结论文字（口径与需求确认一致，措辞与顺序勿改）。"""
+def _period_text(period_label: str, date_from: str, date_to: str) -> str:
+    """结论文字的周期括注：快捷项（本周/本月…）取名称，自定义区间取起止日期，未筛选为「全部时间」。"""
+    if period_label:
+        return period_label
+    if date_from and date_to:
+        return f"{date_from} - {date_to}"
+    if date_from or date_to:
+        return f"{date_from or '不限'} - {date_to or '不限'}"
+    return "全部时间"
+
+
+def _in_period(value: str, date_from: str, date_to: str) -> bool:
+    """YYYY-MM-DD 字符串是否落在统计周期内（空值不命中）。"""
+    if not value:
+        return False
+    return (not date_from or value >= date_from) and (not date_to or value <= date_to)
+
+
+def _ts_in_period(value: datetime | None, date_from: str, date_to: str) -> bool:
+    """DateTime 是否落在统计周期内（按本地日期，与 SQL 侧 func.date() 口径一致）。"""
+    return value is not None and _in_period(value.date().isoformat(), date_from, date_to)
+
+
+def _conclusion_summary(agg: dict, period_text: str) -> str:
+    """结论文字（2026-09-19 新模板，措辞与顺序勿改）。"""
+    names = "、".join(agg["department_names"]) or "无"
     return (
-        f"业务系统方面，统计周期内发现{departments}个部门{systems}个系统的渗透测试，"
-        f"共发现{vuln_systems}个系统存在{vulns}个漏洞，{safe_systems}个系统未发现安全风险。"
-        f"目前{fixed_systems}个系统已完成整改，{fixing_systems}个系统整改中。"
+        f"渗透测试方面，统计周期内（{period_text}）共完成{agg['departments']}个部门（{names}）的"
+        f"{agg['systems']}个系统测试工作。其中初测完成{agg['first_test_systems']}个系统"
+        f"发现{agg['first_test_vulns']}个漏洞。复测完成{agg['retest_systems']}个系统，"
+        f"其中{agg['retest_fixed_systems']}个系统已完成整改，"
+        f"{agg['retest_unfixed_systems']}个系统未完成整改仍存在漏洞未修复。"
         "请相关部门尽快完成漏洞修复并提交复测。具体漏洞情况详见附件。"
     )
 
 
-async def _conclusion_aggregate(session: AsyncSession, cond: list) -> dict:
-    """取工单并按筛选条件聚合结论所需的行数据与计数。"""
+def _conclusion_flags(
+    plans: list, rounds: list, retest_reports: list, date_from: str, date_to: str,
+) -> dict:
+    """按周期口径标记每个命中工单：初测完成 / 复测动作 / 发起复测（口径见 `_period_condition`）。"""
+    flags: dict[int, dict[str, bool]] = {}
+    for p in plans:
+        notice = _in_period(p.retest_notice_time, date_from, date_to)
+        flags[p.id] = {
+            "first": _in_period(p.first_test_done_time, date_from, date_to),
+            "started": notice,
+            "retest": notice,
+        }
+    for plan_id, start_time, done_time in rounds:
+        if plan_id not in flags:
+            continue
+        if _ts_in_period(start_time, date_from, date_to):
+            flags[plan_id]["retest"] = True
+            flags[plan_id]["started"] = True
+        if _ts_in_period(done_time, date_from, date_to):
+            flags[plan_id]["retest"] = True
+    report_count = 0
+    for plan_id, create_time in retest_reports:
+        if _ts_in_period(create_time, date_from, date_to):
+            report_count += 1
+            if plan_id in flags:
+                flags[plan_id]["retest"] = True
+    return {"flags": flags, "retest_report_count": report_count}
+
+
+async def _count_vulns_by_plan(
+    session: AsyncSession, ids: list[int], *, only_open: bool = False,
+) -> dict[int, int]:
+    """按工单统计关联漏洞数（`only_open=True` 时只统计未闭环：非已修复/已忽略）。"""
+    if not ids:
+        return {}
+    stmt = select(Vul.testing_plan_id, func.count(Vul.id)).where(Vul.testing_plan_id.in_(ids))
+    if only_open:
+        stmt = stmt.where(~Vul.status.in_((VulStatus.IGNORED, VulStatus.FIXED)))
+    rows = (await session.execute(stmt.group_by(Vul.testing_plan_id))).all()
+    return {pid: int(count) for pid, count in rows}
+
+
+async def _conclusion_aggregate(
+    session: AsyncSession, cond: list, date_from: str = "", date_to: str = "",
+) -> dict:
+    """取命中工单并按统计周期聚合结论所需的行数据与计数（周期口径见 `plan_conditions`）。"""
     plans = (
         await session.execute(
             select(TestingPlan).where(*cond).order_by(
@@ -494,74 +635,90 @@ async def _conclusion_aggregate(session: AsyncSession, cond: list) -> dict:
             )
         )
     ).scalars().all()
-    linked_rows = (
+    ids = [p.id for p in plans]
+    linked_count = await _count_vulns_by_plan(session, ids)
+    open_count = await _count_vulns_by_plan(session, ids, only_open=True)
+    rounds = (
         await session.execute(
-            select(Vul.testing_plan_id, func.count(Vul.id))
-            .where(Vul.testing_plan_id.in_(select(TestingPlan.id).where(*cond)))
-            .group_by(Vul.testing_plan_id)
+            select(
+                TestingPlanRetestRound.plan_id,
+                TestingPlanRetestRound.start_time,
+                TestingPlanRetestRound.done_time,
+            ).where(TestingPlanRetestRound.plan_id.in_(ids))
         )
     ).all()
-    linked_count = {pid: c for pid, c in linked_rows}
+    retest_reports = (
+        await session.execute(
+            select(Report.testing_plan_id, Report.create_time).where(
+                Report.testing_plan_id.in_(ids),
+                Report.title.ilike(f"%{RETEST_TITLE_MARK}%"),
+            )
+        )
+    ).all()
+    marked = _conclusion_flags(plans, rounds, retest_reports, date_from, date_to)
+    flags = marked["flags"]
 
-    departments: set[str] = set()
+    dept_names: list[str] = []
     rows: list[dict] = []
-    total_vulns = safe_systems = fixed_systems = 0
+    first_test_systems = first_test_vulns = 0
+    retest_systems = retest_fixed = retest_started = 0
     for p in plans:
         department = p.department or "未填写"
-        departments.add(department)
+        if department not in dept_names:
+            dept_names.append(department)
         vul_count = _plan_vuln_count(p, linked_count)
-        total_vulns += vul_count
-        if p.status == PlanStatus.PASSED:
-            safe_systems += 1
-        elif p.status == PlanStatus.RETEST_DONE:
-            fixed_systems += 1
+        all_closed = linked_count.get(p.id, 0) > 0 and open_count.get(p.id, 0) == 0
+        if flags[p.id]["first"]:
+            first_test_systems += 1
+            first_test_vulns += vul_count
+        if flags[p.id]["retest"]:
+            retest_systems += 1
+            retest_fixed += 1 if all_closed else 0
+        if flags[p.id]["started"]:
+            retest_started += 1
         rows.append({
             "ticket_id": p.ticket_id,
             "department": department,
             "system_name": p.system_name,
             "vuln_count": vul_count,
             "test_type": p.test_type,
+            "first_test_done_time": p.first_test_done_time,
+            "retest_done_time": p.retest_done_time,
             "rectify_state": _rectify_state(p.status),
         })
     return {
         "rows": rows,
-        "departments": len(departments),
-        "systems": len(rows),
-        "vulns": total_vulns,
-        "safe_systems": safe_systems,
-        "fixed_systems": fixed_systems,
+        "departments": len(dept_names),
+        "department_names": dept_names,
+        "systems": len(plans),
+        "first_test_systems": first_test_systems,
+        "first_test_vulns": first_test_vulns,
+        "retest_systems": retest_systems,
+        "retest_fixed_systems": retest_fixed,
+        "retest_unfixed_systems": retest_systems - retest_fixed,
+        "retest_started_systems": retest_started,
+        "retest_report_count": marked["retest_report_count"],
     }
 
 
-async def compute_conclusion(session: AsyncSession, cond: list) -> dict:
-    """结论性输出：按筛选条件聚合部门/系统/漏洞/整改状态，生成结论文字与附件行数据。
+async def compute_conclusion(
+    session: AsyncSession, cond: list,
+    period_label: str = "", date_from: str = "", date_to: str = "",
+) -> dict:
+    """结论性输出：按统计周期聚合部门/初测/复测/整改情况，生成结论文字与附件行数据。
 
-    口径（与需求确认一致）：
-    - 部门数 = 筛选结果 department 去重；系统数 = 工单数；
-    - 漏洞数 = 工单关联漏洞真实数，无关联则用手填 stat_* 之和（与 stats_service 一致）；
-    - 未发现安全风险 = 状态测试通过(PASSED)；已完成整改 = 复测完成(RETEST_DONE)；
-    - 整改中 = 其余（非通过且非复测完成）。
+    口径（2026-09-19 与需求确认一致）：
+    - 周期命中 = 初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期（见 `_period_condition`）；
+    - 共完成系统数 = 命中工单数（按工单去重）；部门 = 命中工单 department 去重（空值记「未填写」）；
+    - 初测完成系统 = `first_test_done_time` 命中周期的工单；其漏洞数 = 关联漏洞真实数
+      （无关联回退手填 stat_* 之和，与 stats_service 一致）；
+    - 复测完成系统 = 周期内有复测动作（发起 / 完成 / 复测报告生成）的工单；
+      其中「已完成整改」= 该工单全部关联漏洞闭环（已修复/已忽略），其余为未完成整改仍存在漏洞未修复。
     """
-    agg = await _conclusion_aggregate(session, cond)
-    systems = agg["systems"]
-    vuln_systems = systems - agg["safe_systems"]
-    fixing_systems = systems - agg["fixed_systems"] - agg["safe_systems"]
+    agg = await _conclusion_aggregate(session, cond, date_from, date_to)
+    period_text = _period_text(period_label, date_from, date_to)
     return {
-        "summary": _conclusion_summary(
-            departments=agg["departments"],
-            systems=systems,
-            vuln_systems=vuln_systems,
-            vulns=agg["vulns"],
-            safe_systems=agg["safe_systems"],
-            fixed_systems=agg["fixed_systems"],
-            fixing_systems=fixing_systems,
-        ),
-        "departments": agg["departments"],
-        "systems": systems,
-        "vuln_systems": vuln_systems,
-        "vulns": agg["vulns"],
-        "safe_systems": agg["safe_systems"],
-        "fixed_systems": agg["fixed_systems"],
-        "fixing_systems": fixing_systems,
-        "rows": agg["rows"],
+        **agg,
+        "period_text": period_text,
+        "summary": _conclusion_summary(agg, period_text),
     }

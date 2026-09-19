@@ -219,6 +219,11 @@ async def _migrate_lightweight() -> None:
             await conn.execute(text(
                 "ALTER TABLE testing_plan_retest_rounds ADD COLUMN report_id INTEGER"
             ))
+        # 发起本轮的源报告ID（报告维度「是否已发起复测」判定，Alembic e1f2a3b4c5d6 同步）
+        if round_cols and "src_report_id" not in round_cols:
+            await conn.execute(text(
+                "ALTER TABLE testing_plan_retest_rounds ADD COLUMN src_report_id INTEGER"
+            ))
         # 复测记录自定义标题：为空时聚合按创建日期自动生成（Alembic e2f3a4b5c6d7 同步）
         rr_cols = {r[1] for r in (
             await conn.execute(text("PRAGMA table_info(vul_retest_records)"))

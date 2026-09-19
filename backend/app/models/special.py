@@ -156,6 +156,9 @@ class TestingPlanRetestRound(Base):
     report_id: Mapped[int | None] = mapped_column(
         ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True,
     )  # 触发轮次的复测报告ID，删除该报告时回退对应轮次
+    src_report_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reports.id", ondelete="SET NULL"), nullable=True, index=True,
+    )  # 发起本轮的**源报告**（初测报告）ID：供报告维度判定「该报告是否已发起复测」
     round_no: Mapped[int] = mapped_column(Integer, default=1)
     start_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     done_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

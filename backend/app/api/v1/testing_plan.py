@@ -142,17 +142,24 @@ async def testing_plan_conclusion(
     first_test_from: str = "",
     first_test_to: str = "",
     filters: str = "",
+    period_label: str = "",
     pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """结论性输出：按筛选条件生成结论文字与附件行数据（部门/系统/漏洞/整改状态聚合）。"""
+    """结论性输出：按统计周期生成结论文字与附件行数据（部门/初测/复测/整改聚合）。
+
+    first_test_from / first_test_to 为统计周期（口径见 `plan_query.plan_conditions`）；
+    period_label 为周期名称（如「本周」），自定义区间留空时结论文字回落到起止日期。
+    """
     cond = plan_query.plan_conditions(
         search, status, test_type, department, receive_from, receive_to,
         first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
     )
     cond += plan_query.plan_filters_condition(filters)
-    return await plan_query.compute_conclusion(session, cond)
+    return await plan_query.compute_conclusion(
+        session, cond, period_label, first_test_from, first_test_to,
+    )
 
 
 @router.get("/testing-plans/conclusion/export")
@@ -166,17 +173,20 @@ async def export_testing_plan_conclusion(
     first_test_from: str = "",
     first_test_to: str = "",
     filters: str = "",
+    period_label: str = "",
     pending: bool = False,
     _: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """下载结论性输出附件（工单ID/所属部门/测试系统/漏洞数/测试类型/整改完成情况）。"""
+    """下载结论性输出附件（工单ID/所属部门/测试系统/漏洞数/测试类型/初测完成/复测完成/整改完成情况）。"""
     cond = plan_query.plan_conditions(
         search, status, test_type, department, receive_from, receive_to,
         first_test_from=first_test_from, first_test_to=first_test_to, pending=pending,
     )
     cond += plan_query.plan_filters_condition(filters)
-    data = await plan_query.compute_conclusion(session, cond)
+    data = await plan_query.compute_conclusion(
+        session, cond, period_label, first_test_from, first_test_to,
+    )
     wb = plan_io.build_conclusion_workbook(data["rows"])
     return xlsx_response(wb, "整改情况附件.xlsx")
 

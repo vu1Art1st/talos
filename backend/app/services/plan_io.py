@@ -190,12 +190,16 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
     return result
 
 
-# 结论性输出附件表头：工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 / 整改完成情况
-CONCLUSION_HEADERS = ["工单ID", "所属部门", "测试系统", "漏洞数", "测试类型", "整改完成情况"]
+# 结论性输出附件表头：工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 /
+# 初测完成时间 / 复测完成时间 / 整改完成情况（2026-09-19 随结论口径同步扩展）
+CONCLUSION_HEADERS = [
+    "工单ID", "所属部门", "测试系统", "漏洞数", "测试类型",
+    "初测完成时间", "复测完成时间", "整改完成情况",
+]
 
 
 def build_conclusion_workbook(rows: list[dict]) -> Workbook:
-    """结论性输出附件：单 sheet，每行一个渗透测试工单的整改情况。"""
+    """结论性输出附件：单 sheet，每行一个渗透测试工单的测试与整改情况。"""
     wb = Workbook()
     ws = wb.active
     ws.title = "整改情况"
@@ -207,6 +211,8 @@ def build_conclusion_workbook(rows: list[dict]) -> Workbook:
             r.get("system_name", ""),
             r.get("vuln_count", 0),
             r.get("test_type", ""),
+            r.get("first_test_done_time", ""),
+            r.get("retest_done_time", ""),
             r.get("rectify_state", ""),
         )])
     return wb

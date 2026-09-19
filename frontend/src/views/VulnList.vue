@@ -206,6 +206,19 @@
         <el-table-column prop="submit_time" label="提交时间" width="170" sortable="custom">
           <template #default="{ row }"><span class="num">{{ fmtDateTime(row.submit_time) }}</span></template>
         </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
+          <template #default="{ row }">
+            <el-button size="small" type="primary" link @click.stop="router.push(`/vulns/${row.id}/edit`)">
+              编辑
+            </el-button>
+            <el-popconfirm v-if="canDeleteVuln(row)" title="确认删除该漏洞？删除后不可恢复" width="220"
+                           @confirm="removeVuln(row)">
+              <template #reference>
+                <el-button size="small" type="danger" link @click.stop>删除</el-button>
+              </template>
+            </el-popconfirm>
+          </template>
+        </el-table-column>
         <template #empty>
           <el-empty description="暂无漏洞记录，点击「提交漏洞」开始录入" :image-size="80" />
         </template>
@@ -400,6 +413,23 @@ async function batchRemove() {
   ElMessage.success(`已删除 ${ids.length} 个漏洞`)
   // 当前页被删空时回退一页
   const remainPages = Math.max(1, Math.ceil((total.value - ids.length) / size.value))
+  await reload()
+  await load(Math.min(page.value, remainPages))
+}
+
+// ---------- 行内编辑 / 删除 ----------
+// 删除按钮可见性：与后端单删口径逐条对齐（漏洞管理员可删任意漏洞；其余须为提交人本人，
+// 与后端 `_check_vul_delete_access` 的「未关联工单：提交人；关联工单：认领者」一致——
+// 认领者不在此列的原因是无法从列表行数据判定工单认领关系，认领者可在工单流程抽屉删除）
+function canDeleteVuln(row: Vuln) {
+  return auth.hasPerm('vuln:manage') || row.submitter_id === auth.user?.id
+}
+
+async function removeVuln(row: Vuln) {
+  await client.delete(`/vulns/${row.id}`)
+  ElMessage.success('漏洞已删除')
+  // 当前页被删空时回退一页（与批量删除同口径）
+  const remainPages = Math.max(1, Math.ceil((total.value - 1) / size.value))
   await reload()
   await load(Math.min(page.value, remainPages))
 }

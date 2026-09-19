@@ -452,6 +452,22 @@ async def _login_ready(client: AsyncClient, username: str, password: str) -> dic
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
+async def _user_with_perms(client: AsyncClient, auth: dict, username: str, perms: list[str]) -> dict:
+    """建「角色 + 用户」并返回可用请求头（角色名 = 用户名 + 角色，便于用例间隔离）。"""
+    resp = await client.post(
+        "/api/v1/roles", headers=auth,
+        json={"name": f"{username}角色", "permissions": perms, "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/users", headers=auth,
+        json={"username": username, "password": "Tester@123", "realname": username,
+              "email": "", "phone": "", "is_active": True, "role_id": resp.json()["id"]},
+    )
+    assert resp.status_code == 200, resp.text
+    return await _login_ready(client, username, "Tester@123")
+
+
 async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict):
     """复测报告含未修复漏洞：计划应为复测中(50)、未修复漏洞置「复测未修复」(50+is_retest)、自动建资产与报告。"""
     system_name = "综合办公系统ZZ"
@@ -1766,6 +1782,89 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
                                 params=q(dept))
         assert resp.status_code == 200
         assert resp.json()["total_plans"] == 2
+    finally:
+        for p in plans:
+            await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+
+async def test_testing_plan_nested_filters(client: AsyncClient, auth: dict):
+    """聚合筛选支持条件分组与嵌套：「需求晚于 X 且（状态 Y 或 Z）」、组级取反、三层嵌套与结构非法。
+
+    断言限定在专属部门内，避免共享会话数据库中其他测试残留计划干扰集合比较。
+    """
+    DEPT = "嵌套筛选部门"
+    A, B, C, D = (f"嵌套筛选系统-{s}" for s in "ABCD")
+    bodies = [
+        {"system_name": A, "test_type": "渗透测试", "department": DEPT,
+         "receive_time": "2026-01-05", "status": 30},
+        {"system_name": B, "test_type": "渗透测试", "department": DEPT,
+         "receive_time": "2026-01-06", "status": 40},
+        {"system_name": C, "test_type": "渗透测试", "department": DEPT,
+         "receive_time": "2026-01-07", "status": 10},
+        {"system_name": D, "test_type": "代码审计", "department": DEPT,
+         "receive_time": "2026-01-08", "status": 30},
+    ]
+    plans = []
+    for body in bodies:
+        resp = await client.post("/api/v1/testing-plans", headers=auth, json=body)
+        assert resp.status_code == 200, resp.text
+        plans.append(resp.json())
+    try:
+        def rule(field, op, value=None, *, not_=False):
+            return {"field": field, "op": op, "value": value, "not": not_}
+
+        def cond(*children, logic="and", not_=False):
+            return {"logic": logic, "not": not_, "children": list(children)}
+
+        def q(node):
+            return {"filters": json.dumps(node)}
+
+        dept = rule("department", "eq", DEPT)
+
+        # 「部门=专属 且（需求接收晚于 2026-01-05 且（状态=初测完成 或 状态=提请复测））」
+        assert await _list_plan_names(client, auth, q(cond(
+            dept,
+            cond(rule("receive_time", "gt", "2026-01-05"),
+                 cond(rule("status", "eq", 30), rule("status", "eq", 40), logic="or")),
+        ))) == {B, D}
+
+        # 组级取反：部门=专属 且 非（状态=未测试 或 测试类型=代码审计）
+        assert await _list_plan_names(client, auth, q(cond(
+            dept,
+            cond(rule("status", "eq", 10), rule("test_type", "eq", "代码审计"),
+                 logic="or", not_=True),
+        ))) == {A, B}
+
+        # 三层嵌套：部门=专属 且（状态=未测试 或（接收晚于 2026-01-07 且 状态=初测完成））
+        assert await _list_plan_names(client, auth, q(cond(
+            dept,
+            cond(
+                rule("status", "eq", 10),
+                cond(rule("receive_time", "gt", "2026-01-07"), rule("status", "eq", 30)),
+                logic="or",
+            ),
+        ))) == {C, D}
+
+        # 空分组被忽略，不改变其它条件的语义
+        assert await _list_plan_names(client, auth, q(cond(
+            dept, cond(cond(), rule("system_name", "eq", A)),
+        ))) == {A}
+
+        # stats 端点应用同一套嵌套条件
+        resp = await client.get("/api/v1/testing-plans/stats", headers=auth, params=q(cond(
+            dept, cond(rule("status", "eq", 30), rule("status", "eq", 40), logic="or"),
+        )))
+        assert resp.status_code == 200
+        assert resp.json()["total_plans"] == 3
+
+        # 结构非法：非法逻辑运算符 / 嵌套过深 / 条件超量 → 400
+        for bad in (
+            cond(rule("status", "eq", 10), logic="xor"),
+            cond(cond(cond(cond(cond(cond(rule("status", "eq", 10))))))),
+            cond(*[rule("status", "eq", 10) for _ in range(51)]),
+        ):
+            resp = await client.get("/api/v1/testing-plans", headers=auth, params=q(bad))
+            assert resp.status_code == 400, bad
     finally:
         for p in plans:
             await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
@@ -3270,6 +3369,99 @@ async def test_vuln_list_sorting(client: AsyncClient, auth: dict):
     resp = await client.get(
         "/api/v1/vulns", headers=auth, params={"sort": "drop table", "order": "asc"},
     )
+    assert resp.status_code == 200, resp.text
+
+
+async def test_vuln_delete_permissions(client: AsyncClient, auth: dict):
+    """单删漏洞权限：漏洞管理员（含 `*`）可删任意漏洞，其余账号与编辑口径一致
+    （未关联工单：提交人本人；关联工单：认领者），无关账号 403。
+
+    历史缺口：单删原先仅放行 vuln:manage，工单认领者（无该权限）在流程抽屉无法删除
+    自己录入的漏洞。现放宽到认领者/提交人，同时**保留管理员原有的全量删除能力**
+    （编辑侧是「管理员未认领也不放行」的严格认领口径，删除侧不跟随，
+    否则前端按 `vuln:manage` 显示的删除按钮会点击 403）。
+    """
+    claimer = await _user_with_perms(client, auth, "del_claimer", ["vuln:submit", "special:manage"])
+    bystander = await _user_with_perms(client, auth, "del_bystander", ["vuln:submit"])
+    manager = await _user_with_perms(client, auth, "del_manager", ["vuln:manage"])
+
+    # 场景 A：未关联工单的漏洞 —— 提交人本人可删，无关账号 403，漏洞管理员（admin/*）可删
+    resp = await client.post(
+        "/api/v1/vulns", headers=bystander, json={"title": "单删-路人提交", "level": 30},
+    )
+    vul_own = resp.json()
+    resp = await client.delete(f"/api/v1/vulns/{vul_own['id']}", headers=claimer)
+    assert resp.status_code == 403, resp.text
+    resp = await client.delete(f"/api/v1/vulns/{vul_own['id']}", headers=bystander)
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.post(
+        "/api/v1/vulns", headers=bystander, json={"title": "单删-管理员删", "level": 30},
+    )
+    vul_admin = resp.json()
+    resp = await client.delete(f"/api/v1/vulns/{vul_admin['id']}", headers=auth)
+    assert resp.status_code == 200, resp.text
+
+    # 场景 B：关联工单的漏洞 —— 认领者（无 vuln:manage）可删，未认领账号 403
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "单删权限工单", "test_type": "渗透测试"},
+    )
+    plan_id = resp.json()["id"]
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=claimer)
+    assert resp.status_code == 200, resp.text
+
+    rows: list[dict] = []
+    for title in ("单删-工单漏洞", "单删-超管未认领删", "单删-管理员未认领删"):
+        resp = await client.post(
+            "/api/v1/vulns", headers=claimer,
+            json={"title": title, "level": 20, "testing_plan_id": plan_id},
+        )
+        assert resp.status_code == 200, resp.text
+        rows.append(resp.json())
+
+    resp = await client.delete(f"/api/v1/vulns/{rows[0]['id']}", headers=bystander)
+    assert resp.status_code == 403, resp.text
+    resp = await client.delete(f"/api/v1/vulns/{rows[0]['id']}", headers=claimer)
+    assert resp.status_code == 200, resp.text
+    # 幂等：漏洞不存在时同样返回删除成功
+    resp = await client.delete(f"/api/v1/vulns/{rows[0]['id']}", headers=claimer)
+    assert resp.status_code == 200, resp.text
+
+    # 场景 B2：回归护栏 —— 未认领该工单的漏洞管理员（含 *）仍可删除其漏洞（原行为）
+    for hdr, row in ((auth, rows[1]), (manager, rows[2])):
+        resp = await client.delete(f"/api/v1/vulns/{row['id']}", headers=hdr)
+        assert resp.status_code == 200, resp.text
+
+    resp = await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+
+
+async def test_vuln_delete_cleans_remote_testing(client: AsyncClient, auth: dict):
+    """删除被远程检测关联的漏洞后关联字段置空（生产 PG 强制外键，不清理会 500）。"""
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth, json={"title": "单删-远程检测漏洞", "level": 30},
+    )
+    assert resp.status_code == 200, resp.text
+    vul_id = resp.json()["id"]
+    resp = await client.post(
+        "/api/v1/remote-testings", headers=auth,
+        json={"system_name": "单删权限远程检测", "vuln_id": vul_id},
+    )
+    assert resp.status_code == 200, resp.text
+    rt_id = resp.json()["id"]
+    assert resp.json()["vuln_id"] == vul_id
+
+    resp = await client.delete(f"/api/v1/vulns/{vul_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.get(
+        "/api/v1/remote-testings", headers=auth, params={"search": "单删权限远程检测"},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = [r for r in resp.json()["items"] if r["id"] == rt_id]
+    assert rows and rows[0]["vuln_id"] is None, rows
+
+    resp = await client.delete(f"/api/v1/remote-testings/{rt_id}", headers=auth)
     assert resp.status_code == 200, resp.text
 
 

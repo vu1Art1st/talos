@@ -22,7 +22,7 @@ class SectionOut(SectionIn):
 
 
 class PlanReportBrief(ReportBrief):
-    """测试计划流程中的报告摘要：附带该报告所含漏洞的闭环进度（派生字段，不落库）。
+    """测试计划流程中的报告摘要：附带该报告所含漏洞的闭环进度与复测状态（派生字段，不落库）。
 
     供工单流程抽屉区分「本报告漏洞已全部完成」与「仍有未闭环漏洞」的报告；
     闭环口径与工单复测状态判定一致（已修复 / 已忽略视为已完成）。
@@ -31,6 +31,9 @@ class PlanReportBrief(ReportBrief):
     vul_total: int = 0  # 报告章节关联的漏洞总数
     vul_closed: int = 0  # 其中已完成（已修复/已忽略）的数量
     all_closed: bool = False  # 是否全部完成（vul_total > 0 且全部已完成）
+    is_retest: bool = False  # 报告自身是否为复测报告（标题含「复测」）
+    # none 未发起复测 / ongoing 复测中 / done 复测完成（见 plan_service.retest_state_of）
+    retest_state: str = "none"
 
 
 class ReportMetaIn(BaseModel):
@@ -74,6 +77,8 @@ class ReportListOut(ReportMetaIn):
     testing_plan_id: int | None = None
     ticket_id: str = ""  # 关联工单号（由关联渗透测试工单提供，未关联为空）
     ticket_system_name: str = ""  # 关联工单的测试系统名称
+    # none 未发起复测 / ongoing 复测中 / done 复测完成（见 plan_service.retest_state_of）
+    retest_state: str = "none"
     create_time: datetime | None = None
     update_time: datetime | None = None
 

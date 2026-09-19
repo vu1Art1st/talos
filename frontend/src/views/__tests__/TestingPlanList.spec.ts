@@ -56,9 +56,15 @@ describe('TestingPlanList 工单列表页', () => {
       if (url === '/testing-plans/conclusion') {
         return {
           data: {
-            summary: '本次共测试 1 个系统。',
-            departments: 1, systems: 1, vuln_systems: 0, vulns: 0,
-            safe_systems: 0, fixed_systems: 0, fixing_systems: 0,
+            summary: '渗透测试方面，统计周期内（本周）共完成1个部门（安全部）的1个系统测试工作。'
+              + '其中初测完成1个系统发现3个漏洞。复测完成1个系统，其中0个系统已完成整改，'
+              + '1个系统未完成整改仍存在漏洞未修复。请相关部门尽快完成漏洞修复并提交复测。'
+              + '具体漏洞情况详见附件。',
+            period_text: '本周',
+            departments: 1, department_names: ['安全部'], systems: 1,
+            first_test_systems: 1, first_test_vulns: 3,
+            retest_systems: 1, retest_fixed_systems: 0, retest_unfixed_systems: 1,
+            retest_started_systems: 1, retest_report_count: 1,
           },
         }
       }
@@ -90,7 +96,13 @@ describe('TestingPlanList 工单列表页', () => {
     expect(call, '应请求结论接口').toBeTruthy()
     // 筛选参数由 filterParams() 统一拼装（search 至少存在，保证与列表口径一致）
     expect(call?.[1]?.params).toHaveProperty('search')
-    expect(wrapper.text()).toContain('本次共测试 1 个系统。')
+    // 周期名称随结论请求下发（未选周期为空串），供结论文案括注
+    expect(call?.[1]?.params).toHaveProperty('period_label')
+    expect(wrapper.text()).toContain('统计周期内（本周）')
+    // 新口径卡片：初测完成系统 / 初测发现漏洞 / 复测完成系统 / 已完成整改 / 未完成整改
+    expect(wrapper.text()).toContain('初测发现漏洞')
+    expect(wrapper.text()).toContain('未完成整改')
+    expect(wrapper.text()).toContain('周期内发起复测')
     wrapper.unmount()
   })
 })
