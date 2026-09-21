@@ -1,7 +1,8 @@
 -r requirements.txt
 pytest>=8.0
 pytest-asyncio>=0.23
-aiosqlite>=0.20
+# aiosqlite（SQLite 异步驱动）已随 2026-09-21「统一 PostgreSQL 单栈」收口移除；
+# 测试库自该日起为 PostgreSQL（asyncpg）。如需追溯旧实现，见 git 历史。
 
 # 静态检查（2026-09-17 审计引入）：ruff = lint（未使用导入/长行等）；vulture = 死代码
 ruff>=0.16

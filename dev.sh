@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Talos 一键本地开发脚本（Linux / macOS）
-# - 后端：SQLite + 免队列模式，无需 Postgres/Redis，绑定 0.0.0.0:${BACKEND_PORT}
+# - 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 6379，见 docs/LOCAL_DEV_SETUP.md）
+#   凭据复用仓库根目录 .env 的 POSTGRES_USER / POSTGRES_PASSWORD；开发库 = POSTGRES_DB（默认 vulnplatform）
+# - 后端：免队列模式（后台任务进程内执行，无需另开 arq worker），绑定 0.0.0.0:${BACKEND_PORT}
 # - 前端：Vite Dev Server，绑定 0.0.0.0:${FRONTEND_PORT}，支持通过 VPS_IP:PORT 外部访问
 # - 内置端口冲突检测与健康检查：启动前检测端口占用；启动后轮询 HTTP 确认服务真正响应，
 #   发现端口冲突或「假启动」（进程存在但服务未监听）时明确提示并给出处理建议
@@ -137,6 +139,36 @@ check_port_free "$BACKEND_PORT" "后端"
 check_port_free "$FRONTEND_PORT" "前端"
 echo "[dev] 端口检查通过：$BACKEND_PORT / $FRONTEND_PORT 均空闲。"
 
+# ---------- 依赖服务预检（DBngin 托管的 PostgreSQL / Redis） ----------
+if ! is_port_listening 5432; then
+  echo "[dev] ⚠ 依赖服务未启动：PostgreSQL (DBngin, 16) 未监听 127.0.0.1:5432！"
+  echo "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
+  exit 1
+fi
+if ! is_port_listening 6379; then
+  echo "[dev] ⚠ 依赖服务未启动：Redis (DBngin, 7.x) 未监听 127.0.0.1:6379！"
+  echo "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
+  exit 1
+fi
+echo "[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(6379) 均在监听。"
+
+# ---------- 解析根 .env 的 PostgreSQL 凭据（与 docker-compose 共用一份） ----------
+PG_USER=""
+PG_PASSWORD=""
+PG_DB=""
+if [ -f "$ROOT/.env" ]; then
+  PG_USER=$(grep -E '^\s*POSTGRES_USER\s*=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d '[:space:]')
+  PG_PASSWORD=$(grep -E '^\s*POSTGRES_PASSWORD\s*=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d '[:space:]')
+  PG_DB=$(grep -E '^\s*POSTGRES_DB\s*=' "$ROOT/.env" | head -1 | cut -d= -f2- | tr -d '[:space:]')
+fi
+if [ -z "$PG_USER" ] || [ -z "$PG_PASSWORD" ]; then
+  echo "[dev] ⚠ 无法从仓库根目录 .env 解析 POSTGRES_USER / POSTGRES_PASSWORD！"
+  echo "[dev] 请确认 .env 存在且包含这两项（与 docker-compose 部署共用同一份凭据）。"
+  exit 1
+fi
+PG_DB="${PG_DB:-vulnplatform}"
+echo "[dev] 数据库凭据已加载：用户 $PG_USER，库 $PG_DB（来自 .env）"
+
 if [ ! -x "$BACKEND/.venv/bin/python" ]; then
   echo "[dev] 初始化后端虚拟环境（Python 3.12）并安装依赖..."
   if command -v uv >/dev/null 2>&1; then
@@ -156,12 +188,16 @@ if [ ! -d "$FRONTEND/node_modules" ]; then
 fi
 
 # ---------- 启动后端（后台）并等待就绪 ----------
-echo "[dev] 启动后端 http://0.0.0.0:$BACKEND_PORT （SQLite + 免队列）"
+echo "[dev] 启动后端 http://0.0.0.0:$BACKEND_PORT （PostgreSQL[DBngin] + Redis + 免队列）"
 (
   cd "$BACKEND"
-  # 开发模式：开启 DEBUG（放宽密钥校验、暴露 API 文档），固定内置 admin 初始口令
+  # 开发模式：DBngin 托管 PostgreSQL + Redis + 免队列 + DEBUG + 固定内置 admin 初始口令。
   # --host 0.0.0.0：绑定所有网卡，否则仅 127.0.0.1 可访问（VPS 外部无法连接）
-  VP_DATABASE_URL='sqlite+aiosqlite:///./dev.db' VP_DISABLE_QUEUE=1 VP_DEBUG=1 VP_INITIAL_ADMIN_PASSWORD='admin123' \
+  # DISABLE_QUEUE=1：后台任务在 API 进程内执行，无需另开 arq worker（热重载友好）；
+  # Redis 真实承担限流/登录锁定/token 轮换（不再走进程内降级）。
+  VP_DATABASE_URL="postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:5432/${PG_DB}" \
+  VP_REDIS_URL='redis://127.0.0.1:6379/0' VP_DISABLE_REDIS=0 VP_DISABLE_QUEUE=1 VP_DEBUG=1 \
+  VP_INITIAL_ADMIN_PASSWORD='admin123' \
     exec "$BACKEND/.venv/bin/python" -m uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT"
 ) &
 BACKEND_PID=$!
@@ -169,7 +205,7 @@ trap 'echo "[dev] 停止后端..."; kill "$BACKEND_PID" 2>/dev/null || true' EXI
 
 if ! wait_service_ready "$BACKEND_PORT" "后端" "$BACKEND_HEALTH_PATH"; then
   print_fake_start_advice "$BACKEND_PORT" "后端" "$BACKEND_HEALTH_PATH" \
-    "若为端口冲突，请先释放端口；若为数据库被锁，请关闭占用 dev.db 的进程后重试。"
+    "若为端口冲突，请先释放端口；若为数据库连接失败，请检查 DBngin 服务是否启动、.env 凭据是否正确后重试。"
   kill "$BACKEND_PID" 2>/dev/null || true
   exit 1
 fi

@@ -1,4 +1,4 @@
-"""dev.db 高质量种子数据：清空全部业务数据后重建（基础账号 + 全域关联数据）。
+"""本地开发库高质量种子数据：清空全部业务数据后重建（基础账号 + 全域关联数据）。
 
 生成口径：
 - 时间线覆盖近 12 个月（支撑 Dashboard 趋势图 / 部门透视）；
@@ -14,6 +14,7 @@
 """
 import asyncio
 import os
+import re
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -22,8 +23,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+def _default_dev_dsn() -> str:
+    """默认目标：仓库根 .env 描述的本机 PostgreSQL 开发库（与 dev 脚本 / conftest 同源凭据）。
+
+    返回空串表示 .env 缺 `POSTGRES_PASSWORD`，此时不注入 DSN，交由 `_assert_dev_database`
+    给出可操作的报错（而不是让连接层抛难懂的异常）。
+    """
+    env_file = Path(__file__).resolve().parents[2] / ".env"
+    creds: dict[str, str] = {}
+    if env_file.exists():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^\s*(POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB)\s*=\s*(.+?)\s*$", line)
+            if m:
+                creds[m.group(1)] = m.group(2)
+    password = creds.get("POSTGRES_PASSWORD", "")
+    if not password:
+        return ""
+    user = creds.get("POSTGRES_USER", "vulnplatform")
+    db_name = creds.get("POSTGRES_DB", "vulnplatform")
+    return f"postgresql+asyncpg://{user}:{password}@127.0.0.1:5432/{db_name}"
+
+
 # 必须在导入 app 之前设置（settings 为模块级单例）
-os.environ.setdefault("VP_DATABASE_URL", "sqlite+aiosqlite:///./dev.db")
+_dev_dsn = _default_dev_dsn()
+if _dev_dsn:
+    os.environ.setdefault("VP_DATABASE_URL", _dev_dsn)
 os.environ.setdefault("VP_DISABLE_QUEUE", "1")
 os.environ.setdefault("VP_SECRET_KEY", "dev-secret-key-0123456789abcdef-0123456789")
 
@@ -558,25 +582,44 @@ async def reset_and_seed() -> None:
     print("种子数据完成：" + "，".join(f"{k} {v}" for k, v in stats.items()))
 
 
+# 允许的目标：库名白名单 + 回环主机（双条件，避免「同名远程库」被误清）
+_DEV_DB_NAME_WHITELIST = {"vulnplatform", "vulnplatform_test"}
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
+
 def _assert_dev_database() -> None:
-    """目标库守卫：本脚本会 DELETE 全部业务表，只允许作用于本地 SQLite 开发库。
+    """目标库守卫：本脚本会 DELETE 全部业务表，只允许作用于**本机** PostgreSQL 开发/测试库。
 
     仅靠 `setdefault` 注入 DSN 并不能防止「环境里已导出 VP_DATABASE_URL」的场景，
-    因此这里显式校验目标库，避免误清测试/生产库（2026-09-17 审计 A-4）。
+    因此这里显式校验目标库名与主机，避免误清生产库（2026-09-17 审计 A-4）。
+    2026-09-21 随 SQLite 收口：判据由「仅 sqlite dev.db」改为「PG 库名白名单 + 回环主机」
+    ——主机维度是新增的，原 SQLite 版本靠文件名约束天然限于本机。
     """
+    from sqlalchemy.engine import make_url
+
     url = os.environ.get("VP_DATABASE_URL", "")
-    if not url.startswith("sqlite") or not url.rstrip("/").endswith("dev.db"):
+    db_name = host = ""
+    if url:
+        try:
+            parsed = make_url(url)
+            db_name = (parsed.database or "").strip()
+            host = (parsed.host or "").strip()
+        except Exception:  # noqa: BLE001  非法 DSN 一律拒绝（fail-closed）
+            db_name = host = ""
+    if db_name not in _DEV_DB_NAME_WHITELIST or host not in _LOOPBACK_HOSTS:
         print(
-            "拒绝执行：本脚本仅用于本地 SQLite 开发库（dev.db）。\n"
-            f"当前 VP_DATABASE_URL={url or '(未设置)'}\n"
-            "如确需在其它库执行，请先显式设置 VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db"
+            "拒绝执行：本脚本仅用于本机 PostgreSQL 开发/测试库"
+            f"（库名白名单：{' / '.join(sorted(_DEV_DB_NAME_WHITELIST))}，主机须为回环地址）。\n"
+            f"当前 VP_DATABASE_URL={url or '(未设置)'}"
+            f"（解析结果：库名={db_name or '无'}，主机={host or '无'}）\n"
+            "如确需在本机开发库执行，请显式设置 VP_DATABASE_URL，或由仓库根 .env 提供 POSTGRES_* 凭据。"
         )
         sys.exit(2)
 
 
 if __name__ == "__main__":
     if "--reset" not in sys.argv:
-        print("本脚本会清空 dev.db 全部数据！确认请追加 --reset 参数执行。")
+        print("本脚本会清空目标库全部业务数据！确认请追加 --reset 参数执行。")
         sys.exit(1)
     _assert_dev_database()
     asyncio.run(reset_and_seed())

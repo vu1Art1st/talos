@@ -40,7 +40,7 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 | Layer | Technologies |
 |---|---|
 | Backend | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
-| Database / Queue | PostgreSQL 16 (SQLite for local development) · Redis · arq async task queue |
+| Database / Queue | PostgreSQL 16 (unified across dev / test / production; hosted locally by DBngin) · Redis · arq async task queue |
 | Frontend | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
 | Document Processing | python-docx (parsing) · htmldocx + pygments (export) · Gotenberg (PDF conversion) |
 | Deployment | Docker Compose (api / worker / frontend / postgres / redis / gotenberg) |
@@ -86,7 +86,13 @@ Prerequisites: Docker and the Docker Compose plugin installed on the server.
 
 ## Local Development
 
-One-command scripts (create the virtualenv and install dependencies automatically; SQLite + queue-free mode, no Postgres/Redis needed; built-in account fixed to `admin / admin123`):
+One-command scripts (create the virtualenv and install dependencies automatically; connect to a local DBngin-hosted PostgreSQL 16 + Redis 7; built-in account fixed to `admin / admin123`):
+
+> Prerequisite: PostgreSQL 16 (5432) and Redis 7 (6379) started locally via [DBngin](https://dbngin.com/),
+> with the role plus the `vulnplatform` / `vulnplatform_test` databases created (**databases must be created
+> with explicit UTF8 encoding**). One-time setup and troubleshooting:
+> [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md). The scripts probe both ports and fail with a clear
+> message if the services are not ready.
 
 ```bash
 # Windows
@@ -101,12 +107,13 @@ Then open http://localhost:27014 (services bind to 0.0.0.0, externally reachable
 <details>
 <summary>Manual steps</summary>
 
-Backend (Postgres/Redis-free):
+Backend (requires the local DBngin PostgreSQL 16 to be running with the `vulnplatform` database created — see [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md)):
 
 ```bash
 cd backend
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
-set VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db
+set VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<password>@127.0.0.1:5432/vulnplatform
+set VP_REDIS_URL=redis://127.0.0.1:6379/0
 set VP_DISABLE_QUEUE=1
 set VP_DEBUG=1
 set VP_INITIAL_ADMIN_PASSWORD=admin123
@@ -127,7 +134,10 @@ Run tests:
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest          # backend pytest
+.venv/Scripts/python -m pytest          # backend pytest (test DB = PostgreSQL vulnplatform_test)
+# In a managed/sandboxed terminal (WorkBuddy / CodeBuddy), disable the delete guard or pytest's
+# temp-dir cleanup will be aborted:
+# CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python -m pytest -p no:cacheprovider --basetemp=_pytest_tmp
 
 cd frontend
 pnpm test                               # frontend vitest

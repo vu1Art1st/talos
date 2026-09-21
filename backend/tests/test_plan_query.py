@@ -253,9 +253,9 @@ def test_period_condition_uses_datetime_binds():
     """PG 守卫：周期的 DateTime 分支必须绑日期时间参数，禁止在列上套 `date()` 比日期串。
 
     背景（2026-09-19 线上 500）：`func.date(col) >= '2026-09-14'` 会把日期串按 VARCHAR 绑定，
-    PostgreSQL 不存在 `date >= character varying` 算子（asyncpg 直接抛 UndefinedFunctionError）；
-    而共享会话库是 SQLite，两侧都是文本会「看似通过」——接口级用例发现不了这类差异，
-    故此处用 PostgreSQL 方言编译条件做静态守卫。
+    PostgreSQL 不存在 `date >= character varying` 算子（asyncpg 直接抛 UndefinedFunctionError）。
+    测试库自 2026-09-21 起同为 PostgreSQL，但接口级用例只在「恰好走到该分支且数据非空」时才暴露，
+    静态方言编译断言能更早、更准地失败，故保留为快速反馈守卫。
     """
     from sqlalchemy import select
     from sqlalchemy.dialects import postgresql

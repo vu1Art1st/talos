@@ -1,7 +1,8 @@
 # Talos 部署与运维手册
 
 面向在 VPS 上用 Docker 部署、升级、备份与迁移 Talos 的操作指引。生产采用
-`docker-compose.yml` 编排的 **PostgreSQL**（不是本地开发用的 SQLite `dev.db`）。
+`docker-compose.yml` 编排的 **PostgreSQL 16**（与本地开发/测试同方言同大版本，仅部署形态不同：
+容器 vs 本机 DBngin）。
 
 - 生产数据只存放在两个 Docker 命名卷：`pg_data`（数据库）、`storage_data`（上传图片 / 导入导出原始文档）。
 - 后端启动时会自动建表并写入内置角色 / admin / 字典预设（`init_db`，幂等）。
@@ -51,8 +52,7 @@
    docker compose up -d --build
    ```
 
-   表结构、内置角色 / 字典、admin 账号都会自动创建，**无需手工初始化数据库，也无需清除任何 SQLite 数据**
-   （`dev.db` 仅本地开发使用，生产不加载）。
+   表结构、内置角色 / 字典、admin 账号都会自动创建，**无需手工初始化数据库**。
 
 3. 取初始 admin 口令（若 `.env` 未设 `VP_INITIAL_ADMIN_PASSWORD`，随机生成且仅打印一次）：
 
@@ -65,17 +65,15 @@
 
 ---
 
-## 二、是否需要清除 SQLite 数据？
+## 二、是否需要清除数据？
 
-不需要。
+首次部署**不需要**任何清理：postgres 是全新空卷，天然干净。
 
-- 生产用 PostgreSQL，`backend/dev.db`（SQLite）只在本地 `dev.sh` / `dev.ps1` 开发时使用，生产完全不读它。
-- 首次部署时 postgres 是全新空卷，天然干净。
-- 仅当你想丢弃某个**旧 `pg_data` 卷**里的历史数据、重新开局时才需清库：
+仅当你想丢弃某个**旧 `pg_data` 卷**里的历史数据、重新开局时才需清库：
 
-  ```bash
-  docker compose down -v   # ⚠️ 会删除全部卷及业务数据，确认无数据后再执行
-  ```
+```bash
+docker compose down -v   # ⚠️ 会删除全部卷及业务数据，确认无数据后再执行
+```
 
 ---
 
@@ -340,8 +338,9 @@ bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgra
   sqlalchemy.exc.ProgrammingError: column reports.vul_edit_snapshot does not exist
   ```
 
-后端的 `create_all` 只会补**缺失的表**，不会给已有表加列；`_migrate_lightweight`
-仅对 SQLite（本地开发库）生效，对 PostgreSQL 无效。因此缺列必须靠 Alembic 补齐。
+后端的 `create_all` 只会补**缺失的表**，不会给已有表加列；而 schema 演进自 2026-09-21 起
+只有 **Alembic 单轨**（SQLite 开发库专用的轻量迁移已随单数据库栈收口删除，**没有第二条兜底路径**）。
+因此缺列必须靠 Alembic 补齐。
 
 ### 排查步骤
 

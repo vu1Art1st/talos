@@ -11,16 +11,15 @@ __pycache__/
 # venv 切换/回退时的备份目录（如 .venv.old310），避免误入库
 .venv.*/
 .pytest_cache/
+# pytest 基线临时目录：受管终端下须以 --basetemp 指向仓库内固定目录（默认系统临时目录
+# 会被删除守卫视为越界目标），故该目录会反复生成，勿入库。见 docs/LOCAL_DEV_SETUP.md 第四节
+backend/_pytest_tmp/
 
-# ---------- 数据库（本地 SQLite 及备份；dev.db 无路径前缀，覆盖各目录同名文件） ----------
-dev.db
-_devrun.db
-test.db*
-test_vp*.db
-*.db-journal
-*.db-wal
-*.db-shm
-*.db.bak*
+# ---------- 数据库 ----------
+# SQLite 专属忽略项（dev.db / _devrun.db / test.db* / test_vp*.db / *.db-*）
+# 已随 2026-09-21「统一 PostgreSQL 单栈」收口移除；本地开发库现为 PostgreSQL。
+# DBngin 本地数据目录（PostgreSQL/Redis 实例数据，含二进制文件，勿入库）
+dev-database/
 
 # ---------- 本地存储与备份（含业务数据，勿入库） ----------
 /storage/

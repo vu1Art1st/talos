@@ -212,12 +212,12 @@
 ### 3.4 `seed_dev_data.py` — 开发种子数据（活跃·开发辅助）
 
 - **用途**：清空全部业务表后重建高质量演示数据（近 12 个月时间线、7 种工单状态、6 种漏洞状态、5 类来源、资产-漏洞-工单-报告完整关联、知识库复用 JSON 数据源）。
-- **调用**：`python -m scripts.seed_dev_data --reset` —— **不追加 `--reset` 会直接退出**（557-559 行）。
-- **依赖**：`scripts.seed_knowledge.SEED_DATA`（45 行）、`app.models`、`app.core.security.hash_password`。
-- **环境处理**：`setdefault` 方式注入 `VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db`、`VP_DISABLE_QUEUE=1`、`VP_SECRET_KEY=dev-…`（26-28 行，必须在导入 app 之前设置）。
-- **破坏性**：先 `create_all` 再对 `ALL_TABLES`（48-56 行，26 张业务表）逐表 `DELETE`。
+- **调用**：`python -m scripts.seed_dev_data --reset` —— **不追加 `--reset` 会直接退出**（620-623 行）。
+- **依赖**：`scripts.knowledge_data.SEED_DATA`（68 行）、`app.models`、`app.core.security.hash_password`。
+- **环境处理**：先解析仓库根 `.env` 得到本机开发库 DSN（`postgresql+asyncpg://…@127.0.0.1:5432/vulnplatform`，26-49 行），再以 `setdefault` 注入；另注入 `VP_DISABLE_QUEUE=1`、`VP_SECRET_KEY=dev-…`（51-52 行）。必须在导入 app 之前设置。
+- **破坏性**：先 `create_all` 再对 `ALL_TABLES`（71-79 行，26 张业务表）逐表 `DELETE`。
 - **账号**：`admin / admin123`（管理员）；其余测试账号密码统一 `Talos@2026`。
-- **✅ 目标库守卫（原 P1 风险，2026-09-17 已修复）**：`os.environ.setdefault("VP_DATABASE_URL", …)`（26 行）**只在变量缺失时生效**；若环境中已导出指向生产/测试 PostgreSQL 的 DSN，本脚本会清空该库并写入演示数据。现已在启动时调用 `_assert_dev_database()`：目标非本地 `sqlite...dev.db` 时以**退出码 2 拒绝执行**（守卫用例 `tests/test_seed_dev_data_guard.py`）。
+- **✅ 目标库守卫（原 P1 风险，2026-09-17 已修复；2026-09-21 随 SQLite 收口改造）**：`setdefault` 注入**只在变量缺失时生效**，若环境中已导出指向生产库的 DSN，本脚本会清空该库并写入演示数据。现启动时调用 `_assert_dev_database()`（590-617 行）：要求**库名 ∈ {`vulnplatform`, `vulnplatform_test`} 且主机为回环地址**，二者缺一即以**退出码 2 拒绝执行**；缺失/非法的 DSN 一律 fail-closed（守卫用例 `tests/test_seed_dev_data_guard.py`）。
 
 ### 3.5 `knowledge_data.py` — 模板库数据加载（活跃·共享模块）
 
@@ -266,7 +266,7 @@
 
 ### 3.10 `migrate_utc_to_utc8.py` — UTC→UTC+8 历史数据迁移（一次性）
 
-- **用途**：把存量 naive UTC 时间整体 +8 小时，遍历 `Base.metadata.sorted_tables` 中所有 `DateTime` 列（39-47 行），SQLite 用 `datetime(col,'+8 hours')`、其他方言用 `INTERVAL '8 hours'`（50-53 行）。
+- **用途**：把存量 naive UTC 时间整体 +8 小时，遍历 `Base.metadata.sorted_tables` 中所有 `DateTime` 列（37-47 行），统一用 `INTERVAL '8 hours'`（48 行；原 SQLite 分支已随「统一 PostgreSQL 单栈」收口删除）。
 - **调用**：`python -m scripts.migrate_utc_to_utc8 [--dry-run]`。
 - **依赖**：`app.models`（须先导入以注册全部模型，22 行）、`app.core.config.settings.DATABASE_URL`、`app.db.Base`。
 - **重要限制**：纯日期字符串列（如 `reports.test_start/test_end`）无法精确换算，**脚本不处理，需人工核对**（14-15 行）。
@@ -298,7 +298,7 @@
 | 编号 | 对象 | 结论 | 执行步骤 |
 |---|---|---|---|
 | **M-1** | `seed_knowledge.py` + `sync_knowledge_templates.py` | ✅ **已于 2026-09-17 完成合并** | 新增 `backend/scripts/knowledge_data.py`（`DATA_FILE` + `load_seed_data()` + `SEED_DATA`，模板库数据唯一加载实现）；`seed_dev_data.py` 改为 `from scripts.knowledge_data import SEED_DATA`；`seed_knowledge.py` 已删除（其 upsert CLI 是 `sync_knowledge_templates` 的子集，而后者按 `vuln_types` 表真实码值校验、口径更严；`USER_GUIDE.md` 早已指向 sync）。 |
-| **M-2** | 6 个一次性脚本的重复样板 | ✅ **2026-09-18 完成（6/6）** | `backend/scripts/_common.py`（86 行）提供 `bootstrap()`（静默 SQLAlchemy 回显 + 幂等注入 sys.path）、`dry_run_flag()`、`save_backup(records, prefix, indent=2)`、`run(main, **kwargs)`。**6 个脚本全部迁移**：`backfill_retest.py`（50→47）、`backfill_vul_submit_time.py`（73→69）、`fix_plan_retest_state.py`（109→100）、`fix_retest_section_dup.py`（112→98）、`repair_report_section_order.py`（87→83）、`migrate_utc_to_utc8.py`（81→76）；`backend/scripts/` 合计 **1 403 → 1 387 行**。**关键修正**：`save_backup` 原先写死 `backend/storage/backups`，与既有脚本的 `settings.storage_sub("backups")`（尊重 `VP_STORAGE_DIR`，容器内 `/app/storage/backups`）不一致 → 已统一，且 `settings` 改为**函数内延迟导入**（避免 `import scripts._common` 时因必填环境变量缺失连带影响只用 `run()` 的脚本）。`run()` 的 docstring 固化「dry-run 须先取纯数据快照再 rollback（规避 `MissingGreenlet`）」约定。**验证**：ruff 全绿；dev.db 副本上 8 次运行（4 脚本 × dry/real）输出与退出码**与改造前逐字一致**；另以造数运行触发两个备份分支，确认备份落在配置目录且为合法 JSON。 |
+| **M-2** | 6 个一次性脚本的重复样板 | ✅ **2026-09-18 完成（6/6）** | `backend/scripts/_common.py`（86 行）提供 `bootstrap()`（静默 SQLAlchemy 回显 + 幂等注入 sys.path）、`dry_run_flag()`、`save_backup(records, prefix, indent=2)`、`run(main, **kwargs)`。**6 个脚本全部迁移**：`backfill_retest.py`（50→47）、`backfill_vul_submit_time.py`（73→69）、`fix_plan_retest_state.py`（109→100）、`fix_retest_section_dup.py`（112→98）、`repair_report_section_order.py`（87→83）、`migrate_utc_to_utc8.py`（81→76）；`backend/scripts/` 合计 **1 403 → 1 387 行**。**关键修正**：`save_backup` 原先写死 `backend/storage/backups`，与既有脚本的 `settings.storage_sub("backups")`（尊重 `VP_STORAGE_DIR`，容器内 `/app/storage/backups`）不一致 → 已统一，且 `settings` 改为**函数内延迟导入**（避免 `import scripts._common` 时因必填环境变量缺失连带影响只用 `run()` 的脚本）。`run()` 的 docstring 固化「dry-run 须先取纯数据快照再 rollback（规避 `MissingGreenlet`）」约定。**验证**：ruff 全绿；dev.db 副本上 8 次运行（4 脚本 × dry/real）输出与退出码**与改造前逐字一致**（该验证发生于 2026-09-18，当时本地库仍为 SQLite；SQLite 已于 2026-09-21 收口）；另以造数运行触发两个备份分支，确认备份落在配置目录且为合法 JSON。 |
 | **M-3** | shell：三处「非 root 自动 sudo 重执行自身」 | **抽取**到 `backup-common.sh::ensure_root()` | 现存三份几乎相同的代码块：`backup.sh:9-11`、`backup-incremental.sh:8-10`、`restore.sh:11-13`。调用顺序需调整为「先 source common（无副作用，仅计算 `DOCKER`）→ `ensure_root` → 再 `cd`」。优先级 P3（收益小、需回归验证备份流程）。 |
 | **M-4** | shell：`backup.sh` 与 `backup-incremental.sh` 公共序列 | **可选抽取** `prepare_backup_env()` / `finalize_manifest()` | 重复项：容器前置检查 2 行、`ts`/`ym` 生成、`VOL_PATH` 解析、`mkdir -p`、`MANIFEST.json` 写入、`backups/latest` 软链、`notify` 收尾（约 15 行）。优先级 P3。 |
 

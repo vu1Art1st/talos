@@ -34,7 +34,6 @@ async def migrate(dry_run: bool = False) -> int:
         async with engine.connect() as conn:
             trans = await conn.begin()
             try:
-                is_sqlite = engine.dialect.name == "sqlite"
                 for table in Base.metadata.sorted_tables:
                     for column in table.columns:
                         # JSON 等类型不提供 python_type（或抛 NotImplementedError），跳过
@@ -46,10 +45,7 @@ async def migrate(dry_run: bool = False) -> int:
                             continue
                         table_name = table.name
                         col_name = column.name
-                        if is_sqlite:
-                            expr = f'"{col_name}" = datetime("{col_name}", \'+8 hours\')'
-                        else:
-                            expr = f'"{col_name}" = "{col_name}" + INTERVAL \'8 hours\''
+                        expr = f'"{col_name}" = "{col_name}" + INTERVAL \'8 hours\''
                         result = await conn.execute(text(
                             f'UPDATE "{table_name}" SET {expr} WHERE "{col_name}" IS NOT NULL'
                         ))

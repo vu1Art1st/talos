@@ -161,7 +161,7 @@ def _apply_search_filters(
 def _keyword_match(kw: str, deep: bool):
     """关键词的匹配条件与相关度打分表达式；kw 为空时返回 (None, None)。
 
-    参考链接为 JSON 列，统一 CAST 成文本参与匹配（SQLite 存 TEXT、PG 为 json 均可转）。
+    参考链接为 json 列，统一 CAST 成文本参与匹配（json 与 text 之间无隐式比较算子，须显式转换）。
     """
     refs = cast(KnowledgeEntry.references, Text)
     if not kw:

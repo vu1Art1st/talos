@@ -131,9 +131,9 @@ def _datetime_date_range(col, start: datetime | None, end: datetime | None):
     """DateTime 列的**日期**区间：`[开始日 00:00, 结束日次日 00:00)` 半开区间。
 
     **禁止改回 `func.date(col) >= '<日期串>'`**：那样日期串会按 VARCHAR 绑定，PostgreSQL
-    不存在 `date >= character varying` 算子，asyncpg 直接抛 UndefinedFunctionError（线上 500：
-    `operator does not exist: date >= character varying`）；而 SQLite 因两侧都是文本「看似通过」，
-    属典型 SQLite/PG 差异陷阱。半开区间同时不在列上套函数，可利用 start_time 等索引。
+    不存在 `date >= character varying` 算子，asyncpg 直接抛 UndefinedFunctionError
+    （2026-09-19 线上四个入口 500：`operator does not exist: date >= character varying`）。
+    半开区间同时不在列上套函数，可利用 start_time 等索引。
     """
     conds = [col.is_not(None)]
     if start is not None:

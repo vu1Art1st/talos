@@ -25,6 +25,65 @@
 
 ---
 
+## [2.19.1] - 2026-09-21
+
+### 变更
+
+- **本地开发环境切换 DBngin 托管 PostgreSQL + Redis**（2026-09-21）：`dev.ps1` / `dev.sh`
+  由「SQLite + 免队列」改为连接 DBngin 本机原生托管的 PostgreSQL 16（`vulnplatform` 开发库）与
+  Redis 7——凭据复用根目录 `.env`，新增依赖服务预检（5432/6379 未监听即给出明确指引）；
+  后端测试库同步切至 `vulnplatform_test`（conftest 支持外部 `VP_DATABASE_URL` 覆盖以兼容
+  CI services 容器，并以「库名必须 `_test` 结尾」护栏防止误清开发/生产库，session 开始/结束
+  各执行一次 DROP SCHEMA 重建）。开发与测试自此与生产同方言同大版本，消除 SQLite 掩盖
+  PostgreSQL 方言差异导致的「本地测不出」缺陷（单栈化后该类风险整体消失；搭建手册见
+  `docs/LOCAL_DEV_SETUP.md`）。**阶段二收口已在同批完成**（见下方「移除」）。
+  本批次测试基线：**290 项 = 289 passed + 1 skipped + 0 failed**（旧 SQLite 基线 272 passed + 1 skipped；
+  阶段一切换后为 283 passed，阶段二新增守卫用例 6 项后为 289）。
+- **开发种子脚本目标库守卫改为 PostgreSQL 口径**（2026-09-21）：`scripts/seed_dev_data.py` 的默认 DSN
+  由「写死 `sqlite+aiosqlite:///./dev.db`」改为解析仓库根 `.env`（指向本机 `vulnplatform` 开发库）；
+  `_assert_dev_database()` 判据由「仅限 SQLite dev.db」改为「库名 ∈ {`vulnplatform`,
+  `vulnplatform_test`} **且** 主机为回环地址」，二者缺一即以退出码 2 拒绝执行，缺失/非法 DSN
+  一律 fail-closed（较原方案增加主机维度：只校验库名会放过「同名远程库」）。
+- **文档同步单数据库栈口径**（2026-09-21）：`AGENTS.md` 技术栈表与开发态环境变量改 PostgreSQL、
+  新增「数据库迁移（单轨）」条目（并修正原先指向不存在章节的悬空引用）、后端测试基线由过期的
+  `189 passed` 校正为 `289 passed`；`README.md` / `README_EN.md` 一键开发步骤补 DBngin 前置与
+  PG DSN；`docs/DEPLOY.md` 删「是否需要清除 SQLite 数据」节、排障节改单轨口径；
+  `docs/SCRIPTS.md` 更新 `seed_dev_data.py` / `migrate_utc_to_utc8.py` 的守卫与方言描述及行号。
+
+### 移除
+
+- **SQLite 双轨迁移与相关守卫**（2026-09-21，阶段二收口）：删 `app/db.py::_migrate_lightweight`
+  共 **358 行**（`app/db.py` 由 496 行降至 138 行）及其在 `init_db` 中的调用——schema 演进自此
+  **只有 Alembic 单轨**，无第二条兜底路径（`init_db` 的 `create_all` + 种子保留，PG 生产依赖）。
+  同步删除 `tests/test_schema_consistency.py` 的 SQLite 轨断言（保留 `DEPRECATED_COLUMNS` 模型断言
+  与 Alembic 断言），`scripts/migrate_utc_to_utc8.py` 的 SQLite 分支，以及 `requirements-dev.txt`
+  的 `aiosqlite` 依赖。
+- 新增两条收口守卫防回退（`tests/test_schema_consistency.py`）：`test_no_sqlite_driver_imports_in_app`
+  （`app/` 下不得再引用 `aiosqlite` / `sqlite3`）与 `test_default_database_url_is_postgresql`
+  （配置默认 DSN 不得回退为 SQLite）；`tests/test_seed_dev_data_guard.py` 按新守卫语义重写。
+- **一次性数据回填函数与 SQLite 残留文件**（2026-09-21，阶段三收尾）：删除
+  `app/db.py::_backfill_asset_tech_fields`（历史技术字段回填，37 行函数 + 其 `init_db` 调用；
+  `app/db.py` 138 → 98 行）。删除**前置已在生产 PG 核实收敛**：44 个资产全部满足「新 JSON 列已归一
+  且旧列无待搬运数据」（核实判定 `rows_needing_backfill = 0`，各分项计数亦为 0）；该核实 SQL 与
+  函数行为的等价性已在本地 PostgreSQL 上用 5 类边界数据验证。同批删除本地 SQLite 残留
+  `backend/dev.db`（618 KB / 31 张表；演示数据可由 `scripts/seed_dev_data.py` 重建）、
+  `.gitignore` 中 SQLite 专属忽略项，并清理 4 个冻结迁移文件里的历史 SQLite 注释
+  （`d9e0f1a2b3c4` 的方言防御**代码**分支按「历史迁移内容冻结」原则保留未动）。
+  注：旧列 `ports` / `services` / `middleware` / `database_type` 已无任何读写方（唯一引用即该函数），
+  但**删列不在本次范围**（属独立 schema 变更，须走 Alembic 迁移并登记 `DEPRECATED_COLUMNS`）。
+
+### 修复
+
+- **测试事件循环作用域与数据库连接池错配**（2026-09-21）：`backend/pytest.ini` 此前只声明了
+  fixture 侧的 `asyncio_default_fixture_loop_scope = session`，测试侧仍为默认的函数级 loop，
+  导致 session 级 fixture 建立的 asyncpg 连接池被跨 loop 复用，抛 `Event loop is closed` /
+  `'NoneType' object has no attribute 'send'`（SQLite + aiosqlite 走独立线程、对 loop 归属不敏感，
+  该缺陷长期被掩盖）。现补齐 `asyncio_default_test_loop_scope = session`，并新增回归守卫
+  `backend/tests/test_asyncio_loop_scope.py`（静态校验两条配置 + 运行时断言用例与 session
+  fixture 同 loop + 连接池可用性冒烟）。
+
+---
+
 ## [2.19.0] - 2026-09-20
 
 ### 新增

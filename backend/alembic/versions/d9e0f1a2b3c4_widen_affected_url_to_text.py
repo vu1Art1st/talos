@@ -7,8 +7,9 @@
 - `vulns.affected_url`（模型 app/models/business.py）
 - `import_records.affected_url`（模型 app/models/imports.py）
 
-幂等：仅当当前列类型不是 TEXT 时才改（重复执行为空操作）。SQLite 侧跳过 —— 其 VARCHAR
-只是类型亲和、不强制长度，且不支持 ALTER COLUMN TYPE，开发库由 `app/db.py` 轻量迁移兜底。
+幂等：仅当当前列类型不是 TEXT 时才改（重复执行为空操作）。
+（历史：曾跳过 SQLite —— 其 VARCHAR 仅为类型亲和、不强制长度且不支持 ALTER COLUMN TYPE，
+开发库当时由 app/db.py 轻量迁移兜底；该机制已于 2026-09-21 移除。）
 
 **回滚风险（重要）**：downgrade 把列改回 varchar(512) 时，若库中已存在超过 512 字符的数据，
 PostgreSQL 会直接拒绝该 DDL。紧急回滚请优先只回退应用代码、保留 TEXT 列（TEXT 本身无害）。
@@ -39,7 +40,7 @@ def _is_text(table: str, column: str) -> bool:
 
 def upgrade() -> None:
     if op.get_bind().dialect.name != "postgresql":
-        # SQLite 无需/无法改列类型；长度约束只存在于 PostgreSQL，由本迁移统一到 TEXT
+        # 非 PostgreSQL 方言直接跳过（历史遗留的 SQLite 兼容分支；长度约束只存在于 PostgreSQL）
         return
     if not _is_text("vulns", "affected_url"):
         op.alter_column(

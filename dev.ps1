@@ -1,6 +1,8 @@
 ﻿<#
 Talos 一键本地开发脚本（Windows）
-- 后端：SQLite + 免队列模式，无需 Postgres/Redis，绑定 0.0.0.0:$BackendPort
+- 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 6379，见 docs/LOCAL_DEV_SETUP.md）
+  凭据复用仓库根目录 .env 的 POSTGRES_USER / POSTGRES_PASSWORD；开发库 = POSTGRES_DB（默认 vulnplatform）
+- 后端：免队列模式（后台任务进程内执行，无需另开 arq worker），绑定 0.0.0.0:$BackendPort
 - 前端：Vite Dev Server，绑定 0.0.0.0:$FrontendPort，支持通过 VPS_IP:PORT 外部访问
 - 内置端口冲突检测与健康检查：启动前检测端口占用；启动后轮询 HTTP 确认服务真正响应，
   发现端口冲突或「假启动」（进程存在但服务未监听）时明确提示并给出处理建议
@@ -152,7 +154,7 @@ function Write-FakeStartAdvice {
     Write-Host "[dev] ⚠ $Name 启动超时（${HealthTimeout} 秒内未响应 http://127.0.0.1:$Port$Path）" -ForegroundColor Yellow
     Write-Host "[dev] 进程可能仍在但服务未正常监听（假启动）。"
     Write-Host "[dev] 请查看上方 $Name 启动日志中的错误（Traceback / 报错信息）。"
-    Write-Host "[dev] 常见原因：端口被占用、数据库被锁、依赖缺失、磁盘空间不足。"
+    Write-Host "[dev] 常见原因：端口被占用、数据库连接失败（DBngin 服务未启动/凭据不符）、依赖缺失、磁盘空间不足。"
     Write-Host "[dev] 可终止相关进程后重新运行本脚本。"
 }
 
@@ -166,6 +168,39 @@ foreach ($check in @(@{ Port = $BackendPort; Name = '后端' }, @{ Port = $Front
     }
 }
 Write-Host "[dev] 端口检查通过：$BackendPort / $FrontendPort 均空闲。" -ForegroundColor Green
+
+# ---------- 依赖服务预检（DBngin 托管的 PostgreSQL / Redis） ----------
+# 复用端口检测：5432/6379 处于 LISTEN 即视为服务已启动（DBngin 面板 Start 后即监听）
+foreach ($svc in @(@{ Port = 5432; Name = 'PostgreSQL (DBngin, 16)' }, @{ Port = 6379; Name = 'Redis (DBngin, 7.x)' })) {
+    if (-not (Test-PortInUse -Port $svc.Port)) {
+        Write-Host "[dev] ⚠ 依赖服务未启动：$($svc.Name) 未监听 127.0.0.1:$($svc.Port)！" -ForegroundColor Yellow
+        Write-Host "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
+        exit 1
+    }
+}
+Write-Host '[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(6379) 均在监听。' -ForegroundColor Green
+
+# ---------- 解析根 .env 的 PostgreSQL 凭据（与 docker-compose 共用一份） ----------
+$envFile = Join-Path $root '.env'
+$pgUser = $null; $pgPassword = $null; $pgDb = $null
+if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^\s*(POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB)\s*=\s*(.+?)\s*$') {
+            switch ($Matches[1]) {
+                'POSTGRES_USER' { $pgUser = $Matches[2] }
+                'POSTGRES_PASSWORD' { $pgPassword = $Matches[2] }
+                'POSTGRES_DB' { $pgDb = $Matches[2] }
+            }
+        }
+    }
+}
+if (-not $pgUser -or -not $pgPassword) {
+    Write-Host '[dev] ⚠ 无法从仓库根目录 .env 解析 POSTGRES_USER / POSTGRES_PASSWORD！' -ForegroundColor Yellow
+    Write-Host '[dev] 请确认 .env 存在且包含这两项（与 docker-compose 部署共用同一份凭据）。'
+    exit 1
+}
+if (-not $pgDb) { $pgDb = 'vulnplatform' }
+Write-Host "[dev] 数据库凭据已加载：用户 $pgUser，库 $pgDb（来自 .env）" -ForegroundColor Green
 
 if (-not (Test-Path $venvPython)) {
     Write-Host '[dev] 初始化后端虚拟环境（Python 3.12）并安装依赖...' -ForegroundColor Cyan
@@ -191,15 +226,19 @@ $backendProc = $null
 $frontendProc = $null
 
 try {
-    # 开发模式环境变量：SQLite + 免队列 + DEBUG（放宽密钥校验、暴露 API 文档）+ 固定内置 admin 初始口令
-    # Start-Process 会继承当前会话环境变量，须在启动前后端前统一设置
-    $env:VP_DATABASE_URL = 'sqlite+aiosqlite:///./dev.db'
+    # 开发模式环境变量：PostgreSQL(DBngin) + Redis(DBngin) + 免队列 + DEBUG + 固定内置 admin 初始口令
+    # Start-Process 会继承当前会话环境变量，须在启动前后端前统一设置。
+    # DISABLE_QUEUE=1：后台任务在 API 进程内执行，无需另开 arq worker（热重载友好）；
+    # Redis 真实承担限流/登录锁定/token 轮换（不再走进程内降级）。
+    $env:VP_DATABASE_URL = "postgresql+asyncpg://${pgUser}:${pgPassword}@127.0.0.1:5432/$pgDb"
+    $env:VP_REDIS_URL = 'redis://127.0.0.1:6379/0'
+    $env:VP_DISABLE_REDIS = '0'
     $env:VP_DISABLE_QUEUE = '1'
     $env:VP_DEBUG = '1'
     $env:VP_INITIAL_ADMIN_PASSWORD = 'admin123'
 
     # ---------- 启动后端（后台）并等待就绪 ----------
-    Write-Host "[dev] 启动后端 http://0.0.0.0:$BackendPort （SQLite + 免队列）" -ForegroundColor Cyan
+    Write-Host "[dev] 启动后端 http://0.0.0.0:$BackendPort （PostgreSQL[DBngin] + Redis + 免队列）" -ForegroundColor Cyan
     $backendProc = Start-Process -FilePath $venvPython `
         -ArgumentList '-m', 'uvicorn', 'app.main:app', '--reload', '--host', '0.0.0.0', '--port', "$BackendPort" `
         -WorkingDirectory $backend -NoNewWindow -PassThru

@@ -3,7 +3,7 @@ import time
 
 from app.core.config import settings
 
-try:  # redis 已在依赖中，但连接可能不可用（如 SQLite 单机开发）
+try:  # redis 已在依赖中，但连接可能不可用（如本地未启用 Redis 的单机运行）
     import redis.asyncio as aioredis
 except Exception:  # noqa: BLE001
     aioredis = None  # type: ignore[assignment]

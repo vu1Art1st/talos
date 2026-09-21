@@ -4,8 +4,8 @@
 - 新增 asset_id（FK assets.id）、vuln_id（FK vulns.id，均带索引）与 asset_belong（资产归属文本）；
 - department 语义调整为「部门」（选资产自动带出）。
 
-幂等：模型已不再映射的库（create_all 新库）或列已存在的库直接跳过；与
-app/db.py `_migrate_lightweight` 的 SQLite 加列保持同轨（双轨同步铁律）。
+幂等：模型已不再映射的库（create_all 新库）或列已存在的库直接跳过。
+（历史：当时还需与 app/db.py 的 SQLite 轻量迁移保持同轨；该双轨机制已于 2026-09-21 随 SQLite 收口移除。）
 
 Revision ID: c7d8e9f0a1b2
 Revises: b4c5d6e7f8a9

@@ -20,7 +20,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 评分列类型：Integer → Float（PostgreSQL 需显式 USING 转换；SQLite 由轻量迁移兜底）
+    # 评分列类型：Integer → Float（PostgreSQL 需显式 USING 转换）
     op.alter_column(
         'vulns', 'score',
         existing_type=sa.Integer(),

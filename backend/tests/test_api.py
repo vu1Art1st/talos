@@ -4506,8 +4506,8 @@ def _many_urls(count: int, prefix: str = "https://many.example.com/api") -> list
 async def test_affected_url_multi_value_within_limits(client: AsyncClient, auth: dict):
     """回归：影响URL 录入 20/50/100 条（总远超前 varchar(512)）不再 500，且读回一致。
 
-    旧实现该列是 varchar(512)，PostgreSQL 在 flush 时抛 StringDataRightTruncation →
-    兜底 500；SQLite 不校验长度，故此处用「写入成功 + 读回一致」固化行为。
+    旧实现该列是 varchar(512)，PostgreSQL 在 flush 时抛 StringDataRightTruncation → 兜底 500；
+    改用 TEXT 后以「写入成功 + 读回一致」固化行为（测试库即为 PG，长度约束真实生效）。
     """
     # 20 条：单漏洞录入
     urls20 = _many_urls(20)

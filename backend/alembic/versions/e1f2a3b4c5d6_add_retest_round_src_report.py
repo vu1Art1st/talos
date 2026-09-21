@@ -11,7 +11,8 @@
 手动流转与报告导入复测无源报告，保持 NULL。删除源报告时 SET NULL（不连带删除轮次）。
 存量数据由 `scripts/backfill_retest_src_report.py` 按 `source` 文本回填。
 
-幂等：仅当列不存在时新增（重复执行为空操作）；SQLite 侧由 `app/db.py` 轻量迁移兜底。
+幂等：仅当列不存在时新增（重复执行为空操作）。
+（历史：当时 SQLite 侧由 app/db.py 轻量迁移兜底；该机制已于 2026-09-21 随 SQLite 收口移除。）
 
 Revision ID: e1f2a3b4c5d6
 Revises: d9e0f1a2b3c4

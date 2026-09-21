@@ -40,7 +40,7 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 | 层 | 选型 |
 |---|---|
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
-| 数据库/队列 | PostgreSQL 16（本地开发 SQLite）· Redis · arq 异步任务队列 |
+| 数据库/队列 | PostgreSQL 16（开发 / 测试 / 生产统一，本地由 DBngin 托管）· Redis · arq 异步任务队列 |
 | 前端 | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
 | 文档处理 | python-docx（解析）· htmldocx + pygments（导出）· Gotenberg（PDF 转换） |
 | 部署 | Docker Compose（api / worker / frontend / postgres / redis / gotenberg） |
@@ -86,7 +86,11 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 
 ## 本地开发
 
-一键脚本（自动创建虚拟环境、安装依赖；SQLite + 免队列模式，无需 Postgres/Redis；固定内置账号 `admin / admin123`）：
+一键脚本（自动创建虚拟环境、安装依赖；连接本机 DBngin 的 PostgreSQL 16 + Redis 7；固定内置账号 `admin / admin123`）：
+
+> 前置：本机已用 [DBngin](https://dbngin.com/) 启动 PostgreSQL 16（5432）与 Redis 7（6379），并建好角色与
+> `vulnplatform` / `vulnplatform_test` 两个库（**建库须显式 UTF8**）——一次性步骤与排障见
+> [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md)。脚本会预检这两个端口，未就绪时给出明确提示。
 
 ```bash
 # Windows
@@ -101,12 +105,13 @@ bash dev.sh
 <details>
 <summary>手动步骤</summary>
 
-后端（可免 Postgres/Redis 依赖）：
+后端（需本机 DBngin 的 PostgreSQL 16 已启动并建好 `vulnplatform` 库，见 [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md)）：
 
 ```bash
 cd backend
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
-set VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db
+set VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform
+set VP_REDIS_URL=redis://127.0.0.1:6379/0
 set VP_DISABLE_QUEUE=1
 set VP_DEBUG=1
 set VP_INITIAL_ADMIN_PASSWORD=admin123
@@ -127,7 +132,9 @@ pnpm run dev   # http://localhost:27014，代理 /api 与 /storage 到 27015
 
 ```bash
 cd backend
-.venv/Scripts/python -m pytest          # 后端 pytest
+.venv/Scripts/python -m pytest          # 后端 pytest（测试库为 PostgreSQL 的 vulnplatform_test）
+# 受管终端（WorkBuddy / CodeBuddy 沙箱）须关闭删除守卫，否则 pytest 清理临时目录会被打断：
+# CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python -m pytest -p no:cacheprovider --basetemp=_pytest_tmp
 
 cd frontend
 pnpm test                               # 前端 vitest

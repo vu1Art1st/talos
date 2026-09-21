@@ -10,13 +10,13 @@ Talos 漏洞管理平台：漏洞全生命周期管理（前身洞察 2.0 / insi
 |---|---|
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic · arq + Redis |
 | 前端 | Vue 3 (`<script setup>` + TS) · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
-| 数据库 | 开发 SQLite（免队列），生产 PostgreSQL 16 |
+| 数据库 | PostgreSQL 16（开发 / 测试 / 生产统一；本地由 DBngin 原生托管，见 `docs/LOCAL_DEV_SETUP.md`） |
 | 部署 | Docker Compose（api / worker / frontend / postgres / redis / gotenberg） |
 
 ## 常用命令
 
 ```bash
-# 一键本地开发（Windows / Linux-macOS，SQLite + 免队列，自动建 venv 与装依赖）
+# 一键本地开发（Windows / Linux-macOS，连本机 DBngin 的 PostgreSQL 16 + Redis 7，自动建 venv 与装依赖）
 powershell -ExecutionPolicy Bypass -File .\dev.ps1
 bash dev.sh
 
@@ -25,6 +25,8 @@ cd backend
 uv venv .venv --python 3.12                 # 创建/重建 venv（uv 管理，与容器 python:3.12-slim 对齐）
 uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt   # 安装/同步依赖
 .venv/Scripts/python -m pytest              # 运行全部测试
+# 受管终端（WorkBuddy / CodeBuddy 沙箱）须关闭删除守卫，否则 pytest 清理 basetemp 会被 SystemExit 打断
+# CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python -m pytest -p no:cacheprovider --basetemp=_pytest_tmp
 .venv/Scripts/python -m uvicorn app.main:app --reload --port 27015
 .venv/Scripts/python -m ruff check app scripts alembic tests   # 静态检查（配置 backend/ruff.toml）
 .venv/Scripts/python -m vulture app --min-confidence 80        # 死代码检查
@@ -40,7 +42,7 @@ pnpm test           # vitest 单测
 
 > 前端提交前门禁：`pnpm typecheck` + `pnpm test` + `pnpm run build` 三者全绿（与后端 `ruff` + `pytest` 对应）。
 
-开发态环境变量：`VP_DATABASE_URL=sqlite+aiosqlite:///./dev.db`、`VP_DISABLE_QUEUE=1`、`VP_DEBUG=1`（dev 脚本已内置）。
+开发态环境变量：`VP_DATABASE_URL=postgresql+asyncpg://<user>:<pass>@127.0.0.1:5432/vulnplatform`、`VP_REDIS_URL=redis://127.0.0.1:6379/0`、`VP_DISABLE_REDIS=0`、`VP_DISABLE_QUEUE=1`（后台任务进程内执行，免开 arq worker）、`VP_DEBUG=1`（dev 脚本已内置，凭据取自仓库根 `.env`）。
 
 ## 目录结构
 
@@ -79,14 +81,15 @@ docs/              # DEPLOY / RELEASE / ROADMAP
   - **字典域**（漏洞类型等字典）继续用 `Vuln*`：类 `VulnType`、表 `vuln_types`。字典域与实体域是两条轴，不得互相套用。
   - 常量一律 `VUL_*`（`VUL_TYPE`/`VUL_LEVEL`/`VUL_SOURCE`）。
   - **既成事实例外（保持现状，禁止在新增代码中扩散）**：表名 `vulns`（实体表）与 `vuln_assets`（关联表，其列名为 `vul_id`）；列 `remote_testings.vuln_id`；路由前缀 `/vulns` 与路由模块 `app/api/v1/vulns.py`（对外契约名，模块名与资源名一致）；Pydantic 模块 `app/schemas/vuln.py`（内部模型已是 `VulIn`/`VulOut`）；前端 `Vuln*` 族（前端命名约定 = **API 资源名**，与 `Report`/`Asset`/`Group` 同族、镜像路由 `/vulns`）。
-  - 既有列名（`vul_type` / `vul_id` / `vul_edit_snapshot` / `remote_testings.vuln_id`）**保持不变**：库表列重命名须连同 Alembic 与 `db.py` 轻量迁移双轨一起做（见「数据库迁移」约定），属独立专项；**当前决策：不做**（2026-09-18）。
+  - 既有列名（`vul_type` / `vul_id` / `vul_edit_snapshot` / `remote_testings.vuln_id`）**保持不变**：库表列重命名须连同 Alembic 迁移一起做（见「数据库迁移（单轨）」条目），属独立专项；**当前决策：不做**（2026-09-18）。
 - 字典/枚举与其展示色值只写在 `app/constants.py`，禁止在路由/服务内散落定义；改字典即全端生效（/meta 下发）。
 - **聚合筛选条件树（2026-09-19，新代码强制）**：筛选条件统一为**条件树**（分组 `logic`/`not`/`children` + 规则 `field`/`op`/`value`/`not`），优先级只由嵌套层级表达。后端唯一解析/构造入口是 `app/core/filters.py` 的 `parse_filter_tree`（同时兼容历史 `{"rules": [...]}` 按 connector 左结合折叠）与 `build_tree_condition(node, leaf_builder)`——**接入方只需提供 leaf 构造器与字段白名单**（参考 `plan_query._plan_leaf_condition`），禁止各接口自写规则遍历；结构上限 `MAX_FILTER_DEPTH=5` / `MAX_FILTER_RULES=50`，非法结构 400。前端唯一实现是 `src/utils/filterTree.ts`（归一化 / 剪枝 / 序列化 / 表达式预览），编辑器为 `FilterBuilder.vue` + 递归的 `FilterGroupEditor.vue` + `FilterRuleRow.vue`，条件树类型（`FilterRule`/`FilterGroup`/`FilterNode`/`FilterFieldDef`）声明在 `src/types/index.ts`；**未填写完整的条件不参与请求但仍保留在界面**，界面须给出「实际生效条件」预览以保证所见即所查。
 - 请求/响应模型写入 `app/schemas/` 对应域文件并在 `schemas/__init__.py` 重导出，禁止回填单文件或在路由文件内定义业务模型。
 - 分页/排序统一走 `app/core/query.py` 的 `paginate` / `apply_sort` / `get_or_404`，不手写 limit/offset 样板；聚合筛选（filters JSON）复用 `app/core/filters.py` 引擎。
 - 时间统一 `app/core/timeutil.py` 的 `now()`（UTC+8），禁止散落 `datetime.now()`。
+- **数据库迁移（单轨，2026-09-21 起，改动必读）**：schema 演进的**唯一入口是 Alembic**（`backend/alembic/versions/`）。SQLite 开发库专用的 `app/db.py::_migrate_lightweight` 已随「统一 PostgreSQL 单栈」删除，**不存在第二条轨道，也没有兜底路径**——改模型后必须生成迁移，禁止只改模型不写迁移。新增 / 重命名 / 删除列须把废弃列登记到 `tests/test_schema_consistency.py::DEPRECATED_COLUMNS`（否则 PG 侧残留「NOT NULL 且无默认值」的僵尸列，任何 INSERT 直接 500，历史事故见 `remote_testings.appeal_success`）。`init_db()` 保留（全新库由 `create_all` 建表 + 内置角色/字典种子，`scripts/migrate.py` 依赖该决策做 stamp 纳管）。**禁止在 `app/` 内新增 SQLite 分支、驱动或 SQLite 默认 DSN**（守卫：`test_no_sqlite_driver_imports_in_app`、`test_default_database_url_is_postgresql`）。本地开发/测试库的搭建见 `docs/LOCAL_DEV_SETUP.md`。**单栈化的动因（结论）**：SQLite 与 PostgreSQL 的方言差异曾在**五个轴**上造成缺陷——类型/绑定严格性、外键强制、长度约束、结果集顺序确定性、DDL 能力（`ALTER COLUMN`/`USING` 转换），且这五个轴的差异在实际使用中都会给出「本地测不出」的假绿信号（发布史至少 7 例：如 `func.date(col) >= '<日期串>'` 的线上 500、删除漏洞漏置空 `remote_testings.vuln_id`、`affected_url` 定长溢出）。统一为单数据库栈后该类风险整体消失，双栈时期的跨方言守卫维护税（方言编译断言 + 双轨迁移守卫 + schema 一致性测试）随之消除——**这是「不得新增 SQLite 分支/驱动/默认 DSN」这条禁令的理由**。
 - **渗透测试的时间口径（2026-09-19，改动必读）**：列表 / 统计 / 结论 / 导出共用的「时间范围」是**统计周期**，命中口径 = 初测完成 ∪ 复测发起 ∪ 复测完成 ∪ 复测报告生成 任一落入区间，唯一实现位置是 `plan_query._period_condition`（参数名沿用历史的 `first_test_from` / `first_test_to`）。**根因**：`testing_plans.retest_done_time` 与轮次 `done_time` 只在工单**全部漏洞闭环**时才写入（`vul_service.sync_plan_retest_state`，回退时还会清空），只看完成点必然漏掉「周期内发起但尚未闭环」的复测。新增任何含时间的筛选/统计前先复用该口径，**不得退化回单列过滤**。
-- **DateTime 列禁止与日期字符串比较（2026-09-19 线上 500 事故，硬性）**：`func.date(col) >= '2026-09-14'` 会把日期串绑成 `VARCHAR`，PostgreSQL 无 `date >= character varying` 算子，asyncpg 抛 `UndefinedFunctionError` → 500；而测试库 SQLite 两侧都是文本「看似通过」。凡按「天」过滤 DateTime 列，一律用 `plan_query._datetime_date_range`（或同构的 `[当日 00:00, 次日 00:00)` 半开区间），既类型正确又不在列上套函数（可用索引）。守卫：`tests/test_plan_query.py::test_period_condition_uses_datetime_binds`（PostgreSQL 方言编译 + 绑定类型断言）。**推论**：SQLite 单测覆盖不到的类型差异，需补方言级静态断言。
+- **DateTime 列禁止与日期字符串比较（2026-09-19 线上 500 事故，硬性）**：`func.date(col) >= '2026-09-14'` 会把日期串绑成 `VARCHAR`，PostgreSQL 无 `date >= character varying` 算子，asyncpg 抛 `UndefinedFunctionError` → 500。凡按「天」过滤 DateTime 列，一律用 `plan_query._datetime_date_range`（或同构的 `[当日 00:00, 次日 00:00)` 半开区间），既类型正确又不在列上套函数（可用索引）。守卫：`tests/test_plan_query.py::test_period_condition_uses_datetime_binds`（PostgreSQL 方言编译 + 绑定类型断言）。**推论**：即便测试库已是 PostgreSQL（2026-09-21），接口级用例也只在「恰好走到该分支且数据非空」时才暴露此类类型/绑定差异，方言级静态断言仍需保留。
 - **复测标题 / 复测状态判定（唯一口径）**：标题是否含「复测」用 `plan_service.RETEST_TITLE_MARK`（Python 判定 `is_retest_report_title` 与 SQL `ilike` 共用同一常量）；报告维度三态 `none/ongoing/done` 由 `plan_service.retest_state_of` 单一函数产出（`PlanReportBrief` 与报告管理列表同口径），**禁止在前端或路由里另行推演**。报告 ←→ 复测轮次的结构化关联用 `TestingPlanRetestRound.src_report_id`（发起本轮的源报告），历史数据由 `scripts/backfill_retest_src_report.py` 回填，升级流程自动执行。
 - 用户输入的富文本入库前必须过 `app/core/sanitize.py` 消毒（schemas 中用 `HtmlStr` 类型别名）。
 - **附件/文件路径必须经 `app/core/storage.py`（2026-09-19 安全整改，新代码强制）**：写入侧 `require_attachment_path(rel, subdir=...)`（白名单 `uploads/<子目录>/<32 位十六进制>.<扩展名>`，非法即 400），读取/删除侧 `resolve_storage_path(rel)`（拒绝绝对路径/盘符/`..`/符号链接越界/不存在，统一 404）。**禁止 `settings.storage_path / <请求体或数据库字段>` 裸拼接**——该形态曾导致任意文件读取与删除（审计 TALOS-2026-001/002）。守卫：`tests/test_source_guard.py`。注意：写入校验放在路由层而非 pydantic 字段类型上，避免 Out 模型继承后对存量脏数据在序列化时判非法（列表/详情 500）。
@@ -102,7 +105,6 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 >
 > | 保留形态 | 现存例子 | 保留理由 |
 > |---|---|---|
-> | 幂等 DDL 顺序表 | `db.py::_migrate_lightweight` | 逐列「查 PRAGMA → ALTER」直线逻辑；拆分会反复传 `conn`/列集合，破坏「一段一表」的顺序可读性 |
 > | 建表 → 迁移 → 种子三段直线 | `db.py::init_db` | 无嵌套分支 |
 > | 解析状态机主循环 | `services/docx_parser.py::parse_report_docx` / `parse_docx` | 各段共享 meta / records / 样式上下文，拆分会引入大量跨函数状态传递 |
 > | 语义敏感的状态同步 | `services/vul_service.py::sync_plan_retest_state` | 工单级复测口径的唯一实现且有回归护栏，可读性收益 < 误改风险 |
@@ -156,7 +158,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 **验收口径（改动涉及运行时必做）**：
 
-- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **189 passed / 1 skipped**）。
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **289 passed / 1 skipped**，测试库为 PostgreSQL；受管终端须关闭删除守卫，见「常用命令」）。
 - **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **24 files / 138 passed**）+ `pnpm run build`。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
 - **接口探针**（容器内执行）：`docker compose exec -T api python - < 探针脚本`（脚本用完即删；`_*.py` 已被 .gitignore 覆盖）。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`，`username=admin1&password=123456`），取 token 后依次 GET 22 个关键接口：`/meta`、`/vulns`、`/vulns/stats`、`/reports`、`/testing-plans`、`/testing-plans/stats`、`/testing-plans/conclusion`、`/nonpen-plans`、`/nonpen-plans/stats`、`/remote-testings`、`/spring-actions`、`/knowledge`、`/knowledge/search?q=注入`、`/search?q=a`、`/assets`、`/users`、`/roles`、`/groups`、`/pats`、`/notify-channels`、`/audit/logs`、`/imports` —— **全部 200 视为通过**。
@@ -164,7 +166,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 ## 文档治理
 
-- `docs/` 只保留**长期有效**的文档：`DEPLOY.md`（部署/备份/回滚/排障）、`RELEASE.md`（发布史，唯一真相源）、`ROADMAP.md`（未来计划）、`SCRIPTS.md`（脚本清单）、`OPEN_API_GUIDE.md`、`USER_GUIDE.md`，以及**尚未闭环**的专项报告。
+- `docs/` 只保留**长期有效**的文档：`DEPLOY.md`（部署/备份/回滚/排障）、`LOCAL_DEV_SETUP.md`（本地开发环境搭建与排障，含 DBngin 操作与测试口径）、`RELEASE.md`（发布史，唯一真相源）、`ROADMAP.md`（未来计划）、`SCRIPTS.md`（脚本清单）、`OPEN_API_GUIDE.md`、`USER_GUIDE.md`，以及**尚未闭环**的专项报告。
 - **任务型文档**（审计报告、事故复盘、单次排查报告、批次执行记录）在满足以下三条后**删除**，删除前先归并内容：
   1. **任务闭环** —— 验收项全部打勾，或未打勾项已明确转为待办；
   2. **有价值结论已归并** —— 规范/阈值/坑 → 本文件；运维与排障操作 → `DEPLOY.md`；脚本用途 → `SCRIPTS.md`；跨会话事实 → `.codebuddy/memory/`；
