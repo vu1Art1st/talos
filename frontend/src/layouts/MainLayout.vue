@@ -94,6 +94,12 @@
       <!-- 顶栏：50px 毛玻璃工具栏 -->
       <el-header class="tl-topbar flex items-center gap-3 flex-none" height="50px">
         <span class="crumb text-xs text-gray-400">Talos /</span>
+        <!-- 来源链：编辑/详情类页面展示可点的来源页（redirect 参数优先，回落浏览器站内历史） -->
+        <button v-if="crumbBack" class="crumb-back text-xs" type="button"
+                :title="`返回${crumbBack.title}`" @click="onCrumbBack">
+          <el-icon :size="11"><ArrowLeft /></el-icon>{{ crumbBack.title }}
+        </button>
+        <span v-if="crumbBack" class="crumb text-xs text-gray-400">/</span>
         <h1 class="text-sm font-semibold m-0">{{ route.meta.title }}</h1>
         <div class="flex items-center gap-2 ml-auto">
           <button class="cmdbtn" @click="ui.openCmdk()">
@@ -119,7 +125,7 @@
         </div>
       </el-header>
 
-      <el-main class="tl-main overflow-auto">
+      <el-main ref="mainEl" class="tl-main overflow-auto">
         <!-- h-full：撑满 el-main，使声明了 h-full 的视图（报告编辑/漏洞编辑/详情）正文与侧栏可各自独立滚动 -->
         <div class="max-w-[1920px] mx-auto w-full h-full">
           <!-- 视图多为多根节点（Fragment），transition 需单元素根，故用带 key 的 div 包裹 -->
@@ -158,12 +164,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
+import { resolveBackPath } from '../composables/useNavBack'
 import {
-  Aim, Bell, Collection, Connection, DataLine, Document, Expand, Flag, Fold, Key,
+  Aim, ArrowLeft, Bell, Collection, Connection, DataLine, Document, Expand, Flag, Fold, Key,
   Memo, Monitor, OfficeBuilding, Search, Sunny, Tickets, User, Warning, Moon,
 } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -204,6 +211,94 @@ function go(path: string) {
   if (route.path === path) return
   router.push(path)
 }
+
+// ---------- 面包屑来源链（回退 UX） ----------
+// 编辑/详情类页面在顶栏展示可点的来源页：redirect 参数优先（跨页原路返回，如工单抽屉 → 编辑漏洞），
+// 回落浏览器站内历史（列表 → 编辑等常规导航）；首级页面或无来源时维持原静态面包屑。
+const crumbBack = computed(() => {
+  const back = resolveBackPath(route)
+  if (!back) return null
+  let title: string
+  try {
+    title = (router.resolve(back.path).meta?.title as string | undefined) ?? back.path
+  } catch {
+    return null
+  }
+  if (!title || title === route.meta.title) return null
+  return { ...back, title }
+})
+
+function onCrumbBack() {
+  const back = crumbBack.value
+  if (!back) return
+  if (back.isHistoryBack) router.back()
+  else void router.push(back.path)
+}
+
+// ---------- 滚动位置记忆（回退 UX） ----------
+// el-main 是常驻滚动容器：按 fullPath 记录滚动位置；返回式导航（浏览器后退 / redirect 回跳，
+// 判据为 history.state.position 不高于离开时）恢复，前进式导航置顶。
+const mainEl = ref<{ $el: HTMLElement } | null>(null)
+const SCROLL_MEM_MAX = 120
+const scrollMem = new Map<string, { top: number; position: number }>()
+let scrollRaf = 0
+
+function saveScroll() {
+  const el = mainEl.value?.$el
+  if (!el) return
+  const position = (window.history.state as { position?: unknown } | null)?.position
+  if (typeof position !== 'number') return
+  const fp = route.fullPath
+  if (!scrollMem.has(fp) && scrollMem.size >= SCROLL_MEM_MAX) {
+    const oldest = scrollMem.keys().next().value
+    if (oldest !== undefined) scrollMem.delete(oldest)
+  }
+  scrollMem.set(fp, { top: el.scrollTop, position })
+}
+
+function onMainScroll() {
+  cancelAnimationFrame(scrollRaf)
+  scrollRaf = requestAnimationFrame(saveScroll)
+}
+
+/** 恢复滚动：数据异步加载期间高度不足时以 rAF 重试，直至到位或超时 */
+function restoreScroll(el: HTMLElement, fp: string, top: number) {
+  const deadline = performance.now() + 1200
+  const attempt = () => {
+    if (route.fullPath !== fp) return // 用户已再次导航，放弃
+    el.scrollTop = top
+    if (el.scrollTop >= top - 1) return
+    if (el.scrollHeight >= top + el.clientHeight || performance.now() > deadline) return
+    requestAnimationFrame(attempt)
+  }
+  requestAnimationFrame(attempt)
+}
+
+watch(
+  () => ({ fp: route.fullPath, p: route.path }),
+  ({ fp, p }, prev) => {
+    if (!prev || fp === prev.fp) return
+    // 同页 query 变化（筛选、抽屉状态位）不干预滚动
+    if (p === prev.p) return
+    const el = mainEl.value?.$el
+    if (!el) return
+    const memo = scrollMem.get(fp)
+    const position = (window.history.state as { position?: unknown } | null)?.position
+    if (memo && typeof position === 'number' && memo.position >= position) {
+      restoreScroll(el, fp, memo.top)
+    } else {
+      el.scrollTop = 0
+    }
+  },
+)
+
+onMounted(() => {
+  mainEl.value?.$el?.addEventListener('scroll', onMainScroll, { passive: true })
+})
+onBeforeUnmount(() => {
+  cancelAnimationFrame(scrollRaf)
+  mainEl.value?.$el?.removeEventListener('scroll', onMainScroll)
+})
 
 const pwdVisible = ref(false)
 const pwdForm = reactive({ old_password: '', new_password: '' })
@@ -320,6 +415,22 @@ async function changePassword() {
   border-bottom: 1px solid var(--tl-border);
 }
 .crumb { white-space: nowrap; }
+/* 来源链按钮：轻量可点，hover 反馈与侧栏导航一致 */
+.crumb-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tl-text-2);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .12s ease, color .12s ease;
+}
+.crumb-back:hover { background: var(--tl-surface-2); color: var(--tl-primary); }
 .tl-topbar h1 { color: var(--tl-text-1); white-space: nowrap; }
 
 .cmdbtn {

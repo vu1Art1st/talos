@@ -158,7 +158,8 @@ function normalizeValue(value: unknown): FilterRule['value'] {
     return value.map((v) => (typeof v === 'number' || typeof v === 'string' ? v : null))
   }
   if (typeof value === 'number' || typeof value === 'string') return value
-  return value == null ? '' : String(value)
+  // 空值保持 null：数值字段的 el-input-number 只接受 Number | Null，转成空串会触发 prop 校验告警
+  return value == null ? null : String(value)
 }
 
 function toRule(raw: Record<string, unknown>, allowedFields?: ReadonlySet<string>): FilterRule | null {
@@ -290,10 +291,23 @@ function optionLabel(field: FilterFieldDef | undefined, value: FilterRule['value
   return hit ? hit.label : String(value)
 }
 
+/**
+ * 操作符展示名（**按字段类型取词**）。
+ *
+ * 同一操作符在不同字段类型下文案不同（number 的 `gte` 是「大于等于」、date 的是「不早于」），
+ * 而全局 `OP_LABELS` 按操作符做键、后写入者覆盖前者（date 覆盖 number），
+ * 直接用会让人天等数值字段的预览与操作符下拉文案不一致 —— 故先按当前字段类型取词。
+ */
+function opLabelOf(rule: FilterRule, fields: FilterFieldDef[]): string {
+  return opOptionsOf(rule, fields).find((o) => o.value === rule.op)?.label
+    ?? OP_LABELS[rule.op]
+    ?? rule.op
+}
+
 function describeRule(rule: FilterRule, fields: FilterFieldDef[]): string {
   const field = fieldOf(fields, rule.field)
   const name = field?.label ?? rule.field
-  const op = OP_LABELS[rule.op] ?? rule.op
+  const op = opLabelOf(rule, fields)
   if (!filterOpNeedsValue(rule.op)) return `${name} ${op}`
   if (rule.op === 'between') {
     const [lo, hi] = Array.isArray(rule.value) ? rule.value : [null, null]

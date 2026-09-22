@@ -19,37 +19,38 @@
 
 ## 一、总览
 
-### 1.1 部署与开发/测试脚本 `scripts/`（12 个部署脚本 + `test` / `clean` / `e2e` 三个辅助脚本的 sh+ps1 双份，合计 1 664 行）
+### 1.1 部署与开发/测试脚本 `scripts/`（13 个部署脚本 + `test` / `clean` / `e2e` 三个辅助脚本的 sh+ps1 双份，合计 1 844 行）
 
 | 脚本 | 行数 | 状态 | 调用方 / 出处 |
 |---|---|---|---|
-| `upgrade.sh` | 126 | 活跃·发布流程 | README.md:85 / DEPLOY.md:81,336,377 |
-| `migrate.sh` | 14 | 活跃·发布流程 | `upgrade.sh:105`、`restore.sh:77`、DEPLOY.md:90,118,320 |
-| `backup.sh` | 98 | 活跃·常规运维 | `install-cron.sh:13`、`upgrade.sh:55`、DEPLOY.md:227,249 |
-| `backup-incremental.sh` | 74 | 活跃·常规运维 | `install-cron.sh:12`、`upgrade.sh:58` |
-| `backup-common.sh` | 85 | 活跃·库文件 | 被 `backup.sh`/`backup-incremental.sh`/`restore.sh` source |
+| `upgrade.sh` | 162 | 活跃·发布流程 | README.md:85 / DEPLOY.md:81,336,377 |
+| `migrate.sh` | 14 | 活跃·发布流程 | `upgrade.sh:124`、`restore.sh:77`、DEPLOY.md:90,118,320 |
+| `backup.sh` | 98 | 活跃·常规运维 | `install-cron.sh:13`、`upgrade.sh:72`、DEPLOY.md:227,249 |
+| `backup-incremental.sh` | 74 | 活跃·常规运维 | `install-cron.sh:12`、`upgrade.sh:75` |
+| `backup-common.sh` | 85 | 活跃·库文件 | 被 `backup.sh`/`backup-incremental.sh`/`restore.sh`/`restore-local.sh` source |
 | `docker-cmd.sh` | 13 | 活跃·库文件（2026-09-17 新增） | 被 `backup-common.sh`、`migrate.sh`、`upgrade.sh` source（S-5：`$DOCKER` 前缀统一实现） |
 | `restore.sh` | 77 | 活跃·常规运维 | README.md:85、DEPLOY.md:258 |
-| `notify.sh` | 27 | 活跃·库依赖 | `backup-common.sh:45-49`、`upgrade.sh:99` |
+| `restore-local.sh` | 106 | 活跃·开发辅助（2026-09-22 新增） | 把生产备份导入本地/裸 PostgreSQL（DBngin / WSL 直连）；DEPLOY.md「九」；详见 §2.15 |
+| `notify.sh` | 27 | 活跃·库依赖 | `backup-common.sh:45-49`、`upgrade.sh:161`（升级末尾有 fail-open 步骤失败时） |
 | `install-cron.sh` | 27 | 活跃·一次性安装 | RELEASE.md:385 |
 | `disk-usage.sh` | 127 | 活跃·排障工具 | DEPLOY.md 附「文件与磁盘」（磁盘排查双视角判据） |
 | `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434 |
 | `setup-docker-mirror.sh` | 59 | 活跃·部署前配置 | DEPLOY.md:198,203、RELEASE.md:964 |
 | `test.sh` | 126 | 活跃·开发辅助（2026-09-21 新增） | 后端测试统一入口（WSL/Linux/macOS）：`--workers N` 并行、`--prune` 回收残留；AGENTS.md「常用命令」 |
 | `test.ps1` | 105 | 活跃·开发辅助（2026-09-21 新增） | Windows 侧同上（`-Workers` / `-Prune -Yes`）；按 `.codebuddy/rules/pwsh7.md` 以 **pwsh 7** 调用、文件 UTF-8 无 BOM |
-| `e2e.sh` | 133 | 活跃·开发辅助（2026-09-22 新增） | 端到端测试编排（起独立 E2E 栈 + Playwright）；详见 §2.13 |
-| `e2e.ps1` | 150 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Headed` / `-Keep` / `-PlaywrightArgs`）；详见 §2.13 |
+| `e2e.sh` | 159 | 活跃·开发辅助（2026-09-22 新增） | 端到端测试编排（起独立 E2E 栈 + Playwright）；详见 §2.13 |
+| `e2e.ps1` | 167 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Headed` / `-Keep` / `-PlaywrightArgs`）；详见 §2.13 |
 | `clean.sh` | 104 | 活跃·开发辅助（2026-09-22 新增） | 本地垃圾清理（默认预演，`--apply` 执行）；详见 §2.14 |
 | `clean.ps1` | 115 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Apply`）；详见 §2.14 |
 
-### 1.2 后端脚本 `backend/scripts/`（18 个，2 192 行）
+### 1.2 后端脚本 `backend/scripts/`（18 个，2 218 行）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
 | 脚本 | 行数 | 状态 | 调用方 / 出处 |
 |---|---|---|---|
 | `migrate.py` | 50 | 活跃·发布流程 | `scripts/migrate.sh:10`、DEPLOY.md:121,321 |
-| `backfill_retest.py` | 47 | 活跃·发布流程 | `upgrade.sh:109`（每次升级自动执行）；已改用 `_common.run`（M-2） |
+| `backfill_retest.py` | 47 | 活跃·发布流程 | `upgrade.sh:128`（每次升级自动执行）；已改用 `_common.run`（M-2） |
 | `sync_knowledge_templates.py` | 154 | 活跃·常规运维 | USER_GUIDE.md:251-257、RELEASE.md:166 |
 | `seed_dev_data.py` | 582 | 活跃·开发辅助 | RELEASE.md:706 |
 | `knowledge_data.py` | 42 | 活跃·共享模块 | 被 `seed_dev_data.py` 导入（模板库数据唯一加载实现） |
@@ -60,7 +61,7 @@
 | `backfill_vul_submit_time.py` | 69 | 一次性 | RELEASE.md:546；已改用 `_common.run` + `dry_run_flag`（M-2） |
 | `migrate_utc_to_utc8.py` | 76 | 一次性 | RELEASE.md:957；已改用 `_common`（M-2） |
 | `fix_plan_retest_state.py` | 100 | 一次性 | RELEASE.md:65；已改用 `_common`（M-2） |
-| `backfill_retest_src_report.py` | 88 | 活跃·发布流程（2026-09-19 新增） | `upgrade.sh:118`（每次升级自动执行，失败不阻断）；按 `source` 文本回填 `testing_plan_retest_rounds.src_report_id`，使报告复测三态对存量和新数据一致（幂等、`--dry-run`） |
+| `backfill_retest_src_report.py` | 113 | 活跃·发布流程（2026-09-19 新增） | `upgrade.sh:135`（每次升级自动执行，失败不阻断但**升级末尾汇总告警 + 渠道通知**）；按两条口径回填 `testing_plan_retest_rounds.src_report_id`（① `source` 文本「报告《X》发起复测」同工单唯一命中；② 复用 `plan_service.infer_src_report_id` 的章节漏洞交集口径，覆盖「报告导入复测」轮次），使报告复测三态对存量和新数据一致（幂等、`--dry-run`） |
 | `fix_attachment_paths.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；置空春耕行动/远程检测中不符合上传白名单的存量附件路径（`--dry-run` 仅统计，落库前备份 `storage/backups/`） |
 | `fix_retest_title_html.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；转义存量复测记录标题（HTML 注入）并按新口径重算 `vulns.retest_html`（幂等：只处理含 `<`/`>` 的标题） |
 | `probe_api.py` | 110 | 活跃·开发辅助（2026-09-21 新增） | AGENTS.md「验收口径·接口探针」（本地 / 容器 / CI 共用一份口径）；详见 §3.12 |
@@ -74,7 +75,8 @@
 | `docker` / `docker compose` | 备份三件套、`restore.sh`、`migrate.sh`、`upgrade.sh`、`migrate.py`(间接，容器内执行) |
 | `rsync` | `backup.sh:19`、`backup-incremental.sh:18` |
 | `sha256sum` | `backup.sh:20`、`backup-incremental.sh:19`、`backup-common.sh:76` |
-| `zstd`（可选） | `backup-common.sh:28`（缺失自动回退 gzip，仅提示变慢） |
+| `zstd`（备份侧可选 / **恢复侧必需**） | `backup-common.sh:25`（备份机缺失时自动回退 gzip，仅提示变慢）；但 `restore.sh` / `restore-local.sh` 解压 `.zst` 产物时**必须**存在，否则直接失败（无回退路径，2026-09-22 校正口径） |
+| `psql`（客户端） | `restore-local.sh`（本地/裸 PG 恢复：DBngin 自带 16.14、WSL-Kali 18.1 均已实测可用） |
 | `flock` | `backup-common.sh:53`（缺失直接 `die`） |
 | `curl` | `notify.sh:22` |
 | `crontab` | `install-cron.sh` |
@@ -91,13 +93,13 @@
 
 ### 2.1 `upgrade.sh` — 一键升级编排
 
-- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 重启服务。
+- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 重启服务；末段对 fail-open 步骤的失败做汇总告警。
 - **调用**：`bash scripts/upgrade.sh [--no-backup] [--no-pull] [--anchor]`（仓库根目录，见脚本 3-8 行）。
-- **依赖**：`.env`（33 行强制校验）、`git`、`docker`；内部依次调用 `scripts/backup.sh` 或 `backup-incremental.sh`（55/58 行）、`scripts/notify.sh`（99 行）、`scripts/migrate.sh`（109 行）、`python -m scripts.backfill_retest`（113 行）、`python -m scripts.backfill_retest_src_report`（118 行）。
+- **依赖**：`.env`（37 行强制校验）、`git`、`docker`；内部依次调用 `scripts/backup.sh` 或 `backup-incremental.sh`（72/75 行）、`scripts/notify.sh`（161 行，仅在有 fail-open 步骤失败时）、`scripts/migrate.sh`（124 行）、`python -m scripts.backfill_retest`（128 行）、`python -m scripts.backfill_retest_src_report`（135 行）。
 - **执行场景**：服务器版本升级；**不要**只 `git pull` 后 `up -d`（DEPLOY.md:336）。
 - **关键顺序约定**：数据库迁移在 api 启动**之前**用一次性容器执行（脚本 10-11 行注释），避免 `create_all` 抢先建表导致迁移冲突。
-- **失败影响**：升级前备份失败不阻断流程（fail-open，由每日差异快照兜底，92-101 行）；两个回填步骤仅打印提示（114/119 行）。
-- **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码（50-51、84、105、113、120、126 行）全部改为 `$DOCKER`，并在脚本第 15-17 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
+- **失败影响（2026-09-22 整改）**：**硬依赖**（`git pull` / 镜像构建 / 数据库迁移）失败即中止（`set -euo pipefail`，报错本身即告警）；**可失败的维护步骤**一律 fail-open 但不允许静默——经 `record_warning`（46-57 行辅助函数）登记后，升级末尾统一汇总打印并渠道通知（153-162 行）：升级前备份失败、构建缓存清理失败（`builder prune`）、两个回填步骤失败。起因：`[4.6/5]` 源报告回填曾静默失败（原 `|| echo` 的单行提示被后续输出淹没），导致报告维度复测三态长期显示「未发起复测」而无人察觉。
+- **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码全部改为 `$DOCKER`，并在脚本第 16-18 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
 
 ### 2.2 `migrate.sh` — 生产库结构迁移
 
@@ -137,7 +139,8 @@
 
 - **用途**：从迁移锚点（`storage.tar.*`）或差异快照（`storage/` 目录）恢复；兼容历史 `.gz` 产物。
 - **调用**：`bash scripts/restore.sh <备份目录>`（如 `backups/anchors/2026/09/20260901_030001`），缺参即报错退出（20 行）。
-- **依赖**：`.env`、`docker`；快照目录为 root 所有，故强制以 root 执行（11-13 行）。
+- **依赖**：`.env`、`docker`、**`zstd`（解压 `.zst` 产物时必需，见 §1.3）**；快照目录为 root 所有，故强制以 root 执行（11-13 行）。
+- **边界**：目标只能是 **compose 栈内的 postgres 容器**（`docker compose exec postgres`）；要把备份写入非容器库（本地 DBngin / WSL 直连）用 §2.15 的 `restore-local.sh`。
 - **执行场景**：更换 VPS、灾难恢复、整库回退（DEPLOY.md:249-271 六、更换 VPS）。
 - **破坏性**：会 `docker compose down`、`DROP SCHEMA public CASCADE; CREATE SCHEMA public;`（46、57 行）——**目标库现有数据全部清除**。
 - **收尾提示**：脚本末尾要求恢复后先执行 `bash scripts/migrate.sh`（77 行）。
@@ -230,6 +233,22 @@
   —— 任何目标命中即**中止**（防脚本被改坏后误删数据）。默认预演，删除前打印清单与合计体积。
 - **实测**：2026-09-22 首次执行释放 **7.9 MB**（含 `frontend/dist` 3.5 MB），复跑输出「仓库已干净」。
 
+### 2.15 `restore-local.sh` — 本地/裸 PG 数据恢复（活跃·开发辅助）
+
+- **用途**：把备份产物（迁移锚点 `db.sql.zst|gz` + `storage.tar.*`／差异快照 `storage/`）导入**非 Docker** 的
+  PostgreSQL（本地 DBngin、WSL 里直连的宿主库、任意可达库），供开发/复现用；`restore.sh` 的「去 docker」版本。
+- **调用**：`bash scripts/restore-local.sh <备份目录>`，`-h` 查看用法。参数：
+  `--dsn <url>`（默认 `$VP_RESTORE_DSN`，否则由 `--host/--port/--user/--db` 组装，用户默认取 `.env` 的 `POSTGRES_USER`）、
+  `--storage-dir <dir>`（可选，同时解包 storage；默认跳过，因归档常为 GB 级）、`--yes`。
+- **依赖**：`psql`、`zstd`（`.zst` 产物必需）、`tar`；`source backup-common.sh` 复用产物定位与 `decompress_for` 解压选择，**不依赖 docker**。
+- **破坏性**：`DROP SCHEMA public CASCADE`，目标库现有数据全部清除。
+- **安全守卫**（对齐 SCRIPTS.md §5.4 与 `seed_dev_data.py::_assert_dev_database` 的回环判据）：DSN 主机不是
+  `127.0.0.1` / `localhost` / `::1` 时必须显式 `--yes`，避免误清同名远程库；口令经 `PGPASSWORD` 传入，日志中 DSN 密码已打码。
+- **实测**：2026-09-22 在 WSL-Kali（`networkingMode=mirrored`，`zstd 1.5.7` + `psql 18.1`）对本地 DBngin 执行
+  `restore-local.sh backups/anchors/2026/09/20260910_101126 --dsn postgresql://vulnplatform@127.0.0.1:5432/<临时库>`：
+  **1.3 s 完成**，落库后 30 张表 / 261 漏洞 / 108 报告 / `alembic_version=d6e7f8a9b0c1`，与备份一致；随后 `scripts.migrate`
+  补齐 5 个迁移到 head。现场操作步骤见 `docs/DEPLOY.md`「九、把生产备份导入本地开发库」。
+
 ---
 
 ## 三、后端脚本详述（`backend/scripts/`）
@@ -249,8 +268,8 @@
 ### 3.2 `backfill_retest.py` — 复测聚合标题回填（活跃·发布流程）
 
 - **用途**：把旧格式「复测记录 N」标题重建为「复测记录yymmdd」（同日追加 `-1`、`-2` 后缀）。
-- **调用**：`python -m scripts.backfill_retest`；**`scripts/upgrade.sh:109` 每次升级自动执行**（失败不阻断，110 行提示可手工补跑）。
-- **依赖**：`app.api.v1.vulns._sync_vul_retest_html`（复用业务侧聚合实现，保证与线上同口径）、`VulRetestRecord` 表。
+- **调用**：`python -m scripts.backfill_retest`；**`scripts/upgrade.sh:128` 每次升级自动执行**（失败不阻断，由 `upgrade.sh:129` 的 `record_warning` 登记，升级末尾汇总告警 + 渠道通知）。
+- **依赖**：`app.services.vul_service.sync_vul_retest_html`（复用业务侧聚合实现，保证与线上同口径；批次 D 重构后曾残留在 `app.api.v1.vulns`，已于 `[2.18.1]` 修正）、`VulRetestRecord` 表。
 - **幂等性**：是——只处理 `retest_html` 中仍含旧式编号（`复测记录\s*\d+\s*：`，28 行）的漏洞，且刻意**不重写**「报告复测处理」直接写入的内容。
 - **执行场景**：升级流程内置；数据修复时手工执行。
 

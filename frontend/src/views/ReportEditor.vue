@@ -5,7 +5,13 @@
       <el-card shadow="never">
         <template #header>
           <div class="flex items-center justify-between">
-            <span>报告信息</span>
+            <div class="flex items-center gap-2">
+              <!-- 原路返回：从工单流程抽屉进入时回到抽屉，常规进入时回到报告列表 -->
+              <el-button size="small" class="!mr-1" @click="onBack">
+                <el-icon class="mr-1"><ArrowLeft /></el-icon>返回
+              </el-button>
+              <span>报告信息</span>
+            </div>
             <span class="text-xs text-gray-400">
               版本 v{{ report.version }} · {{ saveState }}
             </span>
@@ -223,9 +229,9 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowDown, ArrowUp } from '@element-plus/icons-vue'
+import { ArrowDown, ArrowLeft, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import type { ExportJob, ReportDetail, ReportSection, VulnState } from '../types'
@@ -235,6 +241,7 @@ import VulnFormPanel from '../components/VulnFormPanel.vue'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { useExportJobs } from '../composables/useExportJobs'
+import { goBack } from '../composables/useNavBack'
 import {
   exportJobColor,
   exportJobName,
@@ -252,6 +259,12 @@ const FIELD_LABELS: Record<string, string> = {
 
 const auth = useAuthStore()
 const route = useRoute()
+const router = useRouter()
+
+// 原路返回：redirect 参数（工单流程抽屉进入时携带）或站内历史优先，兜底报告中心
+function onBack() {
+  void goBack(router, route, '/reports')
+}
 const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
 const report = ref<ReportDetail | null>(null)
 // 章节列表：显式给出元素类型，避免 `v-for` 的索引退化为 `string | number`（E-5 类型门禁暴露）

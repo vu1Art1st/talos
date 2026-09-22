@@ -7,10 +7,21 @@ import { clientMockFactory, getMock, postMock } from '../../__tests__/helpers/cl
 
 vi.mock('../../api/client', () => clientMockFactory())
 
-// mock 路由：组件内多处 router.push 跳漏洞/报告详情页；导入链会拉起 router/index.ts
+// mock 路由：组件内多处 router.push 跳漏洞/报告详情页；导入链会拉起 router/index.ts。
+// 跳转需携带来源（redirect 取自当前页 fullPath）故需 useRoute。
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
-  return { ...actual, useRouter: () => ({ push: vi.fn() }) }
+  return {
+    ...actual,
+    useRoute: () => ({
+      path: '/testing-plans', fullPath: '/testing-plans?plan=1', params: {}, query: { plan: '1' },
+    }),
+    useRouter: () => ({
+      push: vi.fn().mockResolvedValue(undefined),
+      replace: vi.fn().mockResolvedValue(undefined),
+      back: vi.fn(),
+    }),
+  }
 })
 
 // mock auth store：屏蔽其导入链（router/pinia），仅提供 meta 字典与管理员身份

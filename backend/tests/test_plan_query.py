@@ -8,6 +8,7 @@
 - 统计周期命中 = 初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期；
 - 结论新文案（周期括注 / 部门名 / 初测 / 复测 / 已完成整改 / 未完成整改）与计数；
 - 报告维度复测三态（none / ongoing / done）、轮次源报告关联、报告管理页同口径；
+- 无源报告轮次（报告导入复测 / 2.19.0 前存量）的覆盖代偿不误标无关报告；
 - 结论附件列扩展。
 
 断言均限定在**专属部门**内（共享会话库中含其它用例数据）；周期取「今天」，不依赖固定日期。
@@ -247,6 +248,70 @@ async def test_report_retest_state_three_states(client: AsyncClient, auth: dict)
     assert states[first_report] == "done"
     assert states[retest_report] == "done"
     assert states[fresh] == "none"
+
+
+async def test_report_retest_state_covers_import_retest_round(client: AsyncClient, auth: dict):
+    """报告导入复测的存量轮次（有复测报告但无源报告）也要让同工单初测报告进入复测中/复测完成。
+
+    背景（2026-09-22 实测）：`triggered` 原先只认轮次 `src_report_id`，而「报告导入复测」与 2.19.0
+    之前的存量轮次都不带它 → 工单内所有初测报告恒为「未发起复测」（复测报告因标题含「复测」正常）。
+    本用例构造该存量形态，断言读取侧覆盖代偿（本轮复测报告章节漏洞 ∩ 本报告章节漏洞）生效，
+    且不含相同漏洞的其它报告不被误标。
+
+    注意：系统名与初测报告标题刻意不含「复测」二字，否则会被标题口径判为复测报告。
+    """
+    dept = "覆盖代偿专用部门"
+    plan_id = await _new_plan(client, auth, "覆盖代偿系统", department=dept)
+    vul_a, vul_b = await _new_vulns(client, auth, plan_id, ["覆盖代偿漏洞A", "覆盖代偿漏洞B"])
+    first_report = await _new_report(
+        client, auth, plan_id, [vul_a, vul_b], "覆盖代偿系统渗透测试报告",
+    )
+    retest_report = await _new_report(
+        client, auth, plan_id, [vul_a, vul_b], "覆盖代偿系统渗透测试复测报告",
+    )
+    other_vul, = await _new_vulns(client, auth, plan_id, ["覆盖代偿无关漏洞"])
+    other_report = await _new_report(
+        client, auth, plan_id, [other_vul], "覆盖代偿系统第二份渗透测试报告",
+    )
+
+    # 模拟存量数据：轮次有复测报告（report_id）但源报告为空（「报告导入复测」当时的写入形态）
+    from app.db import async_session_maker
+    from app.models import TestingPlanRetestRound
+
+    async with async_session_maker() as session:
+        session.add(TestingPlanRetestRound(
+            plan_id=plan_id, round_no=1, source="报告导入复测", report_id=retest_report,
+        ))
+        await session.commit()
+
+    async def states_of() -> dict[int, str]:
+        detail = await _plan(client, auth, plan_id)
+        return {r["id"]: r["retest_state"] for r in detail["reports"]}
+
+    # 章节漏洞仍修复中（50）→ 初测报告按覆盖代偿进入「复测中」
+    states = await states_of()
+    assert states[first_report] == "ongoing"
+    assert states[retest_report] == "ongoing"
+    assert states[other_report] == "none"  # 章节漏洞未被本轮复测覆盖 → 不误标
+
+    # 章节漏洞闭环（修复中 50 → 复测中 55 → 已修复 60）→ 复测完成；无关报告仍为未发起复测
+    for vid in (vul_a, vul_b):
+        await _transition(client, auth, vid, 55)
+    assert (await states_of())[first_report] == "ongoing"
+    for vid in (vul_a, vul_b):
+        await _transition(client, auth, vid, 60, "<p>复测通过</p>")
+    states = await states_of()
+    assert states[first_report] == "done"
+    assert states[other_report] == "none"
+
+    # 报告管理页同口径
+    resp = await client.get(
+        "/api/v1/reports", headers=auth, params={"search": "覆盖代偿系统", "size": 100},
+    )
+    assert resp.status_code == 200, resp.text
+    states = {r["id"]: r["retest_state"] for r in resp.json()["items"]}
+    assert states[first_report] == "done"
+    assert states[other_report] == "none"
 
 
 def test_period_condition_uses_datetime_binds():

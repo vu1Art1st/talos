@@ -5,7 +5,9 @@
 派生字段（工单ID、测试人员多对多、关联计数）。
 关键词搜索（plan_search_condition / nonpen_search_condition）与聚合筛选的
 工单ID表达式（_ticket_id_filter_expr）口径一致：手动指定值优先，否则由
-receive_time(YYYY-MM-DD) + ticket_seq 派生 YYYYMMDD-N。
+receive_time(YYYY-MM-DD) + ticket_seq 派生 YYYYMMDD-N；自动编号一律经
+`_auto_ticket_id_cond` 构造（要求 ticket_id_manual 为空），与
+`ticket_service.check_ticket_id_unique` 的占用口径严格一致，避免幽灵序号误命中。
 """
 import re
 from datetime import datetime, timedelta
@@ -35,6 +37,25 @@ from app.models import (
 )
 
 
+def _auto_ticket_id_cond(model, date_like: str, seq: int):
+    """自动编号（`YYYYMMDD-N`）的完整命中口径：**仅「纯自动」记录参与**。
+
+    `ticket_id_manual` 非空的记录，即使底层 `ticket_seq` 残留旧值（手动改号后序号不清零，
+    见 `ticket_service.assign_ticket_seq` 的提前返回），也**不得**被
+    `receive_time + ticket_seq` 命中——否则「先自动得到 20260730-1、后手工改为别的编号」
+    的记录会与真正显示 20260730-1 的记录一起被搜出来（一次搜索返回两条，2026-09-22 实测：
+    id=2 手工改为 20260730-2 但 seq 仍为 1，与 id=4 的 20260730-1 同时命中）。
+
+    该守卫与 `ticket_service.check_ticket_id_unique` 的占用口径严格一致：手动指定了编号的
+    记录其底层 `ticket_seq` 不再视为占用。
+    """
+    return and_(
+        model.receive_time.like(date_like),
+        model.ticket_seq == seq,
+        model.ticket_id_manual == "",
+    )
+
+
 def nonpen_search_condition(search: str):
     """漏扫基线工单搜索：计划名称 / 测试系统 / 所属部门 / 工单ID（手动指定值，
     或 YYYYMMDD-N 自动编号的日期+序号组合）。站内列表与开放 API 共用。"""
@@ -52,7 +73,7 @@ def nonpen_search_condition(search: str):
     m = re.fullmatch(r"(\d{8})-(\d+)", search)
     if m:
         date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%"
-        conds.append(NonpenPlan.receive_time.like(date_like) & (NonpenPlan.ticket_seq == int(m.group(2))))
+        conds.append(_auto_ticket_id_cond(NonpenPlan, date_like, int(m.group(2))))
     return or_(*conds)
 
 
@@ -73,9 +94,7 @@ def plan_search_condition(search: str):
     m = re.fullmatch(r"(\d{8})-(\d+)", search)
     if m:
         date_like = f"{m.group(1)[:4]}-{m.group(1)[4:6]}-{m.group(1)[6:]}%"
-        conds.append(
-            TestingPlan.receive_time.like(date_like) & (TestingPlan.ticket_seq == int(m.group(2)))
-        )
+        conds.append(_auto_ticket_id_cond(TestingPlan, date_like, int(m.group(2))))
     return or_(*conds)
 
 
@@ -284,10 +303,7 @@ def _ticket_id_filter_expr(op: str, value) -> object:
     def _eq():
         conds = [TestingPlan.ticket_id_manual == sv]
         if date_like:
-            conds.append(and_(
-                TestingPlan.receive_time.like(date_like),
-                TestingPlan.ticket_seq == int(m.group(2)),
-            ))
+            conds.append(_auto_ticket_id_cond(TestingPlan, date_like, int(m.group(2))))
         return or_(*conds)
 
     if op == "eq":

@@ -58,7 +58,8 @@ export function usePlanFilters(onChange: () => void) {
   // 聚合筛选可选字段（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
   const FILTER_FIELDS = new Set([
     'system_name', 'test_type', 'department', 'receive_time',
-    'status', 'first_test_done_time', 'retest_done_time', 'testers',
+    'status', 'first_test_done_time', 'retest_done_time', 'est_mandays',
+    'actual_mandays', 'testers',
   ])
 
   /**

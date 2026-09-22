@@ -2,12 +2,20 @@
 from app.core.timeutil import now
 
 from fastapi import HTTPException
-from sqlalchemy import case, func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.constants import PlanStatus, VulStatus
 from app.core.deps import user_permissions
-from app.models import ReportSection, TestingPlan, TestingPlanRetestRound, User, Vul
+from app.models import (
+    Report,
+    ReportSection,
+    TestingPlan,
+    TestingPlanRetestRound,
+    User,
+    Vul,
+)
 
 
 def can_operate(user: User, plan: TestingPlan) -> bool:
@@ -84,7 +92,7 @@ def retest_state_of(*, is_retest: bool, triggered: bool, all_closed: bool) -> st
     """报告维度的复测状态：`none` 未发起复测 / `ongoing` 复测中 / `done` 复测完成。
 
     - is_retest：报告自身即复测报告（标题含「复测」）；
-    - triggered：存在由该报告发起的复测轮次（`TestingPlanRetestRound.src_report_id` 指向它）；
+    - triggered：本报告已发起过复测，口径见 `retest_triggered_report_ids`（权威关联 ∪ 覆盖代偿）；
     - all_closed：该报告章节内漏洞是否全部闭环（已修复/已忽略）。
 
     两者皆不成立 → 未发起复测；已发起但仍有未闭环漏洞 → 复测中；章节漏洞全部闭环 → 复测完成。
@@ -123,24 +131,113 @@ async def report_closure_map(
     return {rid: (int(total or 0), int(closed or 0)) for rid, total, closed in rows}
 
 
-async def fill_report_closure(session: AsyncSession, plans: list) -> None:
-    """为工单响应对象（TestingPlanOut）填充各报告「漏洞闭环进度」与「复测状态」派生字段。
+async def retest_triggered_report_ids(
+    session: AsyncSession, report_ids: list[int],
+) -> set[int]:
+    """入参报告 id 中「已发起过复测」的集合（`retest_state_of` 的 `triggered` 判据）。
 
-    `all_closed` 仅在报告存在关联漏洞且全部完成时为 True（无漏洞/空报告不视为已完成）；
-    `retest_state` 口径见 `retest_state_of`（是否已发起复测取自轮次 `src_report_id`）。
+    工单流程抽屉与报告管理列表共用本函数，禁止各接口另行推演。两个来源合并：
+
+    1. **权威关联**：轮次 `src_report_id` 指向该报告（2.19.0 起由「发起复测」入口写入）；
+    2. **覆盖代偿**：`src_report_id` 为空且本轮有复测报告的轮次（「报告导入复测」与 2.19.0
+       前的存量轮次），按「本轮复测报告章节漏洞 ∩ 该报告章节漏洞 ≠ ∅」归因。
+
+    代偿只作用于**无权威关联**的轮次：复测报告章节由源报告章节派生，交集存在即说明本报告的
+    漏洞已被该轮复测覆盖；而「有权威关联」的轮次仍只认 `src_report_id`，避免把复测发起之后
+    新建、恰好复用同一漏洞的报告误标为已发起复测。
     """
-    report_ids = [r.id for p in plans for r in (p.reports or [])]
-    closure = await report_closure_map(session, report_ids)
+    ids = [rid for rid in dict.fromkeys(report_ids) if rid is not None]
+    if not ids:
+        return set()
     triggered = set(
         (
             await session.execute(
                 select(TestingPlanRetestRound.src_report_id).where(
-                    TestingPlanRetestRound.plan_id.in_([p.id for p in plans]),
-                    TestingPlanRetestRound.src_report_id.is_not(None),
+                    TestingPlanRetestRound.src_report_id.in_(ids)
                 )
             )
         ).scalars().all()
     )
+    src_section = aliased(ReportSection)
+    cov_section = aliased(ReportSection)
+    covered_report = aliased(Report)
+    covered = (
+        await session.execute(
+            select(cov_section.report_id)
+            .select_from(TestingPlanRetestRound)
+            .join(src_section, src_section.report_id == TestingPlanRetestRound.report_id)
+            .join(cov_section, cov_section.vul_id == src_section.vul_id)
+            .join(
+                covered_report,
+                and_(
+                    covered_report.id == cov_section.report_id,
+                    covered_report.testing_plan_id == TestingPlanRetestRound.plan_id,
+                ),
+            )
+            .where(
+                TestingPlanRetestRound.src_report_id.is_(None),
+                TestingPlanRetestRound.report_id.is_not(None),
+                cov_section.report_id.in_(ids),
+            )
+            .distinct()
+        )
+    ).scalars().all()
+    triggered.update(covered)
+    return triggered
+
+
+async def infer_src_report_id(
+    session: AsyncSession, plan_id: int, report_id: int,
+) -> int | None:
+    """按「章节漏洞交集最大且唯一」在同工单内推断复测报告的源报告（初测报告）。
+
+    供「报告导入复测」入库时补写轮次 `src_report_id` 与存量轮次回填脚本复用（同一规则）：
+    复测报告章节由源报告章节派生，交集最大者即源报告。候选仅取同工单、标题不含
+    `RETEST_TITLE_MARK` 的报告；无交集或并列最大时返回 None（不做猜测）。
+    """
+    retest_vul_ids = set(
+        (
+            await session.execute(
+                select(ReportSection.vul_id).where(
+                    ReportSection.report_id == report_id,
+                    ReportSection.vul_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
+    if not retest_vul_ids:
+        return None
+    rows = (
+        await session.execute(
+            select(ReportSection.report_id)
+            .join(Report, Report.id == ReportSection.report_id)
+            .where(
+                Report.testing_plan_id == plan_id,
+                Report.id != report_id,
+                Report.title.not_ilike(f"%{RETEST_TITLE_MARK}%"),
+                ReportSection.vul_id.in_(retest_vul_ids),
+            )
+        )
+    ).scalars().all()
+    overlap: dict[int, int] = {}
+    for rid in rows:
+        overlap[rid] = overlap.get(rid, 0) + 1
+    if not overlap:
+        return None
+    best = max(overlap.values())
+    winners = [rid for rid, count in overlap.items() if count == best]
+    return winners[0] if len(winners) == 1 else None
+
+
+async def fill_report_closure(session: AsyncSession, plans: list) -> None:
+    """为工单响应对象（TestingPlanOut）填充各报告「漏洞闭环进度」与「复测状态」派生字段。
+
+    `all_closed` 仅在报告存在关联漏洞且全部完成时为 True（无漏洞/空报告不视为已完成）；
+    `retest_state` 口径见 `retest_state_of`（是否已发起复测取自 `retest_triggered_report_ids`）。
+    """
+    report_ids = [r.id for p in plans for r in (p.reports or [])]
+    closure = await report_closure_map(session, report_ids)
+    triggered = await retest_triggered_report_ids(session, report_ids)
     for p in plans:
         for r in (p.reports or []):
             total, closed = closure.get(r.id, (0, 0))
@@ -158,21 +255,13 @@ async def report_retest_state_map(
 ) -> dict[int, str]:
     """报告管理页批量取复测状态：入参 `[(report_id, title)]`，返回 `{report_id: none|ongoing|done}`。
 
-    一次取章节漏洞闭环与「由该报告发起的轮次」，避免逐报告查询。
+    一次取章节漏洞闭环与「已发起复测的报告」（口径见 `retest_triggered_report_ids`），避免逐报告查询。
     """
     ids = [rid for rid, _ in reports if rid is not None]
     if not ids:
         return {}
     closure = await report_closure_map(session, ids)
-    triggered = set(
-        (
-            await session.execute(
-                select(TestingPlanRetestRound.src_report_id).where(
-                    TestingPlanRetestRound.src_report_id.in_(ids)
-                )
-            )
-        ).scalars().all()
-    )
+    triggered = await retest_triggered_report_ids(session, ids)
     states: dict[int, str] = {}
     for rid, title in reports:
         total, closed = closure.get(rid, (0, 0))

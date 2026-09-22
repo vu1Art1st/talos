@@ -88,6 +88,28 @@ describe('useListPage', () => {
     expect(lp2.sort.order).toBe('asc')
   })
 
+  it('竞态守卫：先发出但后返回的过期响应被丢弃，不覆盖当前列表', async () => {
+    let resolveStale: ((value: unknown) => void) | undefined
+    get.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveStale = resolve }) as never,
+    )
+    get.mockResolvedValueOnce({ data: { items: [{ id: 2 }], total: 1 } } as never)
+
+    const lp = useListPage('/testing-plans')
+    const stale = lp.load(1)
+    const latest = lp.load(1)
+    await latest
+    expect(lp.items.value).toEqual([{ id: 2 }])
+    expect(lp.total.value).toBe(1)
+
+    // 过期响应（上一次查询：2 条）此时才返回 —— 回归：曾把「偶发两条」的结果覆盖到界面上
+    resolveStale!({ data: { items: [{ id: 1 }, { id: 3 }], total: 2 } })
+    await stale
+    expect(lp.items.value).toEqual([{ id: 2 }])
+    expect(lp.total.value).toBe(1)
+    expect(lp.loading.value).toBe(false)
+  })
+
   it('reload 回到第一页', async () => {
     const lp = useListPage('/reports')
     await lp.load(4)

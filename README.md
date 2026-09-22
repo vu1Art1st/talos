@@ -82,7 +82,7 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 
 > **安全提醒**：生产环境务必保持 `VP_DEBUG` 关闭、修改强随机 `VP_SECRET_KEY` 与数据库口令；显式设置 `VP_INITIAL_ADMIN_PASSWORD` 时首次登录后也应尽快修改 admin 密码。
 
-**版本升级 / 备份 / 迁移**：分别使用 `bash scripts/upgrade.sh`（备份 → 拉代码 → 重建镜像 → 迁移数据库 → 重启）、`bash scripts/backup.sh`、`bash scripts/restore.sh backups/<时间戳>`；详细步骤与排障见 [docs/DEPLOY.md](docs/DEPLOY.md)。
+**版本升级 / 备份 / 迁移**：分别使用 `bash scripts/upgrade.sh`（备份 → 拉代码 → 重建镜像 → 迁移数据库 → 重启）、`bash scripts/backup.sh`、`bash scripts/restore.sh backups/<时间戳>`；把生产备份导入**本地开发库**（DBngin，非容器）用 `bash scripts/restore-local.sh <备份目录> --dsn ...`；详细步骤与排障见 [docs/DEPLOY.md](docs/DEPLOY.md)（§九 为本地导入的 Windows / WSL 两条实测路径）。
 
 ## 本地开发
 

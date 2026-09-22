@@ -187,6 +187,17 @@ async def _list_plan_names(client: AsyncClient, auth: dict, params: dict) -> set
     assert resp.status_code == 200, resp.text
     return {p["system_name"] for p in resp.json()["items"]}
 
+
+async def _list_plans(client: AsyncClient, auth: dict, params: dict) -> list[dict]:
+    """按参数取工单列表的**原始条目**（保留顺序与重复）。
+
+    与 `_list_plan_names` 的区别：后者返回 `set`，会把重复行静默吞掉，无法用于断言
+    「一次搜索只应返回一条」这类回归（2026-09-22 幽灵序号缺陷正是被 set 掩盖的）。
+    """
+    resp = await client.get("/api/v1/testing-plans", headers=auth, params={"size": 100, **params})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["items"]
+
 async def _seed_search_entries(client: AsyncClient, auth: dict) -> list[dict]:
     created = []
     for e in _SEARCH_ENTRIES:

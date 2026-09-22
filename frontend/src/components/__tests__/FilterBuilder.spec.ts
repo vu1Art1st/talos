@@ -5,16 +5,21 @@ import ElementPlus from 'element-plus'
 
 import FilterBuilder from '../FilterBuilder.vue'
 import type { FilterFieldDef, FilterGroup, FilterNode, FilterRule } from '../../types'
-import { countFilterRules, createFilterGroup } from '../../utils/filterTree'
+import { countFilterRules, createFilterGroup, normalizeFilterTree } from '../../utils/filterTree'
 
 const FIELDS: FilterFieldDef[] = [
   { key: 'system_name', label: '测试系统', type: 'text' },
   { key: 'status', label: '状态', type: 'enum', options: [{ label: '初测完成', value: 30 }] },
 ]
 
-function mountBuilder(modelValue: FilterGroup = createFilterGroup()) {
+/** 数值字段（人天）：验证 number 类型走数值输入与比较/区间操作符 */
+const MANDay_FIELDS: FilterFieldDef[] = [
+  { key: 'est_mandays', label: '预估人天', type: 'number' },
+]
+
+function mountBuilder(modelValue: FilterGroup = createFilterGroup(), fields: FilterFieldDef[] = FIELDS) {
   return mount(FilterBuilder, {
-    props: { modelValue, fields: FIELDS },
+    props: { modelValue, fields },
     global: { plugins: [ElementPlus] },
   })
 }
@@ -141,6 +146,26 @@ describe('FilterBuilder 聚合筛选条件树编辑器', () => {
     await wrapper.setProps({ modelValue: JSON.parse(JSON.stringify(same)) as FilterGroup })
     expect(wrapper.findAll('.filter-row')).toHaveLength(1)
     expect((wrapper.find('.filter-value input').element as HTMLInputElement).value).toBe('商城')
+    wrapper.unmount()
+  })
+
+  it('数值字段（预估人天）走数值输入并参与生效条件预览', () => {
+    const model = normalizeFilterTree([{ field: 'est_mandays', op: 'gte', value: 3, not: false }])
+    const wrapper = mountBuilder(model, MANDay_FIELDS)
+
+    expect(wrapper.find('.filter-value input').exists()).toBe(true)
+    expect(wrapper.text()).toContain('预估人天 大于等于 3')
+    expect(wrapper.text()).not.toContain('未填写完整')
+    wrapper.unmount()
+  })
+
+  it('数值条件未填取值时不参与查询，但仍保留在界面', () => {
+    const model = normalizeFilterTree([{ field: 'est_mandays', op: 'gte', value: null, not: false }])
+    const wrapper = mountBuilder(model, MANDay_FIELDS)
+
+    expect(wrapper.findAll('.filter-row')).toHaveLength(1)
+    expect(wrapper.text()).toContain('另有 1 条未填写完整')
+    expect(wrapper.text()).not.toContain('预估人天 大于等于')
     wrapper.unmount()
   })
 })

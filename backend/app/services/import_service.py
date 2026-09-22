@@ -540,6 +540,7 @@ async def confirm_batch_internal(
 
     # 报告格式批次：确认入库时自动创建/关联测试计划、资产与报告
     report_auto_created = False
+    round_row = None  # 本轮复测轮次（仅复测批次产生），入库收尾时补写源报告
     if batch.doc_kind == "report":
         plan, round_row = await resolve_report_plan(
             session, batch, user, plan, is_retest,
@@ -560,6 +561,14 @@ async def confirm_batch_internal(
         if is_new:
             new_vul_ids.append(vul.id)
         created += 1
+
+    # 报告导入复测没有「发起复测」入口可携带源报告，本批章节已入库后按同一规则推断并补写
+    # （轮次 src_report_id 是报告维度复测三态的唯一权威判据；推断不出时留空，读取侧另有覆盖代偿）
+    if is_retest and round_row is not None and report is not None:
+        await session.flush()
+        round_row.src_report_id = await plan_service.infer_src_report_id(
+            session, plan.id, report.id,
+        )
 
     await finalize_confirm(
         session, batch, plan, report, report_auto_created, new_vul_ids, user,

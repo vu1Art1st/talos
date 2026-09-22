@@ -43,6 +43,19 @@ command -v docker >/dev/null || {
   exit 1
 }
 
+# ---------- fail-open 步骤的显式告警（数据回填 / 缓存清理 / 备份：失败不阻断升级，但不得静默） ----------
+# 背景（2026-09-22）：[4.6/5] 源报告回填曾静默失败——失败输出被后续步骤淹没，界面长期显示错误的
+# 报告复测三态而无人察觉。此后所有 fail-open 步骤统一登记，升级末尾汇总 + 渠道通知。
+# 用法：if ! <命令>; then record_warning "<步骤>" "<影响说明>" "<手动补救命令>"; fi
+WARNINGS=()
+WARN_COUNT=0
+record_warning() {
+  WARN_COUNT=$((WARN_COUNT + 1))
+  WARNINGS+=("$1 — $2")
+  echo "！！$1 失败：$2"
+  echo "   手动重跑：$3"
+}
+
 OLD_COMMIT="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 echo "========== Talos 升级开始（当前版本 ${OLD_COMMIT}）=========="
 
@@ -90,8 +103,10 @@ $DOCKER compose build
 # [3.5/5] 清理过期构建缓存：BuildKit 构建缓存只增不减会撑爆磁盘（判据见 DEPLOY.md 附「文件与磁盘」）。
 # 保留最近 7 天（168h）缓存，兼顾构建加速与磁盘占用；清理失败不阻断升级。
 echo "[3.5/5] 清理过期构建缓存（保留最近 7 天）"
-$DOCKER builder prune --filter "until=168h" -f \
-  || echo "（构建缓存清理失败，可稍后手动执行：$DOCKER builder prune -af）"
+if ! $DOCKER builder prune --filter "until=168h" -f; then
+  record_warning "清理过期构建缓存" "构建缓存继续占用磁盘（不影响服务运行）" \
+    "$DOCKER builder prune -af"
+fi
 
 # [3.6/5] 回收升级前备份 job（fail-open：失败告警但不阻断升级，因有每日差异快照兜底）
 if [ -n "${BACKUP_PID}" ]; then
@@ -99,8 +114,8 @@ if [ -n "${BACKUP_PID}" ]; then
   if wait "${BACKUP_PID}"; then
     echo "升级前备份完成"
   else
-    echo "（升级前备份失败，请检查 backups/upgrade-backup.log；已由每日差异快照兜底）"
-    sudo bash scripts/notify.sh "升级前备份失败，请检查 backups/upgrade-backup.log" || true
+    record_warning "升级前备份" "本次升级没有可用的升级前备份（每日差异快照仍可兜底）" \
+      "sudo bash scripts/backup.sh  # 并检查 backups/upgrade-backup.log"
   fi
 fi
 
@@ -108,15 +123,20 @@ fi
 echo "[4/5] 数据库结构迁移"
 sudo bash scripts/migrate.sh
 
-# [4.5/5] 存量复测聚合标题回填（新格式「复测记录yymmdd」；仅重建旧编号标题的漏洞）
+# [4.5/5] 存量复测聚合标题回填（新格式「复测记录yymmdd」；仅重建旧编号标题的漏洞，幂等）
 echo "[4.5/5] 复测聚合标题回填"
-$DOCKER compose run --rm api python -m scripts.backfill_retest \
-  || echo "（复测标题回填失败，可稍后手动执行：$DOCKER compose run --rm api python -m scripts.backfill_retest）"
+if ! $DOCKER compose run --rm api python -m scripts.backfill_retest; then
+  record_warning "复测聚合标题回填" "历史「复测记录 N」标题未重建，漏洞详情中的复测记录不按日期格式聚合" \
+    "$DOCKER compose run --rm api python -m scripts.backfill_retest"
+fi
 
-# [4.6/5] 存量复测轮次回填「源报告」（报告维度复测三态依赖它；按 source 文本匹配，幂等）
+# [4.6/5] 存量复测轮次回填「源报告」（报告维度复测三态的唯一权威判据；口径见脚本 docstring，幂等）
 echo "[4.6/5] 复测轮次源报告回填"
-$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report \
-  || echo "（源报告回填失败，可稍后手动执行：$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report）"
+if ! $DOCKER compose run --rm api python -m scripts.backfill_retest_src_report; then
+  echo "   先诊断（只统计不落库）：$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report --dry-run"
+  record_warning "复测轮次源报告回填" "报告维度复测三态可能显示为「未发起复测」（读取侧覆盖代偿仍可兜底）" \
+    "$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report"
+fi
 
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
@@ -129,3 +149,14 @@ $DOCKER compose exec -T api python -m alembic current 2>/dev/null || echo "（�
 echo
 echo "如需回滚代码： git checkout ${OLD_COMMIT} && docker compose up -d --build"
 echo "（数据库回滚请用升级前备份 scripts/restore.sh，见 docs/DEPLOY.md）"
+
+# fail-open 步骤汇总：放在最后打印，保证「有步骤失败」不会被中间输出淹没（2026-09-22 事故整改）
+if [ "${WARN_COUNT}" -gt 0 ]; then
+  echo
+  echo "========== 注意：升级完成，但有 ${WARN_COUNT} 项维护步骤失败（均不阻断升级，请尽快处理） =========="
+  for warning in ${WARNINGS[@]+"${WARNINGS[@]}"}; do
+    echo "  - ${warning}"
+  done
+  echo "补救命令见上方各步骤的「手动重跑」提示。"
+  sudo bash scripts/notify.sh "Talos 升级完成（${NEW_COMMIT}）：有 ${WARN_COUNT} 项维护步骤失败，请查看升级日志并手动补救" || true
+fi

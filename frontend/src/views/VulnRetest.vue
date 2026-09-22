@@ -14,14 +14,14 @@
             <span class="text-xs text-gray-400">共 {{ recordCount }} 条复测记录</span>
           </div>
         </div>
-        <el-button @click="router.push(`/vulns/${vulId}/edit`)">返回编辑</el-button>
+        <el-button @click="openEdit">返回编辑</el-button>
       </div>
     </el-card>
 
     <VulnRetestPanel :vul-id="vulId" @changed="(n: number) => (recordCount = n)">
       <template #actions>
         <div class="flex-1" />
-        <el-button @click="router.back()">返回</el-button>
+        <el-button @click="onBack">返回</el-button>
       </template>
     </VulnRetestPanel>
   </div>
@@ -35,6 +35,7 @@ import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
+import { goBack, withRedirect } from '../composables/useNavBack'
 import { levelSoftStyle, statusLabel, statusSoftStyleWithRetest } from '../utils/colors'
 import type { RetestRecord, Vuln } from '../types'
 
@@ -47,6 +48,19 @@ const vulId = Number(route.params.id)
 const vul = ref<Vuln | null>(null)
 const meta = ref<Record<string, Record<number, string>> | null>(null)
 const recordCount = ref(0)
+
+/**
+ * 来源感知返回（替代裸 router.back()）：直接粘贴 URL 进入时无站内历史，
+ * 裸 back 会退回浏览器上一站甚至退出系统，故兜底到漏洞详情。
+ */
+function onBack() {
+  void goBack(router, route, `/vulns/${vulId}`)
+}
+
+/** 返回编辑页：把本页地址作为来源透传，编辑页取消/保存据此回到复测页 */
+function openEdit() {
+  void router.push(withRedirect(`/vulns/${vulId}/edit`, route.fullPath))
+}
 
 onMounted(async () => {
   meta.value = await auth.fetchMeta()

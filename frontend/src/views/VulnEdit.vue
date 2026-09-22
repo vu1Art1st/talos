@@ -10,22 +10,24 @@
         </div>
       </template>
       <template #actions-left>
-        <el-button v-if="editId" type="warning" plain class="w-full !ml-0" @click="router.push(`/vulns/${editId}/retest`)">
+        <el-button v-if="editId" type="warning" plain class="w-full !ml-0" @click="openRetest">
           复测
         </el-button>
       </template>
       <template #actions-right>
-        <el-button class="w-full !ml-0" @click="router.push('/vulns')">取消</el-button>
+        <el-button class="w-full !ml-0" @click="onCancel">取消</el-button>
       </template>
     </VulnFormPanel>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
+import { goBack, withRedirect } from '../composables/useNavBack'
+import { normalizeRedirect } from '../utils/errorPage'
 import type { VulnForm } from '../types'
 
 // 独立漏洞提交/编辑页：表单主体抽取为 VulnFormPanel（与测试计划流程抽屉复用），
@@ -37,11 +39,28 @@ const editId = route.name === 'vuln-edit' ? Number(route.params.id) : null
 const planId = !editId && route.query.plan_id ? Number(route.query.plan_id) : null
 const planName = ref('')
 
+/**
+ * 来源页（由跳转方经 `redirect` 参数携带，如工单流程抽屉 → 编辑漏洞）：
+ * 存在时取消/保存都原路返回，避免脱离工单上下文；无来源时维持原有去向。
+ */
+const redirectTarget = computed(() => normalizeRedirect(route.query.redirect))
+
+function onCancel() {
+  void goBack(router, route, '/vulns')
+}
+
+function openRetest() {
+  void router.push(withRedirect(`/vulns/${editId}/retest`, route.fullPath))
+}
+
 function onSaved(vulns: VulnForm[]) {
-  if (editId) {
-    router.push(`/vulns/${editId}`)
+  // replace：避免浏览器后退又回到刚保存的表单页
+  if (redirectTarget.value) {
+    void router.replace(redirectTarget.value)
+  } else if (editId) {
+    void router.push(`/vulns/${editId}`)
   } else {
-    router.push(vulns.length === 1 ? `/vulns/${vulns[0].id}` : '/vulns')
+    void router.push(vulns.length === 1 ? `/vulns/${vulns[0].id}` : '/vulns')
   }
 }
 

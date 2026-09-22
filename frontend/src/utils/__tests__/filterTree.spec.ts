@@ -14,6 +14,7 @@ import {
   filterTreeToPayload,
   isFilterRuleComplete,
   normalizeFilterTree,
+  opOptionsOf,
   pruneFilterTree,
 } from '../filterTree'
 
@@ -166,6 +167,55 @@ describe('filterTree 条件树工具', () => {
     applyFilterRuleField(node, FIELDS)
     expect(node.op).toBe('eq')
     expect(node.value).toBe('')
+  })
+
+  it('数值字段（预估 / 实际人天）支持比较与区间，取值以数字形态下发', () => {
+    const fields: FilterFieldDef[] = [
+      ...FIELDS,
+      { key: 'est_mandays', label: '预估人天', type: 'number' },
+      { key: 'actual_mandays', label: '实际人天', type: 'number' },
+    ]
+
+    const node = createFilterRule(fields)
+    node.field = 'est_mandays'
+    applyFilterRuleField(node, fields)
+    // 数值字段默认操作符为「等于」，默认取值为 null（而非空串）
+    expect(node.op).toBe('eq')
+    expect(node.value).toBe(null)
+    expect(isFilterRuleComplete(node)).toBe(false)
+
+    node.value = 3
+    expect(isFilterRuleComplete(node)).toBe(true)
+
+    // 区间：双值数组，两端填齐才算完整
+    node.op = 'between'
+    applyFilterRuleOp(node, fields)
+    expect(node.value).toEqual([null, null])
+    expect(isFilterRuleComplete(node)).toBe(false)
+    node.value = [1, 5]
+    expect(isFilterRuleComplete(node)).toBe(true)
+
+    // 持久化后回填：未填取值的数值条件保持 null（数值输入框只接受 Number | Null）
+    const persisted = normalizeFilterTree({ logic: 'and', children: [rule('est_mandays', 'gte', null)] })
+    expect((persisted.children[0] as FilterRule).value).toBe(null)
+
+    // 操作符面：有比较/区间，无文本类操作符
+    const ops = opOptionsOf(node, fields).map((o) => o.value)
+    expect(ops).toEqual(expect.arrayContaining(['eq', 'gte', 'lte', 'between', 'is_empty']))
+    expect(ops).not.toContain('contains')
+
+    // 预览与请求载荷
+    expect(describeFilterTree(
+      normalizeFilterTree({ logic: 'and', children: [rule('est_mandays', 'gte', 3)] }),
+      fields,
+    )).toBe('预估人天 大于等于 3')
+    expect(filterTreeToPayload(
+      normalizeFilterTree({ logic: 'and', children: [rule('actual_mandays', 'lte', 2.5)] }),
+    )).toEqual({
+      logic: 'and',
+      not: false,
+      children: [{ kind: 'rule', field: 'actual_mandays', op: 'lte', value: 2.5, not: false }],
+    })
   })
 
   it('空分组可安全序列化（后端会忽略）', () => {

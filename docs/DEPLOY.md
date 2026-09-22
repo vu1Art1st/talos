@@ -265,9 +265,9 @@ bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgra
 
 | 路径 | 内容 | 保留策略 |
 |---|---|---|
-| `backups/anchors/<年>/<月>/<时间戳>/` | `db.sql.zst`（或 `.gz`）+ `storage.tar.zst` + `MANIFEST.json` | 只保留**最近 3 份**锚点；清空旧产物前先完成新锚点与基线校验 |
+| `backups/anchors/<年>/<月>/<时间戳>/` | `db.sql.zst` + `storage.tar.zst`（无 `zstd` 的机器上产物为 `.gz`）| 只保留**最近 3 份**锚点；清空旧产物前先完成新锚点与基线校验 |
 | `backups/baseline/storage/` | 差异比对基线（由最近锚点重建） | 随锚点更新 |
-| `backups/snapshots/<年>/<月>/<时间戳>/` | `db.sql.zst` + `storage/`（硬链接差异）+ `MANIFEST.json` | 生成新锚点时清空旧差异 |
+| `backups/snapshots/<年>/<月>/<时间戳>/` | `db.sql.zst`（或 `.gz`）+ `storage/`（硬链接差异）+ `MANIFEST.json` | 生成新锚点时清空旧差异 |
 | `backups/latest` | 指向最近一次备份的软链 | — |
 
 要点：
@@ -278,7 +278,7 @@ bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgra
 - **并发保护**：备份三件套用 `flock`，保证同一时刻只有一份备份在跑。
 - **恢复 / 回滚**：`bash scripts/restore.sh <备份目录>`（锚点或差异快照皆可）→ 完成后**必须先 `bash scripts/migrate.sh`** 再访问页面。注意 `restore.sh` 是**破坏性**的（`DROP SCHEMA public CASCADE`），目标库现有数据全部清除。
 - **异地**：建议定期把 `backups/` 同步到异地存储。
-- **`zstd` 为可选依赖**：缺失时自动回退 gzip（仅提示变慢），不影响可用性。
+- **`zstd` 备份侧可选、恢复侧必需**（2026-09 起产物默认 `.zst`）：备份机有 `zstd` 时产出 `db.sql.zst` / `storage.tar.zst`（多线程，较 gzip 提速 3~5 倍）；缺失则自动回退 gzip 产出 `.gz`，只提示变慢。但**要恢复 `.zst` 产物的机器必须自带 `zstd`**（`restore.sh` / `restore-local.sh` 都按扩展名选解压器，缺 `zstd` 时解压即失败，不存在回退路径）——迁移/换机前先在目标机 `apt install zstd`（Windows 见「九」）。
 
 > 备份不含 `.env`（内含密钥）。迁移 / 灾备时请另行安全保管 `.env`。
 
@@ -304,12 +304,14 @@ bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgra
    bash scripts/restore.sh backups/<时间戳>
    ```
 
-   脚本会：起 postgres → 导入 `db.sql.gz` 到空库 → 起 api 并解包 `storage.tar.gz` 到 `/app/storage` → 拉起全部服务。
+   脚本会：起 postgres → 导入 `db.sql.zst`（历史备份为 `.gz`，脚本按扩展名自动选解压器）到空库 →
+  起 api 并解包 `storage.tar.zst` 到 `/app/storage` → 拉起全部服务。**目标机需已装 `zstd`**（见「五、备份」要点）。
 
 4. 用原 admin 账号登录验证数据完整。
 
 要点：
 
+- **只想把备份数据导入本地开发库**（不起容器栈、目标是 DBngin）：见「九、把生产备份导入本地开发库」，不要在本地用本节的 `restore.sh`（它面向容器栈）。
 - **`POSTGRES_USER/DB/PASSWORD` 必须与备份来源一致**，否则库名 / 连接对不上。
 - `VP_SECRET_KEY` 保持一致可避免已登录用户令牌失效（改了不会丢数据，仅需重新登录）。
 - `redis` / `gotenberg` 无状态，不用迁移。
@@ -431,6 +433,174 @@ bash scripts/upgrade.sh
 - **只 `git pull` + `docker compose up -d` 不会让代码改动生效**：镜像已烘焙代码，必须重建
   （`docker compose build` 或 `docker compose up -d --build`），或直接走 `upgrade.sh`。
 - 端口占用 / 构建失败等中断后重试是安全的：`upgrade.sh` 各步骤幂等，可重复执行。
+
+---
+
+## 九、把生产备份导入本地开发库（Windows / WSL-Kali）
+
+把 VPS 的备份产物（`backups/anchors/...` 或 `backups/snapshots/...`）导入**本地开发库**，用真实数据做开发/复现。
+与「六、更换 VPS」的区别：**只写数据、不起容器栈**，目标是由 DBngin 托管的 `vulnplatform` 开发库
+（本地环境搭建见 `docs/LOCAL_DEV_SETUP.md`）。两方案选一个即可，也可以「Windows 导入 + WSL 验证」组合。
+
+### 9.1 先看清备份里有什么（两方案共用）
+
+以本机实测的 `backups/anchors/2026/09/20260910_101126/` 为例：
+
+| 文件 | 内容 | 实测 |
+|---|---|---|
+| `db.sql.zst` | `pg_dump --clean --if-exists` 纯文本 SQL（UTF8） | 293 KB → 解压 3.2 MB / 6 206 行 / 30 张表 / 30 段 `COPY` |
+| `storage.tar.zst` | `/app/storage` 整卷（`uploads/` + `previews/` + 导出产物） | 1.8 GB |
+| `MANIFEST.json` | `git_commit` / `db_sha256` / `storage_sha256` / `status=complete` | `git_commit=2f0fa7e` |
+
+落库前先做三项检查（**落库本身是破坏性的**：会清空目标库）：
+
+```powershell
+# 1) 完整性：文件 SHA256 应与 MANIFEST.json 的 db_sha256 一致（实测一致）
+(Get-FileHash .\backups\anchors\2026\09\20260910_101126\db.sql.zst -Algorithm SHA256).Hash.ToLower()
+
+# 2) 备份的代码版本 vs 本地：备份落后就 git pull（避免入库后页面缺字段/缺功能）
+git rev-parse --short HEAD        # 本地 9f56530（2.20.0）／备份 2f0fa7e
+
+# 3) 备份库的迁移版本 → 决定恢复后要补几个迁移
+#    实测：dump 内 alembic_version = d6e7f8a9b0c1，本地 head = e1f2a3b4c5d6 → 需补 5 个迁移
+```
+
+> 备份库结构落后于本地代码是**常态**：恢复完必须补迁移，否则新功能页面 500（根因与「七」相同）。
+
+**格式转换（按需）**：备份是纯文本 SQL 的压缩流，`db.sql.zst` / `db.sql.gz` / `db.sql` 三者内容等价，
+脚本按扩展名选解压器，因此「转换」只是换个封装，不涉及 dump 内容：
+
+```powershell
+# .zst → .sql（Windows，zstd 自写文件，最稳）
+zstd -d -f -o db.sql db.sql.zst
+# .sql → .zst（把手工/旧格式 SQL 重新压成脚本可识别的产物名）
+zstd -q -T0 -o db.sql.zst db.sql
+# .gz → .sql：Windows 无 gunzip 时借 WSL/Git-Bash
+wsl -d kali-linux gunzip -c /mnt/e/GitRepo/Talos/backups/.../db.sql.gz > "$env:TEMP\db.sql"
+```
+
+> 转换时**不要让 PowerShell 管道串联两个压缩器**（`gunzip -c a.gz | zstd -o b.zst`）：PowerShell 会按文本
+> 解码中间流，产物必然损坏。分两步走（先落盘 `.sql`，再压缩），或把整条命令交给 `wsl bash -lc '...'` 执行。
+
+### 9.2 方案一：Windows + PowerShell 7（原生，不依赖 WSL / Docker）
+
+工具链：
+
+| 工具 | 用途 | 获取方式 / 本机实测 |
+|---|---|---|
+| `zstd` | 解压 `db.sql.zst`（**必需**） | `winget install --id Facebook.ZStandard -e`（装完重开终端）；本机未装 → 也可用 9.3 的解压回退 |
+| `psql` 16 | 导入 SQL | DBngin 自带：`%LOCALAPPDATA%\com.tinyapp.DBngin\Binaries\postgresql\16.14\bin\psql.exe`（实测 16.14，支持新版 `pg_dump` 的 `\restrict`） |
+| `tar`（bsdtar） | 解 `storage.tar.zst` | Windows 自带（实测 3.8.8，含 `libzstd/1.5.7`，**原生支持 `.tar.zst`**，无需额外装 zstd） |
+
+```powershell
+# 0) 路径常量（按机器调整）
+$BK   = 'E:\GitRepo\Talos\backups\anchors\2026\09\20260910_101126'
+$PSQL = "$env:LOCALAPPDATA\com.tinyapp.DBngin\Binaries\postgresql\16.14\bin\psql.exe"
+$PG   = @('-h','127.0.0.1','-U','vulnplatform','-d','vulnplatform')
+
+# 1) 解压 db（务必用 -o 让 zstd 自己写文件；不要用 `zstd -dc x.zst > x.sql` 或管道——
+#    PowerShell 默认按文本处理，二进制会被解码/换行转换破坏）
+zstd -d -f -o "$env:TEMP\db.sql" "$BK\db.sql.zst"
+
+# 2) 清空目标库（DROP SCHEMA public CASCADE 必需：dump 只 DROP 它自己导出的对象，
+#    残留的 alembic_version / 表会与导入内容冲突）
+& $PSQL @PG -v ON_ERROR_STOP=1 -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+# 3) 导入（ON_ERROR_STOP=1：任何一步失败立即中断，避免半库状态）
+& $PSQL @PG -v ON_ERROR_STOP=1 -q -f "$env:TEMP\db.sql"
+
+# 4) 校验（实测：30 表 / 261 漏洞 / 108 报告 / alembic d6e7f8a9b0c1）
+& $PSQL @PG -c "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public') AS tables, (SELECT version_num FROM alembic_version) AS alembic, (SELECT count(*) FROM vulns) AS vulns, (SELECT count(*) FROM reports) AS reports"
+
+# 5) 补迁移到本地 head（VP_DEBUG=1 免 SECRET_KEY 强校验，与 dev.ps1 同口径）
+cd E:\GitRepo\Talos\backend
+$env:VP_DEBUG='1'; $env:VP_DATABASE_URL='postgresql+asyncpg://vulnplatform@127.0.0.1:5432/vulnplatform'
+.\.venv\Scripts\python.exe -m scripts.migrate     # 实测输出 5 条 Running upgrade ... → e1f2a3b4c5d6
+
+# 6) storage（可选：1.8 GB，只做业务开发可跳过——DB 是唯一必需项）
+& "$env:SystemRoot\system32\tar.exe" -xf "$BK\storage.tar.zst" -C E:\GitRepo\Talos\backend\storage
+
+# 7) 验证：起 dev 栈（前端 27014 / 后端 27015）后用原 admin 账号登录
+pwsh -NoProfile -ExecutionPolicy Bypass -File E:\GitRepo\Talos\dev.ps1
+```
+
+要点：
+
+- **本地 DBngin 连接是 `trust`**（`dev-database/postgre/pg_hba.conf:119` 的 `host all all 127.0.0.1/32 trust`）：连 `127.0.0.1` **不需要密码**，`.env` 的 `POSTGRES_PASSWORD` 只服务容器部署。
+- **目标库编码必须是 UTF8**（本机 `vulnplatform` 实测 UTF8；集群默认库 `postgres` 是 WIN1252）。中文数据导入失败时先按 `LOCAL_DEV_SETUP.md` 用 `TEMPLATE template0 ENCODING 'UTF8'` 重建库。
+- **storage 解到 `backend\storage`**（`STORAGE_DIR` 默认 `storage`，而 dev 后端从 `backend/` 启动），不要解到仓库根。
+- 只想要「几张表 + 中文数据」做联调时，可以只用步骤 1~5；`storage` 常用于复现导入解析/报告导出的附件问题。
+
+常见问题：
+
+| 现象 | 原因与处理 |
+|---|---|
+| `zstd : 无法将“zstd”项识别为 cmdlet…` | 未安装或装完未重开终端；`winget install --id Facebook.ZStandard -e` 后重开 PowerShell；或用 9.3 的 WSL 解压回退 |
+| `invalid byte sequence for encoding "UTF8"` | ① 目标库不是 UTF8（重建库并指定 `TEMPLATE template0 ENCODING 'UTF8'`）；② 在**中文（GBK）控制台**用 `-c` 传了含中文的 SQL：改用纯 ASCII 的 `-c`，或把 SQL 写进 UTF-8 文件用 `-f`，或先 `chcp 65001` |
+| `\restrict: invalid command` | 客户端 psql 过旧（`\restrict` 需 psql ≥ 16.10 / 15.14 / 17.6，新版 `pg_dump` 会用它包裹声明）；升级 psql 客户端（本机 16.14 实测正常） |
+| 导入中报 `relation … already exists` 或 `alembic_version` 冲突 | 漏了步骤 2 的 `DROP SCHEMA public CASCADE`，或目标库不是空库 |
+| 页面 500 `column … does not exist` | 漏了步骤 5 的补迁移（见「七」） |
+| 解压后 SQL 比备份大很多（293 KB → 3.2 MB） | 正常：纯 SQL 文本压缩比通常 10:1 以上 |
+| `tar` 解包报 owner/权限告警 | 备份里的条目属主是容器内 root；Windows 侧可忽略，WSL/Git-Bash 侧加 `--no-same-owner` |
+
+### 9.3 方案二：WSL-Kali（远程连本机 PG + restore 脚本）
+
+本机环境实测（`.wslconfig` 为 `[wsl2] networkingMode=mirrored`）：
+
+| 能力 | 实测结果 |
+|---|---|
+| 工具链 | `/usr/bin/zstd` 1.5.7、`/usr/bin/psql` 18.1、`/usr/bin/docker` 29.4.2、`/usr/bin/tar` |
+| 连通本机 PG | **镜像网络下 WSL 的 `127.0.0.1:5432` 直通 Windows 宿主 DBngin**：`pg_isready` 返回 `accepting connections`，`psql postgresql://vulnplatform@127.0.0.1:5432/vulnplatform` 可查（无需查宿主 IP、无需改 `listen_addresses` / `pg_hba` / 防火墙） |
+| 仓库访问 | 直接 `cd /mnt/e/GitRepo/Talos`（无需在 WSL 内再克隆） |
+
+**脚本选择**：`scripts/restore.sh` 面向 docker compose 栈（`docker compose exec postgres` + 卷内 storage），
+目标只能是容器库；本机 DBngin 不是容器，故用 **`scripts/restore-local.sh`**——它复用 `backup-common.sh` 的产物定位与
+解压能力，去掉 docker 依赖，改为对**任意 DSN** 恢复，并对非回环目标加 `--yes` 破坏性护栏。
+
+```bash
+# 0) 连通性（应先输出 accepting connections；不通见下表）
+pg_isready -h 127.0.0.1 -p 5432
+
+# 1) 一键恢复（清空 public schema → 流式导入 db.sql.zst；实测 1.3 s 完成）
+cd /mnt/e/GitRepo/Talos
+bash scripts/restore-local.sh backups/anchors/2026/09/20260910_101126 \
+     --dsn postgresql://vulnplatform@127.0.0.1:5432/vulnplatform
+
+# 1b) 需要同时恢复上传文件时加 --storage-dir（1.8 GB，写入 /mnt/e 较慢，可留给方案一）
+bash scripts/restore-local.sh backups/anchors/2026/09/20260910_101126 \
+     --dsn postgresql://vulnplatform@127.0.0.1:5432/vulnplatform \
+     --storage-dir /mnt/e/GitRepo/Talos/backend/storage
+
+# 2) 校验（与方案一同一口径）
+psql postgresql://vulnplatform@127.0.0.1:5432/vulnplatform \
+  -c "SELECT (SELECT count(*) FROM information_schema.tables WHERE table_schema='public') AS tables, (SELECT version_num FROM alembic_version) AS alembic, (SELECT count(*) FROM vulns) AS vulns"
+
+# 3) 补迁移：后端 venv 在 Windows 侧，按 9.2 步骤 5 执行（不要在 WSL 里用 /mnt/e 上的 Windows venv 跑 Python）
+```
+
+**解压回退**（Windows 侧没装 `zstd` 时，借 WSL 解压、产物落回 Windows 目录，全程二进制安全）：
+
+```powershell
+wsl -d kali-linux zstd -d -f -o "C:\Users\<你>\AppData\Local\Temp\db.sql" "E:\GitRepo\Talos\backups\anchors\2026\09\20260910_101126\db.sql.zst"
+# 随后回到 9.2 步骤 2 继续（DROP SCHEMA → psql -f）
+```
+
+常见问题：
+
+| 现象 | 原因与处理 |
+|---|---|
+| `pg_isready ... no response` | ① DBngin 里 PostgreSQL 未 Start；② `.wslconfig` 不是 `networkingMode=mirrored`（默认 NAT）：改用宿主 IP 连接 —— `ip route show default \| awk '{print $3}'`（或 `/etc/resolv.conf` 的 nameserver），并按下面两条补配置 |
+| 报 `no pg_hba.conf entry for host "172.x.x.x"` | NAT 模式下 `pg_hba.conf` 只放行 `127.0.0.1/32` 与 `::1/128`：在 `dev-database/postgre/pg_hba.conf` 追加 `host all all 172.16.0.0/12 scram-sha-256`，并在 `postgresql.conf` 设 `listen_addresses = '*'`；改完 `psql -h 127.0.0.1 -U postgres -c "select pg_reload_conf()"`（或在 DBngin 里重启服务） |
+| NAT 模式下仍连不上（无入站放行） | Windows 防火墙放行 TCP 5432（WSL 的 vEthernet 通常属 Public 配置文件，需 `-Profile Any`）：`New-NetFirewallRule -DisplayName "PostgreSQL (WSL)" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5432 -Profile Any`。**不想动 DBngin 配置**可用端口转发：`netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=5433 connectaddress=127.0.0.1 connectport=5432`，WSL 连宿主 `5433`（此时服务端看到的来源是 `127.0.0.1`，天然命中 `trust` 规则） |
+| `zstd: command not found` | `sudo apt install -y zstd`（本机已装 1.5.7） |
+| 脚本报「目标是远程库…确认后请追加 --yes」 | 破坏性护栏：DSN 主机不是 `127.0.0.1` / `localhost` / `::1` 时必须显式 `--yes`，避免误清生产库 |
+| 在 `/mnt/e` 下解包 storage 极慢 | drvfs 跨文件系统 + 1.8 GB，属正常现象；属主告警可忽略（脚本内已用 `tar xf - --no-same-owner`），或干脆把 storage 留给 Windows 侧解包（9.2 步骤 6） |
+
+### 9.4 两方案收尾（共同）
+
+1. 补完迁移后 `alembic current` 应为**本地 head**（当前 `e1f2a3b4c5d6`）；
+2. 启动 dev 栈（`dev.ps1`）→ 用**原 admin 账号**登录验证数据完整；页面报错先看「七、恢复后页面 500 排查」；
+3. 本地库被真实数据覆盖后，`vulnplatform_test` / `vulnplatform_e2e` **不受影响**（测试库独立，见 `LOCAL_DEV_SETUP.md`），跑测试仍按 `scripts/test.ps1` 的既有口径。
 
 ---
 

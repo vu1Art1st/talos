@@ -16,6 +16,7 @@ from _helpers import (
     _login_ready,
     _get_plan,
     _list_plan_names,
+    _list_plans,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -33,7 +34,7 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
     C = "筛选专用系统-渗透C"
     bodies = [
         {"system_name": A, "test_type": "渗透测试", "department": DEPT,
-         "receive_time": "2026-01-01", "status": 10, "est_mandays": 3},
+         "receive_time": "2026-01-01", "status": 10, "est_mandays": 3, "actual_mandays": 1.5},
         {"system_name": B, "test_type": "代码审计", "department": "筛选专用部门B",
          "receive_time": "2026-02-01", "status": 20, "est_mandays": 5},
         {"system_name": C, "test_type": "渗透测试", "department": DEPT,
@@ -69,6 +70,11 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
         # 数字比较与区间（限定专属部门）
         assert await _list_plan_names(client, auth, q(dept, rule("est_mandays", "gte", 3))) == {A}
         assert await _list_plan_names(client, auth, q(dept, rule("est_mandays", "between", [2, 3]))) == {A, C}
+        # 实际人天：与预估人天同属 number 字段（前端字段清单缺口曾导致该列无法筛选）
+        assert await _list_plan_names(client, auth, q(dept, rule("actual_mandays", "eq", 1.5))) == {A}
+        assert await _list_plan_names(client, auth, q(dept, rule("actual_mandays", "between", [1, 2]))) == {A}
+        # 未填实际人天的记录其值为 0，故 number 的「为空」等价于「NULL 或 0」
+        assert await _list_plan_names(client, auth, q(dept, rule("actual_mandays", "is_empty"))) == {C}
         # 日期字符串上界（严格小于），空值被排除
         assert await _list_plan_names(client, auth, q(dept, rule("receive_time", "lt", "2026-02-01"))) == {A}
         # 空值筛选
@@ -785,6 +791,61 @@ async def test_ticket_id_manual_occupancy_and_ghost(client: AsyncClient, auth: d
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["ticket_id"] == "20260730-5"
+
+async def test_plan_search_ticket_id_excludes_ghost_seq(client: AsyncClient, auth: dict):
+    """幽灵序号不得被搜索 / 聚合筛选误命中（2026-09-22 缺陷回归）。
+
+    现场：某记录先自动得到 20260730-1，手工改号后底层 ticket_seq 仍为 1；搜索 20260730-1 时
+    该记录与真正显示 20260730-1 的记录一起命中 → 一次搜索返回两条。口径与
+    `ticket_service.check_ticket_id_unique` 对齐：手动指定了编号的记录，其残留 ticket_seq 不参与命中。
+    """
+    DEPT = "幽灵序号搜索部门"
+    base = {"test_type": "渗透测试", "department": DEPT, "receive_time": "2026-07-30"}
+    created: list[int] = []
+
+    resp = await client.post("/api/v1/testing-plans", headers=auth,
+                             json={**base, "system_name": "幽灵序号系统-自动"})
+    assert resp.status_code == 200, resp.text
+    ghost = resp.json()
+    created.append(ghost["id"])
+    ghost_ticket = ghost["ticket_id"]  # 自动编号（此刻尚无任何记录显示它）
+    assert ghost_ticket.startswith("20260730-")
+
+    # 手工改号为另一个日期的编号：底层 ticket_seq 残留成「幽灵序号」
+    resp = await client.put(f"/api/v1/testing-plans/{ghost['id']}", headers=auth,
+                            json={**base, "system_name": "幽灵序号系统-自动",
+                                  "ticket_id_manual": "20991231-99"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ticket_id"] == "20991231-99"
+
+    # 另一条记录接管该显示编号
+    resp = await client.post("/api/v1/testing-plans", headers=auth,
+                             json={**base, "system_name": "幽灵序号系统-接管",
+                                   "ticket_id_manual": ghost_ticket})
+    assert resp.status_code == 200, resp.text
+    takeover_id = resp.json()["id"]
+    created.append(takeover_id)
+
+    def assert_only_takeover(items: list[dict]) -> None:
+        ids = [p["id"] for p in items]
+        assert ghost["id"] not in ids, f"幽灵序号记录被误命中：{items}"
+        assert takeover_id in ids, f"接管记录未被命中：{items}"
+
+    try:
+        # 关键词搜索（修复前会同时返回幽灵记录）
+        assert_only_takeover(await _list_plans(
+            client, auth, {"search": ghost_ticket, "department": DEPT},
+        ))
+
+        # 聚合筛选同口径（plan_query._ticket_id_filter_expr）
+        filters = json.dumps({"logic": "and", "not": False, "children": [
+            {"kind": "rule", "field": "department", "op": "eq", "value": DEPT},
+            {"kind": "rule", "field": "ticket_id", "op": "eq", "value": ghost_ticket},
+        ]})
+        assert_only_takeover(await _list_plans(client, auth, {"filters": filters}))
+    finally:
+        for plan_id in created:
+            await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
 
 async def test_plan_complete_no_vuln_flow(client: AsyncClient, auth: dict):
     """无漏洞闭环：无漏洞完结 → 测试通过 + 无漏洞报告 → 重复确认拒绝 → 补录漏洞自动重开。"""

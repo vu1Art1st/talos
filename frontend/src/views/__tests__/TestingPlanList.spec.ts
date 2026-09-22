@@ -7,10 +7,19 @@ import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
-// mock 路由：组件内多处 router.push 跳漏洞/报告详情页；导入链会拉起 router/index.ts
+// mock 路由：组件内多处 router.push 跳漏洞/报告详情页；导入链会拉起 router/index.ts。
+// 抽屉状态写入 query（?plan=&vuln=）故需 useRoute；replace 要返回 Promise（组件内 .catch 兜底）。
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
-  return { ...actual, useRouter: () => ({ push: vi.fn() }) }
+  return {
+    ...actual,
+    useRoute: () => ({ path: '/testing-plans', fullPath: '/testing-plans', params: {}, query: {} }),
+    useRouter: () => ({
+      push: vi.fn().mockResolvedValue(undefined),
+      replace: vi.fn().mockResolvedValue(undefined),
+      back: vi.fn(),
+    }),
+  }
 })
 
 // mock auth / theme store：屏蔽其导入链（router/pinia），只提供组件实际读取的字段

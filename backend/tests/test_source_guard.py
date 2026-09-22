@@ -8,7 +8,10 @@
    `app/core/outbound.py` 校验，报告导出的远程图片已改为「只内嵌本地文件」
    （安全审计 TALOS-2026-003/004）；
 3. 复测标题聚合入口必须转义：`sync_vul_retest_html` 内出现 `html_mod.escape`
-   （安全审计 TALOS-2026-005）。
+   （安全审计 TALOS-2026-005）；
+4. 发布脚本 `scripts/upgrade.sh` 的 fail-open 步骤（数据回填 / 缓存清理等）必须经
+   `record_warning` 登记并在升级末尾汇总，禁止 `|| echo` 单行兜底（2026-09-22 静默回填事故：
+   提示被后续输出淹没 → 报告复测三态长期显示「未发起复测」而无人察觉）。
 
 这些约定无法由类型系统或普通单测覆盖（改错是"能跑通但越界"），故用源码级守卫固化。
 """
@@ -125,3 +128,35 @@ def test_scripts_app_references_resolve():
 
     problems = collect_problems()
     assert not problems, "脚本引用了不存在的模块/符号：\n" + "\n".join(problems)
+
+
+# ---------- 发布脚本：fail-open 步骤必须显式登记告警（2026-09-22 静默回填事故整改） ----------
+_UPGRADE_SH = _REPO_ROOT / "scripts" / "upgrade.sh"
+# 维护类步骤：数据回填 / 构建缓存清理等「失败不阻断升级」的命令
+_MAINTENANCE_CMD = re.compile(r"(?:compose run --rm api python -m scripts\.|builder prune)")
+_LEGACY_SWALLOW = re.compile(r"\|\|\s*echo")
+
+
+def test_upgrade_fail_open_steps_are_registered():
+    """upgrade.sh 的 fail-open 步骤不得再用 `|| echo` 单行兜底，必须经 record_warning 登记。
+
+    背景（2026-09-22）：`[4.6/5]` 源报告回填静默失败——单行「可稍后手动执行」提示被后续输出淹没，
+    报告维度复测三态长期显示「未发起复测」而无人察觉。硬依赖（pull / build / migrate）不在此列，
+    它们失败即中止（`set -euo pipefail`），报错本身即可见。
+    """
+    source = _UPGRADE_SH.read_text(encoding="utf-8")
+    offenders = [
+        f"{lineno}: {line.strip()}"
+        for lineno, line in enumerate(source.splitlines(), start=1)
+        # 注释行不受限（便于在脚本里写「不这样做」的反例说明）
+        if not line.lstrip().startswith("#")
+        and _MAINTENANCE_CMD.search(line)
+        and _LEGACY_SWALLOW.search(line)
+    ]
+    assert not offenders, (
+        "维护类步骤失败必须写成 `if ! <命令>; then record_warning …; fi`，"
+        "禁止 `|| echo` 单行兜底（会被后续输出淹没）：\n" + "\n".join(offenders)
+    )
+    assert "record_warning()" in source, "upgrade.sh 缺少 record_warning 辅助函数"
+    assert 'WARN_COUNT}" -gt 0' in source, "upgrade.sh 末尾缺少 fail-open 失败汇总分支"
+    assert "notify.sh" in source, "升级末尾必须对 fail-open 步骤失败做渠道通知"

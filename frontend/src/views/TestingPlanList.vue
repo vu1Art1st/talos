@@ -22,12 +22,16 @@
         :width="960"
       >
         <template #reference>
-          <el-button :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
-            <el-icon class="mr-1"><Filter /></el-icon>筛选
-            <span v-if="filterCount" class="filter-count">{{ filterCount }}</span>
-          </el-button>
+          <!-- manual 模式下 el-popover 不监听外部点击，失焦收回由 useClickOutside 负责；
+               触发按钮需包一层才能取到真实 DOM（el-button 的 ref 是组件实例） -->
+          <span ref="filterTriggerRef" class="inline-flex">
+            <el-button :type="filterCount ? 'primary' : 'default'" @click="filterVisible = !filterVisible">
+              <el-icon class="mr-1"><Filter /></el-icon>筛选
+              <span v-if="filterCount" class="filter-count">{{ filterCount }}</span>
+            </el-button>
+          </span>
         </template>
-        <div class="filter-panel">
+        <div ref="filterPanelRef" class="filter-panel">
           <div class="mb-2 text-sm font-medium">聚合筛选（支持条件分组与嵌套）</div>
           <FilterBuilder v-model="filterTree" :fields="filterFields" @change="onFiltersChange" />
         </div>
@@ -435,14 +439,15 @@
     </template>
   </el-dialog>
 
-  <PlanWorkflowDrawer v-model:visible="workflowVisible" :plan-id="workflowPlanId" @changed="onWorkflowChanged" />
+  <PlanWorkflowDrawer v-model:visible="workflowVisible" :plan-id="workflowPlanId"
+                      :focus-vuln-id="focusVulnId" @changed="onWorkflowChanged" />
 
   <AssetFormDialog v-model:visible="assetDialogVisible" :asset="assetPrefill" @saved="onAssetCreated" />
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import { useAuthStore } from '../stores/auth'
@@ -470,6 +475,7 @@ import FilterBuilder from '../components/FilterBuilder.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
+import { useClickOutside } from '../composables/useClickOutside'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
 import type { Asset, FilterFieldDef, QueryParams, TestingPlan } from '../types'
@@ -481,6 +487,7 @@ import { DIMENSIONS as PLAN_STAT_DIMENSIONS, usePlanStats } from '../composables
 
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 // 函数声明提升：筛选条件变化 → 列表回到首页并同步刷新统计（reload 定义见下方）
 function triggerReload() {
   reload()
@@ -493,6 +500,18 @@ const {
   filterVisible, filterTree, filterCount, onFiltersChange,
   periodLabel, buildParams, disposeFilters,
 } = usePlanFilters(triggerReload)
+
+// 聚合筛选面板：manual 模式下 el-popover 不监听外部点击，点空白处不会收回 —— 由本函数补回。
+// ignoreSelectors 放行面板内 el-select / el-date-picker / el-popconfirm 的 teleport 浮层，
+// 否则点开下拉会把整个面板一起关掉。
+const filterTriggerRef = ref<HTMLElement>()
+const filterPanelRef = ref<HTMLElement>()
+useClickOutside(
+  [filterTriggerRef, filterPanelRef],
+  filterVisible,
+  () => { filterVisible.value = false },
+  { ignoreSelectors: ['.el-popper'] },
+)
 
 // 列表查询：extraParams 以函数声明传入（提升），保证「查询参数口径」全站唯一
 const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage<TestingPlan>('/testing-plans', {
@@ -526,6 +545,8 @@ const filterFields = computed<FilterFieldDef[]>(() => [
   },
   { key: 'first_test_done_time', label: '初测完成', type: 'date' },
   { key: 'retest_done_time', label: '复测完成', type: 'date' },
+  { key: 'est_mandays', label: '预估人天', type: 'number' },
+  { key: 'actual_mandays', label: '实际人天', type: 'number' },
   { key: 'testers', label: '测试人员', type: 'text' },
 ])
 
@@ -765,14 +786,41 @@ function reloadAfterCrud() {
   return Promise.all([load(), loadStats()])
 }
 
-// ---------- 流程抽屉 ----------
+// ---------- 流程抽屉（状态进 URL，支撑编辑后原路返回） ----------
+// 抽屉打开的工单与回退定位的漏洞持久化为 ?plan=&vuln= 查询参数：
+// 从漏洞编辑页 redirect 回来时按参数自动重开抽屉、展开刚编辑的漏洞行，无需重新查找。
 const workflowVisible = ref(false)
 const workflowPlanId = ref<number | null>(null)
+const focusVulnId = computed(() => {
+  const n = Number(route.query.vuln)
+  return Number.isInteger(n) && n > 0 ? n : null
+})
 
 function openWorkflow(row: TestingPlan) {
   workflowPlanId.value = row.id
   workflowVisible.value = true
 }
+
+// 抽屉显隐 ↔ URL 查询参数双向同步：打开写入 plan、关闭清除 plan 与 vuln；
+// replace 避免污染历史栈（浏览器后退直接回到无抽屉的列表）。
+watch(workflowVisible, (v) => {
+  const query = { ...route.query }
+  if (v && workflowPlanId.value) query.plan = String(workflowPlanId.value)
+  else {
+    delete query.plan
+    delete query.vuln
+  }
+  void router.replace({ query }).catch(() => {})
+})
+
+// 首次进入（含编辑页 redirect 回跳）：按 URL 参数恢复抽屉
+onMounted(() => {
+  const planQ = Number(route.query.plan)
+  if (Number.isInteger(planQ) && planQ > 0) {
+    workflowPlanId.value = planQ
+    workflowVisible.value = true
+  }
+})
 
 // 抽屉内发生认领/漏洞/报告/复测等变更后刷新列表与统计
 async function onWorkflowChanged() {

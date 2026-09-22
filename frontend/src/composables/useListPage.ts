@@ -44,9 +44,12 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
       : { prop: '', order: '' },
   )
   const loading = ref(false)
+  /** 请求序号：只采纳最后一次发出的请求的响应（见 load 内的竞态守卫） */
+  let requestSeq = 0
 
   async function load(p = page.value) {
     page.value = p
+    const seq = ++requestSeq
     loading.value = true
     try {
       const { data } = await client.get(url, {
@@ -59,10 +62,14 @@ export function useListPage<T = any>(url: string, options: ListPageOptions = {})
           ...options.extraParams?.(),
         },
       })
+      // 竞态守卫：连续改关键词 / 筛选时先发出的请求可能后返回，过期响应必须丢弃，
+      // 否则列表会被上一次查询的结果整体覆盖（表现为「偶发多出/少了记录」）。
+      if (seq !== requestSeq) return
       items.value = data.items
       total.value = data.total
     } finally {
-      loading.value = false
+      // 只有当自己仍是最新请求时才收尾 loading，避免过期响应提前结束加载态
+      if (seq === requestSeq) loading.value = false
     }
   }
 

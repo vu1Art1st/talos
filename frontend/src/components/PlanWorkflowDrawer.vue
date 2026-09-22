@@ -88,67 +88,70 @@
         </div>
 
         <el-empty v-if="!vulns.length" description="暂无漏洞，点击右上角「录入漏洞」或「从漏洞库选择」开始" :image-size="80" />
-        <el-table v-else :data="vulns" size="small" row-key="id">
-          <el-table-column type="expand">
-            <template #default="{ row }">
-              <div class="px-6 py-3 bg-gray-50/60">
-                <VulnRetestPanel :vul-id="row.id" @changed="onRetestChanged" />
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column label="等级" width="70">
-            <template #default="{ row }">
-              <span class="tl-tag" :style="levelSoftStyle(row.level)">{{ levelName(row.level) }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="漏洞标题" min-width="220" show-overflow-tooltip>
-            <template #default="{ row }">
-              <el-button type="primary" link class="!p-0" @click="openVulnDetail(row.id)">
-                {{ row.title }}
-              </el-button>
-            </template>
-          </el-table-column>
-          <el-table-column label="状态" width="90">
-            <template #default="{ row }">
-              <span class="tl-tag" :style="statusSoftStyleWithRetest(row.status, row.is_retest)">
-                {{ statusLabel(row.status, row.is_retest, vulStatusMap) }}
-              </span>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="200">
-            <template #default="{ row }">
-              <div class="flex items-center gap-2">
-                <el-dropdown v-if="canManageVulns" trigger="click"
-                             @visible-change="(v: boolean) => v && loadTransitions(row)"
-                             @command="(s: number) => transition(row, s)">
-                  <el-button size="small" type="primary" link>
-                    流转<el-icon class="ml-0.5"><ArrowDown /></el-icon>
-                  </el-button>
-                  <template #dropdown>
-                    <el-dropdown-menu>
-                      <template v-if="transitionsMap[row.id]?.length">
-                        <el-dropdown-item v-for="t in transitionsMap[row.id]" :key="t.status" :command="t.status">
-                          {{ t.name }}
-                        </el-dropdown-item>
-                      </template>
-                      <el-dropdown-item v-else disabled>无可流转状态</el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
-                <el-button v-if="canManageVulns" size="small" type="warning" link
-                           @click="router.push(`/vulns/${row.id}/edit`)">
-                  编辑
+        <!-- 外层容器用于「编辑后回跳」定位：展开目标漏洞行并滚动到可见位置 -->
+        <div v-else ref="vulnTableRef">
+          <el-table :data="vulns" size="small" row-key="id" :expand-row-keys="expandedVulnKeys">
+            <el-table-column type="expand">
+              <template #default="{ row }">
+                <div class="px-6 py-3 bg-gray-50/60" :data-vuln-id="row.id">
+                  <VulnRetestPanel :vul-id="row.id" @changed="onRetestChanged" />
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="等级" width="70">
+              <template #default="{ row }">
+                <span class="tl-tag" :style="levelSoftStyle(row.level)">{{ levelName(row.level) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="漏洞标题" min-width="220" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-button type="primary" link class="!p-0" @click="openVulnDetail(row.id)">
+                  {{ row.title }}
                 </el-button>
-                <el-popconfirm v-if="canManageVulns" title="确认删除该漏洞？删除后不可恢复" width="220"
-                               @confirm="removeVuln(row)">
-                  <template #reference>
-                    <el-button size="small" type="danger" link>删除</el-button>
-                  </template>
-                </el-popconfirm>
-              </div>
-            </template>
-          </el-table-column>
-        </el-table>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <span class="tl-tag" :style="statusSoftStyleWithRetest(row.status, row.is_retest)">
+                  {{ statusLabel(row.status, row.is_retest, vulStatusMap) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="200">
+              <template #default="{ row }">
+                <div class="flex items-center gap-2">
+                  <el-dropdown v-if="canManageVulns" trigger="click"
+                               @visible-change="(v: boolean) => v && loadTransitions(row)"
+                               @command="(s: number) => transition(row, s)">
+                    <el-button size="small" type="primary" link>
+                      流转<el-icon class="ml-0.5"><ArrowDown /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <template v-if="transitionsMap[row.id]?.length">
+                          <el-dropdown-item v-for="t in transitionsMap[row.id]" :key="t.status" :command="t.status">
+                            {{ t.name }}
+                          </el-dropdown-item>
+                        </template>
+                        <el-dropdown-item v-else disabled>无可流转状态</el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
+                  <el-button v-if="canManageVulns" size="small" type="warning" link
+                             @click="editVuln(row)">
+                    编辑
+                  </el-button>
+                  <el-popconfirm v-if="canManageVulns" title="确认删除该漏洞？删除后不可恢复" width="220"
+                                 @confirm="removeVuln(row)">
+                    <template #reference>
+                      <el-button size="small" type="danger" link>删除</el-button>
+                    </template>
+                  </el-popconfirm>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
         <div v-if="vulns.length" class="text-xs text-gray-400 mt-2">
           点击行首箭头展开复测记录；「流转」按状态机推进漏洞状态，闭环后报告与计划状态自动联动
         </div>
@@ -256,7 +259,7 @@
                 <el-button size="small" type="danger" plain>发起复测</el-button>
               </template>
             </el-popconfirm>
-            <el-button size="small" type="primary" plain @click="router.push(`/reports/${r.id}`)">
+            <el-button size="small" type="primary" plain @click="editReport(r.id)">
               编辑内容
             </el-button>
             <el-button size="small" plain :loading="exporting[r.id] === 'docx'" @click="doExport(r, 'docx')">
@@ -343,8 +346,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
 import client from '../api/client'
@@ -372,6 +375,7 @@ import { usePlanReports } from '../composables/usePlanReports'
 import { usePlanVulnFlow } from '../composables/usePlanVulnFlow'
 import { usePlanVulnPicker } from '../composables/usePlanVulnPicker'
 import { useReportExports } from '../composables/useReportExports'
+import { withRedirect } from '../composables/useNavBack'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
 import PdfPreviewDialog from './PdfPreviewDialog.vue'
@@ -382,6 +386,8 @@ import VulnDetailDialog from './VulnDetailDialog.vue'
 const props = defineProps<{
   planId: number | null
   visible: boolean
+  /** 从漏洞编辑页原路返回时要展开并定位的漏洞行（来源页写在 ?vuln= 查询参数里） */
+  focusVulnId?: number | null
 }>()
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
@@ -389,6 +395,7 @@ const emit = defineEmits<{
 }>()
 
 const auth = useAuthStore()
+const route = useRoute()
 const router = useRouter()
 
 // ---------- 数据与动作（审计 E-1：按职责下沉为 5 个 composable，此处仅组合） ----------
@@ -536,6 +543,58 @@ async function removeVuln(row: Vuln) {
 function openVulnDetail(id: number) {
   detailVulnId.value = id
   vulnDetailVisible.value = true
+}
+
+// ---------- 来源透传与回退定位（回退 UX） ----------
+// 跳到漏洞/报告编辑页时把「当前页地址（含 plan/vuln 状态位）」写进 redirect 参数，
+// 编辑页取消/保存据此原路返回；返回后由 focusVulnId 展开并滚动到刚编辑的漏洞行。
+const vulnTableRef = ref<HTMLElement>()
+const expandedVulnKeys = ref<Array<string | number>>([])
+
+/** 展开行的复测面板外层容器（带 data-vuln-id），滚动到可视区域中部 */
+function scrollToVulnRow(id: number) {
+  const el = vulnTableRef.value?.querySelector<HTMLElement>(`[data-vuln-id="${id}"]`)
+  if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ block: 'center' })
+}
+
+/** 展开目标漏洞行并滚动到可见位置（展开内容在 nextTick 后才有 DOM） */
+async function focusVulnRow(id: number) {
+  expandedVulnKeys.value = [id]
+  await nextTick()
+  scrollToVulnRow(id)
+}
+
+// 漏洞数据异步加载完成后才可能定位：同时观察 focusVulnId 与列表本身
+watch(
+  [() => props.focusVulnId, () => vulns.value],
+  ([id]) => {
+    if (!props.visible || !id) return
+    if (!vulns.value.some((v) => v.id === id)) return
+    void focusVulnRow(id)
+  },
+)
+
+/**
+ * 当前抽屉所在页的地址（作为编辑页的返回来源）：
+ * 保留现有查询参数（关键词、聚合筛选、统计周期等），补上抽屉状态位 plan 与待定位的 vuln。
+ */
+function hostFullPath(vulnId?: number): string {
+  const [path, search = ''] = route.fullPath.split('?')
+  const params = new URLSearchParams(search)
+  params.delete('redirect') // 避免来源参数层层嵌套
+  if (props.planId) params.set('plan', String(props.planId))
+  if (vulnId) params.set('vuln', String(vulnId))
+  else params.delete('vuln')
+  const qs = params.toString()
+  return qs ? `${path}?${qs}` : path
+}
+
+function editVuln(row: Vuln) {
+  void router.push(withRedirect(`/vulns/${row.id}/edit`, hostFullPath(row.id)))
+}
+
+function editReport(reportId: number) {
+  void router.push(withRedirect(`/reports/${reportId}`, hostFullPath()))
 }
 
 // ---------- 认领 / 漏洞流转 / 报告 / 无漏洞闭环 / 导出 ----------

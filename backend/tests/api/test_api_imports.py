@@ -237,6 +237,11 @@ async def test_report_import_full_rounds_flow(client: AsyncClient, auth: dict):
     assert len(reports) == 3, reports
     assert {r["testing_plan_id"] for r in reports} == {plan["id"]}
 
+    # 报告导入复测补写源报告：两轮都以导入的初测报告为源（否则报告维度三态恒为「未发起复测」）
+    first_report = next(r for r in reports if "复测" not in r["title"])
+    assert {r["src_report_id"] for r in plan["retest_rounds"]} == {first_report["id"]}
+    assert first_report["retest_state"] == "done"
+
 async def test_import_confirm_into_report(client: AsyncClient, auth: dict):
     """Word 导入确认时关联报告：自动追加章节、漏洞进入修复中。"""
     resp = await client.post(

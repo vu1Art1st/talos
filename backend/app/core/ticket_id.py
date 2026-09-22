@@ -4,7 +4,9 @@
 
 维护提醒：聚合筛选与关键词搜索另有 SQL 表达式实现（`app/services/plan_query.py` 的
 `_ticket_id_filter_expr` / `plan_search_condition` / `nonpen_search_condition`），
-三处必须保持同口径；改动本函数时必须同步核对上述表达式。
+三处必须保持同口径：自动编号分支统一经 `plan_query._auto_ticket_id_cond` 构造
+（要求 `ticket_id_manual` 为空，手动改号后残留的 `ticket_seq` 不参与命中），
+与 `ticket_service.check_ticket_id_unique` 的占用口径一致。改动本函数时必须同步核对上述表达式。
 """
 
 
