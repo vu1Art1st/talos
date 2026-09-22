@@ -1,6 +1,5 @@
-# 文本文件统一按 LF 入库（git 自动识别文本类型），检出时按平台转换（Windows→CRLF / Linux→LF），
-# 避免同一目录被 Windows(WSL 挂载 /mnt/e) 双环境检出时出现 CRLF/LF 假 diff。
-* text=auto
-
-# Shell 脚本强制 LF 换行，避免在 Windows 上被转成 CRLF 导致 Linux 服务器 bash 执行报错
+# Git 属性
+# 钩子必须以 LF 结尾：Windows 下 core.autocrlf 会把 .sh/.ps1 检成 CRLF，
+# 带 CR 的 `#!/usr/bin/env bash\r` 会让钩子直接执行失败（bash: 解释器路径无效）。
+.githooks/* text eol=lf
 *.sh text eol=lf

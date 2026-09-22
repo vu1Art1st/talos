@@ -14,6 +14,16 @@ __pycache__/
 # pytest 基线临时目录：受管终端下须以 --basetemp 指向仓库内固定目录（默认系统临时目录
 # 会被删除守卫视为越界目标），故该目录会反复生成，勿入库。见 docs/LOCAL_DEV_SETUP.md 第四节
 backend/_pytest_tmp/
+# 覆盖率产物（pytest-cov；CI 会作为产物上传）
+.coverage
+coverage.xml
+htmlcov/
+
+# ---------- 端到端测试（Playwright，仓库根工具包） ----------
+e2e-results/
+e2e-report/
+# E2E 栈专用 storage（与开发栈 backend/storage 隔离）
+backend/storage_e2e/
 
 # ---------- 数据库 ----------
 # SQLite 专属忽略项（dev.db / _devrun.db / test.db* / test_vp*.db / *.db-*）

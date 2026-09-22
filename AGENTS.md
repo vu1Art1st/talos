@@ -17,19 +17,29 @@ Talos 漏洞管理平台：漏洞全生命周期管理（前身洞察 2.0 / insi
 
 ```bash
 # 一键本地开发（Windows / Linux-macOS，连本机 DBngin 的 PostgreSQL 16 + Redis 7，自动建 venv 与装依赖）
-powershell -ExecutionPolicy Bypass -File .\dev.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\dev.ps1
 bash dev.sh
 
 # 后端（始终用 backend/.venv 解释器，禁止系统 python）
 cd backend
 uv venv .venv --python 3.12                 # 创建/重建 venv（uv 管理，与容器 python:3.12-slim 对齐）
 uv pip install --python .venv/Scripts/python.exe -r requirements-dev.txt   # 安装/同步依赖
-.venv/Scripts/python -m pytest              # 运行全部测试
-# 受管终端（WorkBuddy / CodeBuddy 沙箱）须关闭删除守卫，否则 pytest 清理 basetemp 会被 SystemExit 打断
-# CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python -m pytest -p no:cacheprovider --basetemp=_pytest_tmp
+# 后端测试统一入口（推荐）：脚本已固化「关闭受管终端删除守卫 + 每次运行唯一 basetemp + 进程独占测试 schema」
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1   # Windows（加 -Workers 4 并行）
+bash scripts/test.sh                                            # WSL / Linux / macOS（加 --workers 4 并行）
+# 直接 .venv/Scripts/python -m pytest 仅限「非受管终端且确认无并发测试」时使用，见 docs/LOCAL_DEV_SETUP.md §四
 .venv/Scripts/python -m uvicorn app.main:app --reload --port 27015
 .venv/Scripts/python -m ruff check app scripts alembic tests   # 静态检查（配置 backend/ruff.toml）
 .venv/Scripts/python -m vulture app --min-confidence 80        # 死代码检查
+.venv/Scripts/python -m scripts.check_api_contract             # 前后端契约检查（OpenAPI ↔ 前端 TS 类型；不连库）
+
+# 端到端测试（仓库根工具包：Playwright + 系统 Chrome；自动起独立 E2E 栈，见 docs/SCRIPTS.md §2.14）
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1     # Windows（-Headed 带界面 / -Keep 保留栈）
+bash scripts/e2e.sh                                                 # WSL / Linux / macOS
+
+# 本地垃圾清理（只清可再生：__pycache__ / 工具缓存 / frontend/dist / 测试残留；硬白名单守卫数据目录）
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\clean.ps1            # 预演（加 -Apply 执行）
+bash scripts/clean.sh                                                        # 预演（加 --apply 执行）
 
 # 前端（统一 pnpm，勿用 npm/yarn —— 仓库只保留 pnpm-lock.yaml）
 cd frontend
@@ -41,6 +51,7 @@ pnpm test           # vitest 单测
 ```
 
 > 前端提交前门禁：`pnpm typecheck` + `pnpm test` + `pnpm run build` 三者全绿（与后端 `ruff` + `pytest` 对应）。
+> **本项目不采用 CI（2026-09-22 决策）**：上述门禁一律在**本机**执行（`scripts/test.ps1` + 前端三门禁），发布前按「验收口径」逐项走；不要在仓库内新增 `.github/workflows` 等流水线配置。替代「机器强制」的手段是 **pre-push 钩子**（`.githooks/pre-push`，需各人自行执行一次 `git config core.hooksPath .githooks` 启用；临时跳过 `git push --no-verify`）。**成立前提、代价对照与重估触发条件**见 `docs/LOCAL_DEV_SETUP.md` §五。
 
 开发态环境变量：`VP_DATABASE_URL=postgresql+asyncpg://<user>:<pass>@127.0.0.1:5432/vulnplatform`、`VP_REDIS_URL=redis://127.0.0.1:6379/0`、`VP_DISABLE_REDIS=0`、`VP_DISABLE_QUEUE=1`（后台任务进程内执行，免开 arq worker）、`VP_DEBUG=1`（dev 脚本已内置，凭据取自仓库根 `.env`）。
 
@@ -147,22 +158,28 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 | 端 | 位置 | 命名 | 运行 |
 |---|---|---|---|
 | 后端 | `backend/tests/` | `test_<模块>.py`（如 `test_parser.py` 对应 `services/docx_parser.py`） | `cd backend && .venv/Scripts/python -m pytest` |
+| 后端（API 集成） | `backend/tests/api/` | `test_api_<领域>.py`（按领域拆分；共享 helper `_helpers.py`，模块须可单独运行） | 同上，或 `-Workers 4` 并行 |
 | 前端 | 与被测模块同目录的 `__tests__/` 子目录 | `<被测模块名>.spec.ts`（如 `src/utils/__tests__/download.spec.ts`） | `cd frontend && pnpm test` |
 
 **规则**：
 
-- 新增功能或修 bug 时优先补测试；后端 API 变更必须同步更新 `test_api.py`。
+- 新增功能或修 bug 时优先补测试；后端 API 变更必须同步更新**对应领域模块**（`backend/tests/api/test_api_<领域>.py`，共享 helper 在 `tests/api/_helpers.py`；原先的 4626 行单体 `test_api.py` 已于 2026-09-22 按领域拆分）。
 - 测试不得依赖仓库外/外部文件（后端 docx 样例在测试内用 python-docx 现造，参考 `test_parser.py` 的 `_make_docx`）。
 - 测试产物（db / 临时文件）必须由 fixture teardown 自清理（参考 `conftest.py` 的 session 收尾），禁止依赖 .gitignore 兜底。
+- **改模型或迁移必须保持 `tests/test_migrations.py` 绿**：它在独立 schema 里真跑 `alembic upgrade head`，断言迁移建出的表/列与模型声明一致，并验证 `downgrade base` 能回到空 schema —— 单轨化后 Alembic 是 schema 演进的唯一路径，这是**唯一真正执行迁移**的测试（其余用例走 `create_all`）。
 - 前端纯逻辑（composables / utils）为单测优先覆盖对象；组件测试按需引入 `@vue/test-utils`。
 
 **验收口径（改动涉及运行时必做）**：
 
-- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **289 passed / 1 skipped**，测试库为 PostgreSQL；受管终端须关闭删除守卫，见「常用命令」）。
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **293 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
 - **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **24 files / 138 passed**）+ `pnpm run build`。
+- **端到端（E2E）**（涉及前端交互或前后端联调时）：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`（或 `bash scripts/e2e.sh`）—— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + api 27016 + 前端 27017 + 独立 storage），跑 3 条黄金链路（登录 / 新建漏洞含影响URL 批量粘贴 / 报告编辑器渲染），每条都断言**控制台 0 error**。只有 3 条是**刻意**的：广度仍由分级浏览器冒烟负责，E2E 的维护成本与抖动风险不允许铺页面（取舍见 `playwright.config.ts`）。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
-- **接口探针**（容器内执行）：`docker compose exec -T api python - < 探针脚本`（脚本用完即删；`_*.py` 已被 .gitignore 覆盖）。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`，`username=admin1&password=123456`），取 token 后依次 GET 22 个关键接口：`/meta`、`/vulns`、`/vulns/stats`、`/reports`、`/testing-plans`、`/testing-plans/stats`、`/testing-plans/conclusion`、`/nonpen-plans`、`/nonpen-plans/stats`、`/remote-testings`、`/spring-actions`、`/knowledge`、`/knowledge/search?q=注入`、`/search?q=a`、`/assets`、`/users`、`/roles`、`/groups`、`/pats`、`/notify-channels`、`/audit/logs`、`/imports` —— **全部 200 视为通过**。
-- **浏览器冒烟**（前端改动）：Chrome DevTools 逐页检查**控制台 0 错误/警告** + 关键 DOM（表格行、抽屉步骤条等）渲染；**默认不执行写操作**，避免污染共享数据。
+- **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器数据为 `admin1/123456`，用 `--username/--password` 覆盖。
+- **浏览器冒烟**（前端改动）：Chrome DevTools 逐页检查**控制台 0 错误/警告** + 关键 DOM（表格行、抽屉步骤条等）渲染；**默认不执行写操作**，避免污染共享数据。**按影响面分级执行**（2026-09-22 起，避免每次改动都跑满 12 页）：
+  - **发布前（广度）**：12 组页面 —— `/dashboard`、`/testing-plans`（含流程抽屉 6 步）、`/nonpen-plans`、`/vulns`、`/reports`、`/knowledge`、`/assets` + `/assets/groups`、`/users`、`/roles`、`/tokens`、`/notify-channels`、`/audit`（建议同时覆盖专项三域的 `/remote-testings`、`/spring-actions`）。判据：控制台 0 错误/警告 + 表格/抽屉有真实数据渲染 + 该页 XHR 全 200；
+  - **日常改动（深度）**：只跑**受影响页面**（改报告编辑器 → `/reports` + `/reports/:id`；改工单 → `/testing-plans` + `/nonpen-plans`；改导入 → `/reports/imports`），其余留待发布前；
+  - **纯逻辑 / 类型改动**（无 UI 行为变化）：可省略浏览器冒烟，以三门禁 + `vitest` 为准。
 
 ## 文档治理
 

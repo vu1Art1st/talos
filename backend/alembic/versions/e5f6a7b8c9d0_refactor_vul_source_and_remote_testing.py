@@ -56,10 +56,16 @@ def downgrade() -> None:
     op.add_column('remote_testings', sa.Column('title', sa.String(length=255), nullable=False, server_default=''))
     op.add_column('remote_testings', sa.Column('test_time', sa.String(length=32), nullable=False, server_default=''))
     op.add_column('remote_testings', sa.Column('appeal_report_id', sa.Integer(), nullable=True))
-    op.add_column('remote_testings', sa.Column('appeal_success', sa.Boolean(), nullable=False, server_default=sa.text('false')))
     op.create_index(op.f('ix_remote_testings_title'), 'remote_testings', ['title'], unique=False)
     op.create_foreign_key('remote_testings_appeal_report_id_fkey', 'remote_testings', 'reports', ['appeal_report_id'], ['id'])
-    op.execute("UPDATE remote_testings SET appeal_success = true WHERE appeal_status = 'success'")
+    # appeal_success 的存亡由 b4c5d6e7f8a9（上层迁移）负责：真正删掉它的是那个迁移的 upgrade，
+    # 本迁移的 upgrade 从未删除它。故此处**不得** add_column —— 否则与 b4c5d6e7f8a9.downgrade
+    # 重复新增，`alembic downgrade base` 会以 DuplicateColumnError 中断（2026-09-21 由
+    # tests/test_migrations.py 实测抓到）。仅当该列已被上层回填回来时同步数据，
+    # 兼顾「单步回退（未经过 b4c5d6e7f8a9）」时报缺列的路径。
+    _columns = {c["name"] for c in sa.inspect(op.get_bind()).get_columns('remote_testings')}
+    if 'appeal_success' in _columns:
+        op.execute("UPDATE remote_testings SET appeal_success = true WHERE appeal_status = 'success'")
     op.drop_column('remote_testings', 'appeal_status')
     op.drop_column('remote_testings', 'appeal_file_size')
     op.drop_column('remote_testings', 'appeal_file_path')

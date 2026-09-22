@@ -19,7 +19,7 @@
 
 ## 一、总览
 
-### 1.1 部署脚本 `scripts/`（12 个，926 行）
+### 1.1 部署与开发/测试脚本 `scripts/`（12 个部署脚本 + `test` / `clean` / `e2e` 三个辅助脚本的 sh+ps1 双份，合计 1 664 行）
 
 | 脚本 | 行数 | 状态 | 调用方 / 出处 |
 |---|---|---|---|
@@ -35,8 +35,14 @@
 | `disk-usage.sh` | 127 | 活跃·排障工具 | DEPLOY.md 附「文件与磁盘」（磁盘排查双视角判据） |
 | `swap-manager.sh` | 199 | 活跃·排障工具 | RELEASE.md:434 |
 | `setup-docker-mirror.sh` | 59 | 活跃·部署前配置 | DEPLOY.md:198,203、RELEASE.md:964 |
+| `test.sh` | 126 | 活跃·开发辅助（2026-09-21 新增） | 后端测试统一入口（WSL/Linux/macOS）：`--workers N` 并行、`--prune` 回收残留；AGENTS.md「常用命令」 |
+| `test.ps1` | 105 | 活跃·开发辅助（2026-09-21 新增） | Windows 侧同上（`-Workers` / `-Prune -Yes`）；按 `.codebuddy/rules/pwsh7.md` 以 **pwsh 7** 调用、文件 UTF-8 无 BOM |
+| `e2e.sh` | 133 | 活跃·开发辅助（2026-09-22 新增） | 端到端测试编排（起独立 E2E 栈 + Playwright）；详见 §2.13 |
+| `e2e.ps1` | 150 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Headed` / `-Keep` / `-PlaywrightArgs`）；详见 §2.13 |
+| `clean.sh` | 104 | 活跃·开发辅助（2026-09-22 新增） | 本地垃圾清理（默认预演，`--apply` 执行）；详见 §2.14 |
+| `clean.ps1` | 115 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Apply`）；详见 §2.14 |
 
-### 1.2 后端脚本 `backend/scripts/`（15 个，1 728 行）
+### 1.2 后端脚本 `backend/scripts/`（18 个，2 192 行）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
@@ -57,6 +63,9 @@
 | `backfill_retest_src_report.py` | 88 | 活跃·发布流程（2026-09-19 新增） | `upgrade.sh:118`（每次升级自动执行，失败不阻断）；按 `source` 文本回填 `testing_plan_retest_rounds.src_report_id`，使报告复测三态对存量和新数据一致（幂等、`--dry-run`） |
 | `fix_attachment_paths.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；置空春耕行动/远程检测中不符合上传白名单的存量附件路径（`--dry-run` 仅统计，落库前备份 `storage/backups/`） |
 | `fix_retest_title_html.py` | 78 | 一次性（2026-09-19 安全整改） | RELEASE.md `[2.18.1]` 安全条款；转义存量复测记录标题（HTML 注入）并按新口径重算 `vulns.retest_html`（幂等：只处理含 `<`/`>` 的标题） |
+| `probe_api.py` | 110 | 活跃·开发辅助（2026-09-21 新增） | AGENTS.md「验收口径·接口探针」（本地 / 容器 / CI 共用一份口径）；详见 §3.12 |
+| `prune_test_schemas.py` | 99 | 活跃·开发辅助（2026-09-21 新增） | `scripts/test.sh --prune` / `test.ps1 -Prune`；详见 §3.14 |
+| `check_api_contract.py` | 216 | 活跃·开发辅助（2026-09-22 新增） | 前后端契约检查（OpenAPI ↔ `src/types/index.ts`）；`.githooks/pre-push` 与 AGENTS.md「常用命令」；详见 §3.13 |
 
 ### 1.3 依赖矩阵
 
@@ -171,6 +180,55 @@
 - **依赖**：`python3`（32 行，缺失直接报错）、root。
 - **执行场景**：新机首次部署前（DEPLOY.md:198-203）。
 - **收尾要求**：必须 `sudo systemctl restart docker` 才生效（脚本会提示）。
+
+### 2.12 `test.sh` / `test.ps1` — 后端测试统一入口（活跃·开发辅助）
+
+- **用途**：把「跑后端测试」的正确姿势固化为命令 —— 关闭受管终端删除守卫、每次运行唯一 `--basetemp`（仓库内）、
+  依赖服务（5432/6379）预检、可选并行与残留回收。
+- **为什么需要**：手工跑 pytest 有三处「记错就得到误导性结果」的陷阱：① 受管终端的删除守卫会打断 pytest 清理
+  basetemp，症状是「单文件全绿、全量几十个 ERROR」；② `--basetemp` 用系统临时目录会被守卫视为越界；③ 固定
+  basetemp / 固定 schema 下并发跑两份测试会互相破坏。
+- **调用**：
+  - `bash scripts/test.sh` / `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1`
+  - 并行：`--workers 4` / `-Workers 4`（pytest-xdist，`--dist loadscope` 保证同一模块不拆散）
+  - 回收：`--prune --yes` / `-Prune -Yes`（删除残留 `test_*`/`mig_*` schema 与 basetemp）
+  - 跳过依赖预检：`--no-deps-check` / `-NoDepsCheck`（由 services 容器保证，仅临时流水线场景）
+  - 其余参数原样透传给 pytest（如 `--cov=app`）
+- **依赖**：`backend/.venv`（宿主机一律用项目 venv）；PG + Redis 在跑（可用 `--no-deps-check` 跳过检查）。
+- **测试库隔离**：schema 由 `conftest.py` 按「进程 + xdist worker」派生（`test_<pid>[_gwN]`），本脚本不再干涉；
+  详见 `docs/LOCAL_DEV_SETUP.md` 第四节。
+
+### 2.13 `e2e.sh` / `e2e.ps1` — 端到端测试编排（活跃·开发辅助）
+
+- **用途**：一条命令起**独立于开发栈**的 E2E 环境并跑 Playwright（系统 Chrome）：
+  `vulnplatform_e2e` 库 → 迁移（`scripts.migrate`）→ 种子（`seed_dev_data --reset`）→ api(27016) →
+  前端(27017，代理指向 27016) → `playwright test` → 收摊。**不同库、不同端口、独立 storage**，
+  因此跑 E2E 不动开发数据，也不受"开发库正在被用"影响。
+- **调用**：`bash scripts/e2e.sh` / `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`
+  （`--headed`/`-Headed` 带界面、`--keep`/`-Keep` 跑完保留栈、`--` 之后/`-PlaywrightArgs` 透传给 playwright）。
+- **前置**：本机 PG 5432 + Redis 6379（DBngin）；`vulnplatform_e2e` 库已创建（一次即可，
+  SQL 见 `docs/LOCAL_DEV_SETUP.md` 第六节）；根目录 `pnpm install`（Playwright 装在**仓库根**
+  工具包里，不进 `frontend/`，避免污染前端三门禁）。
+- **关键坑（都已踩过并固化）**：① 受管终端的删除守卫会拦截 Playwright 清理 `outputDir` → 脚本内设
+  `CODEBUDDY_SAFE_DELETE_ENABLED=0`；② `pwsh -File` 下数组参数**不按逗号拆分** → 脚本内显式拆分；
+  ③ PowerShell 变量名不区分大小写，局部变量不能叫 `$playwrightArgs`（会与参数同名而被覆盖）；
+  ④ **收摊必须杀整棵进程树** —— `pnpm dev` 会派生 node/vite，只杀 pnpm 会留下孤儿继续监听 27017，
+  下次运行会"静默复用旧栈"（旧前端代理指向旧 api）拿到似是而非的结果；故：收摊用 `taskkill /T`（Win）、
+  `pkill -P` + 端口兜底（*nix），并在启动前**校验端口空闲**，被占用直接报错退出。
+- **实测**：2026-09-22 首次落地 **3 passed / 1.4 min**（用例本体各 ~2.5 s，其余为起栈 + 种子）。
+
+### 2.14 `clean.sh` / `clean.ps1` — 本地垃圾清理（活跃·开发辅助）
+
+- **用途**：清理**可再生的本地产物** —— `__pycache__`（默认跳过 `.venv`）、`.pytest_cache` / `.ruff_cache`、
+  `backend/_pytest_tmp`、`frontend/dist`、`backend/tests/test_storage` 内容、仓库内 `_*.txt` / `_*.log` 临时日志。
+- **为什么需要**：此前清理靠临时命令 —— 实测 `Get-ChildItem -Recurse __pycache__ | Remove-Item` 会**静默跳过**
+  且无法核对（数量对不上）；本脚本把「哪些该删、哪些绝不能删、删了多少」固化为可复核口径。
+- **调用**：`bash scripts/clean.sh`（预演）/ 加 `--apply` 执行；`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\clean.ps1 [-Apply]`；
+  `--include-venv` / `-IncludeVenv` 才连 `.venv` 内的缓存一起清。
+- **安全设计（硬白名单）**：`.git` / `.env` / `dev-database`（DBngin 活库）/ `backups` / `backend/storage` /
+  `backend/.venv` / `frontend/node_modules` / `.codebuddy` / `.qoder` / `.workbuddy` / `design-demos`
+  —— 任何目标命中即**中止**（防脚本被改坏后误删数据）。默认预演，删除前打印清单与合计体积。
+- **实测**：2026-09-22 首次执行释放 **7.9 MB**（含 `frontend/dist` 3.5 MB），复跑输出「仓库已干净」。
 
 ---
 
@@ -317,6 +375,44 @@
 - **推荐（轻量）**：**原地保留**，在文件头首行补注「一次性脚本，见 docs/SCRIPTS.md §3.x」，并在本文档登记状态。理由：生产现场文档中已出现 `python -m scripts.<name>` 形式的命令（如 `DEPLOY.md:139-172`），物理移动模块路径会使这些命令失效。
 - **可选（物理归档）**：迁入 `backend/scripts/archive/`（新增 `__init__.py`），调用方式变为 `python -m scripts.archive.<name>`；**必须同步修改** `DEPLOY.md` / `RELEASE.md` 中的命令，否则现场升级步骤会直接失败。
 - **不建议直接删除**：这些脚本尚未穷尽所有部署现场（例如 2.12.2 的章节清理步骤仍写在 DEPLOY 升级流程里），删除会让「从旧版本升级」的路径断裂。
+
+### 3.12 `probe_api.py` — 关键接口探针（活跃·开发辅助）
+
+- **用途**：把 AGENTS.md 验收口径里的「22 个关键接口全 200」固化为可重复执行的命令，取代此前「每次临时写探针
+  脚本、跑完即删」的做法（口径不再随人漂移）。
+- **调用**：`python -m scripts.probe_api --base-url <地址>`（可 `--username/--password` 覆盖账号、`--quiet` 只打印失败项）。
+  地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。
+- **依赖**：仅 `httpx`（**不导入 app 配置**，故无需 `VP_SECRET_KEY`，容器内外均可跑）。
+- **退出码**：0 = 全部 200；1 = 登录失败或任一接口非 200（打印明细）。
+- **已知坑**：输出标记刻意用 ASCII（`OK` / `FAIL`）而非 `✓`/`✗` —— Windows 控制台默认 GBK，非 GBK 字形会抛
+  `UnicodeEncodeError`（2026-09-21 实测）。
+
+### 3.13 `check_api_contract.py` — 前后端契约检查（活跃·开发辅助）
+
+- **用途**：把「API 到底返回哪些字段」与「前端 TS 声明了哪些字段」做**双向集合比对**，拦住契约漂移。
+  前端 160 个 vitest 用例全部 mock axios、浏览器冒烟按页面抽检，两层都覆盖不到字段级契约。
+- **调用**：`python -m scripts.check_api_contract [--strict] [--verbose]`（**不连数据库**，只读 `app.openapi()`；
+  自带占位 `VP_SECRET_KEY`，任意环境可跑）。
+- **两方向严重性刻意不同**：**TS 有 / API 无 → 失败**（前端读永不返回的字段，运行时静默 undefined ——
+  本项目 `el-table` 插槽是 `any`，`vue-tsc` 抓不到）；**API 有 / TS 无 → 默认告警**（本项目 TS 只声明
+  实际消费字段，属有意为之），加 `--strict` 才视为失败。
+- **边界**：带索引签名（`[key: string]: any`）的 TS 类型视为开放类型并跳过（如 `ReportSection`）。
+- **已登记的有意差异**：脚本内 `TS_ONLY_ALLOW`（每条附理由）。
+- **首运行战果（2026-09-22）**：24 组映射中发现 `NonpenPlan.asset_names` **两端皆无来源** ——
+  `NonpenPlanOut` 不返回该字段、前端也无赋值，`NonpenPlanWorkflowDrawer` 的「关联资产」块因此永不渲染
+  （死代码）。**已按方案①修复**：`NonpenPlanOut` 新增 `asset_names`，由 `nonpen_service.asset_name_map` /
+  `to_out` 在创建 / 列表 / 详情 / 更新 / 流转五类响应中统一填充（按 `asset_ids` 原顺序，资产已删则跳过），
+  并由 `tests/api/test_api_nonpen.py` 固化回归。
+
+### 3.14 `prune_test_schemas.py` — 测试残留 schema 回收（活跃·开发辅助）
+
+- **用途**：回收被强杀进程（CI 取消、`kill -9`）遗留的 `test_*` / `mig_*` schema。测试改为「每进程独占 schema」后
+  互不干扰，但异常终止不会执行 teardown，故需要本工具。
+- **调用**：`python -m scripts.prune_test_schemas`（**默认只列出**）/ `--yes` 删除；也可经
+  `scripts/test.sh --prune --yes`、`scripts/test.ps1 -Prune -Yes` 调用（同时清理 basetemp）。
+- **安全设计**：只处理 `test_*` / `mig_*`，绝不动 `public` 与业务 schema；目标库必须是**回环地址上的 `*_test` 库**
+  （与 `seed_dev_data.py` 同口径，fail-closed）；「确认无并发测试在跑」由人拍板（加 `--yes`）。
+- **依赖**：仅 SQLAlchemy + 自身解析的 DSN（`VP_DATABASE_URL` 优先，否则读仓库根 `.env`），**不导入 app 配置**。
 
 ---
 

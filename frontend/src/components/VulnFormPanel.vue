@@ -8,7 +8,8 @@
         <el-form ref="targetFormRef" :model="targetForm" :rules="targetRules" label-width="90px">
           <el-form-item label="测试目标" prop="assetIds">
             <div class="w-full flex items-start gap-2">
-              <el-select v-model="targetForm.assetIds" multiple filterable remote :remote-method="searchAssets"
+              <el-select v-model="targetForm.assetIds" data-test="vuln-assets" multiple filterable remote
+                         :remote-method="searchAssets"
                          :loading="assetLoading" placeholder="搜索并选择资产（系统）" class="flex-1"
                          @change="onAssetChange">
                 <el-option v-for="a in assetOptions" :key="a.id" :value="a.id"
@@ -70,7 +71,7 @@
         </template>
         <el-form :ref="(el: unknown) => setVulFormRef(idx, el)" :model="vul" :rules="vulRules" label-width="90px">
           <el-form-item label="漏洞名称" prop="title">
-            <el-input v-model="vul.title" placeholder="例如：后台登录接口存在SQL注入" />
+            <el-input v-model="vul.title" data-test="vuln-title" placeholder="例如：后台登录接口存在SQL注入" />
           </el-form-item>
           <div class="grid grid-cols-1 md:grid-cols-2">
             <el-form-item label="漏洞等级">
@@ -147,7 +148,7 @@
       <el-card shadow="never">
         <template #header>操作</template>
         <div class="space-y-2">
-          <el-button type="primary" class="w-full !ml-0" :loading="saving" @click="save">
+          <el-button type="primary" data-test="vuln-save" class="w-full !ml-0" :loading="saving" @click="save">
             {{ editId ? '保存' : `提交 ${vulns.length} 个漏洞` }}
           </el-button>
           <el-button v-if="!editId" class="w-full !ml-0" @click="addVuln">

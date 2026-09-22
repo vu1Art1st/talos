@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.19.1"
+    APP_VERSION: str = "2.20.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27014"]
 
     DATABASE_URL: str = "postgresql+asyncpg://vuln:vulnpass@localhost:5432/vulnplatform"
+    # 可选：把「业务连接」与「Alembic 迁移」的 search_path 固定到该 schema（留空＝默认 public）。
+    # 用途是测试并发隔离——每个 pytest 进程独占一个 schema，避免共用 public 时互相
+    # DROP SCHEMA 造成「relation ... does not exist」的假失败（见 docs/LOCAL_DEV_SETUP.md）。
+    # 不要在生产/开发库上设置：留空即默认行为。
+    DB_SCHEMA: str = ""
     REDIS_URL: str = "redis://localhost:6379/0"
     # Redis 连接/读写超时（秒，必须 > 0）：Redis 不可达但被防火墙 DROP（而非主动拒绝）时，
     # 无超时的客户端会停在 TCP 握手阶段无限挂起，使进程内降级逻辑（登录失败计数、arq 任务）

@@ -60,13 +60,12 @@ redis-cli -p 6379 ping   # 期望 PONG
 
 ```bash
 # 一键开发（自动预检 5432/6379、解析 .env 凭据；前端 27014 / 后端 27015）
-powershell -ExecutionPolicy Bypass -File .\dev.ps1    # Windows
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\dev.ps1    # Windows（一律 pwsh 7，见 .codebuddy/rules/pwsh7.md）
 bash dev.sh                                            # Linux / macOS / WSL
 
-# 全量测试（自动连 vulnplatform_test，session 开始清空 schema、结束再清空）
-# CODEBUDDY_SAFE_DELETE_ENABLED=0 仅用于绕开受管终端的删除守卫，见第四节
-cd backend && CODEBUDDY_SAFE_DELETE_ENABLED=0 \
-  .venv/Scripts/python.exe -m pytest -p no:cacheprovider --basetemp=_pytest_tmp
+# 全量测试（统一入口）：自动连 vulnplatform_test、按进程独占 schema、处理受管终端删除守卫，见第四节
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\test.ps1   # Windows（-Workers 4 并行 / -Prune -Yes 回收残留）
+bash scripts/test.sh                                          # WSL / Linux / macOS（--workers 4 / --prune --yes）
 ```
 
 - **dev 脚本口径**：`VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform`，
@@ -114,6 +113,23 @@ fixture，其内部的引擎连接池建立在 session loop 上；若测试回�
   而非共享 `app.db.engine`；
 - 排查同类症状时，先确认 `pytest.ini` 两行配置是否都还在（缺一行即复现上述报错）。
 
+### 测试库并发隔离（每个 pytest 进程独占一个 schema）
+
+**背景**：session fixture 会 `DROP SCHEMA … CASCADE` 重建测试库结构。若所有进程都用 `public`，
+两份测试同时跑就会互相清表 —— 症状是**分散在多个文件、看似随机**的
+`UndefinedTableError: relation "vulns" does not exist`（2026-09-21 实测：并发下
+**70 failed / 219 passed**，同一份代码串行跑则全绿），极易被误判为代码缺陷。
+
+**现方案**：`conftest.py` 为每个 pytest 进程派生独立 schema（`test_<pid>`，pytest-xdist 下追加
+worker 名 `_gw0`/`_gw1`…），经 `VP_DB_SCHEMA` 把**业务连接与 Alembic 迁移**的 `search_path`
+固定到该 schema；存储目录同步按 run 隔离（`tests/test_storage/<schema>`）。因此本地串行、
+`--workers N` 并行、CI 多 job、多人同时跑同库，都互不干扰（无需加锁）。
+
+- session 结束自动删除自己的 schema 与存储目录；**进程被强杀**（CI 取消、`kill -9`）时可手工回收：
+  `python -m scripts.prune_test_schemas`（默认只列出）/ 加 `--yes` 删除；
+- 需要固定 schema 名（调试用）时设 `VP_TEST_SCHEMA=<名字>`（worker 后缀仍自动追加，避免同 job 各 worker 撞车）；
+- 库名护栏为 `_test` 或 `_test_<后缀>`，便于 CI 按 job 分库。
+
 ### 受管终端下的删除守卫（运行测试的前置条件）
 
 在带**删除守卫**的受管终端中（WorkBuddy / CodeBuddy 沙箱等会在解释器启动时注入
@@ -136,9 +152,24 @@ CODEBUDDY_SAFE_DELETE_ENABLED=0 .venv/Scripts/python.exe -m pytest \
 
 `--basetemp` 指向仓库内固定目录是刻意的：默认系统临时目录会被守卫视为越界删除目标。
 
-## 五、CI（无 DBngin 环境）
+## 五、无 DBngin 环境（其他机器 / 临时流水线）
 
-CI 用 services 容器提供同版本服务，conftest 只认 `VP_DATABASE_URL` 环境变量，零改动兼容：
+> **本项目不采用 CI**（2026-09-22 决策，`.github/workflows/ci.yml` 已删除）：门禁一律在**本机**执行 ——
+> 后端 `scripts/test.ps1` / `test.sh`（含 `-Workers 4` 并行）、前端三门禁、发布前 `scripts/probe_api.py` 探针。
+> 需要「推之前拦住」时启用 pre-push 钩子（`.githooks/pre-push`）：一次性 `git config core.hooksPath .githooks`
+> 启用；临时跳过用 `git push --no-verify` 或 `TALOS_SKIP_PREPUSH=1`；依赖服务（PG/Redis）未启动时该钩子
+> **fail-open**（只告警不阻断），需要严格阻断时导出 `TALOS_PREPUSH_STRICT=1`。
+>
+> **成立前提**（任一不成立即应重估）：① 单人开发，门禁靠自觉执行；② 本机与生产同栈（PG 16 + Redis 7 单栈），
+> 不存在「只有 CI 环境才装得上/才复现」的依赖；③ 发布节奏 ≤ 1 次/周。
+> **代价对照（实测）**：引入流水线的增量 ≈ 一份 workflow 维护 + 约 3 runner 分钟/次 + 浏览器依赖等；本机门禁 ≈
+> 后端 37 s（`-Workers 4` 18 s）+ 前端三门禁约 1 min，且不消耗额度。
+> **重估触发条件（满足任一即回到「引入流水线」）**：① 浏览器冒烟漏掉的联调缺陷 ≥ 2 次/季；② 出现第二个人改前端
+> 或后端（门禁不能再依赖"我知道该看哪里"）；③ 发布频率 > 1 次/周，本机门禁成为节奏瓶颈；④ 需要「合入即验证」的
+> 多人协作模式（如引入外部贡献者）。
+
+若将来需要在**无 DBngin 的机器**上跑测试（例如临时流水线或他人接手），用 services 容器提供同版本服务即可 ——
+conftest 只认 `VP_DATABASE_URL` 环境变量，零改动兼容：
 
 ```yaml
 services:
@@ -152,3 +183,37 @@ services:
 env:
   VP_DATABASE_URL: postgresql+asyncpg://vulnplatform:test@127.0.0.1:5432/vulnplatform_test
 ```
+
+## 六、端到端测试（E2E）环境
+
+**一次性前置**：
+
+1. **建 E2E 库**（与 dev/test 库隔离，故写路径不污染开发数据）：
+
+   ```sql
+   CREATE DATABASE vulnplatform_e2e
+     OWNER vulnplatform TEMPLATE template0 ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C';
+   ```
+
+2. **在仓库根安装 Playwright 工具包**：`pnpm install`（依赖见根 `package.json`）。
+   浏览器用**系统 Chrome**（`channel: 'chrome'`），不下载 Playwright 自带 Chromium。
+
+**运行**（仓库根目录）：
+
+```bash
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1   # Windows（-Headed / -Keep）
+bash scripts/e2e.sh                                              # WSL / Linux / macOS
+```
+
+脚本会自动完成：迁移 + 重置种子（`seed_dev_data --reset`）→ 起 api(`27016`) → 起前端(`27017`，代理指向 `27016`)
+→ 跑 3 条黄金链路 → 收摊。端口/库名可用 `E2E_API_PORT` / `E2E_WEB_PORT` / `E2E_DB_NAME` 覆盖。
+
+**要点**：
+
+- E2E 用**独立库 + 独立 storage（`backend/storage_e2e`）+ 独立端口**，可与 dev 栈**同时**运行；
+- 失败证据：`e2e-report/index.html`（HTML 报告）与 `e2e-results/<用例>-retry1/trace.zip`
+  （`pnpm e2e:report` 或 `pnpm exec playwright show-trace <zip>`）；
+- 只有 3 条用例是**刻意取舍**（取舍理由见 `playwright.config.ts` 与 AGENTS.md 验收口径）；
+  12 组页面的广度覆盖仍由**分级浏览器冒烟**负责；
+- 机器上没有 Chrome 时：去掉 `playwright.config.ts` 的 `channel: 'chrome'`，改用
+  `pnpm exec playwright install chromium`（一次性 +195 MB）。

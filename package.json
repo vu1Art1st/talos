@@ -1,0 +1,13 @@
+{
+	"name": "talos-e2e",
+	"private": true,
+	"description": "Talos 端到端测试（Playwright + 系统 Chrome）。不接 CI，由 scripts/e2e.ps1 / e2e.sh 编排本机全栈执行；见 AGENTS.md 与 docs/SCRIPTS.md。",
+	"scripts": {
+		"e2e": "playwright test",
+		"e2e:headed": "playwright test --headed",
+		"e2e:report": "playwright show-report e2e-report"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.63.0"
+	}
+}

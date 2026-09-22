@@ -25,6 +25,86 @@
 
 ---
 
+## [2.20.0] - 2026-09-22
+
+### 新增
+
+- **测试统一入口 + 并发隔离（测试流程改进 P0/P1/P2）**（2026-09-21）：
+  - 新增 `scripts/test.sh` / `scripts/test.ps1` 作为测试唯一入口，固化三件「记错就得到误导性结果」的事：
+    关闭受管终端删除守卫、每次运行唯一 basetemp（仓库内）、5432/6379 依赖预检；并支持 `--workers N`（pytest-xdist
+    并行）与 `--prune`（回收残留 schema 与 basetemp）。
+  - `conftest.py` 改为**每个 pytest 进程独占一个 PostgreSQL schema**（`VP_DB_SCHEMA` → 业务连接与 Alembic 的
+    `search_path`；存储目录同步按 run 隔离），消除并发跑测试互相 `DROP SCHEMA` 造成的假失败 ——
+    实测同一份代码：并发（隔离前）70 failed / 219 passed，隔离后**串行 291 passed / 1 skipped / 40.38s、
+    4 worker 并行 29.97s**。
+  - 新增 `backend/scripts/probe_api.py`：22 个关键接口探针固化为脚本（取代「每次手写临时脚本、用完即删」），
+    本地 / 容器 / CI 共用一份口径。
+  - 新增 `backend/scripts/prune_test_schemas.py`：回收被强杀进程遗留的 `test_*` / `mig_*` schema
+    （默认只列出，`--yes` 才删；仅回环地址上的 `*_test` 库，fail-closed）。
+  - `requirements-dev.txt` 增加 `pytest-xdist`（本地并行）与 `pytest-cov`（本地覆盖率报告，不设全量阈值）。
+  - **CI：决定不采用**（2026-09-22）：曾新增 `.github/workflows/ci.yml`（后端静态检查 / 后端测试 /
+    前端三门禁 三 job 并行），经评估后**已删除** —— 门禁一律在**本机**执行（`scripts/test.ps1` + 前端三门禁
+    + 发布前 `scripts/probe_api.py` 探针）。理由：本机与生产同栈（PG 16 + Redis 7 单栈），CI 的增量收益
+    （跨机器可复现、多 job 并行）低于其维护成本与 runner 分钟消耗。
+- **本地垃圾清理脚本**（2026-09-22）：新增 `scripts/clean.sh` / `clean.ps1` —— 只清**可再生**本地产物
+  （`__pycache__`、`.pytest_cache`/`.ruff_cache`、`backend/_pytest_tmp`、`frontend/dist`、测试存储残留、
+  `_*.txt`/`_*.log` 临时日志），默认**预演**、`--apply`/`-Apply` 才删除，并带**硬白名单**（`.env` /
+  `dev-database` / `backups` / `backend/storage` / `.venv` / `node_modules` 等命中即中止）。首次执行释放 **7.9 MB**；
+  另按「只留最近 1 份」清理本地演练备份 `backups/`（4.8 GB → 1.8 GB，回收 ~3.0 GB）并清空 `backend/storage/`。
+- **前后端契约检查**（2026-09-22）：新增 `backend/scripts/check_api_contract.py` —— 把 OpenAPI（`app.openapi()`）
+  与 `frontend/src/types/index.ts` 做**双向字段集合比对**，**不连数据库**：**TS 有 / API 无 → 失败**（前端读永不返回的
+  字段 → 运行时静默 `undefined`；`el-table` 插槽是 `any`，`vue-tsc` 抓不到这类问题）；**API 有 / TS 无 → 默认告警**
+  （本项目 TS 只声明实际消费字段，属有意为之），`--strict` 才视为失败。首运行即抓到一处真实缺陷并已修复（见「修复」）。
+- **端到端测试（E2E）落地**（2026-09-22）：新增仓库根工具包（`package.json` + `playwright.config.ts` + `e2e/golden-path.spec.ts`）
+  与编排脚本 `scripts/e2e.ps1` / `e2e.sh` —— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + 迁移 + 种子 + api 27016 +
+  前端 27017 + 独立 storage，与 dev 栈完全隔离），跑 3 条黄金链路：登录、新建漏洞（含影响URL 批量粘贴切分/去重/落库）、
+  报告编辑器渲染；每条均断言**控制台 0 error**。用**系统 Chrome**（`channel: 'chrome'`，浏览器下载 0 MB），
+  `workers: 1` + `retries: 1` + `trace on-first-retry`，**不做截图基线/canvas 断言**。实测 **3 passed / 1.4 min**
+  （用例本体各 ~2.5 s，其余为起栈）。为定位稳定锚点，给登录/漏洞表单/影响URL 编辑器补了 8 处 `data-test`。
+  前置：`vulnplatform_e2e` 库（DBngin 一次创建）+ 根目录 `pnpm install`。
+- **pre-push 门禁钩子**（2026-09-22，替代 CI 的「机器强制」）：新增 `.githooks/pre-push`（ruff/vulture + 全量 pytest +
+  契约检查 + 前端三门禁；依赖服务未启动时 fail-open，`TALOS_PREPUSH_STRICT=1` 可改为严格阻断）+ `.gitattributes`
+  强制 `.githooks/*` 与 `*.sh` 使用 LF（CRLF 会让 `#!/usr/bin/env bash` 直接失效）。启用需各人执行一次
+  `git config core.hooksPath .githooks`（仓库不代为修改 git 配置）。
+- **拆分单体 `tests/test_api.py`（4626 行 / 89 用例）为 11 个领域模块**（2026-09-22）：新增
+  `backend/tests/api/`（`test_api_{core_auth,assets_vulns,imports,reports,retest,plans,dashboard,special,knowledge,pat_open_api,misc}.py`
+  + 共享 `_helpers.py`）。用 AST 拆分器做**纯搬移**（逐字比对 + 名称守恒校验，收集数量保持 292 不变），
+  并整改三处「依赖其它用例先造数据」的隐式耦合：`test_dashboard` 与 `test_report_edit_and_export`
+  改为自建漏洞；`test_dashboard_by_department` 因依赖 `test_retest_round_tracking` 的「轮次部门」数据，
+  迁入复测模块并在 docstring 注明该**同模块内顺序依赖**。**效果**：11 个模块逐一单独运行全绿（不再有
+  跨模块数据依赖）；`-Workers 4` 并行的加速比由 **1.35x → 2.05x**（串行 36.8s → 并行 17.9s）。
+- **Alembic 迁移端到端守卫**（2026-09-21）：新增 `backend/tests/test_migrations.py` —— 在独立 schema 里
+  真跑 `alembic upgrade head`，断言迁移建出的表/列与模型声明**完全一致**，并验证 `downgrade base` 能回到
+  空 schema。单轨化后 migrations 是 schema 演进的唯一路径，此前**没有任何测试执行过迁移**（其余用例走
+  `create_all`，`test_schema_consistency.py` 只对迁移源码做正则断言）。
+
+### 修复
+
+- **`seed_dev_data.py --reset` 在存在「联动漏扫工单」时报外键错误**（2026-09-22，E2E 首次重置 E2E 库时实测）：
+  原实现按手写的「先子后父」表顺序逐表 `DELETE`，而该顺序把 `testing_plans` 排在 `nonpen_plans` **之前**，
+  一旦库里有 `nonpen_plans.testing_plan_id` 非空的联动工单，就抛
+  `ForeignKeyViolationError: update or delete on table "testing_plans" violates foreign key constraint
+  "nonpen_plans_testing_plan_id_fkey"` —— 即**只要开发库存在联动工单，`--reset` 就不可用**。
+  已改为单条 `TRUNCATE TABLE ... RESTART IDENTITY CASCADE`（依赖顺序交给 PG），顺序不再敏感、也更快。
+- **漏扫基线工单「关联资产」永不显示**（2026-09-22，由新增的前后端契约检查发现）：`NonpenPlanOut` 一直缺少
+  `asset_names`，而前端 `NonpenPlanWorkflowDrawer` 读取 `plan.asset_names` → 该 UI 块恒不渲染（死代码）。
+  现由 `nonpen_service.asset_name_map` / `to_out` 在创建 / 列表 / 详情 / 更新 / 测试项流转五类响应中统一填充
+  （按 `asset_ids` 原顺序、列表一次批量查询、资产已删则跳过）；并新增 `tests/api/test_api_nonpen.py` 固化
+  （该组接口此前**没有 API 级用例**，仅被开放 API 用例间接触及）。测试基线随之 291 → **292 passed**。
+- **`alembic downgrade base` 不可用**（2026-09-21，由新增的迁移守卫实测抓到）：`e5f6a7b8c9d0` 的 downgrade
+  会 `ADD COLUMN appeal_success`，而该列真正被删除发生在上层迁移 `b4c5d6e7f8a9`（本迁移的 upgrade 从未删过它），
+  于是回退到该步时抛 `DuplicateColumnError: column "appeal_success" already exists`。已改为「仅当该列存在时
+  同步数据、不再 `add_column`」，`downgrade base` 现可正常回到空 schema。
+
+### 说明
+
+- `testing_plans.create_nonpen` 由迁移 `c9d0e1f2a3b4` 建列，但该标志后来改为「仅入参、不落库」，模型未映射它。
+  该列 `NOT NULL + server_default=false`，对写入无影响；按项目既有口径（`assets` 的 `ports`/`services`/… 同理）
+  **删列属独立专项**（需 Alembic 迁移 + 登记 `DEPRECATED_COLUMNS`），故在 `tests/test_migrations.py` 中登记为
+  已知惰性列，不顺手删除。
+
+---
+
 ## [2.19.1] - 2026-09-21
 
 ### 变更

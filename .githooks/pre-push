@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# Talos pre-push 门禁（替代 CI 的「机器强制」；2026-09-22 决策：本项目不采用 CI）。
+#
+# 一次性启用（由开发者本人执行，仓库不代为修改 git 配置）：
+#     git config core.hooksPath .githooks
+# 临时跳过（确需时）：git push --no-verify   或   TALOS_SKIP_PREPUSH=1 git push
+#
+# 行为：
+#   - 跑后端门禁（scripts/test.sh：ruff/vulture 独立执行见下，pytest 全量）
+#     与前端三门禁（typecheck / vitest / build）；
+#   - **依赖不可用时 fail-open**（PG/Redis 未启动只告警不阻断，避免"工具没开就不让推"）；
+#     需要严格模式时导出 TALOS_PREPUSH_STRICT=1（此时依赖不可用直接阻断）。
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+if [ "${TALOS_SKIP_PREPUSH:-0}" = "1" ]; then
+  echo "[pre-push] TALOS_SKIP_PREPUSH=1，跳过门禁"
+  exit 0
+fi
+
+fail() {
+  echo "[pre-push] ✗ $1" >&2
+  echo "[pre-push] 修复后重推；确需跳过：git push --no-verify" >&2
+  exit 1
+}
+
+# ---------- 依赖预检（PG 5432 / Redis 6379） ----------
+deps_up() {
+  local port=$1
+  (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
+}
+
+STRICT="${TALOS_PREPUSH_STRICT:-0}"
+DEPS_OK=1
+for spec in "5432:PostgreSQL" "6379:Redis"; do
+  port="${spec%%:*}"
+  name="${spec#*:}"
+  if ! deps_up "$port"; then
+    DEPS_OK=0
+    echo "[pre-push] ⚠ $name 未监听 127.0.0.1:$port" >&2
+  fi
+done
+
+if [ "$DEPS_OK" -eq 0 ]; then
+  if [ "$STRICT" = "1" ]; then
+    fail "依赖服务不可用且 TALOS_PREPUSH_STRICT=1：请先启动 DBngin 的 PostgreSQL/Redis（见 docs/LOCAL_DEV_SETUP.md）"
+  fi
+  echo "[pre-push] ⚠ 依赖服务未就绪，跳过后端全量测试（fail-open）。" >&2
+  echo "[pre-push]   发布前请务必补跑：bash scripts/test.sh（或 docs/LOCAL_DEV_SETUP.md §五 的检查清单）" >&2
+fi
+
+# ---------- 后端：静态检查（不依赖数据库，始终执行） ----------
+PY="$ROOT/backend/.venv/Scripts/python"
+[ -x "$PY" ] || PY="$ROOT/backend/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+  fail "未找到 backend/.venv 解释器，请先按 AGENTS.md「常用命令」用 uv 创建并安装依赖"
+fi
+
+echo "[pre-push] 后端静态检查（ruff + vulture）..."
+( cd "$ROOT/backend" && "$PY" -m ruff check app scripts alembic tests ) || fail "ruff 未通过"
+( cd "$ROOT/backend" && "$PY" -m vulture app --min-confidence 80 ) || fail "vulture 未通过"
+
+if [ "$DEPS_OK" -eq 1 ]; then
+  echo "[pre-push] 后端全量测试（scripts/test.sh）..."
+  bash scripts/test.sh || fail "后端 pytest 未通过"
+fi
+
+# ---------- 前后端契约检查（不依赖数据库，始终执行） ----------
+echo "[pre-push] 前后端契约检查（OpenAPI ↔ src/types/index.ts）..."
+( cd "$ROOT/backend" && "$PY" -m scripts.check_api_contract ) || fail "前后端契约检查未通过"
+
+# ---------- 前端：三门禁 ----------
+echo "[pre-push] 前端三门禁（typecheck + test + build）..."
+( cd frontend \
+  && node ./node_modules/vue-tsc/bin/vue-tsc.js --noEmit \
+  && node ./node_modules/vitest/vitest.mjs run \
+  && node ./node_modules/vite/bin/vite.js build ) || fail "前端三门禁未通过"
+
+echo "[pre-push] ✓ 门禁全绿"

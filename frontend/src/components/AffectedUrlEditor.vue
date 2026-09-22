@@ -3,8 +3,8 @@
     <div v-for="(_, uidx) in rows" :key="uidx"
          class="tl-url-row flex items-center gap-2" :class="{ 'is-invalid': invalidIndexes.includes(uidx) }"
          @paste="onPaste($event, uidx)">
-      <el-input v-model="rows[uidx]" :placeholder="placeholder" class="flex-1" :disabled="disabled"
-                @input="onInput" />
+      <el-input v-model="rows[uidx]" data-test="affected-url-input" :placeholder="placeholder"
+                class="flex-1" :disabled="disabled" @input="onInput" />
       <el-button v-if="rows.length > 1" type="danger" link :disabled="disabled"
                  @click="removeRow(uidx)">
         <el-icon><Delete /></el-icon>
@@ -14,7 +14,7 @@
       <el-button size="small" plain :disabled="disabled" @click="addRow">
         <el-icon class="mr-1"><Plus /></el-icon>添加URL
       </el-button>
-      <span v-if="hint" class="text-xs text-gray-400 truncate">{{ hint }}</span>
+      <span v-if="hint" data-test="affected-url-hint" class="text-xs text-gray-400 truncate">{{ hint }}</span>
     </div>
     <div v-if="error" class="text-xs" style="color: var(--el-color-danger)">{{ error }}</div>
   </div>

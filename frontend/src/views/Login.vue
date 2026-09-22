@@ -21,18 +21,18 @@
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top" @keyup.enter="onLogin">
         <el-form-item prop="username" class="field">
           <template #label>用户名</template>
-          <el-input v-model="form.username" placeholder="请输入用户名" autocomplete="username" :prefix-icon="User" />
+          <el-input v-model="form.username" data-test="login-username" placeholder="请输入用户名" autocomplete="username" :prefix-icon="User" />
         </el-form-item>
         <el-form-item prop="password" class="field">
           <template #label>密码</template>
-          <el-input v-model="form.password" type="password" placeholder="请输入密码" autocomplete="current-password" show-password :prefix-icon="Key" />
+          <el-input v-model="form.password" data-test="login-password" type="password" placeholder="请输入密码" autocomplete="current-password" show-password :prefix-icon="Key" />
         </el-form-item>
 
         <div class="aux-row">
           <el-checkbox v-model="remember">记住我</el-checkbox>
         </div>
 
-        <el-button class="login-btn w-full" size="large" :loading="loading" @click="onLogin">
+        <el-button class="login-btn w-full" data-test="login-submit" size="large" :loading="loading" @click="onLogin">
           登 录
           <el-icon class="ml-1"><Right /></el-icon>
         </el-button>

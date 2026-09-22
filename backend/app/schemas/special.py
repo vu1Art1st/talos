@@ -172,6 +172,9 @@ class NonpenPlanOut(BaseModel):
     ticket_id_manual: str = ""
     ticket_id: str = ""  # 工单ID：YYYYMMDD-N
     asset_ids: list[int] = []
+    # 关联资产名称（按 asset_ids 顺序解析，由输出层填充）：流程抽屉展示「关联资产」用。
+    # 2026-09-22 契约检查发现该字段此前只有前端声明、后端从不返回（UI 块永不渲染）→ 现补齐。
+    asset_names: list[str] = []
     items: dict = {}  # 测试项状态容器 {key: {status, first_times, retest_times}}
     testing_plan_id: int | None = None  # 联动来源测试计划ID，非空即「联动」计划
     linked: bool = False  # 是否由测试计划联动创建

@@ -1,7 +1,7 @@
 """聚合筛选引擎单元测试：条件分组/嵌套解析、历史扁平格式兼容、结构限制与空分组语义。
 
 只覆盖纯结构逻辑（不依赖数据库）：表达式在真实查询上的正确性由 API 级用例
-`test_api.py::test_testing_plan_nested_filters` 端到端验证。
+`tests/api/test_api_plans.py::test_testing_plan_nested_filters` 端到端验证。
 """
 import json
 

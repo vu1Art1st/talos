@@ -10,7 +10,19 @@ class Base(DeclarativeBase):
     pass
 
 
-engine = create_async_engine(settings.DATABASE_URL, echo=settings.DEBUG, pool_pre_ping=True)
+def _connect_args() -> dict:
+    """DB_SCHEMA 非空时把连接的 search_path 固定到该 schema（测试并发隔离，见 LOCAL_DEV_SETUP）。"""
+    if settings.DB_SCHEMA:
+        return {"server_settings": {"search_path": settings.DB_SCHEMA}}
+    return {}
+
+
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+    connect_args=_connect_args(),
+)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 

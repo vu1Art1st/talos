@@ -41,6 +41,11 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # DB_SCHEMA 非空时（测试并发隔离）把迁移的 search_path 固定到该 schema：
+        # 迁移里的未限定 DDL 与 alembic_version 都落在其中，不触碰 public。
+        connect_args=(
+            {"server_settings": {"search_path": settings.DB_SCHEMA}} if settings.DB_SCHEMA else {}
+        ),
     )
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

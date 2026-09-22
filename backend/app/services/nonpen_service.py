@@ -2,6 +2,8 @@
 import copy
 
 from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import (
     NONPEN_ITEM_ACTIONS,
@@ -9,7 +11,8 @@ from app.constants import (
     NONPEN_ITEMS,
     NONPEN_ITEM_STATUS,
 )
-from app.models import NonpenPlan
+from app.models import Asset, NonpenPlan
+from app.schemas import NonpenPlanOut
 
 # 漏扫基线工单与测试计划共享的公共字段：编辑任一方时向另一方双向同步。
 # 测试计划的 status/人天/漏洞统计等专属字段不被覆盖。
@@ -156,3 +159,22 @@ def sync_linked_fields(source, target) -> None:
     for f in SYNC_FIELDS:
         val = getattr(source, f)
         setattr(target, f, list(val) if isinstance(val, list) else val)
+
+
+async def asset_name_map(session: AsyncSession, rows: list[NonpenPlan]) -> dict[int, str]:
+    """批量解析关联资产名称 → {asset_id: name}；供输出层补 `NonpenPlanOut.asset_names`。
+
+    按「一次查询覆盖全部行」实现（列表分页 20 条也只多一次 SQL），不逐行查询。
+    """
+    ids = {aid for row in rows for aid in (row.asset_ids or [])}
+    if not ids:
+        return {}
+    result = (await session.execute(select(Asset.id, Asset.name).where(Asset.id.in_(ids)))).all()
+    return {asset_id: name for asset_id, name in result}
+
+
+def to_out(row: NonpenPlan, names: dict[int, str]) -> NonpenPlanOut:
+    """ORM → 输出模型，并按 `asset_ids` 原顺序填充 `asset_names`（资产已删除时自动跳过）。"""
+    out = NonpenPlanOut.model_validate(row)
+    out.asset_names = [names[aid] for aid in (row.asset_ids or []) if aid in names]
+    return out

@@ -67,7 +67,7 @@ from app.models.business import vuln_assets  # noqa: E402
 from app.models.special import spring_action_vulns, testing_plan_testers  # noqa: E402
 from scripts.knowledge_data import SEED_DATA  # noqa: E402
 
-# 全部业务表（按外键依赖排序，先子后父）
+# 全部业务表（清空时用 TRUNCATE ... CASCADE，故**顺序不再敏感**；列表顺序仅按可读性分组）
 ALL_TABLES = [
     "vul_logs", "vul_retest_records", "vuln_assets", "spring_action_vulns",
     "testing_plan_testers", "testing_plan_retest_rounds", "report_sections",
@@ -266,9 +266,13 @@ def para(*lines: str) -> str:
 async def reset_and_seed() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # 清空全部业务表（子表优先）；自增计数随普通 INTEGER PRIMARY KEY 自动重置
-        for t in ALL_TABLES:
-            await conn.execute(text(f"DELETE FROM {t}"))
+        # 清空全部业务表：单条 TRUNCATE ... RESTART IDENTITY CASCADE。
+        # 不再依赖手写的「先子后父」顺序 —— 该顺序曾漏掉 `nonpen_plans.testing_plan_id → testing_plans.id`
+        # （联动漏扫工单指向测试计划），一旦库里存在联动工单，`--reset` 就抛
+        # ForeignKeyViolationError: update or delete on table "testing_plans" violates foreign key
+        # constraint（2026-09-22 E2E 首次重置时实测）。CASCADE 交由 PG 处理依赖顺序，
+        # RESTART IDENTITY 让自增计数归零（与旧 DELETE 口径一致）。
+        await conn.execute(text(f"TRUNCATE TABLE {', '.join(ALL_TABLES)} RESTART IDENTITY CASCADE"))
 
     async with async_session_maker() as session:
         # ---------- 角色 / 用户 ----------
@@ -583,12 +587,12 @@ async def reset_and_seed() -> None:
 
 
 # 允许的目标：库名白名单 + 回环主机（双条件，避免「同名远程库」被误清）
-_DEV_DB_NAME_WHITELIST = {"vulnplatform", "vulnplatform_test"}
+_DEV_DB_NAME_WHITELIST = {"vulnplatform", "vulnplatform_test", "vulnplatform_e2e"}
 _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 def _assert_dev_database() -> None:
-    """目标库守卫：本脚本会 DELETE 全部业务表，只允许作用于**本机** PostgreSQL 开发/测试库。
+    """目标库守卫：本脚本会清空全部业务表，只允许作用于**本机** PostgreSQL 开发/测试库。
 
     仅靠 `setdefault` 注入 DSN 并不能防止「环境里已导出 VP_DATABASE_URL」的场景，
     因此这里显式校验目标库名与主机，避免误清生产库（2026-09-17 审计 A-4）。

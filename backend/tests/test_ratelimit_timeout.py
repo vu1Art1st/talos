@@ -3,7 +3,7 @@
 背景（2026-09-18 实测）：当 Redis 处于「对端 DROP 报文」而非「主动拒绝连接」时，
 未设置超时的 `aioredis` 客户端会停在 TCP 握手阶段**无限挂起**，`core/ratelimit.py`
 的 `except` 降级分支永不触发 —— 登录失败计数 / PAT 限流的整条鉴权链随之卡死
-（全量测试曾卡在 `tests/test_api.py::test_pat_rate_limit`，即全量第 71 项）。
+（全量测试曾卡在 `tests/api/test_api_pat_open_api.py::test_pat_rate_limit`，即全量第 71 项）。
 
 修复：`config.REDIS_TIMEOUT` + 客户端显式 `socket_connect_timeout` / `socket_timeout`。
 本文件守卫该修复不被回退。

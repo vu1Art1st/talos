@@ -25,6 +25,18 @@ from app.services import nonpen_service, plan_crud, plan_query
 router = APIRouter(tags=["漏扫基线工单"])
 
 
+# 输出组装（必须定义在路由装饰器之前，否则装饰器会绑到辅助函数上、路由静默消失）
+async def _out(session: AsyncSession, row: NonpenPlan) -> NonpenPlanOut:
+    """单条输出：补齐关联资产名称（`NonpenPlanOut.asset_names`，2026-09-22 契约检查发现缺失）。"""
+    return nonpen_service.to_out(row, await nonpen_service.asset_name_map(session, [row]))
+
+
+async def _out_many(session: AsyncSession, rows: list[NonpenPlan]) -> list[NonpenPlanOut]:
+    """批量输出：一次查询解析全部行的关联资产名称（列表分页也仅多一次 SQL）。"""
+    names = await nonpen_service.asset_name_map(session, rows)
+    return [nonpen_service.to_out(row, names) for row in rows]
+
+
 # 注意：/nonpen-plans/stats 需注册在 /nonpen-plans/{row_id} 之前，防止路径吞噬
 @router.get("/nonpen-plans/stats")
 async def nonpen_plan_stats(
@@ -63,7 +75,7 @@ async def list_nonpen_plans(
         items = [r for r in items if r.actionable]
     total = len(items)
     items = items[(page - 1) * size: page * size]
-    return Page(total=total, items=items)
+    return Page(total=total, items=await _out_many(session, items))
 
 
 @router.post("/nonpen-plans", response_model=NonpenPlanOut)
@@ -72,7 +84,8 @@ async def create_nonpen_plan(
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    return await plan_crud.create_nonpen(session, body.model_dump(), user)
+    row = await plan_crud.create_nonpen(session, body.model_dump(), user)
+    return await _out(session, row)
 
 
 @router.get("/nonpen-plans/{row_id}", response_model=NonpenPlanOut)
@@ -82,7 +95,8 @@ async def get_nonpen_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """单条漏扫基线工单详情（含测试项状态容器），供流程抽屉刷新。"""
-    return await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
+    row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
+    return await _out(session, row)
 
 
 @router.put("/nonpen-plans/{row_id}", response_model=NonpenPlanOut)
@@ -93,7 +107,8 @@ async def update_nonpen_plan(
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, NonpenPlan, row_id, "漏扫基线工单不存在")
-    return await plan_crud.update_nonpen(session, row, body.model_dump())
+    updated = await plan_crud.update_nonpen(session, row, body.model_dump())
+    return await _out(session, updated)
 
 
 @router.delete("/nonpen-plans/{row_id}")
@@ -134,7 +149,7 @@ async def nonpen_item_transition(
     nonpen_service.apply_item_action(row, item_key, body.action)
     await session.commit()
     await session.refresh(row)
-    return row
+    return await _out(session, row)
 
 
 @router.post("/nonpen-plans/{row_id}/items/{item_key}/ignore", response_model=NonpenPlanOut)
@@ -150,4 +165,4 @@ async def nonpen_item_ignore(
     nonpen_service.apply_item_action(row, item_key, "ignore" if body.ignored else "unignore")
     await session.commit()
     await session.refresh(row)
-    return row
+    return await _out(session, row)

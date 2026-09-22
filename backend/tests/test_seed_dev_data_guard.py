@@ -1,8 +1,8 @@
 """开发种子脚本的目标库守卫回归测试（2026-09-17 审计 A-4；2026-09-21 随 SQLite 收口改造）。
 
-`scripts/seed_dev_data.py` 会逐表 DELETE 全部业务表，因此必须显式校验目标库。守卫判据为
-「PG 库名白名单（vulnplatform / vulnplatform_test）**且** 主机为回环地址」——两个条件缺一不可：
-只校验库名会放过「同名远程库」，只校验主机则会放过「本机上的其它库」。
+`scripts/seed_dev_data.py` 会清空（TRUNCATE ... CASCADE）全部业务表，因此必须显式校验目标库。守卫判据为
+「PG 库名白名单（vulnplatform / vulnplatform_test / vulnplatform_e2e）**且** 主机为回环地址」
+——两个条件缺一不可：只校验库名会放过「同名远程库」，只校验主机则会放过「本机上的其它库」。
 
 注意：本模块**在导入期**（环境变量仍为 conftest 注入的测试库）完成 `scripts.seed_dev_data`
 导入，之后只在测试内改环境变量后调用守卫函数。否则会在 monkeypatch 期间首次导入
@@ -52,6 +52,8 @@ def test_seed_refuses_malformed_dsn(monkeypatch):
         "postgresql+asyncpg://u:p@127.0.0.1:5432/vulnplatform",
         "postgresql+asyncpg://u:p@localhost:5432/vulnplatform",
         "postgresql+asyncpg://u:p@127.0.0.1:5432/vulnplatform_test",
+        # 端到端测试专用库（E2E 会写数据，故与 dev/test 库隔离；见 scripts/e2e.ps1）
+        "postgresql+asyncpg://u:p@127.0.0.1:5432/vulnplatform_e2e",
     ],
 )
 def test_seed_accepts_local_dev_targets(monkeypatch, dsn):
