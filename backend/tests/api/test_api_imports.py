@@ -109,18 +109,17 @@ async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict)
     assert assets, "未自动创建资产"
     assert target_url in (assets[0]["internal_urls"] or [])
 
-    # 自动创建报告：显示在报告中心，草稿态，章节数与漏洞数一致
+    # 自动创建报告：显示在报告中心，章节数与漏洞数一致
     resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
     reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
     assert reports, "未自动创建报告"
     report = reports[0]
-    assert report["status"] == "draft"
     assert report["testing_plan_id"] == plans[0]["id"]
     detail = await client.get(f"/api/v1/reports/{report['id']}", headers=auth)
     assert len(detail.json()["sections"]) == 2
 
 async def test_report_import_all_fixed_flow(client: AsyncClient, auth: dict):
-    """复测报告全部修复：计划复测完成(60)、报告保持草稿(draft，定稿由导出 Word 驱动)。"""
+    """复测报告全部修复：计划复测完成(60)。"""
     system_name = "门户系统ZZ"
     doc = _build_report_docx(
         system_name, "http://10.8.8.8/portalzz", "10.8.8.8",
@@ -137,7 +136,7 @@ async def test_report_import_all_fixed_flow(client: AsyncClient, auth: dict):
 
     resp = await client.get("/api/v1/reports", headers=auth, params={"search": system_name})
     reports = [r for r in resp.json()["items"] if r["project_name"] == system_name]
-    assert reports and reports[0]["status"] == "draft"
+    assert reports
 
 async def test_report_import_all_fixed_keeps_plan_when_other_vuln_open(
     client: AsyncClient, auth: dict,
@@ -388,9 +387,8 @@ async def test_import_report_fields_and_auto_export(client: AsyncClient, auth: d
     assert report["test_account"] == "admin/Admin@123"
     assert report["actual_mandays"] == 2  # 2026-06-30 ~ 2026-07-01
     assert report["create_time"].startswith("2026-07-01T14:00")
-    # 自动导出成功：导出版本 +1；报告保持草稿（定稿仍由人工导出 Word 驱动）
+    # 自动导出成功：导出版本 +1
     assert report["version"] == 2
-    assert report["status"] == "draft"
 
     # 工单实际人天同步刷新（仅纳入初测报告）
     assert plan["actual_mandays"] == 2

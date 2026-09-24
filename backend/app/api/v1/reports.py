@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import ReportStatus, VulStatus
+from app.constants import VulStatus
 from app.core.deps import require_perm
 from app.core.timeutil import mandays_between, now
 from app.core.query import get_or_404, paginate, apply_sort
@@ -121,7 +121,7 @@ async def list_reports(
     stmt = select(Report).where(*cond)
     stmt = apply_sort(
         stmt, Report, sort, order,
-        {"id", "title", "project_name", "author", "status", "version", "update_time", "create_time"},
+        {"id", "title", "project_name", "author", "version", "update_time", "create_time"},
         Report.update_time.desc(),
     )
     total, items = await paginate(session, stmt, page, size)
@@ -150,7 +150,6 @@ async def list_reports(
             "test_start": r.test_start,
             "test_end": r.test_end,
             "target_ip": r.target_ip,
-            "status": r.status,
             "version": r.version,
             "revision": r.revision,
             "actual_mandays": r.actual_mandays,
@@ -207,7 +206,7 @@ async def create_report_from_vulns(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """从已有漏洞记录一键生成报告草稿，每个漏洞一个章节。"""
+    """从已有漏洞记录一键生成报告，每个漏洞一个章节。"""
     plan = None
     plan_id = body.testing_plan_id
     if plan_id is None:
@@ -421,25 +420,6 @@ async def get_report(
     return await _get_report(session, report_id)
 
 
-def _report_content_changed(report: Report, body: ReportSaveIn) -> bool:
-    """报告内容是否发生变更（元信息 + 章节，按 order 排序比较）。
-
-    用于需求6的已定稿报告内容变更检测：内容变化即视为脱离定稿态。
-    """
-    for k in ("title", "project_name", "customer", "author", "test_start", "test_end", "target_ip"):
-        if getattr(report, k) != getattr(body, k):
-            return True
-    old_sections = [
-        (s.title, s.content_html, s.content_json, s.vul_id)
-        for s in sorted(report.sections, key=lambda s: s.order)
-    ]
-    new_sections = [
-        (s.title, s.content_html, s.content_json, s.vul_id)
-        for s in sorted(body.sections, key=lambda s: s.order)
-    ]
-    return old_sections != new_sections
-
-
 @router.put("/{report_id}", response_model=ReportOut)
 async def save_report(
     report_id: int,
@@ -447,16 +427,11 @@ async def save_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。
-
-    需求6：已定稿(final)报告内容发生变更时，保存后自动回退草稿，需重新导出定稿。
-    """
+    """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。"""
     report = await _get_report(session, report_id)
     if body.revision != report.revision:
         raise HTTPException(409, "报告已被他人修改，请刷新后重试")
 
-    # 需求6：在覆盖前基于旧值判定内容是否变化（纯状态切换不误判）
-    content_changed = _report_content_changed(report, body)
     old_plan_id = report.testing_plan_id  # 保存后可能换计划，需分别刷新新旧计划的人天
     old_linked = {s.vul_id for s in report.sections if s.vul_id}
     for k, v in body.model_dump(exclude={"sections", "revision"}).items():
@@ -469,9 +444,6 @@ async def save_report(
             content_html=s.content_html, content_json=s.content_json, vul_id=s.vul_id,
         ))
     report.revision += 1
-    # 需求6：已定稿报告内容变更后自动回退草稿，需重新导出定稿
-    if content_changed and report.status == ReportStatus.FINAL.to_str():
-        report.status = ReportStatus.DRAFT.to_str()
     # 编辑中新关联进来的漏洞同样自动进入修复中
     new_linked = [s.vul_id for s in body.sections if s.vul_id and s.vul_id not in old_linked]
     await _auto_mark_fixing(session, new_linked, user, report.title)
@@ -502,7 +474,7 @@ async def retest_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """报告列表/测试计划点击「发起复测」：未修复关联漏洞自动流转为复测中，并自动生成复测报告草稿。
+    """报告列表/测试计划点击「发起复测」：未修复关联漏洞自动流转为复测中，并自动生成复测报告。
 
     支持从以下状态进入复测：
     - 修复中(50) → 复测中(55)：标准链路

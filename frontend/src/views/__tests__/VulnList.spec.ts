@@ -33,11 +33,11 @@ function metaFixture() {
   return {
     vul_type: {}, vul_level: {}, vul_status: {}, vul_source: {}, vul_layer: {},
     asset_sec_level: {}, asset_status: {}, system_type: [], url_tag: {},
-    testing_plan_status: {}, report_status: {}, import_batch_status: {},
+    testing_plan_status: {}, import_batch_status: {},
     import_record_status: {}, export_job_status: {}, permissions: [],
     colors: {
       vul_level: {}, vul_status: {}, vul_type: {}, testing_plan_status: {},
-      report_status: {}, asset_status: {}, url_tag: {}, nonpen_item: {},
+      asset_status: {}, url_tag: {}, nonpen_item: {},
       import_batch_status: {}, import_record_status: {}, export_job_status: {},
     },
     nonpen: { items: [], status: {}, actions: {}, action_names: {} },

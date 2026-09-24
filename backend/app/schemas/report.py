@@ -45,7 +45,6 @@ class ReportMetaIn(BaseModel):
     test_end: str = ""
     target_ip: str = ""
     test_account: str = ""  # 被测测试账号（导出模板测试目标表第 5 行）
-    status: str = "draft"
 
 
 class ReportSaveIn(ReportMetaIn):

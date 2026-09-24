@@ -172,10 +172,6 @@
         <div class="space-y-2">
           <el-button type="primary" class="w-full" :loading="saving" @click="save()">保存报告</el-button>
           <el-button type="success" class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
-          <el-select v-model="report.status" class="w-full" @change="markDirty">
-            <el-option label="草稿" value="draft" />
-            <el-option label="已定稿" value="final" />
-          </el-select>
           <el-divider class="!my-3" />
           <el-button class="w-full" @click="doExport('docx')">
             <el-icon class="mr-1"><Document /></el-icon>导出 Word

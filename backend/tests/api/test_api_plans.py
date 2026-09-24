@@ -312,13 +312,11 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     plan = await _get_plan(client, auth, plan_id)
     assert plan["status"] == 50
 
-    # 全部已修复/已忽略：报告保持草稿（需求6），计划复测完成并记完成时间
+    # 全部已修复/已忽略：计划复测完成并记完成时间
     resp = await client.post(
         f"/api/v1/vulns/{vul_b}/transition", headers=auth, json={"status": 20},
     )
     assert resp.status_code == 200
-    report = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
-    assert report["status"] == "draft"
     plan = await _get_plan(client, auth, plan_id)
     assert plan["status"] == 60
     assert plan["retest_done_time"]
@@ -574,7 +572,6 @@ async def test_testing_plan_mandays_and_reports(client: AsyncClient, auth: dict)
     plan = await _get_plan(client, auth, plan_b)
     assert [r["id"] for r in plan["reports"]] == [report_id]
     assert plan["reports"][0]["title"] == "人天反向报告"
-    assert plan["reports"][0]["status"] == "draft"
 
 async def test_testing_plan_actual_mandays_override(client: AsyncClient, auth: dict):
     """实际人天修正：修正后不再被初测报告自动覆盖，取消修正后恢复自动计算。"""

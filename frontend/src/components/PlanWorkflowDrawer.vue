@@ -242,7 +242,6 @@
         <el-empty v-if="!plan.reports?.length" description="暂无报告，录入漏洞后可生成报告" :image-size="80" />
         <div v-for="r in plan.reports" :key="r.id" class="py-3 border-b border-gray-100 last:border-0">
           <div class="flex items-center gap-2">
-            <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
             <span class="text-sm font-medium">{{ r.title }}</span>
             <!-- 复测状态（未发起复测 / 复测中 / 复测完成）：区分已复测与未复测的报告 -->
             <el-tooltip :content="retestStateTip(r)">
@@ -326,7 +325,7 @@
           </el-form-item>
           <el-form-item label="生成报告">
             <el-switch v-model="noVulnGenReport" />
-            <span class="ml-2 text-xs text-gray-400">同步生成「未发现安全漏洞」报告草稿，可导出归档</span>
+            <span class="ml-2 text-xs text-gray-400">同步生成「未发现安全漏洞」报告，可导出归档</span>
           </el-form-item>
           <el-form-item v-if="noVulnGenReport" label="报告标题">
             <el-input v-model="noVulnTitle" placeholder="留空则自动生成" />
@@ -359,8 +358,6 @@ import {
   levelName,
   levelSoftStyle,
   planStatusSoftStyle,
-  reportStatusName,
-  reportStatusSoftStyle,
   retestStateName,
   retestStateSoftStyle,
   softStyle,

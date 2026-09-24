@@ -447,16 +447,12 @@ async def test_report_vuln_state_automation(client: AsyncClient, auth: dict):
     vul = (await client.get(f"/api/v1/vulns/{vul_a}", headers=auth)).json()
     assert vul["retest_html"] == "<p>复测通过，漏洞已修复</p>"
     assert vul["retest_json"] == {"type": "doc", "content": []}
-    report = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
-    assert report["status"] == "draft"
 
-    # B 已忽略：全部为已修复/已忽略，计划复测完成，报告保持草稿（需求6：报告状态由导出定稿驱动）
+    # B 已忽略：全部为已修复/已忽略，计划复测完成
     resp = await client.post(
         f"/api/v1/vulns/{vul_b}/transition", headers=auth, json={"status": 20},
     )
     assert resp.status_code == 200
-    report = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()
-    assert report["status"] == "draft"
 
     # 无关联漏洞的报告不能发起复测
     resp = await client.post("/api/v1/reports", headers=auth, json={"title": "空报告", "sections": []})

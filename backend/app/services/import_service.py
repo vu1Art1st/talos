@@ -193,7 +193,7 @@ async def ensure_report_and_bind_round(
     session: AsyncSession, batch: ImportBatch, plan: TestingPlan, user: User,
     report: Report | None, round_row,
 ) -> tuple[Report | None, bool]:
-    """报告格式批次的报告编排：未显式指定报告时自动创建草稿报告（使导入报告显示在
+    """报告格式批次的报告编排：未显式指定报告时自动创建报告（使导入报告显示在
     报告中心并支持复测信息编辑），并把本轮复测轮次关联到报告——删除报告时据此回退轮次，
     保持复测轮数与报告一致。返回 (报告, 是否自动创建)。"""
     batch_meta = batch.meta_json or {}
@@ -227,7 +227,6 @@ async def ensure_report_and_bind_round(
             test_end=test_end,
             actual_mandays=mandays_between(test_start, test_end),
             creator_id=user.id,
-            status="draft",  # 需求6：新生成报告一律为草稿，定稿由导出 Word 驱动
             **report_kwargs,
         )
         session.add(report)
@@ -463,8 +462,7 @@ async def auto_export_report(
     docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
     await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls)
 
-    # 导出版本号 +1（报告状态保持草稿，定稿仍由人工导出 Word 驱动）；
-    # flush+refresh 后以最终状态写指纹，供下次导出去重判断
+    # 导出版本号 +1；flush+refresh 后以最终状态写指纹，供下次导出去重判断
     report.version += 1
     await session.flush()
     await session.refresh(report)

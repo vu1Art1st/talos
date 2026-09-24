@@ -202,13 +202,13 @@ VULNS = [
 ]
 
 REPORT_TMPL = [
-    # (工单idx, 标题后缀, 状态, test_start, test_end)
-    (0, "初测报告", "completed", "2025-10-13", "2025-10-17"),
-    (0, "复测报告（第一轮）", "completed", "2025-11-03", "2025-11-05"),
-    (1, "初测报告", "completed", "2025-11-10", "2025-11-13"),
-    (3, "初测报告", "final", "2026-01-12", "2026-01-16"),
-    (4, "初测报告", "final", "2026-02-09", "2026-02-12"),
-    (7, "初测报告", "draft", "2026-05-11", "2026-05-14"),
+    # (工单idx, 标题后缀, test_start, test_end)
+    (0, "初测报告", "2025-10-13", "2025-10-17"),
+    (0, "复测报告（第一轮）", "2025-11-03", "2025-11-05"),
+    (1, "初测报告", "2025-11-10", "2025-11-13"),
+    (3, "初测报告", "2026-01-12", "2026-01-16"),
+    (4, "初测报告", "2026-02-09", "2026-02-12"),
+    (7, "初测报告", "2026-05-11", "2026-05-14"),
 ]
 
 # 漏扫基线工单：(计划名, 系统idx, 测试类型idx, 接收日期, items状态映射 key->(status, first, retest), 联动工单idx|None)
@@ -475,7 +475,7 @@ async def reset_and_seed() -> None:
                                    action="复测通过", content="复测确认修复有效", create_time=v.fix_time))
 
         # ---------- 报告 ----------
-        for plan_i, suffix, rstatus, t_start, t_end in REPORT_TMPL:
+        for plan_i, suffix, t_start, t_end in REPORT_TMPL:
             plan = plans[plan_i]
             tester_idx = PLANS[plan_i][6]
             if "复测" in suffix:
@@ -488,7 +488,7 @@ async def reset_and_seed() -> None:
                 title=report_title,
                 project_name=plan.plan_name, customer="内部安全测试",
                 author="、".join(testers[i].realname for i in tester_idx) or admin.realname,
-                test_start=t_start, test_end=t_end, status=rstatus,
+                test_start=t_start, test_end=t_end,
                 target_ip="10.20.0.0/16", actual_mandays=plan.actual_mandays,
                 testing_plan_id=plan.id, creator_id=admin.id,
                 create_time=datetime.strptime(t_end, "%Y-%m-%d").replace(hour=17),

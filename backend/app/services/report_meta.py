@@ -133,7 +133,6 @@ async def build_export_meta(
         "test_end": report.test_end,
         "target_ip": report.target_ip,
         "test_account": report.test_account,
-        "status": report.status,
         "is_retest": is_retest_report_title(report.title),
     }
     if report_time is not None:

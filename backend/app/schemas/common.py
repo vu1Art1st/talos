@@ -95,7 +95,6 @@ class ReportBrief(BaseModel):
 
     id: int
     title: str
-    status: str = "draft"
     actual_mandays: float = 0  # 实际人天，供前端计算计划自动人天（取消修正时恢复展示）
     create_time: datetime | None = None
 

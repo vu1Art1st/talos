@@ -526,8 +526,6 @@ export interface VulnStats {
 export interface Report {
   id: number
   title: string
-  /** 报告状态码：字典键为字符串（与 `reportStatusName` / `reportStatusSoftStyle` 入参一致），列表返回必带 */
-  status: string
   actual_mandays?: number | null
   create_time?: string
   /** 本报告所含漏洞是否已全部闭环（已修复/已忽略），用于「复测完成」标注 */

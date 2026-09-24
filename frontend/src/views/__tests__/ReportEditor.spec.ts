@@ -39,7 +39,7 @@ import ReportEditor from '../ReportEditor.vue'
 function reportFixture() {
   return {
     id: 1, title: '商城系统渗透测试报告', project_name: '商城系统', customer: '',
-    author: '', test_start: '', test_end: '', target_ip: '', status: 'draft',
+    author: '', test_start: '', test_end: '', target_ip: '',
     revision: 0, version: 1, actual_mandays: 0, testing_plan_id: null,
     sections: [{ id: 1, order: 0, title: '测试结论', content_html: '<p>结论</p>', vul_id: null }],
   }
@@ -49,11 +49,11 @@ function metaFixture() {
   return {
     vul_type: {}, vul_level: {}, vul_status: {}, vul_source: {}, vul_layer: {},
     asset_sec_level: {}, asset_status: {}, system_type: [], url_tag: {},
-    testing_plan_status: {}, report_status: {}, import_batch_status: {},
+    testing_plan_status: {}, import_batch_status: {},
     import_record_status: {}, export_job_status: {}, permissions: [],
     colors: {
       vul_level: {}, vul_status: {}, vul_type: {}, testing_plan_status: {},
-      report_status: {}, asset_status: {}, url_tag: {}, nonpen_item: {},
+      asset_status: {}, url_tag: {}, nonpen_item: {},
       import_batch_status: {}, import_record_status: {}, export_job_status: {},
     },
     nonpen: { items: [], status: {}, actions: {}, action_names: {} },

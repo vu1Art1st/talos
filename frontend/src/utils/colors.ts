@@ -56,7 +56,6 @@ export interface DictMetaPayload {
   vul_status: NameDict
   asset_status: NameDict
   url_tag: NameDict
-  report_status: NameDict
   import_batch_status: NameDict
   import_record_status: NameDict
   export_job_status: NameDict
@@ -65,7 +64,6 @@ export interface DictMetaPayload {
     vul_status: NameDict
     vul_type: NameDict
     testing_plan_status: NameDict
-    report_status: NameDict
     asset_status: NameDict
     url_tag: NameDict
     nonpen_item: NameDict
@@ -87,7 +85,6 @@ const dict = reactive({
   vulStatusNames: {} as NameDict,
   assetStatusNames: {} as NameDict,
   urlTagNames: {} as NameDict,
-  reportStatusNames: {} as NameDict,
   importBatchStatusNames: {} as NameDict,
   importRecordStatusNames: {} as NameDict,
   exportJobStatusNames: {} as NameDict,
@@ -96,7 +93,6 @@ const dict = reactive({
     vulStatus: {} as NameDict,
     vulType: {} as NameDict,
     testingPlanStatus: {} as NameDict,
-    reportStatus: {} as NameDict,
     assetStatus: {} as NameDict,
     urlTag: {} as NameDict,
     nonpenItem: {} as NameDict,
@@ -120,7 +116,6 @@ export function applyDictMeta(meta: DictMetaPayload) {
   dict.vulStatusNames = meta.vul_status ?? {}
   dict.assetStatusNames = meta.asset_status ?? {}
   dict.urlTagNames = meta.url_tag ?? {}
-  dict.reportStatusNames = meta.report_status ?? {}
   dict.importBatchStatusNames = meta.import_batch_status ?? {}
   dict.importRecordStatusNames = meta.import_record_status ?? {}
   dict.exportJobStatusNames = meta.export_job_status ?? {}
@@ -128,7 +123,6 @@ export function applyDictMeta(meta: DictMetaPayload) {
   dict.colors.vulStatus = meta.colors.vul_status ?? {}
   dict.colors.vulType = meta.colors.vul_type ?? {}
   dict.colors.testingPlanStatus = meta.colors.testing_plan_status ?? {}
-  dict.colors.reportStatus = meta.colors.report_status ?? {}
   dict.colors.assetStatus = meta.colors.asset_status ?? {}
   dict.colors.urlTag = meta.colors.url_tag ?? {}
   dict.colors.nonpenItem = meta.colors.nonpen_item ?? {}
@@ -191,18 +185,13 @@ export const levelColorByName = (name: string) => colorByName(dict.vulLevelNames
 export const statusColorByName = (name: string) => colorByName(dict.vulStatusNames, dict.colors.vulStatus, name)
 
 /* ============================================================
-   计划 / 报告 / 导出任务 / 导入批次状态标签
+   计划 / 导出任务 / 导入批次状态标签
    ============================================================ */
 
 export const planStatusColor = (s: number) => tone(dict.colors.testingPlanStatus[s] ?? FALLBACK_COLOR)
 export const planStatusSoftStyle = (s: number) =>
   softStyle(dict.colors.testingPlanStatus[s] ?? FALLBACK_COLOR)
 export const planStatusDotStyle = (s: number) => dotStyle(planStatusColor(s))
-
-export const reportStatusName = (s: string) => dict.reportStatusNames[s] ?? s
-export const reportStatusSoftStyle = (s: string) =>
-  softStyle(dict.colors.reportStatus[s] ?? FALLBACK_COLOR)
-export const reportStatusColor = (s: string) => tone(dict.colors.reportStatus[s] ?? FALLBACK_COLOR)
 
 export const exportJobName = (s: string) => dict.exportJobStatusNames[s] ?? s
 export const exportJobColor = (s: string) => tone(dict.colors.exportJobStatus[s] ?? FALLBACK_COLOR)

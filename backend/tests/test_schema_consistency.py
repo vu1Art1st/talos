@@ -20,6 +20,8 @@ _MIGRATIONS_DIR = _BACKEND_DIR / "alembic" / "versions"
 # 表名 -> 已从模型移除的历史列名（新增重命名时在此登记）
 DEPRECATED_COLUMNS = {
     "remote_testings": {"appeal_success", "title", "test_time", "appeal_report_id"},
+    # 报告「草稿/已定稿」状态功能取消：模型与列一并移除（迁移 b9c0d1e2f3a4）
+    "reports": {"status"},
 }
 
 

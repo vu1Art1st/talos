@@ -28,29 +28,6 @@ class PlanStatus(IntEnum):
     PASSED = 70        # 测试通过（测试完成且确认未发现安全漏洞，无漏洞闭环终态）
 
 
-class ReportStatus(IntEnum):
-    """报告状态码。与字符串字段 report.status 双向映射，保持 draft/final/completed 字符串兼容。"""
-    DRAFT = 1      # 草稿
-    FINAL = 2      # 已定稿
-    COMPLETED = 3  # 已完成（全部关联漏洞闭环）
-
-    # 转为数据库存储的字符串值
-    def to_str(self) -> str:
-        return _REPORT_STATUS_TO_STR[self]
-
-    @classmethod
-    def from_str(cls, s: str) -> "ReportStatus":
-        return _REPORT_STATUS_FROM_STR.get(s, cls.DRAFT)
-
-
-_REPORT_STATUS_TO_STR = {
-    ReportStatus.DRAFT: "draft",
-    ReportStatus.FINAL: "final",
-    ReportStatus.COMPLETED: "completed",
-}
-_REPORT_STATUS_FROM_STR = {v: k for k, v in _REPORT_STATUS_TO_STR.items()}
-
-
 VUL_TYPE = {
     10: "SQL注入漏洞",
     15: "XSS跨站漏洞",
@@ -289,10 +266,6 @@ URL_TAG_COLOR = {
     10: "#0284C7",  # 互联网 蓝
     20: "#8A968F",  # 办公网 灰
 }
-
-# 报告状态展示（status 字符串 draft/final/completed）
-REPORT_STATUS_NAME = {"draft": "草稿", "final": "已定稿", "completed": "已完成"}
-REPORT_STATUS_COLOR = {"draft": "#8A968F", "final": "#0284C7", "completed": "#059669"}
 
 # Word 导入批次 / 记录状态展示（imports 与 workers 的状态字符串）
 IMPORT_BATCH_STATUS_NAME = {

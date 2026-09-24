@@ -226,7 +226,6 @@
             </template>
             <div class="flex flex-col gap-1 max-h-64 overflow-auto">
               <div v-for="r in row.reports" :key="r.id" class="flex items-center gap-2">
-                <span class="tl-tag" :style="reportStatusSoftStyle(r.status)">{{ reportStatusName(r.status) }}</span>
                 <!-- 复测状态（未发起复测 / 复测中 / 复测完成）：区分已复测与未复测的报告 -->
                 <span class="tl-tag" :style="retestStateSoftStyle(r.retest_state)">
                   {{ retestStateName(r.retest_state) }}
@@ -458,8 +457,6 @@ import {
   nonpenItems,
   planStatusDotStyle,
   planStatusSoftStyle,
-  reportStatusName,
-  reportStatusSoftStyle,
   retestStateName,
   retestStateSoftStyle,
   softStyle,

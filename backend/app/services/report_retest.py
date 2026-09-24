@@ -44,7 +44,7 @@ async def create_retest_report(
     session: AsyncSession, src: Report, user: User,
     vul_snapshot: dict | None = None,
 ) -> Report:
-    """基于原报告自动生成复测报告草稿。
+    """基于原报告自动生成复测报告。
 
     - 标题：当前发起复测日期（YYYYMMDD）为标题前八位，尾部将原「渗透测试报告」替换为「渗透测试复测报告」；
       同一天对同一来源重复发起复测导致标题重复时，自动追加「-1」「-2」后缀规避重名（不再复用旧报告）；
@@ -70,7 +70,6 @@ async def create_retest_report(
         target_ip=src.target_ip,
         test_start=today.isoformat(),
         test_end=today.isoformat(),
-        status="draft",
         testing_plan_id=src.testing_plan_id,
         creator_id=user.id,
         retest_vul_snapshot=vul_snapshot,

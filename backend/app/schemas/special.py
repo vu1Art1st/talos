@@ -238,5 +238,5 @@ class SpringActionOut(SpringActionIn):
 
 class CompleteNoVulnIn(BaseModel):
     conclusion: str = ""  # 测试结论：记录到计划并写入无漏洞报告，可留空使用默认结论
-    generate_report: bool = True  # 是否同步生成「未发现安全漏洞」报告草稿
+    generate_report: bool = True  # 是否同步生成「未发现安全漏洞」报告
     title: str = ""  # 报告标题：留空时自动生成「yyyymmdd+测试系统+渗透测试报告（无漏洞）」

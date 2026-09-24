@@ -37,7 +37,9 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert meta["colors"]["vul_level"]["10"] == "#DC2626"
     assert meta["import_batch_status"]["parsed"] == "待确认"
     assert meta["export_job_status"]["done"] == "已完成"
-    assert meta["report_status"]["draft"] == "草稿"
+    # 报告「草稿/已定稿」状态功能已取消：名称与色值字典不再随 /meta 下发
+    assert "report_status" not in meta
+    assert "report_status" not in meta["colors"]
     # 名称字典对应的色值必须同步下发：前端 applyDictMeta 无条件注入，
     # 任一 key 缺失会令导出/导入状态标签渲染崩溃（报告区域整体消失）
     assert meta["colors"]["import_batch_status"]["parsed"] == "#0284C7"

@@ -321,7 +321,7 @@ def _no_vul_section_html(system_name: str, conclusion: str) -> str:
 async def _create_no_vul_report(
     session: AsyncSession, plan: TestingPlan, user: User, title: str, conclusion: str,
 ) -> Report:
-    """为无漏洞计划生成「安全测试通过」报告草稿：单章节测试结论，无漏洞关联。
+    """为无漏洞计划生成「安全测试通过」报告：单章节测试结论，无漏洞关联。
 
     标题同计划范围内查重，重复时自动追加「-1」「-2」后缀；测试周期默认取
     需求接收日期至确认当天（未填接收日期时取当天），实际人天自动计算。
@@ -346,7 +346,6 @@ async def _create_no_vul_report(
         author=user.realname or user.username,
         test_start=test_start,
         test_end=today,
-        status="draft",
         testing_plan_id=plan.id,
         creator_id=user.id,
     )
@@ -410,7 +409,7 @@ async def complete_plan_no_vuln(
 
     - 前置校验：计划无关联漏洞（有漏洞须走整改/复测链路）、状态允许流转且未重复确认；
     - 数据记录：状态置为测试通过、初测完成时间打点、记录无漏洞测试结论；
-    - 报告归档：默认同步生成「未发现安全漏洞」报告草稿（可导出 Word/PDF 归档）；
+    - 报告归档：默认同步生成「未发现安全漏洞」报告（可导出 Word/PDF 归档）；
     - 通知：站内信告知测试人员与计划创建人；
     - 后续若补录/关联新漏洞，计划自动重开为「初测中」（见 reopen_passed_plan）。
     """
@@ -423,7 +422,7 @@ async def complete_plan_no_vuln(
     if not plan.first_test_done_time:
         plan.first_test_done_time = tznow().date().isoformat()
 
-    # 报告归档：生成无漏洞报告草稿（标题不含「复测」，计入计划实际人天）
+    # 报告归档：生成无漏洞报告（标题不含「复测」，计入计划实际人天）
     report: Report | None = None
     if body.generate_report:
         title = body.title.strip() or (
