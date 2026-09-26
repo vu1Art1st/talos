@@ -22,6 +22,11 @@ DEPRECATED_COLUMNS = {
     "remote_testings": {"appeal_success", "title", "test_time", "appeal_report_id"},
     # 报告「草稿/已定稿」状态功能取消：模型与列一并移除（迁移 b9c0d1e2f3a4）
     "reports": {"status"},
+    # P0-6 遗留惰性列收口：值早已迁入 port_services / middlewares / databases（模型与迁移一并删除，
+    # 每列一个独立迁移 a5b6c7d8e9f0 / b6c7d8e9f0a1 / b7c8d9e0f1a2 / c8d9e0f1a2b3）
+    "assets": {"ports", "services", "middleware", "database_type"},
+    # 「创建非渗透测试项」勾选改为仅入参不落库，列随之删除（迁移 d3e4f5a6b7c8）
+    "testing_plans": {"create_nonpen"},
 }
 
 

@@ -93,7 +93,7 @@ async def upload_docx(
     await session.commit()
     await session.refresh(batch)
 
-    await dispatch(request.app, "parse_import_task", batch.id)
+    await dispatch(request.app, "parse_import_task", batch.id, job_id=f"parse:{batch.id}")
     return batch
 
 
@@ -136,16 +136,20 @@ async def _confirm_one_batch(
             session, batch, user,
             None, body.asset_id, None, body.testing_plan_id,
         )
-        await audit(session, request, "import_confirm", user, {
-            "target": f"imports/{bid}", "created": result.created,
-        })
+        if not result.replayed:  # 幂等重放不写审计（未产生新的业务变更）
+            await audit(session, request, "import_confirm", user, {
+                "target": f"imports/{bid}", "created": result.created,
+            })
         return BatchConfirmItemOut(
-            batch_id=bid, filename=batch.filename, status="confirmed", detail=result.msg,
+            batch_id=bid, filename=batch.filename,
+            status="confirmed", detail=result.msg,
         ), result.report_id
     except HTTPException as exc:
         await session.rollback()
+        # 409 = 并发确认抢占失败（P0-2）：不算失败，按 skipped 提示稍后刷新即可
+        status = "skipped" if exc.status_code == 409 else "failed"
         return BatchConfirmItemOut(
-            batch_id=bid, filename=batch.filename, status="failed", detail=str(exc.detail),
+            batch_id=bid, filename=batch.filename, status=status, detail=str(exc.detail),
         ), None
     except Exception:
         await session.rollback()
@@ -325,15 +329,20 @@ async def confirm_batch(
     user: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """确认入库：解析记录经知识库回填后建漏洞并去重合并，报告格式批次自动编排计划/资产/报告。"""
+    """确认入库：解析记录经知识库回填后建漏洞并去重合并，报告格式批次自动编排计划/资产/报告。
+
+    幂等（P0-2）：已确认批次或已入库记录的重复提交返回既有结果（created=0），不重复写入；
+    并发确认时后到者返回 409。
+    """
     batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
     result = await import_service.confirm_batch_internal(
         session, batch, user,
         body.record_ids, body.asset_id, body.report_id, body.testing_plan_id,
     )
-    await audit(session, request, "import_confirm", user, {
-        "target": f"imports/{batch_id}", "created": result.created,
-    })
+    if not result.replayed:
+        await audit(session, request, "import_confirm", user, {
+            "target": f"imports/{batch_id}", "created": result.created,
+        })
     return {"msg": result.msg, "created": result.created}
 
 

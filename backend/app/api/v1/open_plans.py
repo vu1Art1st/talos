@@ -148,18 +148,20 @@ async def open_list_nonpen_plans(
     _: User = Depends(get_pat_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """漏扫基线工单分页列表（search 匹配计划名称 / 测试系统 / 部门 / 工单ID）。"""
+    """漏扫基线工单分页列表（search 匹配计划名称 / 测试系统 / 部门 / 工单ID）。
+
+    「仅可进行」与站内同口径，统一由 `plan_query.nonpen_actionable_condition` 下推到 SQL
+    （P0-4）：不再「取回最多 10000 条后在应用层过滤再分页」。
+    """
     cond = [plan_query.nonpen_search_condition(search)] if search else []
+    if actionable:
+        cond.append(plan_query.nonpen_actionable_condition())
     stmt = apply_sort(
         select(NonpenPlan).where(*cond), NonpenPlan, sort, order,
         NONPEN_SORT_FIELDS, NONPEN_DEFAULT_ORDER,
     )
-    # 「仅可进行」依赖 items JSON 派生判定，SQL 层无法过滤，与站内同口径：取回后应用层过滤再分页
-    total, items = await paginate(session, stmt, 1, 10_000)
-    if actionable:
-        items = [r for r in items if r.actionable]
-    total = len(items)
-    return Page(total=total, items=items[(page - 1) * size: page * size])
+    total, items = await paginate(session, stmt, page, size)
+    return Page(total=total, items=items)
 
 
 @router.get("/nonpen-plans/{row_id}", response_model=NonpenPlanOut)

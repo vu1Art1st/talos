@@ -556,6 +556,11 @@ export interface ReportDetail extends Report {
   test_end?: string | null
   author?: string | null
   testing_plan_id?: number | null
+  /**
+   * 编辑乐观锁版本（后端每次保存 +1）：保存时必须把服务端返回的原值原样回传，
+   * 与服务端不一致则 409（见 `views/ReportEditor.vue` 的冲突处理与 `composables/useAutosave.ts`）。
+   */
+  revision?: number
 }
 
 /** 报告导出记录（原声明在 `composables/useExportJobs.ts`，E-5 上提为领域类型） */

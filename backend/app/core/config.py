@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.20.2"
+    APP_VERSION: str = "2.20.3"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -75,6 +75,17 @@ class Settings(BaseSettings):
     DISABLE_QUEUE: bool = False
 
     GOTENBERG_URL: str = "http://localhost:3000"
+
+    # 后台任务租约与重试（P0-3）：
+    # - LEASE_SECONDS：任务持有时长，超租约且无心跳的任务由启动回收扫描接管；
+    #   必须显著大于单次任务耗时（导出大报告 / 解析大文档），否则正常任务会被误回收。
+    # - MAX_ATTEMPTS：达到上限仍失败则进死信（dead_letter_reason 记录原因），不再自动重试。
+    # - BACKOFF_SECONDS：可重试错误的指数退避基数（第 n 次重试等待 base * 2^(n-1)）。
+    TASK_LEASE_SECONDS: int = 600
+    TASK_MAX_ATTEMPTS: int = 3
+    TASK_BACKOFF_SECONDS: int = 30
+    # 健康检查：Gotenberg 为可选能力，探测超时取小值避免拖慢 ready 探针
+    HEALTH_PROBE_TIMEOUT: float = 2.0
 
     # 报告图片压缩：重采样分辨率上限（最长边像素）、JPEG 质量、正文图片统一宽度（cm）
     # 用于解决高分辨率截图（2-3MB/张）导致报告 docx 体积过大（>20MB）的问题

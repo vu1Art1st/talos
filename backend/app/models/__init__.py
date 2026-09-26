@@ -8,12 +8,13 @@ from app.models.special import (
     SpringAction,
     TestingPlan,
     TestingPlanRetestRound,
+    TicketSeqCounter,
     spring_action_vulns,
     testing_plan_testers,
 )
 from app.models.dictionary import DictOption, VulnType
 from app.models.knowledge import KnowledgeEntry
-from app.models.system import NotificationChannel, OperationLog
+from app.models.system import NotificationChannel, OperationLog, TaskDedupKey
 
 __all__ = [
     "Role", "User", "Group", "GroupUser", "GroupMember", "PersonalAccessToken",
@@ -21,8 +22,8 @@ __all__ = [
     "Report", "ReportSection", "ExportJob",
     "ImportBatch", "ImportRecord",
     "RemoteTesting", "TestingPlan", "TestingPlanRetestRound", "SpringAction",
-    "NonpenPlan", "spring_action_vulns", "testing_plan_testers",
+    "NonpenPlan", "TicketSeqCounter", "spring_action_vulns", "testing_plan_testers",
     "DictOption", "VulnType",
     "KnowledgeEntry",
-    "OperationLog", "NotificationChannel",
+    "OperationLog", "NotificationChannel", "TaskDedupKey",
 ]

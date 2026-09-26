@@ -18,6 +18,8 @@ vi.mock('vue-router', async (importOriginal) => {
       replace: vi.fn().mockResolvedValue(undefined),
       back: vi.fn(),
     }),
+    // 离页守卫需要真实路由上下文；冒烟用例只验证渲染与加载，故替换为 no-op
+    onBeforeRouteLeave: vi.fn(),
   }
 })
 

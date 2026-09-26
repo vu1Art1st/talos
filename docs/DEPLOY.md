@@ -168,6 +168,7 @@ sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGR
 | 版本 | 脚本 | 用途 |
 | --- | --- | --- |
 | 2.12.2 | `scripts.fix_retest_section_dup` | 剥离存量报告章节正文尾部内嵌的「复测详情」副本（见下） |
+| 2.20.3 | `scripts.enable_trgm_indexes` | 建立前后通配符检索的 pg_trgm GIN 索引（可选，见「十、」） |
 | — | `scripts.backfill_retest` | 复测聚合标题回填，`upgrade.sh` 已自动执行（见 3.2） |
 
 #### 2.12.2 清理存量报告章节的复测详情副本
@@ -216,6 +217,17 @@ sudo docker compose cp api:/app/storage/backups/report_sections_retest_<时间�
 
 > 备份 JSON 内含每条章节的 `id` / `report_id` / `vul_id` / `before` / `after` 原文，可据此逐条还原；
 > 若需整库回退，使用升级前备份（`upgrade.sh` 已自动生成）走 `scripts/restore.sh`（见「六、更换 VPS」）。
+
+#### 2.20.3 遗留惰性列清理（迁移自动完成，需先备份）
+
+该版本删除 5 个历史列：`assets.ports / services / middleware / database_type` 与
+`testing_plans.create_nonpen`。**每列一个独立迁移**（`a5b6c7d8e9f0` → `c8d9e0f1a2b3` → `d3e4f5a6b7c8`），
+`upgrade.sh` 会随 `alembic upgrade head` 自动执行，无需手工脚本。
+
+- 删列前已核查全仓无读写（值早已迁入 `port_services` / `middlewares` / `databases`；
+  `create_nonpen` 改为仅入参不落库），且各迁移的 `downgrade` 会按原定义重建列。
+- **升级前请确保已有一份可用备份**（`upgrade.sh` 默认生成）；如需回退某一列，执行
+  `alembic downgrade <该迁移的 down_revision>` 即可恢复该列定义（数据不可恢复，故备份是关键）。
 
 ---
 
@@ -601,6 +613,78 @@ wsl -d kali-linux zstd -d -f -o "C:\Users\<你>\AppData\Local\Temp\db.sql" "E:\G
 1. 补完迁移后 `alembic current` 应为**本地 head**（当前 `e1f2a3b4c5d6`）；
 2. 启动 dev 栈（`dev.ps1`）→ 用**原 admin 账号**登录验证数据完整；页面报错先看「七、恢复后页面 500 排查」；
 3. 本地库被真实数据覆盖后，`vulnplatform_test` / `vulnplatform_e2e` **不受影响**（测试库独立，见 `LOCAL_DEV_SETUP.md`），跑测试仍按 `scripts/test.ps1` 的既有口径。
+
+---
+
+## 十、健康探针与后台任务恢复（2.20.3 / P0-3）
+
+### 10.1 三档健康探针
+
+| 路径 | 语义 | 判据 |
+|---|---|---|
+| `/api/health` | 兼容旧探针 | 恒 200，只表示进程在跑（不查依赖） |
+| `/api/health/live` | 存活探针 | 恒 200；**不查依赖**（依赖故障时应重启前先排障，而非被编排杀掉） |
+| `/api/health/ready` | 就绪探针 | 逐项返回依赖状态；任一**必需**依赖失败返回 **503**，可选依赖失败不影响状态码 |
+
+依赖分级：**PostgreSQL 恒为必需**；队列启用时（`VP_DISABLE_QUEUE=0`）**Redis 与 arq worker 心跳
+同为必需**；**Gotenberg 为可选**（不可用只降级「PDF 导出不可用」）。
+响应形如 `{"status":"ready","checks":{"database":{"ok":true,"required":true},"redis":{...},"worker":{...},"gotenberg":{"ok":false,"required":false,"reason":"连接超时"}}}` ——
+只含依赖名、`ok` 与归类后的原因文案，**不含 DSN / 凭据 / 内网地址**。
+
+worker 心跳键为 `arq:health-check`（worker 每 30s 续期，TTL 61s）：探针读到该键才认为有存活 worker，
+故「Redis 通但 worker 全挂」同样会返回 503。
+
+```bash
+curl -s -o /dev/null -w 'health=%{http_code}\n'  http://127.0.0.1/api/health
+curl -s http://127.0.0.1/api/health/ready | python3 -m json.tool
+```
+
+### 10.2 后台任务租约与自动恢复
+
+导入解析与报告导出均带**租约 / 心跳 / 尝试次数 / 退避 / 死信**字段（`attempts`、`last_heartbeat`、
+`lease_until`、`next_retry_at`、`dead_letter_reason`），口径见 `app/services/task_lifecycle.py`：
+
+- 任务启动即写租约（默认 600s），长步骤前续租；worker 崩溃后记录停在 `running` / `parsing`，
+  **超租约即被判为孤儿任务**，在 API 启动时回收一次，并：
+  - 未达最大次数（默认 3）→ 回到排队态 + 指数退避（`30s × 2^n`，封顶 1h）后重试；
+  - 已达上限或属永久错误（文件损坏 / 数据缺失等）→ 置 `failed` 并在 `dead_letter_reason` 保留原因。
+- 兜底扫描：worker 侧 cron 每 5 分钟；无队列形态（`VP_DISABLE_QUEUE=1`）由 API 进程内每 5 分钟一次。
+- 可调参数：`VP_TASK_LEASE_SECONDS`（须显著大于单次最长任务耗时）、`VP_TASK_MAX_ATTEMPTS`、
+  `VP_TASK_BACKOFF_SECONDS`。
+- 幂等：任务重试不会重复生成章节 / 漏洞 / 复测轮次 / 报告文件（导出按状态短路，通知按幂等键抢占，
+  报告导入按批次状态机与 `export_jobs.dedup_key` 去重）。
+
+```bash
+# 查看最近的导出任务与重试/死信状态
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT id,report_id,status,attempts,lease_until,next_retry_at,left(dead_letter_reason,40) AS reason FROM export_jobs ORDER BY id DESC LIMIT 10"'
+sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT id,filename,status,attempts,lease_until,next_retry_at,left(dead_letter_reason,40) AS reason FROM import_batches ORDER BY id DESC LIMIT 10"'
+```
+
+### 10.3 从前端报错定位后端日志（request_id）
+
+每次响应都带 `X-Request-Id` 头（复用调用方传入值，否则服务端生成 12 位十六进制）；
+后端 `app.*` 日志统一形如 `... [rid=<request_id>] app.api.v1.xxx: ...`，4xx/5xx 另有一条
+`请求失败 rid=... method=... path=... status=...` 汇总行。后台任务无 HTTP 上下文，关联字段为
+消息里的 `job_id=` / `batch_id=`。
+
+```bash
+# 用界面响应头里的 rid 直接过滤日志
+sudo docker compose logs --tail 2000 api | grep 'rid=<粘贴的 request_id>'
+sudo docker compose logs --tail 2000 api | grep 'job_id=<导出任务ID>'
+```
+
+### 10.4 可选：启用 pg_trgm 前后通配符索引（P0-4）
+
+列表关键词走 `%keyword%`（B-tree 无法命中）。基准实测（10 万漏洞、关键词具选择性）：
+`P95 43.5ms → 5.3ms`，执行计划由 `Seq Scan` 变为 `Bitmap Index Scan on ix_trgm_vulns_title`。
+该脚本幂等、可先试运行；需要 `CREATE EXTENSION pg_trgm` 权限（compose 的 `postgres` 用户满足）。
+
+```bash
+sudo docker compose run --rm api python -m scripts.enable_trgm_indexes --dry-run
+sudo docker compose run --rm api python -m scripts.enable_trgm_indexes
+```
 
 ---
 

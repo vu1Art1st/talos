@@ -27,6 +27,12 @@ class ImportBatch(Base):
     error: Mapped[str] = mapped_column(Text, default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    # ---- 任务生命周期（P0-3）：租约 / 心跳 / 重试 / 死信，口径见 services/task_lifecycle.py ----
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    dead_letter_reason: Mapped[str] = mapped_column(Text, default="")
 
     records: Mapped[list["ImportRecord"]] = relationship(
         back_populates="batch", cascade="all, delete-orphan", order_by="ImportRecord.seq"

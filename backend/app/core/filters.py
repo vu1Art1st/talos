@@ -4,6 +4,11 @@
 本模块只负责操作符白名单、区间取值与表达式构造；派生/关联字段（如工单ID、多对多、计数）
 由调用方提供 leaf 构造器（`build_tree_condition` 的 `leaf_builder` 参数）后统一组合。
 
+日期口径分两类，**不得混用**：
+- `ftype == "date"` 且 `is_datetime=False`：**日期字符串列**（库内即 `YYYY-MM-DD` 文本），按字典序直接比较；
+- `is_datetime=True`：**DateTime 列**，按 `[当日 00:00, 次日 00:00)` 半开区间比较，
+  禁止在列上调用 `date()`（见 `datetime_filter_expr` 的根因说明）。
+
 条件结构（v2，支持分组嵌套与「组内 且/或、整体 非、组间 且/或」任意组合）：
     {"logic": "and", "not": false, "children": [
         {"kind": "rule", "field": "receive_time", "op": "gt", "value": "2026-01-01"},
@@ -17,9 +22,11 @@
 解析时按左结合语义等价折叠为上述嵌套树。
 """
 import json
+import re
+from datetime import datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import and_, func
+from sqlalchemy import and_, or_
 
 # 规则操作符白名单：所有接入聚合筛选的接口共用同一套语义
 ALLOWED_FILTER_OPS = {
@@ -51,8 +58,70 @@ def to_float(text) -> float:
         return 0.0
 
 
+_DATE_ONLY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def day_bounds(value, label: str = "日期") -> tuple[datetime, datetime]:
+    """`YYYY-MM-DD` → (当日 00:00, 次日 00:00) 半开区间边界；格式或日期非法直接 400。
+
+    naive 本地时间口径，与库内 DateTime 列（`now()` 写入、`plan_query._day_start`）一致。
+    """
+    text = str(value if value is not None else "").strip()
+    if not _DATE_ONLY.match(text):
+        raise HTTPException(400, f"{label}格式错误，需为 YYYY-MM-DD：{value}")
+    try:
+        start = datetime.fromisoformat(f"{text}T00:00:00")
+    except ValueError:
+        raise HTTPException(400, f"{label}不是有效日期：{value}")
+    return start, start + timedelta(days=1)
+
+
+def datetime_filter_expr(col, op: str, value) -> object:
+    """DateTime 列的**日期区间**语义：全部按 `[当日 00:00, 次日 00:00)` 半开区间构造。
+
+    **禁止改回 `func.date(col) >= '<日期串>'`**：日期串会按 VARCHAR 绑定，PostgreSQL 不存在
+    `date >= character varying` 算子，asyncpg 直接抛 `UndefinedFunctionError`（2026-09-19 线上
+    四个入口 500）。半开区间同时不在列上套函数，可利用该列索引。
+
+    操作符边界口径（前端日期选择器只给 `YYYY-MM-DD`，故一律按「整天」解释）：
+    - `eq`   ：落在该自然日内；
+    - `ne`   ：不在该自然日内（NULL 行不命中，与 `col != value` 的三值逻辑一致）；
+    - `gt`   ：晚于该日（`>= 次日 00:00`）；
+    - `gte`  ：不早于该日（`>= 当日 00:00`）；
+    - `lt`   ：早于该日（`< 当日 00:00`）；
+    - `lte`  ：不晚于该日（`< 次日 00:00`）；
+    - `between`：`[起始日 00:00, 结束日次日 00:00)`，需两个完整日期。
+    """
+    if op == "between":
+        lo, hi = split_range(value)
+        if lo in (None, "") or hi in (None, ""):
+            raise HTTPException(400, "区间筛选需要填写完整的起止值")
+        start, _ = day_bounds(lo, "区间起始日期")
+        _, end = day_bounds(hi, "区间结束日期")
+        return and_(col.is_not(None), col >= start, col < end)
+    if op == "eq":
+        start, end = day_bounds(value)
+        return and_(col.is_not(None), col >= start, col < end)
+    if op == "ne":
+        start, end = day_bounds(value)
+        return and_(col.is_not(None), or_(col < start, col >= end))
+    if op == "gt":
+        return col >= day_bounds(value)[1]
+    if op == "gte":
+        return col >= day_bounds(value)[0]
+    if op == "lt":
+        return col < day_bounds(value)[0]
+    if op == "lte":
+        return col < day_bounds(value)[1]
+    raise HTTPException(400, f"日期时间字段不支持操作符：{op}")
+
+
 def build_filter_expr(col, ftype: str, is_datetime: bool, op: str, value) -> object:
-    """按字段类型构造单字段筛选条件（不含 NOT 取反）。"""
+    """按字段类型构造单字段筛选条件（不含 NOT 取反）。
+
+    `is_datetime=True` 表示该列是 DateTime（日期区间语义见 `datetime_filter_expr`）；
+    否则 `ftype == "date"` 是**日期字符串列**（`YYYY-MM-DD` 文本，字典序即时间序，直接比较）。
+    """
     if op in ("is_empty", "is_not_empty"):
         if ftype == "number":
             empty = col.is_(None) | (col == 0)
@@ -62,8 +131,7 @@ def build_filter_expr(col, ftype: str, is_datetime: bool, op: str, value) -> obj
             empty = col.is_(None) | (col == "")
         return empty if op == "is_empty" else ~empty
     if is_datetime:
-        # DateTime 列统一转日期字符串比较，保证跨数据库行为一致
-        col = func.date(col)
+        return datetime_filter_expr(col, op, value)
     if ftype in ("text", "enum"):
         if op == "contains":
             return col.ilike(f"%{value}%")

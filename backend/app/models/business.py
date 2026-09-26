@@ -27,7 +27,9 @@ class Asset(Base):
     - databases: [{"name": str, "version": str}]
     - owners: [{"name": str, "phone": str, "email": str}]
 
-    ports/services/middleware/database_type 为历史字段，启动时一次性迁移到新 JSON 字段后不再读写。
+    历史字段 ports / services / middleware / database_type 已于 P0-6 随独立迁移删除
+    （值早已迁入 port_services / middlewares / databases，全仓无读写；见
+    tests/test_schema_consistency.DEPRECATED_COLUMNS）。
     """
 
     __tablename__ = "assets"
@@ -40,10 +42,6 @@ class Asset(Base):
     system_type: Mapped[str] = mapped_column(String(64), default="")
     public_urls: Mapped[list | None] = mapped_column(JSON, default=list)
     internal_urls: Mapped[list | None] = mapped_column(JSON, default=list)
-    ports: Mapped[list | None] = mapped_column(JSON, default=list)  # 历史字段
-    services: Mapped[str] = mapped_column(String(255), default="")  # 历史字段
-    middleware: Mapped[str] = mapped_column(String(128), default="")  # 历史字段
-    database_type: Mapped[str] = mapped_column(String(128), default="")  # 历史字段
     port_services: Mapped[list | None] = mapped_column(JSON, default=list)
     middlewares: Mapped[list | None] = mapped_column(JSON, default=list)
     databases: Mapped[list | None] = mapped_column(JSON, default=list)
@@ -99,7 +97,8 @@ class Vul(Base):
 
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
-    submit_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    # 索引（P0-4）：列表默认按提交时间排序 / 时间范围筛选，缺索引在大库上退化为全表排序
+    submit_time: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
     audit_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     notice_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fix_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

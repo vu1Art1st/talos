@@ -7,6 +7,24 @@ from app.core.timeutil import now
 from app.db import Base
 
 
+class TaskDedupKey(Base):
+    """后台任务幂等键（P0-2）。
+
+    队列重试（arq 失败重试 / 进程重启后的恢复投递）可能让同一业务副作用执行两次。
+    任务执行前先以幂等键 `INSERT ... ON CONFLICT DO NOTHING` 抢占：抢不到说明该副作用
+    已经（或正在）执行，直接返回，不产生第二次通知/导出。
+
+    键由调用方在**业务事件发生时**生成（如通知的一次 dispatch 生成一个 uuid），
+    而不是由消息内容派生 —— 后者会把「同分钟内容相同的两次真实事件」误判为重复。
+    过期键由 worker 的定期清理任务删除，避免无界增长。
+    """
+
+    __tablename__ = "task_dedup_keys"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
+
+
 class OperationLog(Base):
     """登录与敏感操作审计日志：action 见 constants.AUDIT_ACTIONS（login_* 前缀为登录事件）。"""
 

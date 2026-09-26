@@ -13,10 +13,10 @@ import re
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import String, and_, exists, func, or_, select
+from sqlalchemy import String, and_, exists, func, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import TESTING_PLAN_STATUS, PlanStatus, VulStatus
+from app.constants import NONPEN_ITEMS, TESTING_PLAN_STATUS, PlanStatus, VulStatus
 from app.core.filters import (
     build_filter_expr,
     build_tree_condition,
@@ -53,6 +53,37 @@ def _auto_ticket_id_cond(model, date_like: str, seq: int):
         model.receive_time.like(date_like),
         model.ticket_seq == seq,
         model.ticket_id_manual == "",
+    )
+
+
+# 漏扫基线工单「可进行」判定所用的可测试状态（与 models/special.NonpenPlan.actionable 同口径）
+NONPEN_ACTIONABLE_STATUSES = ("not_started", "testing", "retesting")
+
+
+def nonpen_actionable_condition():
+    """漏扫基线工单「仅可进行」的 **SQL 侧** 派生条件（P0-4）。
+
+    为什么必须下推到 SQL：`items` 是 JSON 固定键容器（`constants.NONPEN_ITEMS` =
+    baseline/host/web，每键 `{status, first_times, retest_times}`），原实现在 Python 侧用
+    `NonpenPlan.actionable` 过滤，只能「取回最多 10000 条 + 应用层过滤再分页」，
+    数据量增长后每次请求的读取量与内存都线性放大。
+
+    实现要点：**键名必须内联为字面量，不能用绑定参数**——表达式索引
+    `(items -> 'baseline' ->> 'status')` 只有在查询表达式与索引表达式结构完全一致时才会
+    被使用，而 `json_extract_path_text(items, $1, $2)` 里的 Param 节点与索引中的 Const
+    节点不相等，规划器不会采信该索引。键名来自代码常量（非用户输入），无注入面。
+    路径是**两级**：先取测试项对象（`->` 返回 json），再取 status（`->>` 返回文本）。
+    口径与 `NonpenPlan.actionable` 属性一致，二者由 `tests/api/test_api_nonpen.py`
+    的等价性用例锁定。
+    """
+    return and_(
+        NonpenPlan.items.is_not(None),
+        or_(*[
+            literal_column(
+                f"nonpen_plans.items -> '{key}' ->> 'status'"
+            ).in_(NONPEN_ACTIONABLE_STATUSES)
+            for key in NONPEN_ITEMS
+        ]),
     )
 
 
@@ -581,7 +612,7 @@ def _in_period(value: str, date_from: str, date_to: str) -> bool:
 
 
 def _ts_in_period(value: datetime | None, date_from: str, date_to: str) -> bool:
-    """DateTime 是否落在统计周期内（按本地日期，与 SQL 侧 func.date() 口径一致）。"""
+    """DateTime 是否落在统计周期内（按本地日期，与 SQL 侧 `_datetime_date_range` 半开区间同口径）。"""
     return value is not None and _in_period(value.date().isoformat(), date_from, date_to)
 
 

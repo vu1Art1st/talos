@@ -186,7 +186,7 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
             result.created += 1
         else:
             result.updated += 1
-    await session.commit()
+    await ticket_service.commit_or_conflict(session)
     return result
 
 

@@ -134,9 +134,14 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 领域类型统一声明在 `src/types/index.ts`（工单/漏洞/报告/导出记录等），页面与 composable 不得就地复制 `any` 或另起同名接口；新增字段先在该文件补声明（字段名与后端 API 一致，snake_case）。**新增代码不得引入 `any`**：确属边界（第三方写入的结构、用户输入 JSON）用 `unknown`，或在原处写明理由保留；类型收敛**不得改变运行时数据流**（`{...base, ...detail}` 必须保留 spread，只在边界做 `?? base.x` 归一）。`pnpm typecheck` 必须保持 **0 错误**。
 - **弹窗/抽屉打开函数命名统一为 `open<Target>`**（2026-09-17 审计 F-2）：`useCrudDialog` 的打开函数为 `openFormDialog`，业务侧为 `openCreateAsset` / `openWorkflow` 等；组件对外 API 可直接导出 `open`（与 `@closed` 对称）。禁止再引入 `openDialog`、`onOpen` 这类无目标或事件式命名（`onXxx` 仅用于「事件回调」语义，不作为「打开」动作名）。
 - 视图/组件冒烟测试统一复用 `src/__tests__/helpers/clientMock.ts`（`clientMockFactory()` + `getMock`），禁止在各 spec 内重复书写 axios client 的 `vi.mock` 样板。
+- **编辑型页面的未保存内容防护（P0-5，新代码强制）**：保存状态与离页判定统一走 `src/composables/useAutosave.ts`，状态机固定为 `saved / dirty / saving / failed / conflict`，离页判定唯一入口是 `confirmLeave()`（无修改直接放行 → 有修改先补存一次 → 仍失败再弹「继续保存 / 放弃修改 / 留在当前页」）。**路由离开、退出登录 / 切换账号（`utils/unsavedGuard.ts::confirmLeaveAll`，`auth.logout` 前置校验）、浏览器关闭标签页（`beforeunload`）三条路径必须复用同一判定**，禁止各自实现提示逻辑。保存失败不得跳全屏错误页（自行给请求加 `meta: { skipErrorPage: true }`），须保留本地输入并在界面给出状态与重试入口；409 / 版本冲突必须由用户显式选择，禁止静默覆盖他人内容。
 - 状态标签统一 `tl-tag` 类 + `softStyle()` 柔和样式；表格行内允许「色点 + 文字」dot-tag 变体（等级/状态语义），色值仍走 colors.ts 字典注册表，禁止视图内硬编码。
 - Tailwind 灰阶类（`text-gray-*` / `bg-gray-*` / `border-gray-*` / `bg-white`）已映射到 `--tl-gray-*` 令牌自动适配暗黑模式，可直接使用；新增样式优先用令牌，保证明暗两态可用。
 - 日期区间选择器（`el-date-picker[type=daterange]`）的根节点即 `.el-input__wrapper`，Element Plus 给该类设了 `flex-grow: 1`；放进 flex 行（`.tl-filterbar` 或自写 `flex` 容器）会被拉伸撑满、`!w-*` 失效。固定宽度必须同时写 `!grow-0`（`flex-grow: 0 !important`）。
+- **来源感知返回（返回导航专项，2026-09-22 落地；原专项设计稿已删除，结论归并于此，git 历史即归档）**：返回/取消/保存后的跳转一律走 `src/composables/useNavBack.ts`（`resolveBackPath` / `goBack` / `withRedirect`），三层兜底 = 显式 `redirect` 查询参数 > 站内历史（`history.state.back`）> 安全默认页，站点内路径归一化复用 `utils/errorPage.ts::normalizeRedirect`。**禁止**裸 `router.back()`（直接粘贴 URL 进入时会退出站点）与硬编码 `router.push('/xxx')` 作为返回目标；跨页跳转需用 `withRedirect(path, from)` 透传来源。
+- **页面状态外化到 URL**：抽屉等「离开即销毁」的上下文用查询参数承载（如 `?plan=<工单ID>&vuln=<漏洞ID>`，`replace` 写入不污染历史栈），使回退/刷新/分享后可恢复；同页 query 变化不得重置滚动位置。
+- **滚动位置记忆**：`el-main` 为滚动容器（非 `window`），按 `route.fullPath` 记录（LRU ≤120 条）；仅**返回式导航**恢复（异步数据未就绪时用 `rAF` 重试，1200ms 超时），前进式导航一律置顶。
+- 面包屑来源链由 `MainLayout.vue` 依 `resolveBackPath` 渲染（与当前标题相同或为过渡页时不渲染），色值/圆角/过渡沿用 `--tl-*` 令牌。守卫与兜底行为由 `src/composables/__tests__/useNavBack.spec.ts` 覆盖（四层兜底 + 非法 redirect）。
 
 ## UI 设计规范精要
 

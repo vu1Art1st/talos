@@ -35,7 +35,7 @@ async def create_plan(session: AsyncSession, data: dict, user: User) -> TestingP
                 400,
                 "已勾选「创建漏扫基线工单」，请填写「需求接收日期」（用于生成共享工单ID）或手动指定工单ID",
             )
-        await session.flush()  # 先持久化测试计划拿到 id，供非渗透记录引用
+        await ticket_service.flush_or_conflict(session)  # 先持久化测试计划拿到 id，供非渗透记录引用
         session.add(NonpenPlan(
             plan_name=row.plan_name,
             system_name=row.system_name,
@@ -51,7 +51,7 @@ async def create_plan(session: AsyncSession, data: dict, user: User) -> TestingP
             detail=row.detail,
             creator_id=user.id,
         ))
-    await session.commit()
+    await ticket_service.commit_or_conflict(session)
     await session.refresh(row)
     return row
 
@@ -102,7 +102,7 @@ async def update_plan(
     await plan_service.refresh_mandays(session, row.id)
     for np in linked:
         nonpen_service.sync_linked_fields(row, np)
-    await session.commit()
+    await ticket_service.commit_or_conflict(session)
     await session.refresh(row)
     return row, old_status
 
@@ -117,7 +117,7 @@ async def create_nonpen(session: AsyncSession, data: dict, user: User) -> Nonpen
     await ticket_service.assign_ticket_seq(session, row)
     await ticket_service.check_ticket_id_unique(session, row.ticket_id)
     session.add(row)
-    await session.commit()
+    await ticket_service.commit_or_conflict(session)
     await session.refresh(row)
     return row
 
@@ -139,6 +139,6 @@ async def update_nonpen(session: AsyncSession, row: NonpenPlan, data: dict) -> N
         source = await session.get(TestingPlan, row.testing_plan_id)
         if source is not None:
             nonpen_service.sync_linked_fields(row, source)
-    await session.commit()
+    await ticket_service.commit_or_conflict(session)
     await session.refresh(row)
     return row

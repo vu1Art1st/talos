@@ -1,5 +1,6 @@
+import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 
 from fastapi import FastAPI, Request
@@ -8,12 +9,29 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import DataError
 
+from app.api.health import router as health_router
 from app.api.images import router as images_router
 from app.api.v1 import api_router
 from app.core.config import settings
+from app.core.log_context import REQUEST_ID_HEADER, install_log_context, set_request_id
 from app.db import init_db
+from app.services import task_lifecycle
 
 logger = logging.getLogger(__name__)
+
+
+async def _periodic_task_recovery(app: FastAPI) -> None:
+    """无队列（进程内执行）形态的兜底扫描：启动之外每 SWEEP_INTERVAL_SECONDS 回收一次。
+
+    有 arq worker 时该职责由 worker 的 cron（workers/main.recover_tasks_task）承担，
+    两边同时跑只会重复调用幂等任务，不会产生重复业务副作用。
+    """
+    while True:
+        await asyncio.sleep(task_lifecycle.SWEEP_INTERVAL_SECONDS)
+        try:
+            await task_lifecycle.recover_and_redispatch(app)
+        except Exception as exc:  # noqa: BLE001  兜底扫描失败不应影响服务
+            logger.warning("周期性任务回收失败: %s", exc)
 
 
 @asynccontextmanager
@@ -37,12 +55,32 @@ async def lifespan(app: FastAPI):
             )
         except Exception as exc:
             logger.warning("Redis 连接失败，后台任务将在进程内执行: %s", exc)
+    # 启动时回收超租约 / 待重试任务（P0-3）：worker 崩溃留下的 running/parsing 不再永久卡住。
+    # 回收失败不影响启动（探针会通过 worker 心跳暴露问题）。
+    try:
+        summary = await task_lifecycle.recover_and_redispatch(app)
+        if summary["requeued"] or summary["dead"]:
+            logger.warning(
+                "启动任务回收：重新排队=%s 死信=%s", summary["requeued"], summary["dead"],
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("启动任务回收失败（不影响启动）: %s", exc)
+    # 无队列形态没有 worker cron，由 API 进程内的周期任务兜底重试（有队列时交给 worker）
+    sweep_task = (
+        asyncio.create_task(_periodic_task_recovery(app)) if settings.DISABLE_QUEUE else None
+    )
     yield
+    if sweep_task is not None:
+        sweep_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweep_task
     if app.state.arq is not None:
         await app.state.arq.close()
 
 
 def create_app() -> FastAPI:
+    # 业务日志统一带 request_id（P0-3）：便于从界面报错定位后端日志
+    install_log_context()
     app = FastAPI(
         title=settings.APP_NAME,
         version=settings.APP_VERSION,
@@ -62,10 +100,19 @@ def create_app() -> FastAPI:
     )
 
     @app.middleware("http")
-    async def _security_headers(request, call_next):
-        # 阻止浏览器 MIME 嗅探，降低上传文件（如图片）被当作其他类型执行的风险
+    async def _request_context(request, call_next):
+        # 请求 ID：优先复用调用方传入值（便于网关/前端串联），并回写响应头。
+        # 必须在 call_next 之前写入 ContextVar，下游任务才会继承该值。
+        rid = set_request_id(request.headers.get(REQUEST_ID_HEADER, ""))
         response = await call_next(request)
+        response.headers.setdefault(REQUEST_ID_HEADER, rid)
+        # 阻止浏览器 MIME 嗅探，降低上传文件（如图片）被当作其他类型执行的风险
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        if response.status_code >= 400:
+            logger.warning(
+                "请求失败 rid=%s method=%s path=%s status=%s",
+                rid, request.method, request.url.path, response.status_code,
+            )
         return response
 
     # 统一错误响应体：前端按状态码跳转自定义错误页（frontend/src/utils/errorPage.ts），
@@ -106,10 +153,8 @@ def create_app() -> FastAPI:
     # 图片需登录下发（安全审计 批次 E-1）：路径保持 /storage/uploads/images/<name> 不变，
     # 但不再是静态直出——导出/导入原始文档/预览等敏感文件同样只走鉴权接口
     app.include_router(images_router)
-
-    @app.get("/api/health")
-    async def health():
-        return {"status": "ok"}
+    # 健康检查（P0-3）：/api/health 兼容旧探针，/live 存活、/ready 就绪（含依赖逐项状态）
+    app.include_router(health_router)
 
     return app
 

@@ -43,6 +43,22 @@ async def _get_report(session: AsyncSession, report_id: int) -> Report:
     return await get_or_404(session, Report, report_id, "报告不存在")
 
 
+async def _lock_report(session: AsyncSession, report_id: int) -> Report:
+    """加行锁读取报告（P0-2 并发加固）。
+
+    `save_report` 必须先取锁再比对 `revision`：只做「读 revision → 比对 → 写」的三步
+    在 READ COMMITTED 下无法互斥——两个并发请求都会读到同一个旧 revision 并双双通过校验，
+    后提交者静默覆盖先提交者的内容。`SELECT ... FOR UPDATE` 让同一报告的保存串行化，
+    后到者在锁释放后读到已自增的 revision，直接落 409。
+    """
+    report = (
+        await session.execute(select(Report).where(Report.id == report_id).with_for_update())
+    ).scalar_one_or_none()
+    if report is None:
+        raise HTTPException(404, "报告不存在")
+    return report
+
+
 async def _auto_mark_fixing(session: AsyncSession, vul_ids: list[int], user: User, report_title: str) -> None:
     """漏洞关联生成报告后自动流转为「修复中」（仅对处于未修复等可流转状态的漏洞生效）。"""
     await vul_service.auto_transition(
@@ -354,7 +370,7 @@ async def batch_export(
         pending.append(job)
     await session.commit()
     for job in pending:
-        await dispatch(request.app, "export_report_task", job.id)
+        await dispatch(request.app, "export_report_task", job.id, job_id=f"export:{job.id}")
     return jobs
 
 
@@ -428,7 +444,7 @@ async def save_report(
     session: AsyncSession = Depends(get_session),
 ):
     """全量保存报告（元信息 + 章节），revision 乐观锁防止并发覆盖。"""
-    report = await _get_report(session, report_id)
+    report = await _lock_report(session, report_id)
     if body.revision != report.revision:
         raise HTTPException(409, "报告已被他人修改，请刷新后重试")
 
@@ -682,7 +698,7 @@ async def export_report(
     session.add(job)
     await session.commit()
     await session.refresh(job)
-    await dispatch(request.app, "export_report_task", job.id)
+    await dispatch(request.app, "export_report_task", job.id, job_id=f"export:{job.id}")
     await audit(session, request, "report_export", user, {
         "target": f"reports/{report_id}", "title": report.title, "fmt": body.fmt,
     })

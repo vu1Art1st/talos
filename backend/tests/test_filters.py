@@ -1,17 +1,22 @@
-"""聚合筛选引擎单元测试：条件分组/嵌套解析、历史扁平格式兼容、结构限制与空分组语义。
+"""聚合筛选引擎单元测试：条件分组/嵌套解析、历史扁平格式兼容、结构限制与空分组语义，
+以及 P0-1 的 DateTime 列日期区间口径（半开区间 + 绑定类型守卫）。
 
 只覆盖纯结构逻辑（不依赖数据库）：表达式在真实查询上的正确性由 API 级用例
-`tests/api/test_api_plans.py::test_testing_plan_nested_filters` 端到端验证。
+`tests/api/test_api_plans.py::test_testing_plan_nested_filters` 与
+`test_testing_plan_datetime_filters` 端到端验证。
 """
 import json
+from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import column
+from sqlalchemy import DateTime, String, column
+from sqlalchemy.dialects import postgresql
 
 from app.core.filters import (
     MAX_FILTER_DEPTH,
     MAX_FILTER_RULES,
+    build_filter_expr,
     build_tree_condition,
     count_filter_rules,
     parse_filter_tree,
@@ -161,3 +166,134 @@ def test_build_condition_ignores_empty_groups():
     assert parse(group(group())) is None
     # 取反不会把「空条件」变成恒真：构造层直接忽略该分组
     assert build_tree_condition({"kind": "group", "logic": "and", "not": True, "children": []}, leaf) is None
+
+
+# ---------- P0-1：DateTime 列日期区间口径 ----------
+
+
+def dt_col():
+    return column("create_time", DateTime())
+
+
+def dt_compiled(op: str, value):
+    """按 PostgreSQL 方言编译 DateTime 字段筛选表达式（只读编译，不连库）。"""
+    expr = build_filter_expr(dt_col(), "date", True, op, value)
+    return expr.compile(dialect=postgresql.dialect())
+
+
+DT_OPS = [
+    ("eq", "2026-01-15"),
+    ("ne", "2026-01-15"),
+    ("gt", "2026-01-15"),
+    ("gte", "2026-01-15"),
+    ("lt", "2026-01-15"),
+    ("lte", "2026-01-15"),
+    ("between", ["2026-01-15", "2026-01-31"]),
+]
+
+
+@pytest.mark.parametrize("op,value", DT_OPS)
+def test_datetime_filter_binds_datetime_and_never_calls_date(op, value):
+    """P0-1 守卫：DateTime 列不得出现 `date(...)`，且所有绑定必须是 DateTime。
+
+    背景：`func.date(col) >= '2026-09-14'` 会把日期串按 VARCHAR 绑定，PostgreSQL 无
+    `date >= character varying` 算子（asyncpg 抛 UndefinedFunctionError → 线上 500）。
+    """
+    compiled = dt_compiled(op, value)
+    assert {type(b.type).__name__ for b in compiled.binds.values()} == {"DateTime"}
+    assert "date(" not in str(compiled)
+
+
+def test_datetime_filter_boundaries_are_half_open_per_day():
+    """边界口径：一律 `[当日 00:00, 次日 00:00)`；覆盖当日零点、当日最后一秒、跨月与闰日。"""
+    def lit(op, value):
+        return str(build_filter_expr(dt_col(), "date", True, op, value)
+                   .compile(compile_kwargs={"literal_binds": True}))
+
+    # eq：整天区间；「当日最后一秒」（次日 00:00 前一微秒）含在内，次日零点不含
+    assert lit("eq", "2026-01-15") == (
+        "create_time IS NOT NULL AND create_time >= '2026-01-15 00:00:00' "
+        "AND create_time < '2026-01-16 00:00:00'"
+    )
+    # 跨月：1 月末日的次日为 2 月 1 日
+    assert "create_time < '2026-02-01 00:00:00'" in lit("eq", "2026-01-31")
+    # 闰日：2024-02-29 可解析，次日为 3 月 1 日
+    assert "create_time < '2024-03-01 00:00:00'" in lit("eq", "2024-02-29")
+    # gt/lt 为严格单边（区别只在用哪一端）
+    assert lit("gt", "2026-01-15") == "create_time >= '2026-01-16 00:00:00'"
+    assert lit("gte", "2026-01-15") == "create_time >= '2026-01-15 00:00:00'"
+    assert lit("lt", "2026-01-15") == "create_time < '2026-01-15 00:00:00'"
+    assert lit("lte", "2026-01-15") == "create_time < '2026-01-16 00:00:00'"
+    # ne 保持三值逻辑：NULL 行不命中
+    assert lit("ne", "2026-01-15") == (
+        "create_time IS NOT NULL AND (create_time < '2026-01-15 00:00:00' "
+        "OR create_time >= '2026-01-16 00:00:00')"
+    )
+    # between 为闭开区间 [起始日, 结束日次日)
+    assert lit("between", ["2026-01-15", "2026-01-31"]) == (
+        "create_time IS NOT NULL AND create_time >= '2026-01-15 00:00:00' "
+        "AND create_time < '2026-02-01 00:00:00'"
+    )
+
+
+def test_datetime_day_bounds_and_illegal_input():
+    """`day_bounds` 是唯一日期解析入口：跨月/闰日正确，空值与非法日期一律 400。"""
+    from app.core.filters import day_bounds
+
+    assert day_bounds("2026-01-31") == (
+        datetime(2026, 1, 31), datetime(2026, 2, 1)
+    )
+    assert day_bounds("2024-02-29") == (datetime(2024, 2, 29), datetime(2024, 3, 1))
+    # 与 plan_query 的半开区间口径同源（次日 = 当日 + 1 天）
+    assert day_bounds("2026-09-19")[1] == day_bounds("2026-09-19")[0] + timedelta(days=1)
+
+    for bad in ("", None, "  ", "2026-1-1", "2026/01/01", "2025-02-29", "2026-13-01", "not-a-date"):
+        with pytest.raises(HTTPException) as exc:
+            day_bounds(bad)
+        assert exc.value.status_code == 400
+
+
+def test_datetime_filter_rejects_illegal_and_incomplete_values():
+    """非法日期与不完整区间必须 400（不得生成错误 SQL 或静默返回空）。"""
+    for op, value in [
+        ("eq", "2026-02-30"), ("gt", "not-a-date"), ("lte", ""), ("gte", None),
+        ("between", ["2026-01-01", ""]), ("between", "single"),
+        ("unknown_op", "2026-01-01"),
+    ]:
+        with pytest.raises(HTTPException) as exc:
+            build_filter_expr(dt_col(), "date", True, op, value)
+        assert exc.value.status_code == 400
+
+
+def test_datetime_is_empty_operators_check_null_only():
+    """空值判定：DateTime 列的「为空」只看 NULL（区别于日期字符串列的空串）。"""
+    def lit(op):
+        return str(build_filter_expr(dt_col(), "date", True, op, None)
+                   .compile(compile_kwargs={"literal_binds": True}))
+
+    assert lit("is_empty") == "create_time IS NULL"
+    assert lit("is_not_empty") == "create_time IS NOT NULL"
+
+
+def test_date_string_filter_keeps_string_semantics():
+    """冻结基线：日期**字符串**列（is_datetime=False）继续按字典序直接比较，绑定为 VARCHAR。"""
+    col = column("receive_time", String())
+
+    def lit(op, value):
+        expr = build_filter_expr(col, "date", False, op, value)
+        compiled = expr.compile(dialect=postgresql.dialect())
+        assert "DateTime" not in {type(b.type).__name__ for b in compiled.binds.values()}
+        return str(expr.compile(compile_kwargs={"literal_binds": True}))
+
+    assert lit("gt", "2026-01-01") == "receive_time > '2026-01-01'"
+    assert lit("gte", "2026-01-01") == "receive_time >= '2026-01-01'"
+    assert lit("lt", "2026-01-01") == (
+        "receive_time IS NOT NULL AND receive_time != '' AND receive_time < '2026-01-01'"
+    )
+    assert lit("lte", "2026-01-01") == (
+        "receive_time IS NOT NULL AND receive_time != '' AND receive_time <= '2026-01-01'"
+    )
+    assert lit("between", ["2026-01-01", "2026-01-31"]) == (
+        "receive_time IS NOT NULL AND receive_time != '' "
+        "AND receive_time >= '2026-01-01' AND receive_time <= '2026-01-31'"
+    )

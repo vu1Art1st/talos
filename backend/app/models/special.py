@@ -2,16 +2,36 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Table, Text,
-    UniqueConstraint,
+    JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Table, Text,
+    UniqueConstraint, text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.constants import NONPEN_ITEMS
 from app.core.ticket_id import derive_ticket_id
 from app.core.timeutil import now
 from app.db import Base
 from app.models.business import Asset, Vul
 from app.models.user import User
+
+# 工单ID（显示编号）的数据库表达式：与 `core.ticket_id.derive_ticket_id` 严格同口径 ——
+# 手动指定值优先；否则 receive_time(YYYY-MM-DD) 去掉横线取前 8 位 + '-' + ticket_seq，
+# 两者皆无则 NULL（NULL 不参与唯一索引，故「无编号」的记录可任意多条）。
+# 该表达式用于两个工单表的唯一索引，是「并发写入也不会产生重复工单ID」的数据库级兜底
+# （P0-2：仅靠请求前查询无法防止两个并发请求同时通过校验）。
+_TICKET_NO_EXPR = (
+    "coalesce(nullif(ticket_id_manual, ''), "
+    "case when receive_time <> '' and ticket_seq <> 0 "
+    "then substr(replace(receive_time, '-', ''), 1, 8) || '-' || cast(ticket_seq as varchar) end)"
+)
+
+# 漏扫基线「仅可进行」的 SQL 侧判定用表达式索引（P0-4）。
+# 与 `services/plan_query.nonpen_actionable_condition` **必须逐字一致**：表达式索引只有在
+# 查询表达式与索引表达式结构相同时才会被规划器采信（键名内联为字面量，走参数的写法无效）。
+# 三个键各自建索引后，`(a) OR (b) OR (c)` 可由 BitmapOr 组合多个索引扫描。
+_NONPEN_ITEM_STATUS_INDEXES = tuple(
+    (f"ix_nonpen_plans_item_{key}", f"(items -> '{key}' ->> 'status')") for key in NONPEN_ITEMS
+)
 
 # 春耕行动-漏洞多对多关联表
 spring_action_vulns = Table(
@@ -76,18 +96,21 @@ class TestingPlan(Base):
     """测试计划。status 见 constants.TESTING_PLAN_STATUS。"""
 
     __tablename__ = "testing_plans"
+    # 显示编号（手动值或接收日期+当日序号）在库内唯一：并发创建时由数据库兜底拒绝重复
+    __table_args__ = (Index("uq_testing_plans_ticket_no", text(_TICKET_NO_EXPR), unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     system_name: Mapped[str] = mapped_column(String(128), index=True)
     plan_name: Mapped[str] = mapped_column(String(128), default="")  # 测试计划名称，与测试系统区分
     test_type: Mapped[str] = mapped_column(String(64), default="")
-    department: Mapped[str] = mapped_column(String(128), default="")
-    receive_time: Mapped[str] = mapped_column(String(32), default="")
+    # 高频筛选字段索引（P0-4）：部门 / 接收时间 / 状态是列表与统计的主要过滤维度
+    department: Mapped[str] = mapped_column(String(128), default="", index=True)
+    receive_time: Mapped[str] = mapped_column(String(32), default="", index=True)
     ticket_time: Mapped[str] = mapped_column(String(32), default="")  # 工单提起时间
     ticket_seq: Mapped[int] = mapped_column(Integer, default=0)  # 当日录入次序，配合 receive_time 生成 ticket_id
     ticket_id_manual: Mapped[str] = mapped_column(String(64), default="")  # 手动指定的工单ID，优先于自动生成
     first_test_done_time: Mapped[str] = mapped_column(String(32), default="")
-    status: Mapped[int] = mapped_column(Integer, default=10)
+    status: Mapped[int] = mapped_column(Integer, default=10, index=True)
     retest_notice_time: Mapped[str] = mapped_column(String(32), default="")
     retest_done_time: Mapped[str] = mapped_column(String(32), default="")
     stat_critical: Mapped[int] = mapped_column(Integer, default=0)
@@ -143,6 +166,25 @@ class TestingPlan(Base):
         return derive_ticket_id(self.ticket_id_manual, self.receive_time, self.ticket_seq)
 
 
+class TicketSeqCounter(Base):
+    """工单当日序号计数器（P0-2 并发加固）。
+
+    为什么需要独立表：`ticket_seq` 原先按「查询当日最大序号 + 1」分配，两个并发请求会读到
+    同一个最大值，从而分配出重复序号（进而生成重复工单ID）。本表以 `receive_date` 为主键，
+    分配时用 `INSERT ... ON CONFLICT DO UPDATE SET last_seq = GREATEST(...) + 1 RETURNING`
+    单条语句完成「加锁 + 自增 + 取值」，`testing_plans` 与 `nonpen_plans` 共用同一行，
+    保证同日编号分配**原子且单调**（跨表也不重号）。
+
+    last_seq 只增不减：删除工单后序号不复用（与既有「自动分配仅单调递增」口径一致）。
+    """
+
+    __tablename__ = "ticket_seq_counters"
+
+    receive_date: Mapped[str] = mapped_column(String(32), primary_key=True)  # YYYY-MM-DD
+    last_seq: Mapped[int] = mapped_column(Integer, default=0)
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
 class TestingPlanRetestRound(Base):
     """测试计划复测轮次记录：每次发起复测新增一轮，全部漏洞闭环后打完成点。
 
@@ -182,6 +224,12 @@ class NonpenPlan(Base):
     """
 
     __tablename__ = "nonpen_plans"
+    # 与 testing_plans 同口径的显示编号唯一索引（两表各自唯一 + 共享当日序号序列 = 全局不重复）
+    # + 「仅可进行」的 items 表达式索引（P0-4）
+    __table_args__ = (
+        Index("uq_nonpen_plans_ticket_no", text(_TICKET_NO_EXPR), unique=True),
+        *(Index(name, text(expr)) for name, expr in _NONPEN_ITEM_STATUS_INDEXES),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     plan_name: Mapped[str] = mapped_column(String(128), default="")  # 计划名称，与测试系统区分

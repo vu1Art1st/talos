@@ -21,12 +21,12 @@ _BACKEND_DIR = Path(__file__).resolve().parent.parent
 _SCHEMA = f"mig_{os.getpid()}"
 # 迁移链自建、不属于模型声明的表
 _NON_MODEL_TABLES = {"alembic_version"}
-# 已知「迁移建了、模型未映射」的惰性历史列（登记为已知，不算不一致；其它漂移仍会失败）。
-# testing_plans.create_nonpen：迁移 c9d0e1f2a3b4 建列，但该标志后来改成「仅入参、不落库」
-# （plan_crud 里 payload.pop 后即弃）。列 NOT NULL + server_default=false，写入不受影响；
-# 按项目既有口径（assets 的 ports/services/middleware/database_type 同理）**删列属独立专项**，
-# 需单独走「Alembic 迁移 + 登记 DEPRECATED_COLUMNS」，故不在此处顺手删。
-_LEGACY_UNMAPPED_COLUMNS: dict[str, set[str]] = {"testing_plans": {"create_nonpen"}}
+# 已知「迁移建了、模型未映射」的惰性历史列白名单（登记为已知，不算不一致；其它漂移仍会失败）。
+# P0-6（2026-09-26）已把历史欠账清空：testing_plans.create_nonpen 与 assets 的
+# ports/services/middleware/database_type 五列各走一个独立迁移删除，并登记进
+# tests/test_schema_consistency.DEPRECATED_COLUMNS。此处保留机制本身（空表），
+# 供未来出现「暂不删列」的过渡期使用——新增条目必须在 DEPRECATED_COLUMNS 同步登记。
+_LEGACY_UNMAPPED_COLUMNS: dict[str, set[str]] = {}
 
 
 def _alembic(*args: str) -> subprocess.CompletedProcess[str]:

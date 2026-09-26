@@ -12,7 +12,7 @@ from datetime import datetime as _dt, time as _dt_time
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -52,6 +52,34 @@ async def load_parsed_records(
     if not records:
         raise HTTPException(400, "没有可入库的记录（仅解析成功且未入库的记录可确认）")
     return list(records)
+
+
+# 批次确认入库的抢占状态（parsed → confirming → confirmed/parsed 回退）
+CONFIRM_BUSY_MSG = "该批次正在确认中，请稍后刷新重试"
+
+
+async def claim_batch_for_confirm(session: AsyncSession, batch: ImportBatch) -> str:
+    """用**条件状态迁移**抢占批次（P0-2），返回 `claimed` / `already_confirmed` / `busy` / `invalid`。
+
+    `UPDATE import_batches SET status='confirming' WHERE id=:id AND status='parsed'` 是
+    「比较并交换」：并发确认时，后到者的 UPDATE 会阻塞在行锁上，前一个事务提交后重新判定
+    条件不再成立（rowcount=0），于是这里看到 `confirmed`（重复调用，幂等返回）或
+    `confirming`（仍在进行中，409）。仅靠「先查状态再写」无法互斥，会出现重复章节/漏洞/轮次。
+    抢占不单独提交：中途失败由调用方 rollback，批次自动回到 `parsed` 可重试。
+    """
+    result = await session.execute(
+        update(ImportBatch)
+        .where(ImportBatch.id == batch.id, ImportBatch.status == "parsed")
+        .values(status="confirming")
+    )
+    if result.rowcount == 1:
+        return "claimed"
+    await session.refresh(batch)
+    if batch.status == "confirmed":
+        return "already_confirmed"
+    if batch.status == "confirming":
+        return "busy"
+    return "invalid"
 
 
 async def sync_plan_testers(session: AsyncSession, plan: TestingPlan, testers: list[str]) -> None:
@@ -430,7 +458,7 @@ async def finalize_confirm(
 
 async def auto_export_report(
     session: AsyncSession, report: Report, plan: TestingPlan | None,
-    user: User, auto_time: _dt | None,
+    user: User, auto_time: _dt | None, dedup_key: str | None = None,
 ) -> None:
     """导入报告确认入库后自动生成 docx 文件并记录导出任务（可下载）。
 
@@ -438,7 +466,18 @@ async def auto_export_report(
     测试账号等），本函数只负责注入导入路径特有的 `report_time`（报告标题日期固定 14:00）；
     文件同步生成，不依赖 arq 队列（开发免队列也生效）。
     导入新报告无实际改动，导出成功不会改变报告指纹以外的内容，仅导出版本号 +1。
+
+    `dedup_key` 为幂等键（P0-2）：同一批次重复走到这里时直接返回，不生成第二份文件与
+    第二条导出记录（`export_jobs.dedup_key` 唯一索引是最终兜底）。
     """
+    if dedup_key:
+        existing = (
+            await session.execute(
+                select(ExportJob.id).where(ExportJob.dedup_key == dedup_key).limit(1)
+            )
+        ).first()
+        if existing is not None:
+            return
     # meta / 版本记录 / 章节 / 漏洞与资产构建统一由 services.report_meta 提供，
     # 与后台导出任务（workers/main.export_report_task）共用同一实现，禁止在此重复实现。
     meta = await report_meta.build_export_meta(
@@ -474,6 +513,7 @@ async def auto_export_report(
         file_path=docx_path,
         creator_id=user.id,
         report_snapshot=report.fingerprint(),
+        dedup_key=dedup_key,
     )
     if auto_time is not None:
         job.create_time = auto_time
@@ -494,6 +534,7 @@ class ConfirmResult:
     created: int
     report_id: int | None
     msg: str
+    replayed: bool = False  # 是否为幂等重放（重复提交已确认批次），调用方据此跳过审计
 
 
 async def confirm_batch_internal(
@@ -507,12 +548,34 @@ async def confirm_batch_internal(
 ) -> ConfirmResult:
     """单批次确认入库（单批 / 批量端点共用，逻辑与原 confirm_batch 完全一致）。
 
-    承担：记录校验 → 报告格式批次编排计划/资产/报告 → 知识库回填与去重合并 →
-    收尾 → 自动导出报告 → 刷新工单人天 → 单批次 commit。
+    承担：抢占批次（条件状态迁移）→ 记录校验 → 报告格式批次编排计划/资产/报告 →
+    知识库回填与去重合并 → 收尾 → 自动导出报告 → 刷新工单人天 → 单批次 commit。
     审计由调用方在返回后记录（audit 独立提交，不影响业务事务）。
     校验失败抛 HTTPException；调用方（批量端点）负责捕获并按批次回滚隔离。
+    **幂等（P0-2）**：已确认批次重复调用返回既有结果（created=0、replayed=True），
+    不重复写入章节/漏洞/复测轮次；并发确认时后到者得到 409。
     """
-    records = await load_parsed_records(session, batch.id, record_ids)
+    claim = await claim_batch_for_confirm(session, batch)
+    if claim == "already_confirmed":
+        return ConfirmResult(
+            batch_id=batch.id, created=0, report_id=None, replayed=True,
+            msg="该批次已确认入库（重复提交已忽略，未产生重复数据）",
+        )
+    if claim == "busy":
+        raise HTTPException(409, CONFIRM_BUSY_MSG)
+    if claim == "invalid":
+        raise HTTPException(400, f"批次当前状态「{batch.status}」不允许确认入库")
+    try:
+        records = await load_parsed_records(session, batch.id, record_ids)
+    except HTTPException:
+        # 指定记录已全部入库（部分确认后的重复提交）：释放抢占并幂等返回
+        await session.rollback()
+        if record_ids:
+            return ConfirmResult(
+                batch_id=batch.id, created=0, report_id=None, replayed=True,
+                msg="所选记录均已入库（重复提交已忽略，未产生重复数据）",
+            )
+        raise
 
     asset = None
     if asset_id is not None:
@@ -571,6 +634,9 @@ async def confirm_batch_internal(
     await finalize_confirm(
         session, batch, plan, report, report_auto_created, new_vul_ids, user,
     )
+    # 部分确认（仍有 parsed/error 记录）时释放抢占：批次回到 parsed，可继续确认剩余记录
+    if batch.status == "confirming":
+        batch.status = "parsed"
     # 工单级复测状态重算：本批漏洞已入库，按工单**全部关联漏洞**是否闭环判定
     # 「复测完成 / 复测中」（复测批次沿用报告日期写复测完成时间）
     if plan is not None:
@@ -588,7 +654,7 @@ async def confirm_batch_internal(
                 auto_time = _dt.combine(_dt.strptime(report_date, "%Y-%m-%d").date(), _dt_time(14, 0))
             except ValueError:
                 auto_time = None
-        await auto_export_report(session, report, plan, user, auto_time)
+        await auto_export_report(session, report, plan, user, auto_time, dedup_key=f"auto:{batch.id}")
     # 报告实际人天已按测试周期计算，同步刷新关联工单的实际人天（仅纳入初测报告）
     if plan is not None and not is_retest:
         await plan_service.refresh_mandays(session, plan.id)

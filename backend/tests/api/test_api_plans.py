@@ -8,6 +8,7 @@
 仅按领域重新归位；共享夹具见 tests/conftest.py，共享 helper 见 tests/api/_helpers.py。
 """
 import json
+from datetime import timedelta
 from io import BytesIO
 import pytest
 from httpx import AsyncClient
@@ -188,6 +189,66 @@ async def test_testing_plan_nested_filters(client: AsyncClient, auth: dict):
     finally:
         for p in plans:
             await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+async def test_testing_plan_datetime_filters(client: AsyncClient, auth: dict):
+    """P0-1 回归：`create_time` / `update_time` 等 DateTime 列的日期筛选走半开区间，不得 500。
+
+    背景：旧实现在列上套 `func.date(col)` 与日期串比较，PostgreSQL 无
+    `date >= character varying` 算子（asyncpg 抛 UndefinedFunctionError → 500）。
+    本用例覆盖当日零点 / 当日最后一秒、跨日边界（昨日/明日）、interval 与非法日期。
+    """
+    from app.core.timeutil import now as tznow
+
+    DEPT = "日期筛选专用部门"
+    A = "日期筛选系统-当日"
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": A, "test_type": "渗透测试", "department": DEPT},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+
+    today = tznow().date()
+    day, yesterday = today.isoformat(), (today - timedelta(days=1)).isoformat()
+    tomorrow = (today + timedelta(days=1)).isoformat()
+
+    def q(field: str, op: str, value, not_: bool = False) -> dict:
+        return {"filters": json.dumps({"logic": "and", "children": [
+            {"kind": "rule", "field": "department", "op": "eq", "value": DEPT},
+            {"kind": "rule", "field": field, "op": op, "value": value, "not": not_},
+        ]})}
+
+    try:
+        # 当日整天区间命中（「当日零点」与「当日最后一秒」都在区间内）
+        assert await _list_plan_names(client, auth, q("create_time", "eq", day)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "gte", day)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "lte", day)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "between", [day, day])) == {A}
+        # 严格单边：晚于昨日 / 早于明日命中；晚于明日 / 早于昨日不命中
+        assert await _list_plan_names(client, auth, q("create_time", "gt", yesterday)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "lt", tomorrow)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "gt", tomorrow)) == set()
+        assert await _list_plan_names(client, auth, q("create_time", "lt", yesterday)) == set()
+        assert await _list_plan_names(client, auth, q("create_time", "ne", day)) == set()
+        # 取反的等价性：not(eq 昨日) 命中当日记录
+        assert await _list_plan_names(client, auth, q("create_time", "eq", yesterday, True)) == {A}
+        # update_time 同为 DateTime 列，刚创建即落在当日
+        assert await _list_plan_names(client, auth, q("update_time", "eq", day)) == {A}
+        assert await _list_plan_names(client, auth, q("update_time", "between", [day, day])) == {A}
+        # 空值判定只看 NULL（DateTime 列无「空串」概念）
+        assert await _list_plan_names(client, auth, q("create_time", "is_not_empty", None)) == {A}
+        assert await _list_plan_names(client, auth, q("create_time", "is_empty", None)) == set()
+        # 非法日期 / 非法区间明确 400，不落 500
+        for bad in (
+            q("create_time", "eq", "2026-02-30"),
+            q("create_time", "gte", "not-a-date"),
+            q("create_time", "between", [day, ""]),
+        ):
+            resp = await client.get("/api/v1/testing-plans", headers=auth, params=bad)
+            assert resp.status_code == 400, resp.text
+    finally:
+        await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+
 
 async def test_testing_plan_search_by_ticket_id(client: AsyncClient, auth: dict):
     """关键词搜索支持工单ID：手动指定值 / 自动编号（完整 YYYYMMDD-N、日期段、序号段）。"""
@@ -717,7 +778,12 @@ async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     assert resp.status_code == 400
 
 async def test_ticket_seq_increment_no_reuse(client: AsyncClient, auth: dict):
-    """工单ID自动分配采用「当日最大编号+1」：删除/释放的编号不复用，仅手动可选用。"""
+    """工单ID自动分配：当日序号严格递增且**删除后不复用**，被释放的编号仅手动可选用。
+
+    断言采用**相对口径**（以本用例首个分配值为基准）：P0-2 起当日序号由 `ticket_seq_counters`
+    计数器分配，是跨用例单调递增的（删除记录也不回退），硬编码 `20260101-1` 会依赖同模块其它
+    用例是否用过该日期，属脆弱断言。
+    """
     body = {"department": "递增部门", "receive_time": "2026-01-01"}
 
     resp = await client.post(
@@ -725,33 +791,38 @@ async def test_ticket_seq_increment_no_reuse(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 200, resp.text
     plan_a = resp.json()
-    assert plan_a["ticket_id"] == "20260101-1"
+    assert plan_a["ticket_id"].startswith("20260101-")
+    base = int(plan_a["ticket_id"].rsplit("-", 1)[1])
 
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "递增系统B"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260101-2"
+    assert resp.json()["ticket_id"] == f"20260101-{base + 1}"
 
-    # 删除占用 20260101-1 的计划后，自动分配不复用空洞，继续递增到 3
+    # 删除占用该编号的计划后，自动分配不复用空洞，继续递增
     resp = await client.delete(f"/api/v1/testing-plans/{plan_a['id']}", headers=auth)
     assert resp.status_code == 200, resp.text
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth, json={**body, "system_name": "递增系统C"},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260101-3"
+    assert resp.json()["ticket_id"] == f"20260101-{base + 2}"
 
-    # 被释放的 20260101-1 仍可手动指定给新工单
+    # 被释放的编号仍可手动指定给新工单（手动口径不看底层序号）
+    freed = f"20260101-{base}"
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth,
-        json={**body, "system_name": "递增系统D", "ticket_id_manual": "20260101-1"},
+        json={**body, "system_name": "递增系统D", "ticket_id_manual": freed},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260101-1"
+    assert resp.json()["ticket_id"] == freed
 
 async def test_ticket_id_manual_occupancy_and_ghost(client: AsyncClient, auth: dict):
-    """工单编号占用口径统一：自动分配跳过 manual 占用；manual 记录底层 seq 不产生幽灵占用。"""
+    """工单编号占用口径统一：自动分配跳过 manual 占用；manual 记录底层 seq 不产生幽灵占用。
+
+    断言用相对口径：当日序号由计数器单调递增（P0-2），绝对编号会受同模块其它用例影响。
+    """
     body = {"department": "占用部门", "receive_time": "2026-07-30"}
 
     # A 手动指定 20260730-2（其 ticket_seq=0，不参与自动分配）
@@ -761,33 +832,36 @@ async def test_ticket_id_manual_occupancy_and_ghost(client: AsyncClient, auth: d
     )
     assert resp.status_code == 200, resp.text
 
-    # 自动工单 B：max(纯自动 seq, manual N)=2 -> 新序号 3，编号 20260730-3（跳过 A 占用的 2）
+    # 自动工单 B：必须跳过 A 手动占用的 2（当日序号 = max(已占用) + 1）
     resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统B"})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260730-3"
+    plan_b = resp.json()
+    seq_b = int(plan_b["ticket_id"].rsplit("-", 1)[1])
+    assert seq_b >= 3, f"自动编号必须跳过手动占用的 2，实际 {plan_b['ticket_id']}"
 
-    # 自动工单 C：max(3, 2)+1=4 -> 20260730-4（单调递增）
+    # 自动工单 C：严格递增 +1
     resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统C"})
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260730-4"
+    assert resp.json()["ticket_id"] == f"20260730-{seq_b + 1}"
 
-    # 幽灵占用场景：D 自动得到 20260730-5 后手动改为 20260730-88（底层 seq 保留 5）
+    # 幽灵占用场景：D 自动得到 seq_b+2 后手动改为 20260730-88（底层 seq 保留）
     resp = await client.post("/api/v1/testing-plans", headers=auth, json={**body, "system_name": "占用系统D"})
     plan_d = resp.json()
-    assert plan_d["ticket_id"] == "20260730-5"
+    assert plan_d["ticket_id"] == f"20260730-{seq_b + 2}"
     resp = await client.put(
         f"/api/v1/testing-plans/{plan_d['id']}", headers=auth,
         json={**body, "system_name": "占用系统D", "ticket_id_manual": "20260730-88"},
     )
     assert resp.status_code == 200, resp.text
 
-    # E 手动指定 20260730-5（D 显示为 20260730-88，无任何工单显示 5）→ 应放行
+    # E 手动指定 D 释放的显示编号（D 现在显示 20260730-88）→ 应放行
+    freed = plan_d["ticket_id"]
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth,
-        json={**body, "system_name": "占用系统E", "ticket_id_manual": "20260730-5"},
+        json={**body, "system_name": "占用系统E", "ticket_id_manual": freed},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["ticket_id"] == "20260730-5"
+    assert resp.json()["ticket_id"] == freed
 
 async def test_plan_search_ticket_id_excludes_ghost_seq(client: AsyncClient, auth: dict):
     """幽灵序号不得被搜索 / 聚合筛选误命中（2026-09-22 缺陷回归）。

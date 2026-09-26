@@ -62,6 +62,9 @@ async def list_nonpen_plans(
     cond = []
     if search:
         cond.append(plan_query.nonpen_search_condition(search))
+    # 「仅可进行」下推到 SQL（P0-4）：不再取回全量后在应用层过滤再分页
+    if actionable:
+        cond.append(plan_query.nonpen_actionable_condition())
     stmt = select(NonpenPlan).where(*cond)
     stmt = apply_sort(
         stmt, NonpenPlan, sort, order,
@@ -69,12 +72,7 @@ async def list_nonpen_plans(
          "receive_time", "ticket_time", "ticket_seq", "create_time"},
         (NonpenPlan.receive_time.desc(), NonpenPlan.ticket_seq.desc(), NonpenPlan.id.desc()),
     )
-    # 「仅可进行」依赖 items JSON 的派生判定，SQL 层无法直接过滤，取回后应用层过滤再分页
-    total, items = await paginate(session, stmt, 1, 10_000)
-    if actionable:
-        items = [r for r in items if r.actionable]
-    total = len(items)
-    items = items[(page - 1) * size: page * size]
+    total, items = await paginate(session, stmt, page, size)
     return Page(total=total, items=await _out_many(session, items))
 
 

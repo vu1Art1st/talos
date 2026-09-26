@@ -7,19 +7,22 @@
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2">
               <!-- 原路返回：从工单流程抽屉进入时回到抽屉，常规进入时回到报告列表 -->
-              <el-button size="small" class="!mr-1" @click="onBack">
+              <el-button size="small" class="!mr-1" data-test="report-back" @click="onBack">
                 <el-icon class="mr-1"><ArrowLeft /></el-icon>返回
               </el-button>
               <span>报告信息</span>
             </div>
-            <span class="text-xs text-gray-400">
-              版本 v{{ report.version }} · {{ saveState }}
+            <!-- 未保存 / 保存失败态用 Element Plus 的 warning 令牌着色，明暗两态均可见 -->
+            <span class="text-xs" data-test="report-save-state" :class="hasUnsaved ? '' : 'text-gray-400'"
+                  :style="hasUnsaved ? 'color: var(--el-color-warning)' : ''">
+              版本 v{{ report.version }} · {{ saveStateLabel }}
             </span>
           </div>
         </template>
         <el-form label-width="90px" size="default">
           <el-form-item label="报告标题">
-            <el-input v-model="report.title" placeholder="标准名称（邮件、台账）-测试系统（网页）" @input="markDirty" />
+            <el-input v-model="report.title" data-test="report-title"
+                      placeholder="标准名称（邮件、台账）-测试系统（网页）" @input="markDirty" />
           </el-form-item>
           <div class="grid grid-cols-1 md:grid-cols-2">
             <el-form-item label="测试系统">
@@ -170,7 +173,8 @@
       <el-card shadow="never">
         <template #header>操作</template>
         <div class="space-y-2">
-          <el-button type="primary" class="w-full" :loading="saving" @click="save()">保存报告</el-button>
+          <el-button type="primary" class="w-full" data-test="report-save"
+                     :loading="saving" @click="saveManual">保存报告</el-button>
           <el-button type="success" class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
           <el-divider class="!my-3" />
           <el-button class="w-full" @click="doExport('docx')">
@@ -224,8 +228,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowLeft, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
@@ -237,7 +241,9 @@ import VulnFormPanel from '../components/VulnFormPanel.vue'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
 import { useExportJobs } from '../composables/useExportJobs'
+import { AUTOSAVE_STATE_LABEL, useAutosave } from '../composables/useAutosave'
 import { goBack } from '../composables/useNavBack'
+import { registerUnsavedGuard } from '../utils/unsavedGuard'
 import {
   exportJobColor,
   exportJobName,
@@ -267,8 +273,6 @@ const report = ref<ReportDetail | null>(null)
 const sections = computed<ReportSection[]>(() => report.value?.sections ?? [])
 const meta = ref<Record<string, Record<number, string>> | null>(null)
 const jobs = ref<ExportJob[]>([])
-const saving = ref(false)
-const saveState = ref('已保存')
 const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
 // 报告编辑页「录入漏洞」：与测试流程录入漏洞完全一致（VulnFormPanel），预关联本报告测试计划
 const vulnFormVisible = ref(false)
@@ -282,8 +286,26 @@ const vulnStates = ref<Record<number, VulnState>>({})
 const isRetestReport = computed(() => String(report.value?.title ?? '').includes('复测'))
 const navStatusLabel = (s: number) => (!isRetestReport.value && s === 50 ? statusName(10) : statusName(s))
 const navStatusStyle = (s: number) => (!isRetestReport.value && s === 50 ? statusSoftStyle(10) : statusSoftStyle(s))
-let saveTimer: number | undefined
 let jobTimer: number | undefined
+
+// 自动保存状态机（P0-5）：3 秒防抖自动保存 + 统一离页判定（路由离开 / 退出登录 / 关标签页）
+const {
+  state: saveState, saving, hasUnsaved, markDirty, saveNow, markSaved, confirmLeave, dispose: disposeAutosave,
+} = useAutosave({
+  save: doSave,
+  // 409 冲突不静默覆盖：由用户选择「加载最新 / 继续编辑」
+  isConflict: (err) => (err as { response?: { status?: number } })?.response?.status === 409,
+  onConflict: async () => {
+    await ElMessageBox.confirm(
+      '报告已被他人修改，是否加载最新版本？（当前未保存修改将丢弃，选择「继续编辑」可保留本地内容）',
+      '版本冲突',
+      { confirmButtonText: '加载最新', cancelButtonText: '继续编辑', type: 'warning' },
+    ).then(load).catch(() => undefined)
+  },
+})
+const saveStateLabel = computed(() => AUTOSAVE_STATE_LABEL[saveState.value])
+// 退出登录 / 切换账号走同一守卫（路由离开在下方 onBeforeRouteLeave 中复用同一判定）
+const unregisterGuard = registerUnsavedGuard(confirmLeave)
 
 // 测试周期：日期范围选择器与 test_start / test_end 字符串字段互转
 const testRange = computed<[string, string] | null>({
@@ -306,13 +328,6 @@ const actualMandays = computed(() => {
   const diff = dayjs(end).diff(dayjs(start), 'day')
   return diff >= 0 ? diff + 1 : 0
 })
-
-function markDirty() {
-  saveState.value = '有未保存修改'
-  // 防抖自动保存草稿
-  window.clearTimeout(saveTimer)
-  saveTimer = window.setTimeout(() => save(true), 3000)
-}
 
 async function loadVulnStates() {
   const { data } = await client.get<VulnState[]>(`/reports/${route.params.id}/vuln-states`)
@@ -448,6 +463,8 @@ async function load() {
   data.sections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
   report.value = data
   syncAuthorNames()
+  // 服务端内容已同步到本地：状态机回到「已保存」（含冲突后选择「加载最新」的路径）
+  markSaved()
   await Promise.all([loadJobs(), loadVulnStates()])
 }
 
@@ -460,35 +477,28 @@ async function removeJob(job: ExportJob) {
   await loadJobs()
 }
 
-async function save(auto = false) {
+/** 实际保存动作：只负责发请求与回填服务端结果，状态由 useAutosave 统一维护。 */
+async function doSave() {
   if (!report.value) return
-  window.clearTimeout(saveTimer)
-  saving.value = true
-  try {
-    const body = {
-      ...report.value,
-      sections: report.value.sections.map((s, i) => ({ ...s, order: i })),
-    }
-    const { data } = await client.put<ReportDetail>(`/reports/${report.value.id}`, body)
-    data.sections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    report.value = data
-    syncAuthorNames()
-    saveState.value = '已保存'
-    // 保存可能触发新关联漏洞自动进入修复中，同步刷新状态
-    await loadVulnStates()
-    if (!auto) ElMessage.success('保存成功')
-  } catch (e) {
-    // axios 错误结构：仅判定 409（版本冲突），其余交给拦截器统一提示
-    if ((e as { response?: { status?: number } })?.response?.status === 409) {
-      await ElMessageBox.confirm('报告已被他人修改，是否加载最新版本？（当前未保存修改将丢失）', '版本冲突', {
-        confirmButtonText: '加载最新',
-        cancelButtonText: '继续编辑',
-        type: 'warning',
-      }).then(load).catch(() => undefined)
-    }
-  } finally {
-    saving.value = false
+  const body = {
+    ...report.value,
+    sections: report.value.sections.map((s, i) => ({ ...s, order: i })),
   }
+  // skipErrorPage：保存失败（5xx）不得整页跳错误页 —— 那会清空编辑上下文、本地草稿随之丢失。
+  // 失败态由状态机展示（「保存失败，请重试」）+ 拦截器轻提示承载（P0-5）。
+  const { data } = await client.put<ReportDetail>(
+    `/reports/${report.value.id}`, body, { meta: { skipErrorPage: true } },
+  )
+  data.sections.sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+  report.value = data
+  syncAuthorNames()
+  // 保存可能触发新关联漏洞自动进入修复中，同步刷新状态
+  await loadVulnStates()
+}
+
+/** 手动保存按钮：仅在确认保存成功时提示（失败状态由状态机展示 + 拦截器提示）。 */
+async function saveManual() {
+  if (await saveNow()) ElMessage.success('保存成功')
 }
 
 function removeSection(i: number) {
@@ -523,7 +533,8 @@ async function onVulnFormSaved() {
 }
 
 async function doExport(fmt: string) {
-  if (saveState.value !== '已保存') await save(true)
+  // 导出前先落库（导出走服务端报告内容）；保存失败时中止导出，避免导出旧内容
+  if (hasUnsaved.value && !(await saveNow())) return
   if (!report.value) return
   const ok = await submitExport(route.params.id as string, fmt, report.value.title)
   if (ok) await loadJobs()
@@ -543,8 +554,12 @@ onMounted(async () => {
   }, 2000)
 })
 
+// 路由离开（含浏览器返回 / 站内跳转）：与登出、关标签页共用同一判定
+onBeforeRouteLeave(() => confirmLeave())
+
 onBeforeUnmount(() => {
-  window.clearTimeout(saveTimer)
+  unregisterGuard()
+  disposeAutosave()
   window.clearInterval(jobTimer)
 })
 </script>

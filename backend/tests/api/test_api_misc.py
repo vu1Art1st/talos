@@ -148,11 +148,15 @@ async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dic
     assert resp.status_code == 200
 
 async def test_notify_emit_on_vuln_created(client: AsyncClient, auth: dict, monkeypatch):
-    """漏洞创建事件触发渠道分发（monkeypatch dispatch 捕获，不出站）。"""
+    """漏洞创建事件触发渠道分发（monkeypatch dispatch 捕获，不出站）。
+
+    同时锁定 P0-2 的幂等投递契约：任务参数末尾带 `dedup_key`（同一事件重试只发一次），
+    且 dispatch 带投递级 `job_id`（重复入队被 arq 拒绝）。
+    """
     calls: list[tuple] = []
 
-    async def fake_dispatch(app, func_name, *args):
-        calls.append((func_name, args))
+    async def fake_dispatch(app, func_name, *args, **kwargs):
+        calls.append((func_name, args, kwargs))
 
     import app.services.notify_service as notify_service
 
@@ -173,9 +177,12 @@ async def test_notify_emit_on_vuln_created(client: AsyncClient, auth: dict, monk
 
     notify_calls = [c for c in calls if c[0] == "send_notify_task"]
     assert notify_calls, "漏洞创建应触发通知分发"
-    func_name, args = notify_calls[0]
+    func_name, args, kwargs = notify_calls[0]
     assert args[0] == "email" and args[1]["recipients"] == ["sec@example.com"]
     assert "[Talos] 新漏洞创建" in args[2]
+    # 幂等键随任务参数下发；投递键与其一致（便于从日志反查同一次投递）
+    assert len(args[4]) == 32, "通知任务应携带 32 位十六进制幂等键"
+    assert kwargs.get("job_id") == f"notify:{args[4]}"
 
 # ---------- F4 CVSS ----------
 async def test_vuln_cvss_fields(client: AsyncClient, auth: dict):

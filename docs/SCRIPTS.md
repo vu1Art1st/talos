@@ -433,6 +433,33 @@
   （与 `seed_dev_data.py` 同口径，fail-closed）；「确认无并发测试在跑」由人拍板（加 `--yes`）。
 - **依赖**：仅 SQLAlchemy + 自身解析的 DSN（`VP_DATABASE_URL` 优先，否则读仓库根 `.env`），**不导入 app 配置**。
 
+### 3.15 `benchmark_lists.py` — 列表查询性能基准（活跃·开发辅助）
+
+- **用途**：在**独立 schema**（`VP_DB_SCHEMA`，默认 `bench_<pid>`）里造出可重复的基准数据，对列表首屏
+  的真实代码路径（`plan_query` 条件构造器 + `core/query.paginate`）计时并输出 P50 / P95，
+  可选输出 `EXPLAIN (ANALYZE, BUFFERS)`；用于判断索引与「下推到 SQL」的回归（ROADMAP P0-4）。
+- **调用**（仓库根目录，backend 解释器）：
+  ```bash
+  VP_DATABASE_URL=postgresql+asyncpg://user:pw@127.0.0.1:5432/vulnplatform_test \
+    backend/.venv/Scripts/python -m scripts.benchmark_lists \
+    --vulns 100000 --plans 10000 --reports 10000 --nonpen 5000 --logs 20000 --runs 7 --explain
+  ```
+- **参数**：`--vulns/--plans/--reports/--nonpen/--logs`（数据量）、`--runs`（取样次数）、
+  `--explain`（打印执行计划）、`--trgm`（对比 pg_trgm 索引前后的关键词检索延迟与计划）。
+- **安全设计**：必须显式提供 `VP_DATABASE_URL`（不读仓库根 `.env`）；全程只操作自建 schema 并在结束时 DROP，
+  不触碰 `public`；输出以 `RESULT` 开头便于从 SQLAlchemy echo 中筛选。
+- **依赖**：完整 app 配置 + `app.db`（engine 在导入时按 `VP_DB_SCHEMA` 固定 search_path，故环境变量须先于导入设置）。
+
+### 3.16 `enable_trgm_indexes.py` — 前后通配符检索索引（活跃·常规运维·可选）
+
+- **用途**：为列表页的 `%keyword%` 检索列（漏洞标题 / 资产名 / 两表测试系统名）建立 pg_trgm
+  GIN 三元组索引，替代高成本顺序扫描。评估与实测数据见 `docs/DEPLOY.md` §10.4 与 `docs/RELEASE.md`。
+- **调用**：`python -m scripts.enable_trgm_indexes --dry-run`（只报告动作）/ 不带参数执行（幂等，可重复运行）。
+- **实现要点**：先探 `pg_available_extensions`，不可用或无 `CREATE EXTENSION` 权限时给出结论并**不报错退出**；
+  建索引后 `ANALYZE` 并打印一条代表性 `EXPLAIN` 自证索引可用。**刻意不写成 Alembic 迁移**：
+  权限不足会让 `upgrade head` 失败，而全新库走 `create_all` 会漏建，两条路径无法一致。
+- **依赖**：完整 app 配置 + `app.db`。
+
 ---
 
 ## 五、维护约定（新增 / 修改脚本时）

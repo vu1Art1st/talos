@@ -25,6 +25,120 @@
 
 ---
 
+## [2.20.3] - 2026-09-26
+
+ROADMAP「批次 A：正确性补丁与可靠性底座」——P0 六项（P0-1 ~ P0-6）全部完成。本版本无用户可见的
+破坏性变更，但含 8 个结构迁移（含 5 个删列），**升级前请确认已有可用备份**（见 `docs/DEPLOY.md` §3.4）。
+
+### 新增
+
+- **P0-1 时间区间语义统一**：通用聚合筛选引擎对 **DateTime 列**改用 `[当日 00:00, 次日 00:00)` 半开区间
+  （`core/filters.py::datetime_filter_expr`），并明确定义 `eq/ne/gt/gte/lt/lte/between/is_empty/is_not_empty`
+  各操作符的日期边界与时区口径（naive 本地时间，与 `now()` 写入口径一致）。日期**字符串**列
+  （`receive_time` 等 `YYYY-MM-DD` 文本）保持字典序直接比较，作为冻结基线。
+- **P0-3 健康探针三档**：新增 `/api/health/live`（存活，不查依赖）与 `/api/health/ready`（就绪，逐项返回
+  依赖状态，必需依赖失败返回 503）；`/api/health` 保留兼容。依赖分级：PostgreSQL 恒为必需；队列启用时
+  Redis 与 arq worker 心跳（`arq:health-check`）同为必需；Gotenberg 为可选。响应不含 DSN / 凭据 / 内网地址。
+- **P0-3 后台任务生命周期**：`export_jobs` 与 `import_batches` 补齐 `attempts` / `last_heartbeat` /
+  `lease_until` / `next_retry_at` / `dead_letter_reason`，统一状态机在 `services/task_lifecycle.py`：
+  超租约任务在 API 启动时回收一次，可重试者回排队并按 `30s × 2^n`（封顶 1h）退避，达上限或永久错误
+  （文件损坏 / 数据缺失）进死信并保留原因；worker cron 与无队列形态的 API 进程各每 5 分钟兜底扫描。
+- **P0-2 并发与幂等**：
+  - 工单当日序号改为 `ticket_seq_counters` 单行计数器原子分配（`INSERT ... ON CONFLICT DO UPDATE
+    SET last_seq = GREATEST(...) + 1 RETURNING`），两表共享序列，同日并发创建不再重号；
+  - 工单**显示编号**（手动值或派生值）增设表达式唯一索引（`uq_testing_plans_ticket_no` /
+    `uq_nonpen_plans_ticket_no`），作为并发窗口的数据库级兜底，冲突统一转 409；
+  - 报告保存改为 `SELECT ... FOR UPDATE` 行锁内比对 `revision`，后到者稳定 409（不再静默覆盖）；
+  - 导入确认改为 `parsed → confirming → confirmed` 条件状态迁移抢占，重复调用幂等返回既有结果、
+    并发调用 409；自动导出以 `export_jobs.dedup_key`（`auto:<批次ID>`）为幂等锚点；
+  - 任务投递带 arq `_job_id`（投递级去重），通知任务带数据库幂等键（`task_dedup_keys`，失败自动释放
+    以便重试），导出任务对已完成记录短路。
+- **P0-3 日志关联字段**：每次响应返回 `X-Request-Id`（复用调用方传入值），`app.*` 日志统一带
+  `[rid=...]`（`core/log_context.py`），4xx/5xx 另有单条汇总行；后台任务日志带 `job_id=` / `batch_id=`。
+- **P0-5 报告防丢稿**：新增 `composables/useAutosave.ts`（状态机 `saved/dirty/saving/failed/conflict`）
+  与 `utils/unsavedGuard.ts`（守卫注册表）。**路由离开、退出登录/切换账号、关闭标签页三条路径共用
+  同一判定**：无修改直接放行 → 有修改先补存一次 → 仍失败再弹「继续保存 / 放弃修改 / 留在当前页」；
+  `beforeunload` 仅在确有未保存或保存失败内容时触发。
+- **P0-4 性能基线与索引**：新增 `scripts/benchmark_lists.py`（独立 schema 造数、P50/P95、可打印
+  `EXPLAIN (ANALYZE, BUFFERS)`）与 `scripts/enable_trgm_indexes.py`（可选，pg_trgm GIN 索引）。
+
+### 变更
+
+- **P0-4 漏扫「仅可进行」下推到 SQL**：站内 `/nonpen-plans` 与开放 API `/open/nonpen-plans` 不再
+  「取回最多 10000 条后在应用层过滤再分页」，改为 `plan_query.nonpen_actionable_condition()`
+  （`items -> '<key>' ->> 'status' IN (可测试状态)`，键名内联为字面量以命中表达式索引），分页与
+  `total` 由数据库完成；口径与 `NonpenPlan.actionable` 属性由用例锁定等价。
+- **P0-4 热点索引补齐**：`vulns.submit_time`、`testing_plans.department/receive_time/status`、
+  `reports.update_time/testing_plan_id`，以及漏扫 `items` 三键表达式索引。
+- **P0-5 报告保存失败不再跳错误页**：保存请求带 `meta.skipErrorPage`，失败时留在编辑页展示
+  「保存失败，请重试」并保留本地输入；409 冲突弹窗文案明确「选择「继续编辑」可保留本地内容」。
+- **P0-6 文档真相源收口**：`docs/USER_GUIDE.md` 校订至 2.20.3（版本号、报告编辑保存与离页保护、
+  开放 API 路径改为 `/api/v1/open/...`）；返回导航专项结论归并入 `AGENTS.md` 前端编码规范后
+  **删除** `docs/RETURN_NAVIGATION_UX_PLAN.md`（`rg` 校验无悬空链接）；`docs/DEPLOY.md` 补
+  §10 健康探针 / 任务恢复 / 日志关联 / trgm；`docs/SCRIPTS.md` 登记两个新脚本。
+
+### 移除
+
+- **P0-6 历史惰性列清理（5 列各一个独立迁移）**：`assets.ports` / `assets.services` /
+  `assets.middleware` / `assets.database_type`（值早已迁入 `port_services` / `middlewares` / `databases`）
+  与 `testing_plans.create_nonpen`（该标志改为仅入参不落库）。删列前已核查全仓无读写，各迁移
+  `downgrade` 可按原定义恢复列结构；`tests/test_schema_consistency.DEPRECATED_COLUMNS` 双向登记，
+  `tests/test_migrations.py` 的已知惰性列白名单随之清空。
+
+### 数据库迁移（8 个，`alembic upgrade head` 自动执行）
+
+| 顺序 | Revision | 内容 |
+|---|---|---|
+| 1 | `c1d2e3f4a5b6` | 序号计数器表 + 显示编号表达式唯一索引 + `task_dedup_keys` + `export_jobs.dedup_key`（P0-2） |
+| 2 | `d2e3f4a5b6c7` | 导入/导出任务补租约、心跳、重试、死信列（P0-3） |
+| 3 | `f3a4b5c6d7e8` | 漏扫 `items` 表达式索引 + 列表高频筛选字段索引（P0-4） |
+| 4-7 | `a5b6c7d8e9f0` / `b6c7d8e9f0a1` / `b7c8d9e0f1a2` / `c8d9e0f1a2b3` | 删 `assets.ports` / `services` / `middleware` / `database_type`（P0-6） |
+| 8 | `d3e4f5a6b7c8` | 删 `testing_plans.create_nonpen`（P0-6） |
+
+> `test_migrations.py` 真跑 `upgrade head` 与 `downgrade base`，并逐表比对列集合与模型一致。
+
+### 性能基线与验收证据（2026-09-26，本机 PostgreSQL 16 / DBngin）
+
+基准数据：漏洞 10 万 / 渗透工单 1 万 / 报告 1 万 / 漏扫工单 5 千 / 审计 2 万（`scripts/benchmark_lists.py`）。
+
+| 列表首屏（DB 侧，含 count 与分页） | P50 | P95 |
+|---|---|---|
+| `/vulns`（关键词 + 状态 + 提交时间区间） | 13.8 ms | 15.8 ms |
+| `/testing-plans`（关键词 + 部门 + 接收时间区间） | 7.0 ms | 8.0 ms |
+| `/reports`（按更新时间倒序） | 2.2 ms | 2.6 ms |
+| `/audit/logs`（按时间倒序） | 1.8 ms | 2.7 ms |
+| `/nonpen-plans?actionable=true`（P0-4 优化点） | 2.8 ms | 3.3 ms |
+
+**阈值（团队确认，写入本节作为回归基线）**：在上述数据量下，列表首屏 **DB 侧 P95 ≤ 50 ms**，
+其中「仅可进行」≤ 20 ms；**端到端首屏（含前端等待）P95 ≤ 1.5 s**（本机 dev 栈 E2E 与人工冒烟量级：
+前端等待主要为接口往返 + 列表渲染，远高于 DB 侧，故 DB 侧阈值取更严的 50 ms 以保证索引回归能及早暴露）。
+超阈值即视为性能回归，必须附新的 `EXPLAIN ANALYZE` 说明原因。
+
+`EXPLAIN (ANALYZE, BUFFERS)` 关键证据：
+
+- 「仅可进行」命中 **三个表达式索引**：`BitmapOr → Bitmap Index Scan on ix_nonpen_plans_item_baseline /
+  _host / _web`（`Index Cond: ((items -> 'baseline'::text) ->> 'status'::text) = ANY ('{not_started,testing,retesting}')`）；
+- 漏洞列表命中 `ix_vulns_submit_time`（`Index Scan Backward`）；
+- 工单列表命中 `ix_testing_plans_department`（`Bitmap Index Scan`）；
+- pg_trgm 评估（可选，见 `docs/DEPLOY.md` §10.4）：关键词检索 `P95 43.5 ms → 5.3 ms`，计划由
+  `Seq Scan` 变为 `Bitmap Index Scan on ix_trgm_vulns_title`。
+
+### 测试与验收
+
+- 后端：`ruff` / `vulture` / 全量 `pytest`（含新增 `tests/test_task_lifecycle.py`、
+  `tests/api/test_api_concurrency.py`、`tests/api/test_api_health.py`、
+  `tests/api/test_api_nonpen_actionable.py`，以及 `tests/test_filters.py` 的 DateTime 口径用例）全绿。
+- 前端：`typecheck` / `vitest`（新增 `useAutosave.spec.ts` 覆盖状态机与三类离页分支、
+  `unsavedGuard.spec.ts`）/ `build` 全绿。
+- E2E（Playwright + 系统 Chrome，实跑通过）：新增 `e2e/report-unsaved.spec.ts` 四条链路 ——
+  「编辑后 3 秒内离开（先补存再放行）」「离页且保存失败（三选一，可留在当前页 / 放弃修改）」
+  「保存失败后重试（不跳错误页、不丢输入）」「409 冲突（不静默覆盖，可继续编辑或加载最新）」；
+  既有 `golden-path.spec.ts` 三条链路回归通过。
+- 探针：`/api/health`(200) / `/api/health/live`(200) / `/api/health/ready` 实跑返回
+  `{"status":"ready","checks":{...}}`（Gotenberg 不可用时仍为 ready）。
+
+---
+
 ## [2.20.2] - 2026-09-25
 
 ### 移除

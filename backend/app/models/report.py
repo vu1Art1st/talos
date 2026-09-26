@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now
@@ -29,7 +29,10 @@ class Report(Base):
     # 复测报告生成时关联漏洞状态快照 {vul_id: {status, retest_html, retest_json}}，
     # 再次发起复测时对比当前漏洞状态，未更新则阻止生成新复测报告
     retest_vul_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    testing_plan_id: Mapped[int | None] = mapped_column(ForeignKey("testing_plans.id"), nullable=True)
+    # 索引（P0-4）：报告列表按更新时间排序、按工单归属筛选（复测三态/报告归集均用到）
+    testing_plan_id: Mapped[int | None] = mapped_column(
+        ForeignKey("testing_plans.id"), nullable=True, index=True,
+    )
 
     def fingerprint(self) -> dict:
         """报告内容指纹：编辑锁版本 + 报告更新时间 + 关联漏洞编辑时间快照。
@@ -44,7 +47,8 @@ class Report(Base):
         }
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
-    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+    # 索引（P0-4）：报告列表默认按更新时间排序
+    update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now, index=True)
 
     sections: Mapped[list["ReportSection"]] = relationship(
         back_populates="report",
@@ -82,6 +86,20 @@ class ExportJob(Base):
     toc_auto_updated: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     # 导出时的报告内容指纹 {revision, update_time, vul_edit_snapshot}，用于导出前重复判断
     report_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 幂等键（P0-2）：仅自动导出使用（`auto:<批次ID>`），唯一索引保证「同一批次重复确认
+    # 不会生成第二条导出记录与第二份文件」；手动导出留 NULL（唯一索引允许多个 NULL）。
+    dedup_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # ---- 任务生命周期（P0-3）：租约 / 心跳 / 重试 / 死信，统一口径见 services/task_lifecycle.py ----
+    attempts: Mapped[int] = mapped_column(Integer, default=0)  # 已尝试次数（含当前次）
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # 超期即视为孤儿任务；建索引供启动回收扫描按租约过期快速定位
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    dead_letter_reason: Mapped[str] = mapped_column(Text, default="")  # 进死信的原因（永久错误/超次数）
+
+
+# 自动导出幂等键的唯一索引（显式命名，保证 Alembic 迁移与 create_all 建出同名对象）
+Index("uq_export_jobs_dedup_key", ExportJob.dedup_key, unique=True)
