@@ -28,7 +28,7 @@ from app.schemas import (
     ReportSimilarityOut,
     ReportVulnStateOut,
 )
-from app.services import plan_service, vul_service
+from app.services import plan_service, template_service, vul_service
 from app.services.audit_service import audit
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.services.notify_service import notify
@@ -691,9 +691,16 @@ async def export_report(
     # 需 flush + refresh 后采集指纹，确保与最终落库状态一致
     await session.flush()
     await session.refresh(report)
+    # P1-4 模板中心：按报告类型选择启用模板，记录到导出任务（历史报告可追溯）。
+    # 无启用模板时 template_id 为空，导出回退包内默认模板。
+    report_type = "retest" if plan_service.is_retest_report_title(report.title) else "penetration"
+    tpl = await template_service.pick_template(session, report_type)
     job = ExportJob(
         report_id=report_id, title=report.title, fmt=body.fmt,
         creator_id=user.id, report_snapshot=report.fingerprint(),
+        template_id=tpl.id if tpl else None,
+        template_version=tpl.version if tpl else 0,
+        template_name=tpl.name if tpl else "",
     )
     session.add(job)
     await session.commit()
@@ -701,6 +708,7 @@ async def export_report(
     await dispatch(request.app, "export_report_task", job.id, job_id=f"export:{job.id}")
     await audit(session, request, "report_export", user, {
         "target": f"reports/{report_id}", "title": report.title, "fmt": body.fmt,
+        "template": job.template_name, "template_version": job.template_version,
     })
     return job
 

@@ -191,10 +191,11 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
 
 
 # 结论性输出附件表头：工单ID / 所属部门 / 测试系统 / 漏洞数 / 测试类型 /
-# 初测完成时间 / 复测完成时间 / 整改完成情况（2026-09-19 随结论口径同步扩展）
+# 初测完成时间 / 复测完成时间 / 整改完成情况 / SLA 逾期漏洞数
+# （2026-09-19 随结论口径同步扩展；2026-09-26 增加 SLA 逾期列，与列表/看板同一判定函数）
 CONCLUSION_HEADERS = [
     "工单ID", "所属部门", "测试系统", "漏洞数", "测试类型",
-    "初测完成时间", "复测完成时间", "整改完成情况",
+    "初测完成时间", "复测完成时间", "整改完成情况", "SLA逾期漏洞数",
 ]
 
 
@@ -214,5 +215,6 @@ def build_conclusion_workbook(rows: list[dict]) -> Workbook:
             r.get("first_test_done_time", ""),
             r.get("retest_done_time", ""),
             r.get("rectify_state", ""),
+            r.get("sla_overdue", 0),
         )])
     return wb

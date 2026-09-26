@@ -21,6 +21,12 @@
           <span class="font-mono text-xs">{{ row.prefix }}…</span>
         </template>
       </el-table-column>
+      <!-- P1-6 scope：只读 / 工单读写 / 管理只读 / 读写 -->
+      <el-table-column label="权限范围" width="140">
+        <template #default="{ row }">
+          <span class="ktag">{{ patScopeName(row.scope) }}</span>
+        </template>
+      </el-table-column>
       <el-table-column label="有效期至" width="170" sortable>
         <template #default="{ row }">
           <span :class="isExpired(row) ? 'text-gray-400' : ''">{{ fmtDateTime(row.expires_at) }}</span>
@@ -68,6 +74,15 @@
           <el-radio-button v-for="d in [7, 30, 90, 365]" :key="d" :value="d">{{ d }} 天</el-radio-button>
         </el-radio-group>
       </el-form-item>
+      <el-form-item label="权限范围" required>
+        <el-select v-model="createForm.scope" class="w-full">
+          <el-option v-for="o in scopeOptions" :key="o.value" :value="o.value" :label="o.label" />
+        </el-select>
+        <div class="mt-1 text-xs text-gray-400">
+          只读：仅查询；工单读写：可创建/更新工单；管理只读：额外可读 SLA 配置与投递记录；
+          读写：全部能力（写操作仍受账号角色权限约束）
+        </div>
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button @click="createVisible = false">取消</el-button>
@@ -98,13 +113,15 @@ import { ElMessage } from 'element-plus'
 import { Document, Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
-import { dotStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { useAuthStore } from '../stores/auth'
+import { dotStyle, patScopeName, patScopeOptions, STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'
 import { fmtDateTime } from '../utils/format'
 import { renderMarkdown } from '../utils/markdown'
 import guideMd from '../../../docs/OPEN_API_GUIDE.md?raw'
 import type { ApiToken } from '../types'
 
+const auth = useAuthStore()
 const { items, total, page, size, loading, load, onSizeChange } = useListPage<ApiToken>('/pats')
 
 const guideVisible = ref(false)
@@ -114,7 +131,9 @@ const createVisible = ref(false)
 const creating = ref(false)
 const tokenVisible = ref(false)
 const createdToken = ref('')
-const createForm = reactive({ name: '', expire_days: 30 })
+const createForm = reactive({ name: '', expire_days: 30, scope: 'full' })
+
+const scopeOptions = computed(() => patScopeOptions())
 
 // 无到期时间视为已过期（`new Date(0)`，与原先 null 入参的强制转换结果一致）
 const isExpired = (row: ApiToken) => new Date(row.expires_at ?? 0).getTime() <= Date.now()
@@ -122,6 +141,7 @@ const isExpired = (row: ApiToken) => new Date(row.expires_at ?? 0).getTime() <= 
 function openCreate() {
   createForm.name = ''
   createForm.expire_days = 30
+  createForm.scope = 'full'
   createVisible.value = true
 }
 
@@ -130,7 +150,7 @@ async function create() {
   creating.value = true
   try {
     const { data } = await client.post('/pats', {
-      name: createForm.name.trim(), expire_days: createForm.expire_days,
+      name: createForm.name.trim(), expire_days: createForm.expire_days, scope: createForm.scope,
     })
     createVisible.value = false
     createdToken.value = data.token
@@ -152,7 +172,11 @@ async function copyToken() {
   ElMessage.success('已复制到剪贴板')
 }
 
-onMounted(load)
+onMounted(async () => {
+  // scope 名称来自 /meta（字典单源），先取字典再拉列表
+  await auth.fetchMeta()
+  await load()
+})
 </script>
 
 <style scoped>

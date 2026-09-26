@@ -17,6 +17,13 @@
         <el-option v-for="(name, code) in levelMap" :key="code" :label="name" :value="Number(code)" />
       </el-select>
       <el-button v-if="hasFilter" link type="primary" @click="resetFilters">重置</el-button>
+      <template #actions>
+        <el-select v-model="viewId" placeholder="选择视图" clearable class="!w-44" @change="applyView">
+          <el-option v-for="v in views" :key="v.id" :value="v.id"
+                     :label="`${dashboardViewScopeName(v.scope)} · ${v.name}`" />
+        </el-select>
+        <el-button class="btn-min" @click="openSaveView">保存视图</el-button>
+      </template>
     </FilterToolbar>
 
     <div v-loading="loading" class="space-y-3">
@@ -25,6 +32,27 @@
         <StatCard v-for="card in cards" :key="card.label" :label="card.label" :value="card.value">
           <template #spark><SparkLine :points="card.spark" :color="card.sparkColor" /></template>
         </StatCard>
+      </div>
+
+      <!-- P1-1 / P1-7 运营指标：SLA 逾期、平均修复时长、复测积压、报告未交付 -->
+      <div class="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        <StatCard label="SLA 逾期" :value="sla?.overdue ?? 0" :color="STAT_CARD_COLORS.red">
+          <template #meta>逾期率 {{ sla?.overdue_rate ?? 0 }}%</template>
+        </StatCard>
+        <StatCard label="SLA 临期" :value="sla?.due_soon ?? 0" :color="STAT_CARD_COLORS.orange" />
+        <StatCard label="平均修复时长"
+                  :value="sla?.avg_fix_days === null || sla?.avg_fix_days === undefined ? '-' : `${sla.avg_fix_days} 天`"
+                  :color="STAT_CARD_COLORS.green" />
+        <StatCard label="平均逾期时长"
+                  :value="sla?.avg_overdue_days === null || sla?.avg_overdue_days === undefined ? '-' : `${sla.avg_overdue_days} 天`"
+                  :color="STAT_CARD_COLORS.red" />
+        <StatCard label="复测积压" :value="ops?.retest_backlog ?? 0" :color="STAT_CARD_COLORS.orange">
+          <template #meta>漏洞 {{ ops?.retest_backlog_vulns ?? 0 }} · 工单 {{ ops?.retest_backlog_plans ?? 0 }}</template>
+        </StatCard>
+        <StatCard label="报告未交付" :value="ops?.undelivered_reports ?? 0" :color="STAT_CARD_COLORS.blue" />
+      </div>
+      <div v-if="lastData?.cached_at" class="text-2xs text-gray-400 text-right">
+        数据截至 {{ fmtDateTime(lastData.cached_at) }}（短时缓存，写入后自动失效）
       </div>
 
       <!-- 趋势（2fr） + 等级分布（1fr） -->
@@ -100,17 +128,59 @@
                 <span class="num">{{ row.fix_rate === null ? '-' : `${row.fix_rate}%` }}</span>
               </template>
             </el-table-column>
+            <!-- P1-7 部门整改排名：SLA 逾期数与逾期率（与列表/导出同一判定函数） -->
+            <el-table-column label="SLA 逾期" width="100">
+              <template #default="{ row }">
+                <span class="num" :style="deptSla(row.department).overdue ? { color: 'var(--tl-danger)' } : {}">
+                  {{ deptSla(row.department).overdue }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="逾期率" width="90">
+              <template #default="{ row }"><span class="num">{{ deptSla(row.department).overdue_rate }}%</span></template>
+            </el-table-column>
           </el-table>
         </template>
         <el-empty v-else description="暂无部门提测数据" :image-size="80" />
       </el-card>
     </div>
+
+    <!-- 保存视图（P1-7：个人视图 / 部门默认视图） -->
+    <el-dialog v-model="saveViewVisible" title="保存看板视图" width="480px" :close-on-click-modal="false">
+      <el-form :model="viewForm" label-width="100px">
+        <el-form-item label="视图名称" required>
+          <el-input v-model="viewForm.name" maxlength="64" placeholder="例如：本季度高危逾期" />
+        </el-form-item>
+        <el-form-item label="视图类型">
+          <el-radio-group v-model="viewForm.scope">
+            <el-radio-button value="personal">个人视图</el-radio-button>
+            <el-radio-button value="department">部门默认视图</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="viewForm.scope === 'department'" label="部门" required>
+          <el-select v-model="viewForm.department" filterable clearable class="w-full">
+            <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="设为默认">
+          <el-switch v-model="viewForm.is_default" />
+        </el-form-item>
+        <el-form-item label="筛选条件">
+          <span class="text-xs text-gray-400">{{ filterSummary }}</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveViewVisible = false">取消</el-button>
+        <el-button type="primary" :loading="savingView" @click="saveView">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import * as echarts from 'echarts'
+import { ElMessage } from 'element-plus'
 import client from '../api/client'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import SparkLine from '../components/SparkLine.vue'
@@ -118,8 +188,11 @@ import StatCard from '../components/StatCard.vue'
 import { areaGradient, chartThemeName, PALETTE } from '../utils/chartTheme'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
-import type { DashboardDepartment, DashboardStats, IdName, QueryParams } from '../types'
-import { levelColorByName, statusColorByName, vulTypeColor } from '../utils/colors'
+import type { DashboardDepartment, DashboardStats, DashboardView, IdName, QueryParams } from '../types'
+import {
+  dashboardViewScopeName, levelColorByName, STAT_CARD_COLORS, statusColorByName, vulTypeColor,
+} from '../utils/colors'
+import { fmtDateTime } from '../utils/format'
 
 // 图表系列色（唯一色源 chartTheme.PALETTE，语义化命名便于系列引用）
 const [SERIES_MINT, SERIES_SKY, SERIES_AMBER, , , , SERIES_PINK] = PALETTE
@@ -158,6 +231,75 @@ const cards = ref([
   { label: '修复率', value: '0%' as number | string, sparkColor: '#34d399', spark: [] as number[] },
   { label: '在管资产', value: 0 as number | string, sparkColor: '#38bdf8', spark: [] as number[] },
 ])
+
+// ---------- P1-1 / P1-7：SLA 与运营指标（与列表/导出/开放 API 同一数据源） ----------
+const sla = computed(() => lastData.value?.sla)
+const ops = computed(() => lastData.value?.ops)
+const deptSlaMap = computed(() => {
+  const m: Record<string, { overdue: number; overdue_rate: number }> = {}
+  for (const d of lastData.value?.sla?.by_department ?? []) {
+    m[d.department] = { overdue: d.overdue, overdue_rate: d.overdue_rate }
+  }
+  return m
+})
+const deptSla = (dept: string) => deptSlaMap.value[dept] ?? { overdue: 0, overdue_rate: 0 }
+
+// ---------- P1-7：看板视图（个人 / 部门默认） ----------
+const views = ref<DashboardView[]>([])
+const viewId = ref<number | null>(null)
+const saveViewVisible = ref(false)
+const savingView = ref(false)
+const viewForm = reactive({ name: '', scope: 'personal', department: '', is_default: false })
+const filterSummary = computed(() => {
+  const parts: string[] = []
+  if (dateRange.value?.length === 2) parts.push(`录入 ${dateRange.value[0]} ~ ${dateRange.value[1]}`)
+  if (deptFilter.value) parts.push(`部门 ${deptFilter.value}`)
+  if (sourceFilter.value !== null) parts.push(`来源 ${sourceMap.value[sourceFilter.value] ?? sourceFilter.value}`)
+  if (levelFilter.value !== null) parts.push(`等级 ${levelMap.value[levelFilter.value] ?? levelFilter.value}`)
+  return parts.length ? parts.join('；') : '无筛选条件（全量）'
+})
+
+async function loadViews() {
+  views.value = (await client.get<DashboardView[]>('/dashboard/views')).data
+}
+
+function applyView(id: number | null) {
+  const v = views.value.find((x) => x.id === id)
+  if (!v?.query) return
+  dateRange.value = v.query.date_from && v.query.date_to ? [v.query.date_from, v.query.date_to] : null
+  deptFilter.value = v.query.department ?? ''
+  sourceFilter.value = v.query.source ?? null
+  levelFilter.value = v.query.level ?? null
+  void reload()
+}
+
+function openSaveView() {
+  viewForm.name = ''
+  viewForm.scope = 'personal'
+  viewForm.department = deptFilter.value || ''
+  viewForm.is_default = false
+  saveViewVisible.value = true
+}
+
+async function saveView() {
+  if (!viewForm.name.trim()) return ElMessage.warning('请填写视图名称')
+  if (viewForm.scope === 'department' && !viewForm.department) return ElMessage.warning('请选择部门')
+  savingView.value = true
+  try {
+    await client.post('/dashboard/views', {
+      name: viewForm.name.trim(),
+      scope: viewForm.scope,
+      department: viewForm.scope === 'department' ? viewForm.department : '',
+      is_default: viewForm.is_default,
+      query: filterParams(),
+    })
+    saveViewVisible.value = false
+    ElMessage.success('视图已保存')
+    await loadViews()
+  } finally {
+    savingView.value = false
+  }
+}
 
 function mk(el: HTMLElement | undefined, option: echarts.EChartsOption) {
   if (!el) return
@@ -301,6 +443,7 @@ onMounted(async () => {
     departments.value = data.map((g) => g.name)
   }).catch(() => { /* 无权限时部门筛选项置空 */ })
   await reload()
+  await loadViews()
   window.addEventListener('resize', onResize)
 })
 

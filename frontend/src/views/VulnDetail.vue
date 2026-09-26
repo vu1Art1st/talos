@@ -52,6 +52,24 @@
           <el-descriptions-item label="提交时间">{{ fmtDateTime(vul.submit_time) }}</el-descriptions-item>
           <el-descriptions-item label="通知时间">{{ fmtDateTime(vul.notice_time) }}</el-descriptions-item>
           <el-descriptions-item label="闭环时间">{{ fmtDateTime(vul.fix_time) }}</el-descriptions-item>
+          <el-descriptions-item label="修复时限">
+            <div v-if="vul.due_at" class="flex items-center gap-2">
+              <span class="num">{{ fmtDateTime(vul.due_at) }}</span>
+              <span class="tl-tag" :style="slaStateSoftStyle(vul.sla_state)">
+                {{ slaStateMeta(vul.sla_state).label }} · {{ fmtSlaRemaining(vul.sla_remaining_hours) }}
+              </span>
+            </div>
+            <span v-else>-</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="SLA 延期">
+            <el-button v-if="vul.due_at && canExtend" size="small" link type="primary" @click="openExtend">
+              延期申请
+            </el-button>
+            <el-link v-if="extensions.length" class="ml-2" type="info" @click="extVisible = true">
+              {{ extensions.length }} 条记录
+            </el-link>
+            <span v-if="!vul.due_at && !extensions.length">-</span>
+          </el-descriptions-item>
         </el-descriptions>
       </el-card>
 
@@ -90,18 +108,65 @@
   </div>
 <!-- 首屏加载占位：避免数据未到时的空白闪现 -->
   <div v-else v-loading="true" class="h-64" element-loading-text="加载中..." />
+
+  <!-- P1-1 SLA 延期：记录原/新到期时间与原因，不允许无痕改期 -->
+  <el-dialog v-model="extendVisible" title="SLA 延期申请" width="480px" :close-on-click-modal="false">
+    <el-form :model="extendForm" label-width="110px">
+      <el-form-item label="当前到期时间">{{ fmtDateTime(vul?.due_at) }}</el-form-item>
+      <el-form-item label="延期方式">
+        <el-radio-group v-model="extendForm.mode">
+          <el-radio-button value="days">顺延天数</el-radio-button>
+          <el-radio-button value="date">指定日期</el-radio-button>
+        </el-radio-group>
+      </el-form-item>
+      <el-form-item v-if="extendForm.mode === 'days'" label="顺延天数" required>
+        <el-input-number v-model="extendForm.extend_days" :min="1" :max="365" />
+      </el-form-item>
+      <el-form-item v-else label="新到期时间" required>
+        <el-date-picker v-model="extendForm.new_due_at" type="datetime" value-format="YYYY-MM-DD HH:mm"
+                        format="YYYY-MM-DD HH:mm" placeholder="选择新的到期时间" />
+      </el-form-item>
+      <el-form-item label="延期原因" required>
+        <el-input v-model="extendForm.reason" type="textarea" :rows="3" maxlength="500" show-word-limit />
+      </el-form-item>
+    </el-form>
+    <template #footer>
+      <el-button @click="extendVisible = false">取消</el-button>
+      <el-button type="primary" :loading="extending" @click="submitExtend">提交</el-button>
+    </template>
+  </el-dialog>
+
+  <el-dialog v-model="extVisible" title="SLA 延期记录" width="640px">
+    <el-table :data="extensions" stripe>
+      <el-table-column label="原到期时间" width="170">
+        <template #default="{ row }"><span class="num">{{ fmtDateTime(row.old_due_at) }}</span></template>
+      </el-table-column>
+      <el-table-column label="新到期时间" width="170">
+        <template #default="{ row }"><span class="num">{{ fmtDateTime(row.new_due_at) }}</span></template>
+      </el-table-column>
+      <el-table-column prop="reason" label="原因" min-width="180" show-overflow-tooltip />
+      <el-table-column prop="username" label="操作人" width="110" />
+      <el-table-column label="时间" width="170">
+        <template #default="{ row }"><span class="num">{{ fmtDateTime(row.create_time) }}</span></template>
+      </el-table-column>
+      <template #empty><el-empty description="暂无延期记录" :image-size="80" /></template>
+    </el-table>
+  </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { levelSoftStyle, softStyle, STAT_CARD_COLORS, statusLabel, statusSoftStyleWithRetest, vulTypeSoftStyle } from '../utils/colors'
-import { fmtDateTime } from '../utils/format'
+import {
+  levelSoftStyle, slaStateMeta, slaStateSoftStyle, softStyle, STAT_CARD_COLORS,
+  statusLabel, statusSoftStyleWithRetest, vulTypeSoftStyle,
+} from '../utils/colors'
+import { fmtDateTime, fmtSlaRemaining } from '../utils/format'
 import { safeHtml } from '../utils/html'
-import type { TestingPlan, UserBrief, Vuln, VulnLog, VulnTransition } from '../types'
+import type { SlaExtension, TestingPlan, UserBrief, Vuln, VulnLog, VulnTransition } from '../types'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -111,6 +176,45 @@ const logs = ref<VulnLog[]>([])
 const transitions = ref<VulnTransition[]>([])
 const comment = ref('')
 const meta = ref<Record<string, Record<number, string>> | null>(null)
+
+// ---------- P1-1 SLA 延期 ----------
+const extensions = ref<SlaExtension[]>([])
+const extendVisible = ref(false)
+const extVisible = ref(false)
+const extending = ref(false)
+const extendForm = reactive({ mode: 'days', extend_days: 3, new_due_at: '', reason: '' })
+const canExtend = computed(() => auth.hasPerm('vuln:manage') && vul.value?.sla_state !== 'closed')
+
+function openExtend() {
+  extendForm.mode = 'days'
+  extendForm.extend_days = 3
+  extendForm.new_due_at = ''
+  extendForm.reason = ''
+  extendVisible.value = true
+}
+
+async function loadExtensions() {
+  const id = route.params.id
+  extensions.value = (await client.get<SlaExtension[]>(`/sla/vulns/${id}/extensions`)).data
+}
+
+async function submitExtend() {
+  if (!extendForm.reason.trim()) return ElMessage.warning('请填写延期原因')
+  if (extendForm.mode === 'date' && !extendForm.new_due_at) return ElMessage.warning('请选择新的到期时间')
+  extending.value = true
+  try {
+    await client.post(`/sla/vulns/${route.params.id}/extend`, {
+      reason: extendForm.reason.trim(),
+      extend_days: extendForm.mode === 'days' ? extendForm.extend_days : null,
+      new_due_at: extendForm.mode === 'date' ? extendForm.new_due_at : null,
+    })
+    extendVisible.value = false
+    ElMessage.success('延期已提交并留痕')
+    await Promise.all([load(), loadExtensions()])
+  } finally {
+    extending.value = false
+  }
+}
 
 // 影响URL 多值（后端换行分隔存储）逐行展示
 const affectedUrls = computed<string[]>(() =>
@@ -191,5 +295,6 @@ async function saveAsTemplate() {
 onMounted(async () => {
   meta.value = await auth.fetchMeta()
   await load()
+  await loadExtensions()
 })
 </script>

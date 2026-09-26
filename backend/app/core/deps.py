@@ -1,13 +1,14 @@
-"""认证依赖：JWT 会话令牌（get_current_user）、个人访问令牌（get_pat_user，F6 开放只读 API）、
+"""认证依赖：JWT 会话令牌（get_current_user）、个人访问令牌（get_pat_user，F6/P1-6）、
 图片端点认证（get_image_viewer，安全审计 批次 E-1）。"""
 import hashlib
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants import PAT_ADMIN_READ_SCOPES, PAT_PLAN_WRITE_SCOPES, PAT_READ_SCOPES
 from app.core.config import settings
 from app.core.ratelimit import get_failures, incr_failure
 from app.core.security import IMAGE_COOKIE, decode_token
@@ -101,14 +102,20 @@ def user_permissions(user: User) -> set[str]:
     return set(user.role.permissions or [])
 
 
-async def resolve_pat(session: AsyncSession, token: str, *, rate_limited: bool = True) -> User:
-    """按 sha256 校验个人访问令牌并返回所属用户（get_pat_user 与图片端点共用）。
+async def resolve_pat_row(
+    session: AsyncSession,
+    token: str,
+    *,
+    rate_limited: bool = True,
+    response: Response | None = None,
+) -> PersonalAccessToken:
+    """按 sha256 校验个人访问令牌并返回令牌行（`resolve_pat` 与图片端点共用）。
 
     - 明文令牌不落库；
     - 校验令牌有效、未过期、所属用户启用；
-    - `rate_limited=True`（默认）时限流每令牌每分钟 PAT_RATE_LIMIT 次（固定窗口），超限 429，
-      并回写 `last_used_at`；图片端点按 `rate_limited=False` 调用（一张页面几十张图，
-      若逐张计数会误伤正常浏览，且不应为只读图片放大写字开销）。
+    - `rate_limited=True`（默认）时限流每令牌每分钟 PAT_RATE_LIMIT 次（固定窗口）：
+      超限返回 429 + `Retry-After`，正常请求回写 `X-RateLimit-Limit/Remaining` 头；
+      图片端点按 `rate_limited=False` 调用（一张页面几十张图，逐张计数会误伤正常浏览）。
     """
     if not token.startswith("tlp_"):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "开放 API 仅支持个人访问令牌（Bearer tlp_xxx）")
@@ -127,25 +134,75 @@ async def resolve_pat(session: AsyncSession, token: str, *, rate_limited: bool =
     if pat.user is None or not pat.user.is_active:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "令牌所属用户不可用")
     if rate_limited:
+        limit = max(int(settings.PAT_RATE_LIMIT), 1)
         rl_key = f"pat_rl:{pat.id}"
-        if await get_failures(rl_key, 60) >= settings.PAT_RATE_LIMIT:
-            raise HTTPException(429, "请求过于频繁，请稍后再试")
+        used = await get_failures(rl_key, 60)
+        if used >= limit:
+            raise HTTPException(
+                429, "请求过于频繁，请稍后再试",
+                headers={
+                    "Retry-After": "60",
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
         await incr_failure(rl_key, 60)
+        if response is not None:
+            response.headers.setdefault("X-RateLimit-Limit", str(limit))
+            response.headers.setdefault("X-RateLimit-Remaining", str(max(limit - used - 1, 0)))
         pat.last_used_at = now()
         session.add(pat)
         await session.commit()
+    return pat
+
+
+async def resolve_pat(session: AsyncSession, token: str, *, rate_limited: bool = True) -> User:
+    """按 sha256 校验个人访问令牌并返回所属用户（图片端点等无响应上下文场景使用）。"""
+    pat = await resolve_pat_row(session, token, rate_limited=rate_limited)
     return pat.user
 
 
 async def get_pat_user(
     request: Request,
+    response: Response,
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    """开放 API 认证：仅接受 `tlp_` 前缀的个人访问令牌（只读语义，不检查角色权限）。"""
-    user = await resolve_pat(session, token)
+    """开放 API 认证：仅接受 `tlp_` 前缀的个人访问令牌。
+
+    scope 与角色权限在各自的依赖里校验（读接口要求 scope 属于可读集合，
+    写接口要求 scope 属于工单写集合且角色权限命中）；本依赖只负责认证与令牌元信息透出。
+    """
+    pat = await resolve_pat_row(session, token, response=response)
+    # 令牌元信息透出：审计日志据此记录 PAT 名称，scope 依赖据此校验
+    request.state.pat_name = pat.name
+    request.state.pat_scope = pat.scope or "full"
+    user = pat.user
     _enforce_password_change(user, request.url.path)
     return user
+
+
+def _pat_scope(request: Request) -> str:
+    return str(getattr(request.state, "pat_scope", "") or "full")
+
+
+def require_pat_scope(*allowed: str):
+    """要求令牌 scope 命中给定集合（缺省视为 full，兼容存量令牌）。"""
+
+    async def checker(request: Request, _: User = Depends(get_pat_user)) -> User:
+        scope = _pat_scope(request)
+        if scope not in allowed:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"当前访问令牌 scope「{scope}」不足，需为 {' / '.join(allowed)}",
+            )
+        return _
+
+    return checker
+
+
+# 读接口依赖：所有 scope 均可读（显式声明，便于契约与文档一致）
+require_pat_read = require_pat_scope(*PAT_READ_SCOPES)
 
 
 def _has_perm(user: User, perm: str) -> bool:
@@ -171,14 +228,22 @@ def require_perm(perm: str):
     return checker
 
 
-def require_pat_perm(perm: str):
-    """开放 API 写操作权限校验：PAT 认证后按「令牌所属用户」的角色权限校验。
+def require_pat_perm(perm: str, *, scopes: tuple[str, ...] = PAT_PLAN_WRITE_SCOPES):
+    """开放 API 写操作权限校验：PAT scope 命中 **且** 令牌所属用户角色权限命中。
 
-    与站内 require_perm 同口径（角色权限含 perm 或通配符 * 放行），避免个人令牌
-    绕过 RBAC 执行写操作；只读端点（/open/vulns、/open/stats、工单查询）不套用此依赖。
+    - scope（P1-6）：默认要求工单写能力（`plan_write` / `full`）；只读 scope 的令牌
+      即使账号有权限也不能写，避免「只读令牌被用于写操作」；
+    - 角色权限：与站内 require_perm 同口径（含 perm 或通配符 * 放行），
+      避免个人令牌绕过 RBAC。
     """
 
-    async def checker(user: User = Depends(get_pat_user)) -> User:
+    async def checker(request: Request, user: User = Depends(get_pat_user)) -> User:
+        scope = _pat_scope(request)
+        if scope not in scopes:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"当前访问令牌 scope「{scope}」不足，工单写操作需为 {' / '.join(scopes)}",
+            )
         if _has_perm(user, perm):
             return user
         raise HTTPException(
@@ -186,6 +251,11 @@ def require_pat_perm(perm: str):
         )
 
     return checker
+
+
+def require_pat_admin_read(*, scopes: tuple[str, ...] = PAT_ADMIN_READ_SCOPES):
+    """开放 API「管理只读」依赖（P1-6）：要求 scope 为 admin_read / full。"""
+    return require_pat_scope(*scopes)
 
 
 def require_any_perm(*required: str):

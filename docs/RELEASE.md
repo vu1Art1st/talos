@@ -25,6 +25,92 @@
 
 ---
 
+## [2.21.0] - 2026-09-26
+
+ROADMAP「P1：业务闭环与运营能力」——P1-1 ~ P1-7 全部完成。本版本无破坏性接口变更（开放 API 全部为
+**向后兼容扩展**，存量 PAT 默认 `full` scope，行为不变），含 1 个结构迁移（新建 5 表 + 8 处加列，
+`e7f8a9b0c1d2_p1_business_ops.py`，降级路径已实测）。
+
+### 新增
+
+- **P1-1 SLA 修复时限**：
+  - 系统管理 → **SLA 配置**（`/sla/config`、`/sla/policies`）：启用开关、计时口径（自然日 / 工作日）、
+    默认时限、到期前提醒提前量、是否允许延期、工作日与节假日、停止计时状态、按等级时限；
+  - 漏洞新增 / 等级变化时按策略写入 `vulns.due_at`；状态进入「已修复 / 已忽略」停止计时；
+    策略变更默认只影响未来新漏洞，历史重算须显式执行 `POST /sla/recalculate`（写审计）；
+  - 延期 `POST /sla/vulns/{id}/extend` 记录原/新到期时间、原因与操作人（写漏洞日志 + 审计，
+    **不允许无痕改期**），延期流水可在漏洞详情查看；
+  - 到期前提醒与逾期升级：worker 每 15 分钟扫描（`sla_scan_task`），站内信 + 渠道通知同源触发，
+    幂等键 `sla:<kind>:<vul_id>:<due>` 保证**同一次到期状态只提醒一次**；
+  - 统计：逾期率、平均修复时长、平均逾期时长、按等级 / 部门 / 来源分布（`GET /sla/stats`）；
+  - 判定单源：列表、详情、工单流程抽屉、看板、整改情况附件（新增「SLA逾期漏洞数」列）、
+    开放 API 全部经 `sla_service.evaluate` / `sla_state_condition`。
+- **P1-2 个人待办工作台与站内通知中心**：顶栏铃铛（未读徽标，60 秒轮询 + 窗口重新可见时刷新）、
+  最近消息下拉（一键查看与全部已读）、消息中心页（按类型筛选、仅未读、单条/批量已读、深链跳转）；
+  `/todos` 聚合五类待办（待认领 / 我提交的漏洞 / 待复测 / 待确认导入 / SLA 临期与逾期）。
+  **全部站内信统一经 `services/message_service.create_message`**（含 SAVEPOINT 兜底：消息写入失败
+  只告警、不影响主业务事务），保留期已读 90 天 / 未读 180 天。
+- **P1-3 外部通知投递可观测与失败恢复**：新增 `notify_deliveries` 投递记录（渠道、事件、目标摘要、
+  请求时间、HTTP 状态、尝试次数、最后错误、下次重试、死信原因）；外部通知失败按可重试/永久错误分流，
+  可重试者按 `30s × 2^n`（封顶 1h）退避，达上限进死信；worker 每 5 分钟重投到期记录（进程重启不丢失）；
+  「测试发送」返回**投递回执**（含投递 ID 与错误）；错误信息按类型分类并**脱敏**（不回显 webhook 地址、
+  密钥或内网地址）；通知渠道页新增「投递记录」页签，可按渠道 / 事件 / 状态 / 时间筛选，支持暂停、恢复与
+  单条失败重放。
+- **P1-4 报告模板中心**：模板元数据（名称 / 适用报告类型 / 版本 / 启用状态 / 创建人 / 更新时间）、
+  `.docx` 上传（经 `core/storage.py` 与 `core/archive.py` 的路径白名单与解压配额守卫）、
+  7 张锚点表占位符校验（缺失时**阻止发布**并给出字段清单）、示例数据试生成与下载、版本化与回滚
+  （同名同时仅一个启用版本，回滚＝重新启用旧版本；启用中的版本不可删除）、导出记录保存
+  `template_id` / `template_name` / `template_version`，无可用模板时回退包内 `report_template.docx`。
+- **P1-5 导入与数据治理增强**：失败记录按「只重试失败记录」重试（批次自身失败时整批重建，同一批次行保留
+  → 审计链不断）；重复候选视图（标题 / URL / 等级 / 关联工单 / 相似度并列，可「合并到已有漏洞」或
+  「保留为独立记录」，确认入库记 `outcome=merged`）；字段修正留痕（前后值 + 修正人 + 来源）；
+  批量确认结果报告 xlsx（新增 / 更新 / 合并 / 跳过 / 失败及原因，直接读库保证与最终状态一致）；
+  解析等级来源 `level_source` 与汇总-详情不一致 `level_mismatch` 标记。
+- **P1-6 开放 API 成熟化**：PAT 新增 `scope`（`read` / `plan_write` / `admin_read` / `full`，存量令牌
+  迁移为 `full` 保持现状能力）；写接口支持 `Idempotency-Key`（同键重放返回首次结果，同键不同内容 409，
+  处理中 409）；分页接口返回 `page` / `size` / `has_more` / `next_cursor` 元数据，`cursor` 按 id 降序
+  稳定遍历；429 带 `Retry-After`，正常请求回写 `X-RateLimit-Limit/Remaining`；开放 API 响应带
+  `X-API-Version`；审计日志新增 `request_id` 列并在开放 API 写操作中并入 `pat_name`；
+  新增只读端点 `GET /open/sla-config`、`GET /open/notify-deliveries`（`admin_read` / `full`）。
+- **P1-7 运营看板与部门治理**：看板新增 SLA 逾期、SLA 临期、平均修复时长、平均逾期时长、复测积压
+  （漏洞 / 工单）、报告未交付指标卡与「部门整改排名」列（SLA 逾期数与逾期率）；支持保存个人视图与部门
+  默认视图（`/dashboard/views`）；统计结果带 `cached_at`（短 TTL 缓存 + 写入失效，界面展示「数据截至」）。
+
+### 变更
+
+- 导入预览页：等级来源与不一致标记可见，新增「重复候选检查」入口与「结果报告」下载；导入列表新增
+  「重试失败」动作。
+- 漏洞列表新增「SLA 状态」筛选与「修复时限」列；漏洞详情新增修复时限与延期申请/延期记录。
+- 令牌页新增「权限范围」列与创建时 scope 选择；通知渠道页新增投递记录页签。
+
+### 修复
+
+- 通知任务参数由「渠道配置副本」改为**投递记录 ID**：投递记录成为唯一幂等锚点，重复入队不再产生第二次外呼，
+  且投递记录必须在派发前提交（否则请求 session 关闭会回滚掉记录本身）。
+
+### 迁移与运维
+
+- 迁移 `e7f8a9b0c1d2_p1_business_ops.py`：新建 `sla_config` / `sla_policies` / `sla_extensions` /
+  `report_templates` / `notify_deliveries` / `api_idempotency_keys` / `import_record_changes` /
+  `dashboard_views` 八张表，`vulns.due_at`、`messages.link`、`export_jobs.template_*`、
+  `personal_access_tokens.scope`、`operation_logs.request_id`、`import_records.merge_vul_id/outcome/outcome_reason`
+  等列；`downgrade` 逐项可回滚（已在真库实测 upgrade → downgrade → upgrade）。
+- **升级后 SLA 默认关闭**：需管理员在「系统管理 → SLA 配置」启用并保存，再按需执行「历史重算」；
+  遗留漏洞的 `due_at` 为空（`sla_state=none`），不参与逾期统计。
+- 无新增环境变量；`scripts/bench_import.py` 为新增工具脚本（见 `docs/SCRIPTS.md`）。
+
+### 回归证据（本机门禁）
+
+| 门禁 | 结果 |
+|---|---|
+| `ruff check app scripts alembic tests` | 通过 |
+| 全量 `pytest`（`scripts/test.ps1`） | 354 passed / 1 skipped |
+| Alembic 真库 upgrade / downgrade / upgrade | 通过（`e7f8a9b0c1d2` ↔ `d3e4f5a6b7c8`） |
+| `pnpm typecheck` | 0 error |
+| `pnpm test`（Vitest） | 31 文件 / 191 passed |
+| `pnpm run build` | 成功 |
+| 导入性能基准（20 份 × 12 漏洞） | 3.85s、tracemalloc 峰值 13.8MB、docx 磁盘 0.7MB、240 条记录 |
+
 ## [2.20.3] - 2026-09-26
 
 ROADMAP「批次 A：正确性补丁与可靠性底座」——P0 六项（P0-1 ~ P0-6）全部完成。本版本无用户可见的

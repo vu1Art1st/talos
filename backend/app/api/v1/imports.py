@@ -13,19 +13,24 @@ from app.constants import DOCX_MIME
 from app.core.config import settings
 from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_sort
 from app.core.deps import require_perm
+from app.core.xlsx import xlsx_response
 from app.db import get_session
-from app.models import Asset, ImportBatch, ImportRecord, TestingPlan, User
+from app.models import Asset, ImportBatch, ImportRecord, ImportRecordChange, TestingPlan, User, Vul
 from app.schemas import (
     BatchConfirmIn,
     BatchConfirmItemOut,
     BatchConfirmOut,
     ImportBatchOut,
     ImportConfirmIn,
+    ImportDuplicateGroupOut,
+    ImportRecordChangeOut,
+    ImportRecordMergeIn,
     ImportRecordOut,
     ImportRecordUpdateIn,
+    ImportRetryOut,
     Page,
 )
-from app.services import import_service
+from app.services import import_governance, import_service
 from app.services.audit_service import audit
 from app.services.docx_parser import _map_level_report, build_import_template
 from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
@@ -291,20 +296,112 @@ async def batch_detail(
 async def update_record(
     record_id: int,
     body: ImportRecordUpdateIn,
-    _: User = Depends(require_perm("import:manage")),
+    user: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    """人工修正解析字段：逐字段留痕（修正前后值 + 修正人），形成可追溯数据链。"""
     record = await get_or_404(session, ImportRecord, record_id, "记录不存在")
     if record.status == "confirmed":
         raise HTTPException(400, "已确认入库的记录不能修改")
+    changes: list[tuple[str, str, str]] = []
     for k, v in body.model_dump(exclude_none=True).items():
+        changes.append((k, str(getattr(record, k, "") or ""), str(v)))
         setattr(record, k, v)
+    await import_governance.record_changes(session, record, changes, user)
     if record.title and record.status == "error":
         record.status = "parsed"
         record.parse_error = ""
     await session.commit()
     await session.refresh(record)
     return record
+
+
+@router.get("/records/{record_id}/changes", response_model=list[ImportRecordChangeOut])
+async def list_record_changes(
+    record_id: int,
+    _: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """单条记录的字段修正流水（可追溯数据链）。"""
+    await get_or_404(session, ImportRecord, record_id, "记录不存在")
+    return (
+        await session.execute(
+            select(ImportRecordChange)
+            .where(ImportRecordChange.record_id == record_id)
+            .order_by(ImportRecordChange.id.desc())
+            .limit(200)
+        )
+    ).scalars().all()
+
+
+@router.post("/records/{record_id}/merge", response_model=ImportRecordOut)
+async def merge_record(
+    record_id: int,
+    body: ImportRecordMergeIn,
+    _: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """重复候选处理：合并到已有漏洞（传 vul_id）或保留为独立记录（vul_id=None）。"""
+    record = await get_or_404(session, ImportRecord, record_id, "记录不存在")
+    if record.status == "confirmed":
+        raise HTTPException(400, "已确认入库的记录不能调整合并目标")
+    if body.vul_id is not None and await session.get(Vul, body.vul_id) is None:
+        raise HTTPException(400, "目标漏洞不存在")
+    record.merge_vul_id = body.vul_id
+    await session.commit()
+    await session.refresh(record)
+    return record
+
+
+@router.get("/{batch_id}/duplicates", response_model=list[ImportDuplicateGroupOut])
+async def list_duplicates(
+    batch_id: int,
+    _: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """重复漏洞候选视图：标题 / URL / 等级 / 关联工单 / 相似度并列展示。"""
+    batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
+    return await import_governance.find_duplicate_candidates(session, batch)
+
+
+@router.post("/{batch_id}/retry-failed", response_model=ImportRetryOut)
+async def retry_failed(
+    batch_id: int,
+    request: Request,
+    user: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """只重试失败记录（整批解析失败时整批重建）；保留原批次审计链。"""
+    batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
+    if batch.status == "confirmed":
+        raise HTTPException(400, "已确认入库的批次无需重试")
+    result = await import_governance.retry_failed_records(session, batch)
+    await session.commit()
+    await audit(session, request, "import_confirm", user, {
+        "target": f"imports/{batch_id}", "op": "retry_failed",
+        "retried": result["retried"], "resolved": result["resolved"],
+    })
+    return ImportRetryOut(**result)
+
+
+@router.get("/{batch_id}/result-report")
+async def download_result_report(
+    batch_id: int,
+    _: User = Depends(require_perm("import:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量确认结果报告（xlsx）：新增 / 更新 / 合并 / 跳过 / 失败及原因。"""
+    batch = (
+        await session.execute(
+            select(ImportBatch).options(selectinload(ImportBatch.records))
+            .where(ImportBatch.id == batch_id)
+        )
+    ).scalar_one_or_none()
+    if batch is None:
+        raise HTTPException(404, "导入批次不存在")
+    wb = import_governance.build_result_report(batch, batch.records)
+    name = f"导入结果_{batch.filename.rsplit('.', 1)[0]}.xlsx"
+    return xlsx_response(wb, name)
 
 
 @router.post("/records/{record_id}/discard", response_model=ImportRecordOut)

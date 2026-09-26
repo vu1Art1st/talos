@@ -11,7 +11,7 @@ import pytest
 
 from app.core.config import settings
 from app.core.outbound import assert_public_url
-from app.workers.main import send_notify_task
+from app.services import notify_service
 
 
 # ---------- 目标判定 ----------
@@ -63,18 +63,27 @@ async def test_notify_channel_rejects_internal_webhook(client, auth):
     assert "内网" in resp.json()["detail"]
 
 
-# ---------- 发送侧：兜底校验与请求参数 ----------
-async def test_send_notify_task_blocks_internal_target(monkeypatch):
+# ---------- 发送侧：兜底校验与请求参数（P1-3 起发送逻辑收敛到 notify_service.perform_send） ----------
+async def test_perform_send_blocks_internal_target(monkeypatch):
     """存量渠道配置或 DNS 事后变化时，发送前兜底校验必须拦住，且不得发起任何请求。"""
     def _boom(*args, **kwargs):
         raise AssertionError("目标被拒时不应构造出站客户端")
 
     monkeypatch.setattr(httpx, "AsyncClient", _boom)
-    await send_notify_task({}, "wecom", {"url": "http://127.0.0.1:8099/hook"}, "标题", "正文")
-    await send_notify_task({}, "dingtalk", {"url": "http://10.1.2.3/hook"}, "标题", "正文")
+    for channel_type, url in (
+        ("wecom", "http://127.0.0.1:8099/hook"),
+        ("dingtalk", "http://10.1.2.3/hook"),
+    ):
+        status_code, error = await notify_service.perform_send(
+            channel_type, {"url": url}, "标题", "正文",
+        )
+        assert status_code == 0
+        assert "SSRF" in error or "拒绝" in error
+        # 不可重试（配置错误，重试无意义）
+        assert not notify_service.error_is_retryable(error)
 
 
-async def test_send_notify_task_public_target_without_redirect(monkeypatch):
+async def test_perform_send_public_target_without_redirect(monkeypatch):
     captured: dict = {}
 
     class _Resp:
@@ -96,9 +105,27 @@ async def test_send_notify_task_public_target_without_redirect(monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(httpx, "AsyncClient", _Client)
-    await send_notify_task({}, "wecom", {"url": "https://1.1.1.1/hook"}, "标题", "正文")
+    status_code, error = await notify_service.perform_send(
+        "wecom", {"url": "https://1.1.1.1/hook"}, "标题", "正文",
+    )
 
+    assert (status_code, error) == (200, "")
     assert captured["url"] == "https://1.1.1.1/hook"
     # 不跟随重定向：重定向目标同样可能指向内网
     assert captured["follow_redirects"] is False
     assert captured["payload"]["msgtype"] == "markdown"
+
+
+async def test_perform_send_error_is_sanitized(monkeypatch):
+    """错误信息脱敏：不得回显 webhook 地址中的密钥（P1-3 验收）。"""
+    secret_url = "https://1.1.1.1/hook?key=TOPSECRET"
+
+    def _boom(*args, **kwargs):
+        raise httpx.ConnectError(f"failed to connect to {secret_url}")
+
+    monkeypatch.setattr(httpx, "AsyncClient", _boom)
+    _status, error = await notify_service.perform_send(
+        "wecom", {"url": secret_url}, "标题", "正文",
+    )
+    assert "TOPSECRET" not in error
+    assert notify_service.error_is_retryable(error)  # 网络错误可重试

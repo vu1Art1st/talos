@@ -186,7 +186,7 @@ async def test_conclusion_text_and_counts(client: AsyncClient, auth: dict):
 
 
 async def test_conclusion_export_columns(client: AsyncClient, auth: dict):
-    """结论附件列扩展：工单ID/部门/系统/漏洞数/测试类型/初测完成/复测完成/整改完成情况。"""
+    """结论附件列扩展：工单ID/部门/系统/漏洞数/测试类型/初测完成/复测完成/整改完成情况/SLA逾期漏洞数。"""
     from openpyxl import load_workbook
 
     dept = "结论附件专用部门"
@@ -203,12 +203,14 @@ async def test_conclusion_export_columns(client: AsyncClient, auth: dict):
     rows = list(load_workbook(BytesIO(resp.content)).active.iter_rows(values_only=True))
     assert rows[0] == (
         "工单ID", "所属部门", "测试系统", "漏洞数", "测试类型",
-        "初测完成时间", "复测完成时间", "整改完成情况",
+        "初测完成时间", "复测完成时间", "整改完成情况", "SLA逾期漏洞数",
     )
     assert rows[1][1] == dept
     assert rows[1][2] == "结论附件系统"
     assert rows[1][5] == today
     assert rows[1][6] in ("", None)  # 空单元格回读为 None
+    # P1-1 新增列：SLA 逾期漏洞数（SLA 未启用时恒为 0；口径与列表/看板共用 sla_service）
+    assert int(rows[1][8]) >= 0
 
 
 

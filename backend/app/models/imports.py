@@ -67,5 +67,30 @@ class ImportRecord(Base):
     status: Mapped[str] = mapped_column(String(16), default="parsed")
     parse_error: Mapped[str] = mapped_column(Text, default="")
     vul_id: Mapped[int | None] = mapped_column(ForeignKey("vulns.id"), nullable=True)
+    # ---- P1-5 数据治理 ----
+    # 重复候选视图中选择「合并到已有漏洞」时写入；确认入库时更新该漏洞而非新建
+    merge_vul_id: Mapped[int | None] = mapped_column(ForeignKey("vulns.id"), nullable=True)
+    # 入库结果（结果报告口径）：created / updated / merged / skipped / failed
+    outcome: Mapped[str] = mapped_column(String(16), default="")
+    outcome_reason: Mapped[str] = mapped_column(Text, default="")
 
     batch: Mapped[ImportBatch] = relationship(back_populates="records")
+
+
+class ImportRecordChange(Base):
+    """导入记录字段修正流水（P1-5）：记录字段、修正前后值与修正人，形成可追溯数据链。"""
+
+    __tablename__ = "import_record_changes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    record_id: Mapped[int] = mapped_column(
+        ForeignKey("import_records.id", ondelete="CASCADE"), index=True,
+    )
+    field: Mapped[str] = mapped_column(String(32), default="")
+    old_value: Mapped[str] = mapped_column(Text, default="")
+    new_value: Mapped[str] = mapped_column(Text, default="")
+    # 来源：manual（人工修正）/ knowledge（知识库回填）
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    username: Mapped[str] = mapped_column(String(64), default="")
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)

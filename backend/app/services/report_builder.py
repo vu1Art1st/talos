@@ -961,14 +961,16 @@ def build_report_docx(
     out_path: str,
     assets: list[dict] | None = None,
     plan_urls: list[str] | None = None,
+    template_path: str | None = None,
 ) -> str:
     """基于模板生成报告 docx。
 
     meta: 报告元信息；vulns: 漏洞数据（含 id/level/status 等）；
     sections: [{title, content_html, vul_id}] 有序章节；assets: 关联资产聚合；
-    plan_urls: 工单维护的被测系统URL，非空时作为「测试目标」表URL的权威来源。
+    plan_urls: 工单维护的被测系统URL，非空时作为「测试目标」表URL的权威来源；
+    template_path: 指定模板文件（P1-4 模板中心），为空时回退包内默认模板 settings.REPORT_TEMPLATE。
     """
-    template = Path(settings.REPORT_TEMPLATE)
+    template = Path(template_path or settings.REPORT_TEMPLATE)
     if not template.exists():
         raise FileNotFoundError(f"报告模板不存在: {template}")
 

@@ -107,4 +107,17 @@ async def init_db() -> None:
             from app.constants import VUL_TYPE
             for i, (code, name) in enumerate(sorted(VUL_TYPE.items())):
                 session.add(VulnType(code=code, name=name, sort=i, is_builtin=True))
+
+        # SLA 配置与等级策略预置（P1-1）：配置行与各等级策略各写一次，之后由界面维护
+        from app.models import SlaConfig, SlaPolicy
+        from app.services.sla_service import DEFAULT_LEVEL_DAYS
+        if await session.get(SlaConfig, 1) is None:
+            session.add(SlaConfig(id=1))
+        for level, days in DEFAULT_LEVEL_DAYS.items():
+            exists = (
+                await session.execute(select(SlaPolicy.id).where(SlaPolicy.level == level))
+            ).scalar_one_or_none()
+            if exists is None:
+                session.add(SlaPolicy(level=level, days=days))
+
         await session.commit()

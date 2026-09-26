@@ -4,19 +4,24 @@ from datetime import timedelta
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE
+from app.constants import VUL_LEVEL, VUL_STATUS, VUL_TYPE, PlanStatus, VulStatus
 from app.core.timeutil import now as tznow, parse_date
-from app.models import Asset, TestingPlan, Vul
+from app.models import Asset, Report, TestingPlan, Vul
 
 # 修复情况状态码（与 VulStatus 的数值口径一致；用于聚合层归并）
 _STATUS_FIXED = 60
 _STATUS_CLOSED = (20, 60)
 
+# 已完成初测、应交付报告的工单状态（不含「测试通过」无漏洞结项）
+_REPORT_EXPECTED_STATUSES = (
+    PlanStatus.WAIT_RETEST, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING, PlanStatus.RETEST_DONE,
+)
 
-def _vuln_scope_cond(
+
+def vuln_scope_cond(
     date_from: str, date_to: str, source: int | None, level: int | None, department: str,
 ) -> list:
-    """构造漏洞筛选条件（统一应用于本模块各漏洞聚合查询）。"""
+    """构造漏洞筛选条件（统一应用于本模块各漏洞聚合查询；SLA 统计亦复用）。"""
     cond = []
     d_from = parse_date(date_from)
     if d_from:
@@ -178,6 +183,46 @@ async def _by_department_stats(session: AsyncSession, department: str, vul_cond:
     )
 
 
+async def _operational_stats(session: AsyncSession, vul_cond: list) -> dict:
+    """运营指标（P1-7）：复测积压 / 报告未交付 / 未闭环漏洞。
+
+    所有指标与列表、导出共用同一「提交时间」筛选口径（`vuln_scope_cond`）。
+    """
+    retest_vulns = (
+        await session.execute(
+            select(func.count(Vul.id)).where(*vul_cond, Vul.status == VulStatus.RETESTING)
+        )
+    ).scalar_one()
+    retest_plans = (
+        await session.execute(
+            select(func.count(TestingPlan.id)).where(
+                TestingPlan.status.in_((PlanStatus.RETEST_APPLY, PlanStatus.RETESTING))
+            )
+        )
+    ).scalar_one()
+    delivered = select(Report.testing_plan_id).where(Report.testing_plan_id.is_not(None))
+    undelivered = (
+        await session.execute(
+            select(func.count(TestingPlan.id)).where(
+                TestingPlan.status.in_(_REPORT_EXPECTED_STATUSES),
+                TestingPlan.id.notin_(delivered),
+            )
+        )
+    ).scalar_one()
+    open_vulns = (
+        await session.execute(
+            select(func.count(Vul.id)).where(*vul_cond, Vul.status.notin_(_STATUS_CLOSED))
+        )
+    ).scalar_one()
+    return {
+        "retest_backlog_vulns": retest_vulns,
+        "retest_backlog_plans": retest_plans,
+        "retest_backlog": retest_vulns + retest_plans,
+        "undelivered_reports": undelivered,
+        "open_vulns": open_vulns,
+    }
+
+
 async def build_stats(
     session: AsyncSession,
     *,
@@ -187,12 +232,25 @@ async def build_stats(
     source: int | None = None,
     level: int | None = None,
 ) -> dict:
-    """安全态势聚合：支持按事件多维筛选（时间范围/部门/来源/等级）后展示。"""
-    vul_cond = _vuln_scope_cond(date_from, date_to, source, level, department)
+    """安全态势聚合：支持按事件多维筛选（时间范围/部门/来源/等级）后展示。
 
+    P1-7：结果带短 TTL 缓存（`services/stats_cache`，默认 30 秒），数据变更后由
+    写入路径显式失效，避免大库重复计算；缓存键覆盖全部筛选参数，保证
+    「同一筛选条件在列表、看板、导出、开放 API 得到一致的分母与结果」。
+    """
+    from app.services import sla_service, stats_cache
+
+    key = stats_cache.cache_key(
+        date_from=date_from, date_to=date_to, department=department,
+        source=source, level=level,
+    )
+    cached = stats_cache.get(key)
+    if cached is not None:
+        return cached
+
+    vul_cond = vuln_scope_cond(date_from, date_to, source, level, department)
     total_vulns = (await session.execute(select(func.count(Vul.id)).where(*vul_cond))).scalar_one()
     total_assets = (await session.execute(select(func.count(Asset.id)))).scalar_one()
-
     by_status_rows = await _count_by(session, vul_cond, Vul.status)
     by_level_rows = await _count_by(session, vul_cond, Vul.level)
     by_status = [
@@ -204,7 +262,6 @@ async def build_stats(
         for lv, c in by_level_rows
     ]
     by_type = await _top_vul_types(session, vul_cond)
-
     # 近 12 个月提交趋势：取一年内数据在应用层按月聚合
     trend_rows = (
         await session.execute(
@@ -215,8 +272,12 @@ async def build_stats(
 
     fixed = sum(c for s, c in by_status_rows if s == _STATUS_FIXED)
     closed = sum(c for s, c in by_status_rows if s in _STATUS_CLOSED)
+    sla = await sla_service.sla_stats(
+        session, date_from=date_from, date_to=date_to,
+        department=department, source=source, level=level,
+    )
 
-    return {
+    result = {
         "total_vulns": total_vulns,
         "total_assets": total_assets,
         "open_vulns": total_vulns - closed,
@@ -226,4 +287,9 @@ async def build_stats(
         "by_type": by_type,
         "by_department": await _by_department_stats(session, department, vul_cond),
         "trend": _build_trend(trend_rows),
+        "sla": sla,
+        "ops": await _operational_stats(session, vul_cond),
+        "cached_at": tznow().isoformat(timespec="seconds"),
     }
+    stats_cache.put(key, result)
+    return result

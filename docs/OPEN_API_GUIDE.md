@@ -12,12 +12,16 @@
 
 | 项目 | 说明 |
 |---|---|
-| 可访问端点 | **漏洞与态势（只读）**：`GET /open/vulns`、`GET /open/stats`；**工单（读写）**：`/open/testing-plans`、`/open/nonpen-plans` |
+| 可访问端点 | **漏洞与态势（只读）**：`GET /open/vulns`、`GET /open/stats`；**工单（读写）**：`/open/testing-plans`、`/open/nonpen-plans`；**管理只读**：`GET /open/sla-config`、`GET /open/notify-deliveries` |
 | 认证方式 | 仅个人访问令牌（`tlp_` 前缀），JWT 会话令牌**不接受** |
+| 令牌 scope | `read`（只读）/ `plan_write`（工单读写）/ `admin_read`（只读 + SLA 配置与投递记录）/ `full`（全部能力，默认，存量令牌迁移值）。scope 不足返回 **403**（见 §3.4） |
 | 读权限 | 令牌代表**创建者身份**，但查询接口不做 RBAC 校验、不过滤数据归属，可读取全量漏洞 / 态势 / 工单 |
 | 写权限 | **仅工单接口支持写入**（创建与更新），且按令牌所属用户的角色权限校验 `special:manage`，与站内一致；**删除、漏洞与报告写入一律不支持** |
+| 幂等 | 写接口支持 `Idempotency-Key` 请求头：同键重放返回首次结果，同键不同内容 **409**（见 §6.3） |
 | 站内接口 | **不可用**。`GET /api/v1/vulns`、`/api/v1/testing-plans` 等站内端点只认 JWT，携带 PAT 访问返回 401 |
-| 限流 | 每令牌每分钟 120 次（`PAT_RATE_LIMIT`，服务端可用 `VP_PAT_RATE_LIMIT` 调整），超限 429 |
+| 限流 | 每令牌每分钟 120 次（`PAT_RATE_LIMIT`，服务端可用 `VP_PAT_RATE_LIMIT` 调整），超限 429 并带 `Retry-After`；正常响应回写 `X-RateLimit-Limit` / `X-RateLimit-Remaining` |
+| 版本标识 | 所有开放 API 响应带 `X-API-Version`（当前 `1`）；**破坏性调整必须递增该头并保留旧版本一段时间**（见 §13） |
+| 请求追踪 | 响应带 `X-Request-Id`（可自行传入同值以串联调用链）；开放 API 写操作的审计日志同时记录 PAT 名称 |
 
 > 结论：PAT 是**漏洞/态势只读出口 + 工单读写出口**，适合安全大屏、日报脚本、工单自动化与数据同步；
 > 漏洞录入、报告编辑、工单删除等仍需在系统界面或站内接口（JWT）完成。
@@ -72,6 +76,21 @@ Accept: application/json
 **浏览器端 JS 直接调用会被跨域拦截**，除非你的站点已加入服务端白名单。
 推荐做法：**在服务端（后端脚本 / 定时任务 / 中间层）调用**，前端页面不要持有 PAT。
 
+### 3.4 令牌 scope（P1-6，2026-09-26）
+
+创建令牌时选择 scope（Web 界面「访问令牌 → 新建令牌 → 权限范围」）：
+
+| scope | 可用能力 | 典型用途 |
+|---|---|---|
+| `read` | 只读：`/open/vulns`、`/open/stats`、工单查询 | 安全大屏、日报脚本 |
+| `plan_write` | 只读 + 工单创建 / 更新（`/open/testing-plans`、`/open/nonpen-plans`） | 工单自动化同步 |
+| `admin_read` | 只读 + `GET /open/sla-config`、`GET /open/notify-deliveries` | 投递成功率监控、SLA 口径核对 |
+| `full` | 全部能力（**默认**；2026-09-26 之前创建的令牌迁移为该值） | 内部集成 |
+
+- scope 不足 → **403**，响应体写明当前 scope 与所需 scope；账号角色权限不足 → 同样 403。
+- 只读令牌**即使账号有写权限也不能写**：`read` 令牌调用工单写接口一定 403（避免「只读令牌被误用于写操作」）。
+- scope 在创建时确定，**不支持修改**；需要新 scope 请吊销后重建。
+
 ---
 
 ## 4. 接口一：漏洞分页查询
@@ -96,14 +115,18 @@ GET /api/v1/open/vulns
 | `submit_time_to` | string | `""` | 录入时间止，格式 **`YYYY-MM-DD`**（**含当天 23:59:59**，闭区间） |
 | `sort` | string | `""` | 排序字段，仅在白名单内生效：`id` / `title` / `level` / `vul_type` / `status` / `submit_time` |
 | `order` | string | `desc` | `desc` 降序；**除 `desc` 外的任何值均按升序**处理 |
+| `sla_state` | string | `""` | SLA 派生状态筛选（P1-1）：`none` / `ok` / `due_soon` / `overdue` / `closed`，见 4.2 |
 | `page` | int | `1` | 页码，从 1 开始（`< 1` 触发 422） |
 | `size` | int | `20` | 每页条数，**1–100**（超出触发 422） |
+| `cursor` | string | `""` | **稳定游标**（P1-6）：传上一页最后一条的 `id`，则忽略 `page`、按 `id` 降序取下一页；适合全量遍历（见 4.3） |
 
 > 参数要点
 > - 单选与多选**互斥**：多选参数非空时，同名单选参数被忽略。
 > - **时间格式必须严格为 `YYYY-MM-DD`**；格式非法时该条件被**静默忽略**（不报错、不筛选），这是最常见的"筛选没生效"原因。
 > - 非法排序字段不会报错，会回退默认排序：`submit_time` 降序（并以 `id` 降序作为稳定次序）。
 > - 该接口**不提供** `asset_id` / `department` / `system_type` / `mine` 等参数（这些仅站内 `/api/v1/vulns` 支持）；如需按部门/资产筛选，请拉取后在本地按响应中的 `department`、`assets` 字段过滤。
+> - **游标 vs 偏移**：不传 `cursor` 时按 `page`/`size` 偏移分页（沿用既有行为，默认 `submit_time` 降序）；
+>   传 `cursor` 时按 `id` 降序稳定遍历，避免深分页重复/漏行。游标模式下的游标值取上一页**最后一条**的 `id`。
 
 ### 4.2 字典码表
 
@@ -142,11 +165,28 @@ GET /api/v1/open/vulns
 
 > 以上字典以后端 `app/constants.py` 为唯一来源，站内 `/api/v1/meta` 亦可获取。
 
+**SLA 状态 `sla_state`（P1-1 派生字段，非字典码）**
+
+| 值 | 含义 | 判定口径 |
+|---|---|---|
+| `none` | 未纳入 SLA | 漏洞无 `due_at`（SLA 未启用或该等级停用） |
+| `ok` | 正常 | 未闭环且剩余时间 > 到期前提醒窗口（`warn_hours`） |
+| `due_soon` | 即将到期 | 未闭环且剩余时间 ≤ 提醒窗口（含恰好到期） |
+| `overdue` | 已逾期 | 未闭环且已过截止时间 |
+| `closed` | 已停止计时 | 状态命中「停止计时状态」（默认已忽略 20 / 已修复 60） |
+
+> 判定与站内列表、看板、导出共用 `services/sla_service.evaluate`，口径必然一致；
+> 漏洞对象另返回 `due_at`、`sla_remaining_hours`（负值=已逾期）、`sla_overdue_days`。
+
 ### 4.3 响应结构
 
 ```json
 {
   "total": 128,
+  "page": 1,
+  "size": 20,
+  "has_more": true,
+  "next_cursor": "1005",
   "items": [
     {
       "id": 1024,
@@ -185,7 +225,11 @@ GET /api/v1/open/vulns
       "audit_time": null,
       "notice_time": null,
       "fix_time": null,
-      "update_time": "2026-08-25T09:01:02"
+      "update_time": "2026-08-25T09:01:02",
+      "due_at": "2026-09-04T10:12:33",
+      "sla_state": "due_soon",
+      "sla_remaining_hours": 12.5,
+      "sla_overdue_days": 0.0
     }
   ]
 }
@@ -197,6 +241,9 @@ GET /api/v1/open/vulns
 |---|---|---|
 | `total` | int | 符合条件的**总条数**（非本页条数），用于计算总页数 |
 | `items` | array | 当前页数据 |
+| `page` / `size` | int | 本次实际使用的分页参数回显 |
+| `has_more` | bool | 是否还有下一页（偏移模式按 `page`/`size` 计算；游标模式按是否取满一页计算） |
+| `next_cursor` | string \| null | **仅游标模式**返回：下一页应传入的 `cursor`；`null` 表示已到末页。偏移模式下为 `null`——若要用游标连续遍历，请取 `items` 最后一条的 `id` 作为首次 `cursor` |
 
 **`items[]` 关键字段**
 
@@ -216,6 +263,8 @@ GET /api/v1/open/vulns
 | `delay_days` / `delay_reason` | 延期天数与原因 |
 | `submitter_id` | 提交人用户 ID |
 | `submit_time` / `audit_time` / `notice_time` / `fix_time` / `update_time` | 各时间节点，字符串格式 `YYYY-MM-DDTHH:MM:SS`，**均为 UTC+8（北京时间）且不带时区后缀**，可能为 `null` |
+| `due_at` | 修复截止时间（SLA，P1-1），未纳入 SLA 时为 `null` |
+| `sla_state` / `sla_remaining_hours` / `sla_overdue_days` | SLA 派生状态 / 剩余小时（负值=已逾期）/ 逾期天数，口径见 4.2 |
 
 ---
 
@@ -284,10 +333,10 @@ GET /api/v1/open/stats
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
-| GET | `/api/v1/open/testing-plans` | PAT 登录即可 | 分页列表 |
-| GET | `/api/v1/open/testing-plans/{id}` | PAT 登录即可 | 单条详情 |
-| POST | `/api/v1/open/testing-plans` | PAT + `special:manage` | 创建工单 |
-| PUT | `/api/v1/open/testing-plans/{id}` | PAT + `special:manage` | 全量更新工单 |
+| GET | `/api/v1/open/testing-plans` | PAT（任意 scope） | 分页列表 |
+| GET | `/api/v1/open/testing-plans/{id}` | PAT（任意 scope） | 单条详情 |
+| POST | `/api/v1/open/testing-plans` | PAT（scope `plan_write`/`full`）+ 账号 `special:manage` | 创建工单（支持 `Idempotency-Key`） |
+| PUT | `/api/v1/open/testing-plans/{id}` | PAT（scope `plan_write`/`full`）+ 账号 `special:manage` | 全量更新工单（支持 `Idempotency-Key`） |
 
 ### 6.1 列表参数（GET /open/testing-plans）
 
@@ -333,6 +382,7 @@ GET /api/v1/open/stats
 curl -sS -X POST "$TALOS_BASE/open/testing-plans" \
   -H "Authorization: Bearer $TALOS_TOKEN" \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: plan-sso-2026q3" \
   -d '{
         "system_name": "统一身份认证系统",
         "plan_name": "2026年三季度渗透测试",
@@ -404,6 +454,20 @@ curl -sS -X POST "$TALOS_BASE/open/testing-plans" \
 
 `testers[]` 为测试人员摘要（`id` / `username` / `realname`），`vuls[]` 为关联漏洞摘要（`id` / `title` / `level` / `status` / `layer`），`reports[]` 为关联报告摘要（`id` / `title` / `status` / `actual_mandays` / `create_time`），`retest_rounds[]` 为复测轮次（`round_no` / `start_time` / `done_time` / `source`）。
 
+**幂等（`Idempotency-Key`，P1-6）**
+
+| 场景 | 结果 |
+|---|---|
+| 首次带键 `K` 请求 | 正常创建，服务端记录键与响应 |
+| 再次带同一键 `K`、**请求体完全相同** | **200**，返回首次创建结果（不产生第二个工单） |
+| 同一键 `K`、请求体不同 | **409**「Idempotency-Key 已用于不同的请求内容，请更换幂等键」 |
+| 同一键 `K` 的首次请求仍在处理中 | **409**「正在处理中，请稍后重试」 |
+| 不带该请求头 | 无幂等保护（重复提交会产生第二条工单） |
+
+- 键的生效范围是 `(令牌所属用户, 具体接口, 键值)`，不同接口/不同用户互不干扰；超过 128 字符截断。
+- 幂等记录保留 **7 天**（worker 定期清理），客户端超时重试窗口内请沿用同一个键。
+- 覆盖接口：`POST/PUT /open/testing-plans`、`POST/PUT /open/nonpen-plans`。
+
 ### 6.4 更新工单（PUT）
 
 ```bash
@@ -438,10 +502,10 @@ curl -sS -X PUT "$TALOS_BASE/open/testing-plans/88" \
 
 | 方法 | 路径 | 权限 | 说明 |
 |---|---|---|---|
-| GET | `/api/v1/open/nonpen-plans` | PAT 登录即可 | 分页列表 |
-| GET | `/api/v1/open/nonpen-plans/{id}` | PAT 登录即可 | 单条详情 |
-| POST | `/api/v1/open/nonpen-plans` | PAT + `special:manage` | 创建工单 |
-| PUT | `/api/v1/open/nonpen-plans/{id}` | PAT + `special:manage` | 全量更新工单 |
+| GET | `/api/v1/open/nonpen-plans` | PAT（任意 scope） | 分页列表 |
+| GET | `/api/v1/open/nonpen-plans/{id}` | PAT（任意 scope） | 单条详情 |
+| POST | `/api/v1/open/nonpen-plans` | PAT（scope `plan_write`/`full`）+ 账号 `special:manage` | 创建工单（支持 `Idempotency-Key`） |
+| PUT | `/api/v1/open/nonpen-plans/{id}` | PAT（scope `plan_write`/`full`）+ 账号 `special:manage` | 全量更新工单（支持 `Idempotency-Key`） |
 
 ### 7.1 列表参数（GET /open/nonpen-plans）
 
@@ -550,6 +614,10 @@ curl -sS -X POST "$TALOS_BASE/open/nonpen-plans" \
 | 401 | `令牌所属用户不可用` | 令牌所属账号被禁用 | 联系管理员恢复账号，或换用其他账号的令牌 |
 | 401 | `登录已过期，请重新登录` | 用 **PAT 访问了站内端点**（如 `/api/v1/vulns`、`/api/v1/testing-plans`） | PAT 只能访问 `/open/*`；如需站内能力请改用 JWT 登录流程 |
 | 403 | `当前令牌所属账号缺少权限: special:manage` | 用 PAT 调用工单**写接口**（POST / PUT），但令牌所属账号的角色没有 `special:manage` | 换用具备专项管理权限的账号创建的令牌；查询接口不受此限制 |
+| 403 | `当前访问令牌 scope「read」不足，工单写操作需为 plan_write / full` | 工单写接口的**令牌 scope 不足**（P1-6）：只读令牌不允许写 | 新建 `plan_write` 或 `full` scope 的令牌（scope 不可修改） |
+| 403 | `当前访问令牌 scope「read」不足，需为 admin_read / full` | 调用管理只读接口（`/open/sla-config`、`/open/notify-deliveries`）时 scope 不足 | 改用 `admin_read` / `full` scope 的令牌 |
+| 409 | `Idempotency-Key 已用于不同的请求内容，请更换幂等键` | 同一键先后提交了**不同请求体**（P1-6） | 为不同请求使用不同的键；确认键的生成规则（建议 `业务单号+操作`） |
+| 409 | `同一 Idempotency-Key 的请求正在处理中，请稍后重试` | 首次请求尚未完成，第二次已到达 | 稍后（秒级）重试同键请求，即可拿到首次结果 |
 | 403 | `仅认领者或管理员可修改测试状态` | 更新渗透测试工单时**改变了状态**，但操作者既不是该工单认领者，权限也不含 `*` | 先在系统内认领该工单，或改由管理员账号的令牌执行 |
 | 400 | `不允许从当前状态流转到目标状态` | 工单状态流转不在状态机白名单内（见 6.2） | 按 6.2 的流转表选择目标状态 |
 | 400 | `该计划存在关联漏洞，不能流转为「测试通过」` | 工单存在关联漏洞却要把状态改为 70 测试通过 | 先处理漏洞走复测流程，或改走目标状态 60 |
@@ -558,7 +626,7 @@ curl -sS -X POST "$TALOS_BASE/open/nonpen-plans" \
 | 404 | `Not Found` | URL 路径写错（如漏了 `/api/v1` 前缀、把 `/open/vulns` 写成 `/vulns`） | 核对完整路径 `{BaseURL}/open/vulns` |
 | 404 | `渗透测试工单不存在` / `漏扫基线工单不存在` | 工单 ID 不存在或已被删除 | 核对 ID |
 | 422 | 数组（见上） | 参数类型/范围非法，如 `page=0`、`size=200`、`level=abc`；或请求体校验失败，如 `system_name` 为空、漏扫工单缺少工单ID来源、`test_items` 出现非法取值 | 读取 `detail[].loc` / `detail[].msg` 定位出错字段 |
-| 429 | `请求过于频繁，请稍后再试` | 单令牌 60 秒窗口内请求数超过 120 次 | 退避重试 / 降低轮询频率 / 分页批量拉取而非逐条请求 |
+| 429 | `请求过于频繁，请稍后再试`（响应头带 `Retry-After: 60`、`X-RateLimit-Limit`、`X-RateLimit-Remaining: 0`） | 单令牌 60 秒窗口内请求数超过 120 次 | 按 `Retry-After` 退避重试 / 降低轮询频率 / 分页批量拉取而非逐条请求 |
 | 500 | `Internal Server Error` | 服务端异常 | 重试一次；持续出现请联系管理员并提供请求时间与 URL |
 
 ### 8.2 处理策略建议
@@ -568,10 +636,11 @@ curl -sS -X POST "$TALOS_BASE/open/nonpen-plans" \
 | 200 | — | 正常解析 |
 | 400 | 否 | 修正业务参数（状态流转 / 工单ID / 必填项） |
 | 401 | **否** | 直接告警并停止任务（重试只会继续失败），提示人工更换令牌 |
-| 403 | 否 | 改用具备 `special:manage` 的账号令牌，或先认领工单 |
+| 403 | 否 | 改用具备 `special:manage` 的账号令牌、改用匹配 scope 的令牌，或先认领工单 |
 | 404 | 否 | 修正 URL 或工单 ID |
+| 409 | **视情况** | 幂等键冲突：换键（内容不同）或稍后重试同键（处理中）；**不要**换键重发同一业务请求，否则会重复创建 |
 | 422 | 否 | 修正参数 |
-| 429 | **是** | 指数退避：`sleep(min(2^n, 60))`，最多 3–5 次；长期方案是调大 `size`、降低频率 |
+| 429 | **是** | 优先读 `Retry-After`；否则指数退避 `sleep(min(2^n, 60))`，最多 3–5 次；长期方案是调大 `size`、降低频率 |
 | 5xx | 是 | 最多重试 2 次，仍失败则告警 |
 
 > 限流计数发生在**认证通过后、业务逻辑执行前**，因此被限流的请求同样占用配额；设计轮询任务时请把频率控制在 **120 次/分钟/令牌**以内（建议留 20% 余量）。
@@ -1087,6 +1156,7 @@ const npUpdated = await openApi(`/open/nonpen-plans/${np.id}`, {}, {
 |---|---|
 | 存放 | 存环境变量 / 密钥库 / CI Secrets，**禁止**硬编码进源码、提交到 Git、写进前端包 |
 | 一令牌一用途 | 大屏、日报脚本、数据同步各建一枚，便于单独吊销与通过「最近使用」定位调用方 |
+| 最小权限 | 按需选择 scope：只读脚本用 `read`（**不要**图省事选 `full`）；写工单用 `plan_write`；要读 SLA 配置/投递记录再给 `admin_read` |
 | 有效期 | 脚本类建议 90 天；临时排查用 7 天；365 天仅用于长期稳定集成 |
 | 即将过期 | 系统**不提供续期接口、也不会自动续期**：提前新建一枚 → 更新调用方配置 → 验证通过后再吊销旧令牌 |
 | 已过期 | 调用返回 401「访问令牌已过期，请重新生成」，只能新建替换 |
@@ -1141,6 +1211,15 @@ A：工单更新是 **PUT 全量语义**（与站内一致），请求体与创�
 **Q13：可以通过 API 删除工单、录入漏洞或推进漏扫测试项吗？**
 A：不可以。开放接口仅提供工单的查询、创建与更新；删除、漏洞写入、测试项流转等请使用系统界面或站内接口（JWT 认证）。
 
+**Q14：只读令牌调用工单写接口报 403「scope 不足」，但我账号明明有权限？**
+A：这是刻意设计：scope 与账号权限**两道校验都要过**。只读令牌（`read`）不能写，请另建 `plan_write` 或 `full` scope 的令牌。scope 创建后不可修改。
+
+**Q15：想全量同步十万条漏洞，翻页到后面出现重复/漏行怎么办？**
+A：用游标模式：首次请求取 `items` 最后一条的 `id`，后续带 `cursor=<该 id>`（按 `id` 降序稳定遍历），直到 `next_cursor` 为 `null`。
+
+**Q16：客户端超时重试会不会创建两条工单？**
+A：带同一个 `Idempotency-Key` 就不会——重放返回首次结果。**注意别换键重发**：不同键＝新请求，会真的再建一条。
+
 ---
 
 ## 12. 接口速查卡
@@ -1148,32 +1227,59 @@ A：不可以。开放接口仅提供工单的查询、创建与更新；删除�
 ```
 Base URL : https://<host>/api/v1
 认证头    : Authorization: Bearer tlp_xxx
-限流      : 120 次/分钟/令牌
+令牌 scope: read | plan_write | admin_read | full
+限流      : 120 次/分钟/令牌（超限 429 + Retry-After；正常响应带 X-RateLimit-*）
+版本头    : X-API-Version: 1（所有响应）
+幂等头    : Idempotency-Key: <唯一键>（仅工单写接口）
 
 GET /open/vulns?search=&status=&statuses=&level=&levels=&vul_type=&vul_types=
                 &testing_plan_id=&submit_time_from=YYYY-MM-DD&submit_time_to=YYYY-MM-DD
+                &sla_state={none|ok|due_soon|overdue|closed}
                 &sort={id|title|level|vul_type|status|submit_time}&order={desc|asc}
-                &page=1&size=20            -> { total, items: [VulOut] }
+                &page=1&size=20            或  &cursor=<上页末条 id>&size=20
+                -> { total, page, size, has_more, next_cursor, items: [VulOut] }
 
 GET /open/stats?date_from=YYYY-MM-DD&date_to=YYYY-MM-DD&department=&source=&level=
                 -> { total_vulns, total_assets, open_vulns, fix_rate,
-                     by_status[], by_level[], by_type[], by_department[], trend[] }
+                     by_status[], by_level[], by_type[], by_department[], trend[],
+                     sla{...}, ops{...}, cached_at }
+
+GET /open/sla-config                                        -> { config{...}, policies[] }   (需 admin_read/full)
+GET /open/notify-deliveries?status=&event=&page=1&size=20   -> { total, items: [NotifyDeliveryOut] }  (需 admin_read/full)
 
 GET /open/testing-plans?search=&status=&test_type=&department=
                 &receive_from=YYYY-MM-DD&receive_to=YYYY-MM-DD
                 &first_test_from=YYYY-MM-DD&first_test_to=YYYY-MM-DD
                 &sort={id|system_name|...|create_time}&order={desc|asc}&page=1&size=20
-                -> { total, items: [TestingPlanOut] }
+                -> { total, page, size, has_more, next_cursor, items: [TestingPlanOut] }
 GET /open/testing-plans/{id}                               -> TestingPlanOut
-POST /open/testing-plans        body=TestingPlanIn         -> TestingPlanOut    (需 special:manage)
-PUT  /open/testing-plans/{id}   body=TestingPlanIn(全量)   -> TestingPlanOut    (需 special:manage)
+POST /open/testing-plans        body=TestingPlanIn         -> TestingPlanOut    (需 plan_write/full + special:manage；支持 Idempotency-Key)
+PUT  /open/testing-plans/{id}   body=TestingPlanIn(全量)   -> TestingPlanOut    (同上)
 
 GET /open/nonpen-plans?search=&actionable=&sort=&order=&page=1&size=20
-                -> { total, items: [NonpenPlanOut] }
+                -> { total, page, size, has_more, next_cursor, items: [NonpenPlanOut] }
 GET /open/nonpen-plans/{id}                                -> NonpenPlanOut
-POST /open/nonpen-plans         body=NonpenPlanIn          -> NonpenPlanOut     (需 special:manage)
-PUT  /open/nonpen-plans/{id}    body=NonpenPlanIn(全量)    -> NonpenPlanOut     (需 special:manage)
+POST /open/nonpen-plans         body=NonpenPlanIn          -> NonpenPlanOut     (需 plan_write/full + special:manage；支持 Idempotency-Key)
+PUT  /open/nonpen-plans/{id}    body=NonpenPlanIn(全量)    -> NonpenPlanOut     (同上)
 
 工单状态: 10未测试 20初测中 30初测完成 40提请复测 50复测中 60复测完成 70测试通过
 漏扫测试项: baseline基线扫描 / host主机漏洞扫描 / web Web漏洞扫描
+SLA 状态: none未纳入 / ok正常 / due_soon即将到期 / overdue已逾期 / closed已停止计时
 ```
+
+---
+
+## 13. 版本化、限流与弃用策略（P1-6）
+
+| 项目 | 约定 |
+|---|---|
+| 版本标识 | 所有 `/api/v1/open/*` 响应带 `X-API-Version`（当前 `1`）；调用方**建议记录该头**，便于服务端升级后比对 |
+| 兼容性口径 | 新增**可选**请求参数、新增响应字段属兼容变更，**不升版本**；删除/重命名字段、改变字段类型或语义、收紧校验、改变默认排序属**破坏性变更** |
+| 破坏性变更流程 | ① 递增 `X-API-Version`；② 在 `docs/RELEASE.md` 与本文档写明旧→新对应关系；③ **至少保留一个发布周期的双版本并行**（旧行为继续可用）；④ 弃用公告写明**弃用日期**与替代写法，到期后才移除 |
+| 弃用公告位置 | 本文档 §13 + `docs/RELEASE.md` 对应版本段落（同时在前端「访问令牌 → 接口文档」抽屉可见，该抽屉内联本文档全文） |
+| 限流 | 按**令牌**维度 60 秒固定窗口计数，上限 `VP_PAT_RATE_LIMIT`（默认 120）；超限 429 + `Retry-After: 60`；正常请求回写 `X-RateLimit-Limit` / `X-RateLimit-Remaining`。计数发生在认证通过后，被限流的请求同样占用配额 |
+| 分页稳定性 | 需要全量遍历时使用 `cursor`（`id` 降序），避免深分页重复/漏行；偏移模式仍受支持，但不保证跨页不重复 |
+| 幂等 | 写接口建议**始终**携带 `Idempotency-Key`（内容建议 `业务单号+操作`），记录保留 7 天 |
+| 请求追踪 | 响应带 `X-Request-Id`；调用方可传入自定义值以串联网关日志；开放 API 写操作的审计日志同时记录 PAT 名称 |
+
+> 当前无弃用中的字段或端点。任何弃用都会在本节以下表格登记：字段/端点、弃用日期、替代写法、计划移除版本。

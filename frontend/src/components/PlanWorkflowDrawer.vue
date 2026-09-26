@@ -117,6 +117,18 @@
                 </span>
               </template>
             </el-table-column>
+            <!-- P1-1：工单抽屉同样展示修复时限与 SLA 状态（与列表/详情/看板同一判定函数） -->
+            <el-table-column label="修复时限" width="180">
+              <template #default="{ row }">
+                <div v-if="row.due_at" class="flex flex-col gap-0.5">
+                  <span class="num text-xs">{{ fmtDateTime(row.due_at) }}</span>
+                  <span class="tl-tag" :style="slaStateSoftStyle(row.sla_state)">
+                    {{ slaStateMeta(row.sla_state).label }} · {{ fmtSlaRemaining(row.sla_remaining_hours) }}
+                  </span>
+                </div>
+                <span v-else class="text-xs text-gray-400">-</span>
+              </template>
+            </el-table-column>
             <el-table-column label="操作" width="200">
               <template #default="{ row }">
                 <div class="flex items-center gap-2">
@@ -360,12 +372,14 @@ import {
   planStatusSoftStyle,
   retestStateName,
   retestStateSoftStyle,
+  slaStateMeta,
+  slaStateSoftStyle,
   softStyle,
   STAT_CARD_COLORS,
   statusSoftStyleWithRetest,
   statusLabel,
 } from '../utils/colors'
-import { fmtDateTime } from '../utils/format'
+import { fmtDateTime, fmtSlaRemaining } from '../utils/format'
 import type { Report, Vuln } from '../types'
 import { usePlanDetail } from '../composables/usePlanDetail'
 import { usePlanReports } from '../composables/usePlanReports'

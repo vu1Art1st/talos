@@ -19,6 +19,9 @@ from app.services import task_lifecycle
 
 logger = logging.getLogger(__name__)
 
+# 开放 API 契约版本（P1-6）：仅当发生**破坏性**变更时递增，并同步 docs/OPEN_API_GUIDE.md
+OPEN_API_VERSION = "1"
+
 
 async def _periodic_task_recovery(app: FastAPI) -> None:
     """无队列（进程内执行）形态的兜底扫描：启动之外每 SWEEP_INTERVAL_SECONDS 回收一次。
@@ -108,6 +111,9 @@ def create_app() -> FastAPI:
         response.headers.setdefault(REQUEST_ID_HEADER, rid)
         # 阻止浏览器 MIME 嗅探，降低上传文件（如图片）被当作其他类型执行的风险
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # 开放 API 版本标识（P1-6）：破坏性调整必须升版本号（策略见 docs/OPEN_API_GUIDE.md）
+        if request.url.path.startswith("/api/v1/open"):
+            response.headers.setdefault("X-API-Version", OPEN_API_VERSION)
         if response.status_code >= 400:
             logger.warning(
                 "请求失败 rid=%s method=%s path=%s status=%s",

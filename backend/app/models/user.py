@@ -57,6 +57,9 @@ class PersonalAccessToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
+    # 令牌 scope（P1-6）：read / plan_write / admin_read / full，见 constants.PAT_SCOPES。
+    # 存量令牌默认 full（= 现状能力：读全开、写仍受角色 RBAC 约束），避免兼容性回归。
+    scope: Mapped[str] = mapped_column(String(16), default="full", server_default="full")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
     user: Mapped[User] = relationship(lazy="selectin")

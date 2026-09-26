@@ -87,6 +87,11 @@ class Vul(Base):
     asset_level: Mapped[int] = mapped_column(Integer, default=0)
     # CVSS 3.1 向量字符串（F4 计算器写入），空表示未评
     cvss_vector: Mapped[str] = mapped_column(String(255), default="")
+    # ---- P1-1 SLA 修复时限 ----
+    # 修复截止时间：由 services/sla_service 在新增 / 等级变更时按策略计算落库；
+    # 已闭环后保留终值（历史统计与导出用），重算只在显式调用时进行。
+    due_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
     is_retest: Mapped[bool] = mapped_column(default=False)
     delay_days: Mapped[int] = mapped_column(Integer, default=0)
     delay_reason: Mapped[str] = mapped_column(Text, default="")
@@ -140,12 +145,20 @@ class VulLog(Base):
 
 
 class Message(Base):
+    """站内消息（P1-2）：所有事件统一经 services/message_service.create_message 写入。
+
+    `link` 为前端站内深链（如 `/vulns/12`），无深链时为空串；权限不足时前端跳无权限页，
+    不在消息内泄露对象内容。
+    """
+
     __tablename__ = "messages"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    # constants.MESSAGE_TYPES 的键（vuln/plan/report/import/sla/system）
     msg_type: Mapped[str] = mapped_column(String(32), default="vuln")
     title: Mapped[str] = mapped_column(String(255), default="")
     content: Mapped[str] = mapped_column(Text, default="")
+    link: Mapped[str] = mapped_column(String(255), default="")
     is_read: Mapped[bool] = mapped_column(default=False)
-    create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)

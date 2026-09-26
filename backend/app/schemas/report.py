@@ -92,6 +92,10 @@ class ExportJobOut(BaseModel):
     status: str
     error: str = ""
     toc_auto_updated: bool = False  # 目录域是否已自动更新（当前恒为 False，前端据此提示手动更新域）
+    # P1-4 模板中心：本次导出使用的模板（template_id 为空表示包内默认模板）
+    template_id: int | None = None
+    template_name: str = ""
+    template_version: int = 0
     create_time: datetime | None = None
     finish_time: datetime | None = None
     has_file: bool = False  # 是否存在可下载的导出文件（导入自动生成的记录无实际文件）

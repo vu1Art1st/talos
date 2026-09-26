@@ -17,6 +17,41 @@ async def paginate(session: AsyncSession, stmt, page: int, size: int):
     return total, rows
 
 
+async def paginate_cursor(
+    session: AsyncSession, stmt, *, page: int, size: int, cursor: str = "", id_col=None,
+):
+    """分页 + 稳定游标（P1-6），返回 `(total, rows, meta)`。
+
+    - `cursor` 为空：沿用既有 offset 分页（`page`/`size`），`total` 为全量条数；
+    - `cursor` 非空（上一页末条 id）：忽略 `page`，改按 **id 降序**稳定遍历下一页，
+      `total` 仍为全量条数；
+    - `meta` 含 `page`/`size`/`has_more`/`next_cursor`，`next_cursor` 为 None 表示已到末页。
+
+    注意：游标模式强制按 id 降序，与默认业务排序（如接收日期倒序）可能不同——
+    这是稳定性优先的取舍，调用方在文档中说明即可。
+    """
+    count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    working = stmt
+    use_cursor = bool(cursor) and id_col is not None
+    if use_cursor:
+        working = working.order_by(None).order_by(id_col.desc())
+        if str(cursor).isdigit():
+            working = working.where(id_col < int(cursor))
+        rows = (await session.execute(working.limit(size + 1))).scalars().all()
+    else:
+        rows = (
+            await session.execute(working.offset((page - 1) * size).limit(size + 1))
+        ).scalars().all()
+
+    has_more = len(rows) > size
+    rows = list(rows[:size])
+    next_cursor = str(rows[-1].id) if (rows and has_more and use_cursor) else None
+    meta = {"page": page, "size": size, "has_more": has_more, "next_cursor": next_cursor}
+    return total, rows, meta
+
+
 def apply_sort(stmt, model, sort: str, order: str, allowed: set[str], default_order):
     """按白名单字段排序；sort 非法则用 default_order。default_order 为排序表达式或其元组。
 

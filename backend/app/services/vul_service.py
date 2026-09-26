@@ -15,7 +15,7 @@ from app.constants import (
     PlanStatus,
     VulStatus,
 )
-from app.models import Message, User, Vul, VulLog, VulRetestRecord
+from app.models import User, Vul, VulLog, VulRetestRecord
 
 
 def can_transition(current: int, target: int) -> bool:
@@ -176,14 +176,15 @@ async def transition(
         content=comment,
     ))
 
-    # 站内信通知提交人
+    # 站内信通知提交人（P1-2：统一经 message_service，带站内深链）
     if vul.submitter_id and vul.submitter_id != operator.id:
-        session.add(Message(
-            user_id=vul.submitter_id,
-            msg_type="vuln",
-            title=f"漏洞「{vul.title}」状态更新",
+        from app.services import message_service
+
+        await message_service.create_message(
+            session, vul.submitter_id, "vuln", f"漏洞「{vul.title}」状态更新",
             content=f"{operator.username} 将状态 {action}。{comment}",
-        ))
+            link=f"/vulns/{vul.id}",
+        )
     return vul
 
 

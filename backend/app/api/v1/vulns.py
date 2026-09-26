@@ -36,7 +36,7 @@ from app.schemas import (
     VulTransitionIn,
     VulUpdateIn,
 )
-from app.services import plan_service, vul_service
+from app.services import plan_service, sla_service, stats_cache, vul_service
 from app.services.audit_service import audit, resolve_realnames
 from app.services.notify_service import notify
 
@@ -62,11 +62,18 @@ async def _notify_transition(
                      system=plan.system_name, operator=operator)
 
 
-def build_vul_out(vul: Vul) -> VulOut:
+async def build_vul_out(session: AsyncSession, vul: Vul) -> VulOut:
+    """漏洞输出模型（含 SLA 派生状态）。
+
+    SLA 判定统一走 `sla_service.evaluate`（配置带短 TTL 缓存，逐行调用开销可忽略），
+    保证列表 / 详情 / 看板 / 导出 / 开放 API 口径一致。
+    """
     out = VulOut.model_validate(vul)
     out.asset_ids = [a.id for a in vul.assets]
     # 归属部门取自关联资产，去重后拼接
     out.department = "、".join(dict.fromkeys(a.department for a in vul.assets if a.department))
+    for key, value in sla_service.evaluate(vul, await sla_service.runtime(session)).items():
+        setattr(out, key, value)
     return out
 
 
@@ -274,6 +281,7 @@ async def list_vulns(
     test_types: str = "",
     submit_time_from: str = "",
     submit_time_to: str = "",
+    sla_state: str = "",
     mine: bool = False,
     sort: str = "",
     order: str = "desc",
@@ -297,6 +305,8 @@ async def list_vulns(
         submit_time_to=parse_date(submit_time_to),
         mine=mine, user=user,
     )
+    if sla_state:
+        cond.extend(sla_service.sla_state_condition(sla_state, await sla_service.runtime(session)))
 
     stmt = select(Vul).where(*cond)
     if sort == "level":
@@ -312,7 +322,7 @@ async def list_vulns(
             (Vul.submit_time.desc(), Vul.id.asc()),
         )
     total, vulns = await paginate(session, stmt, page, size)
-    return Page(total=total, items=[build_vul_out(v) for v in vulns])
+    return Page(total=total, items=[await build_vul_out(session, v) for v in vulns])
 
 
 # 修复情况归并口径（与前端展示一致）：已修复 / 修复中(含复测中) / 未修复 / 其他(已忽略+暂不处理)
@@ -593,6 +603,9 @@ async def create_vuln(
     vul.assets = await _fetch_assets(session, asset_ids)
     session.add(vul)
     await session.flush()
+    # P1-1 SLA：按当前策略计算修复截止时间（策略变更默认只影响新漏洞）
+    sla_config = await sla_service.get_config(session)
+    sla_service.apply_to_vul(vul, sla_config, await sla_service.load_policies(session))
     vul_service.add_log(session, vul, user, "创建漏洞")
     # 无漏洞闭环重开：已确认「测试通过」的计划新增漏洞时自动回到「初测中」
     await plan_service.reopen_passed_plan(session, vul.testing_plan_id)
@@ -601,10 +614,11 @@ async def create_vuln(
     await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
+    stats_cache.invalidate()
     await audit(session, request, "vuln_create", user, {"target": f"vulns/{vul.id}", "title": vul.title})
     await notify(request.app, session, "vuln_created",
                  title=vul.title, operator=user.realname or user.username)
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.post("/batch", response_model=list[VulOut])
@@ -619,6 +633,9 @@ async def create_vulns_batch(
     for plan_id in plan_ids:
         await _check_plan_access(session, plan_id, user)
     vulns: list[Vul] = []
+    # P1-1 SLA：批量创建共用同一份配置与策略（避免逐条查库）
+    sla_config = await sla_service.get_config(session)
+    sla_policies = await sla_service.load_policies(session)
     for item in body.vulns:
         data = item.model_dump()
         item_asset_ids = data.pop("asset_ids", [])
@@ -630,6 +647,7 @@ async def create_vulns_batch(
         vul.assets = await _fetch_assets(session, merged_ids)
         session.add(vul)
         await session.flush()
+        sla_service.apply_to_vul(vul, sla_config, sla_policies)
         vul_service.add_log(session, vul, user, "创建漏洞", "批量提交")
         vulns.append(vul)
     for plan_id in plan_ids:
@@ -640,6 +658,7 @@ async def create_vulns_batch(
     await session.commit()
     for vul in vulns:
         await session.refresh(vul)
+    stats_cache.invalidate()
     await audit(session, request, "vuln_create", user, {
         "op": "batch", "count": len(vulns),
         "titles": [v.title for v in vulns[:10]],
@@ -648,7 +667,7 @@ async def create_vulns_batch(
         await notify(request.app, session, "vuln_created",
                      title=vulns[0].title, count=len(vulns),
                      operator=user.realname or user.username)
-    return [build_vul_out(v) for v in vulns]
+    return [await build_vul_out(session, v) for v in vulns]
 
 
 @router.get("/{vul_id}", response_model=VulOut)
@@ -658,7 +677,7 @@ async def get_vuln(
     session: AsyncSession = Depends(get_session),
 ):
     vul = await get_or_404(session, Vul, vul_id, "漏洞不存在")
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.put("/{vul_id}", response_model=VulOut)
@@ -676,6 +695,7 @@ async def update_vuln(
     new_status = data.pop("status", None)
     old_status = vul.status
     old_plan_id = vul.testing_plan_id
+    old_level = vul.level
     if data.get("testing_plan_id") != old_plan_id:
         await _check_plan_access(session, data.get("testing_plan_id"), user)
     for k, v in data.items():
@@ -684,6 +704,10 @@ async def update_vuln(
     if vul.testing_plan_id is not None:
         vul.source = 0
     vul.assets = await _fetch_assets(session, asset_ids)
+    # P1-1 SLA：等级变化时按当前策略重算截止时间（与新增同一实现）
+    if vul.level != old_level:
+        sla_config = await sla_service.get_config(session)
+        sla_service.apply_to_vul(vul, sla_config, await sla_service.load_policies(session))
     vul_service.add_log(session, vul, user, "编辑漏洞")
     done_plans: list = []
     # 编辑页下拉直接调整状态：写日志并双向联动报告/测试计划状态
@@ -701,8 +725,9 @@ async def update_vuln(
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
     await session.refresh(vul)
+    stats_cache.invalidate()
     await _notify_transition(request, session, user, vul, old_status, new_status, done_plans)
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.delete("/{vul_id}")
@@ -731,6 +756,7 @@ async def delete_vuln(
     )
     await plan_service.refresh_stats(session, plan_id)
     await session.commit()
+    stats_cache.invalidate()
     await audit(session, request, "vuln_delete", user, {"target": f"vulns/{vul_id}", "title": title})
     return {"msg": "删除成功"}
 
@@ -758,6 +784,7 @@ async def delete_vulns_batch(
     for plan_id in plan_ids:
         await plan_service.refresh_stats(session, plan_id)
     await session.commit()
+    stats_cache.invalidate()
     await audit(session, request, "vuln_delete", operator, {
         "op": "batch", "count": len(vulns), "ids": body.ids[:50],
     })
@@ -793,13 +820,14 @@ async def set_vuln_status(
     done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
+    stats_cache.invalidate()
     if body.status != old_status:
         await audit(session, request, "vuln_transition", user, {
             "target": f"vulns/{vul_id}", "title": vul.title,
             "from": VUL_STATUS.get(old_status, str(old_status)), "to": VUL_STATUS.get(body.status, str(body.status)),
         })
     await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.patch("/{vul_id}/fields", response_model=VulOut)
@@ -828,12 +856,15 @@ async def patch_vuln_fields(
     if status_changed:
         await vul_service.set_status(session, vul, body.status, user, "报告编辑页调整状态")
         await vul_service.sync_plan_retest_state(session, [vul.id])
-    # 等级变化后重算关联计划的漏洞统计
+    # 等级变化后重算关联计划的漏洞统计与 SLA 截止时间
     if any(f.startswith("漏洞等级") for f in changed_fields):
+        sla_config = await sla_service.get_config(session)
+        sla_service.apply_to_vul(vul, sla_config, await sla_service.load_policies(session))
         await plan_service.refresh_stats(session, vul.testing_plan_id)
     await session.commit()
     await session.refresh(vul)
-    return build_vul_out(vul)
+    stats_cache.invalidate()
+    return await build_vul_out(session, vul)
 
 
 @router.post("/{vul_id}/transition", response_model=VulOut)
@@ -860,13 +891,14 @@ async def transition_vuln(
     done_plans = await vul_service.sync_plan_retest_state(session, [vul.id])
     await session.commit()
     await session.refresh(vul)
+    stats_cache.invalidate()
     if body.status != old_status:
         await audit(session, request, "vuln_transition", user, {
             "target": f"vulns/{vul_id}", "title": vul.title,
             "from": VUL_STATUS.get(old_status, str(old_status)), "to": VUL_STATUS.get(body.status, str(body.status)),
         })
     await _notify_transition(request, session, user, vul, old_status, body.status, done_plans)
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.post("/{vul_id}/delay", response_model=VulOut)
@@ -882,7 +914,7 @@ async def delay_vuln(
     vul_service.add_log(session, vul, user, "延期处理", f"延期{body.delay_days}天：{body.delay_reason}")
     await session.commit()
     await session.refresh(vul)
-    return build_vul_out(vul)
+    return await build_vul_out(session, vul)
 
 
 @router.get("/{vul_id}/logs", response_model=list[VulLogOut])

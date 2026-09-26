@@ -17,6 +17,10 @@
           <el-icon :size="15"><DataLine /></el-icon><span v-if="!collapsed">安全态势</span>
         </button>
         <template v-if="!collapsed"><div class="nav-group">漏洞运营</div></template>
+        <button class="nav-item" :class="{ active: activeMenu === '/todos' }"
+                :title="collapsed ? '个人待办' : undefined" @click="go('/todos')">
+          <el-icon :size="15"><Finished /></el-icon><span v-if="!collapsed">个人待办</span>
+        </button>
         <button v-if="auth.hasPerm('special:manage')" class="nav-item" :class="{ active: activeMenu === '/testing-plans' }"
                 :title="collapsed ? '渗透测试工单' : undefined" @click="go('/testing-plans')">
           <el-icon :size="15"><Tickets /></el-icon><span v-if="!collapsed">渗透测试工单</span>
@@ -36,6 +40,10 @@
         <button v-if="auth.hasPerm('report:manage')" class="nav-item" :class="{ active: activeMenu === '/reports' }"
                 :title="collapsed ? '报告中心' : undefined" @click="go('/reports')">
           <el-icon :size="15"><Document /></el-icon><span v-if="!collapsed">报告中心</span>
+        </button>
+        <button v-if="auth.hasPerm('report:manage')" class="nav-item" :class="{ active: activeMenu === '/report-templates' }"
+                :title="collapsed ? '报告模板' : undefined" @click="go('/report-templates')">
+          <el-icon :size="15"><Files /></el-icon><span v-if="!collapsed">报告模板</span>
         </button>
         <template v-if="auth.hasPerm('asset:manage')">
           <template v-if="!collapsed"><div class="nav-group">资产管理</div></template>
@@ -77,6 +85,10 @@
                   :title="collapsed ? '通知渠道' : undefined" @click="go('/notify-channels')">
             <el-icon :size="15"><Bell /></el-icon><span v-if="!collapsed">通知渠道</span>
           </button>
+          <button v-if="auth.hasPerm('system:manage')" class="nav-item" :class="{ active: activeMenu === '/sla-config' }"
+                  :title="collapsed ? 'SLA 配置' : undefined" @click="go('/sla-config')">
+            <el-icon :size="15"><Timer /></el-icon><span v-if="!collapsed">SLA 配置</span>
+          </button>
         </template>
       </nav>
 
@@ -107,6 +119,7 @@
             <span class="cmdbtn-text">搜索或跳转…</span>
             <kbd class="kbd">{{ isMac ? '⌘K' : 'Ctrl K' }}</kbd>
           </button>
+          <NotificationBell />
           <button class="icon-btn" :title="theme.dark ? '切换到浅色' : '切换到暗黑'" @click="theme.toggle()">
             <el-icon :size="14"><Sunny v-if="theme.dark" /><Moon v-else /></el-icon>
           </button>
@@ -170,11 +183,12 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { resolveBackPath } from '../composables/useNavBack'
 import {
-  Aim, ArrowLeft, Bell, Collection, Connection, DataLine, Document, Expand, Flag, Fold, Key,
-  Memo, Monitor, OfficeBuilding, Search, Sunny, Tickets, User, Warning, Moon,
+  Aim, ArrowLeft, Bell, Collection, Connection, DataLine, Document, Expand, Files, Finished, Flag, Fold, Key,
+  Memo, Monitor, OfficeBuilding, Search, Sunny, Tickets, Timer, User, Warning, Moon,
 } from '@element-plus/icons-vue'
 import client from '../api/client'
 import BrandMark from '../components/BrandMark.vue'
+import NotificationBell from '../components/NotificationBell.vue'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { useUiStore } from '../stores/ui'

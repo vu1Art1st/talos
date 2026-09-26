@@ -164,39 +164,118 @@ async def test_completed_export_is_not_regenerated_on_retry(client):
         await session.commit()
 
 
-async def test_notify_dedup_key_prevents_duplicate_delivery(client, monkeypatch):
-    """重复投递：同一幂等键的通知只发送一次；不同幂等键仍各发一次。"""
-    sent: list[str] = []
-    monkeypatch.setattr(
-        "app.workers.main._send_mail_sync",
-        lambda to, subject, body: sent.append(subject),
+async def _make_delivery(session):
+    """建一条待投递记录（+ 关联渠道），返回 (delivery_id, channel_id)。"""
+    from app.models import NotificationChannel, NotifyDelivery
+
+    channel = NotificationChannel(
+        name=f"测试渠道-{uuid4().hex[:6]}", type="email",
+        config={"recipients": ["a@b.c"]}, events=[],
     )
+    session.add(channel)
+    await session.flush()
+    row = NotifyDelivery(
+        channel_id=channel.id, channel_name=channel.name, channel_type=channel.type,
+        event="vuln_created", title="标题", content="正文", status="pending",
+    )
+    session.add(row)
+    await session.commit()
+    return row.id, channel.id
+
+
+async def _drop_delivery(delivery_id: int, channel_id: int) -> None:
+    from app.models import NotificationChannel, NotifyDelivery
+
+    async with async_session_maker() as session:
+        row = await session.get(NotifyDelivery, delivery_id)
+        if row is not None:
+            await session.delete(row)
+        channel = await session.get(NotificationChannel, channel_id)
+        if channel is not None:
+            await session.delete(channel)
+        await session.commit()
+
+
+async def test_notify_delivery_success_is_not_resent(client, monkeypatch):
+    """投递记录是幂等锚点（P1-3）：成功后重投直接短路，不产生第二次外呼。"""
+    calls: list[str] = []
+
+    async def fake_send(channel_type, config, title, body):
+        calls.append(title)
+        return 200, ""
+
+    monkeypatch.setattr("app.services.notify_service.perform_send", fake_send)
+    from app.models import NotifyDelivery
     from app.workers.main import send_notify_task
 
-    key = f"notify-{uuid4().hex}"
-    for _ in range(3):
-        await send_notify_task({}, "email", {"recipients": ["a@b.c"]}, "标题", "正文", key)
-    assert sent == ["标题"]
+    async with async_session_maker() as session:
+        delivery_id, channel_id = await _make_delivery(session)
 
-    await send_notify_task({}, "email", {"recipients": ["a@b.c"]}, "标题", "正文", uuid4().hex)
-    assert len(sent) == 2
+    await send_notify_task({}, delivery_id)
+    await send_notify_task({}, delivery_id)  # 已成功 → 短路
+    assert calls == ["标题"]
+
+    async with async_session_maker() as session:
+        row = await session.get(NotifyDelivery, delivery_id)
+        assert row.status == "success" and row.attempts == 1 and row.finish_time is not None
+    await _drop_delivery(delivery_id, channel_id)
 
 
-async def test_notify_dedup_key_released_after_failure(client, monkeypatch):
-    """发送失败必须释放幂等键：否则队列重试会被自己的幂等键永久挡住。"""
-    calls: list[int] = []
+async def test_notify_delivery_retry_then_dead_letter(client, monkeypatch):
+    """可重试错误 → failed + next_retry_at；永久错误 → dead 且保留原因（P1-3）。"""
+    retryable = {"flag": True}
 
-    def boom(to, subject, body):
-        calls.append(1)
-        raise RuntimeError("smtp down")
+    async def fake_send(channel_type, config, title, body):
+        if retryable["flag"]:
+            return 0, "[可重试] 网络连接失败：timeout"
+        return 400, "对端返回 400（请检查渠道配置：地址、鉴权或收件人）"
 
-    monkeypatch.setattr("app.workers.main._send_mail_sync", boom)
+    monkeypatch.setattr("app.services.notify_service.perform_send", fake_send)
+    from app.models import NotifyDelivery
     from app.workers.main import send_notify_task
 
-    key = f"fail-{uuid4().hex}"
-    await send_notify_task({}, "email", {"recipients": ["a@b.c"]}, "t", "b", key)
-    await send_notify_task({}, "email", {"recipients": ["a@b.c"]}, "t", "b", key)
-    assert len(calls) == 2  # 第二次仍被允许（键已释放）
+    async with async_session_maker() as session:
+        delivery_id, channel_id = await _make_delivery(session)
+
+    await send_notify_task({}, delivery_id)
+    async with async_session_maker() as session:
+        row = await session.get(NotifyDelivery, delivery_id)
+        assert row.status == "failed" and row.next_retry_at is not None
+        assert "[可重试]" not in row.last_error
+
+    retryable["flag"] = False
+    await send_notify_task({}, delivery_id)
+    async with async_session_maker() as session:
+        row = await session.get(NotifyDelivery, delivery_id)
+        assert row.status == "dead" and "400" in row.dead_letter_reason
+    await _drop_delivery(delivery_id, channel_id)
+
+
+async def test_retry_due_deliveries_redelivers(client, monkeypatch):
+    """到期待重试记录可被兜底扫描重投（进程重启后不丢失）。"""
+    from datetime import timedelta
+
+    from app.core.timeutil import now
+    from app.models import NotifyDelivery
+
+    async def ok_send(channel_type, config, title, body):
+        return 200, ""
+
+    monkeypatch.setattr("app.services.notify_service.perform_send", ok_send)
+    from app.services import notify_service
+
+    async with async_session_maker() as session:
+        delivery_id, channel_id = await _make_delivery(session)
+        row = await session.get(NotifyDelivery, delivery_id)
+        row.status = "failed"
+        row.next_retry_at = now() - timedelta(seconds=1)
+        await session.commit()
+
+    async with async_session_maker() as session:
+        assert await notify_service.retry_due_deliveries(session) == 1
+        await session.commit()
+        assert (await session.get(NotifyDelivery, delivery_id)).status == "success"
+    await _drop_delivery(delivery_id, channel_id)
 
 
 async def test_dedup_key_claim_and_cleanup(client):

@@ -173,6 +173,20 @@ AUDIT_ACTIONS = {
     "spring_action_change": "春耕行动变更",
     "remote_testing_change": "远程检测变更",
     "attachment_download": "下载专项附件",
+    # P1-1 SLA 修复时限：策略变更与历史重算必须留痕（默认只影响未来新漏洞）
+    "sla_config_update": "SLA 配置变更",
+    "sla_policy_update": "SLA 策略变更",
+    "sla_recalculate": "SLA 历史重算",
+    "sla_extend": "SLA 延期",
+    # P1-3 外部通知投递可观测：暂停/恢复/重放均为管理动作，需留痕
+    "notify_delivery_replay": "重放通知投递",
+    # P1-4 报告模板中心：发布 / 停用 / 回滚必须记入审计
+    "template_publish": "发布报告模板",
+    "template_activate": "启用报告模板版本",
+    "template_delete": "删除报告模板",
+    # P1-7 运营看板视图
+    "dashboard_view_save": "保存看板视图",
+    "dashboard_view_delete": "删除看板视图",
 }
 
 # 通知渠道类型（F3）：webhook 走 httpx 出站 POST，邮件复用 SMTP 任务
@@ -188,6 +202,106 @@ NOTIFY_EVENTS = {
     "plan_claimed": "工单认领",
     "vuln_transition": "漏洞状态流转",
     "retest_completed": "复测完成",
+    # P1-1 SLA：到期前提醒与逾期升级（由 worker 的 sla_scan_task 触发，幂等键防重复）
+    "sla_due_soon": "SLA 即将到期",
+    "sla_overdue": "SLA 已逾期",
+}
+
+
+# ---------- P1-3 外部通知投递状态（投递记录展示与筛选） ----------
+NOTIFY_DELIVERY_STATUS_NAME = {
+    "pending": "待投递",
+    "success": "已送达",
+    "failed": "待重试",
+    "dead": "死信",
+}
+NOTIFY_DELIVERY_STATUS_COLOR = {
+    "pending": "#D97706",
+    "success": "#059669",
+    "failed": "#D97706",
+    "dead": "#DC2626",
+}
+
+
+# ---------- P1-2 站内消息与个人待办 ----------
+# 站内信类型（Message.msg_type）：前端按类型筛选与着色
+MESSAGE_TYPES = {
+    "vuln": "漏洞",
+    "plan": "工单",
+    "report": "报告",
+    "import": "导入",
+    "sla": "SLA",
+    "system": "系统",
+}
+
+# 个人待办聚合分类（dashboard/todos 聚合，派生不落库）
+TODO_TYPES = {
+    "plan_unclaimed": "待认领工单",
+    "my_vulns": "我提交的漏洞",
+    "retest": "待复测",
+    "import_pending": "待确认导入",
+    "sla_due": "SLA 临期",
+    "sla_overdue": "SLA 逾期",
+}
+
+
+# ---------- P1-6 个人访问令牌 scope ----------
+# 存量令牌与新建令牌默认 full（= 现状能力：读全开、写仍受角色 RBAC 约束），避免回归。
+PAT_SCOPES = {
+    "read": "只读",
+    "plan_write": "工单读写",
+    "admin_read": "管理只读",
+    "full": "读写（含工单写与管理只读）",
+}
+PAT_DEFAULT_SCOPE = "full"
+# 「读」能力集合：所有 scope 均可读
+PAT_READ_SCOPES = ("read", "plan_write", "admin_read", "full")
+# 「工单写」能力集合
+PAT_PLAN_WRITE_SCOPES = ("plan_write", "full")
+# 「管理只读」能力集合
+PAT_ADMIN_READ_SCOPES = ("admin_read", "full")
+
+
+# ---------- P1-4 报告模板中心 ----------
+REPORT_TEMPLATE_TYPES = {
+    "penetration": "渗透测试报告",
+    "retest": "复测报告",
+    "all": "通用模板",
+}
+
+
+# ---------- P1-1 SLA 修复时限 ----------
+# 计时日口径：自然日 / 工作日（工作日排除周末与配置的节假日）
+SLA_DAY_BASIS = {"natural": "自然日", "workday": "工作日"}
+
+# SLA 派生状态（展示与筛选；判定函数统一在 services/sla_service.py）
+SLA_STATES = {
+    "none": "未设置",
+    "ok": "正常",
+    "due_soon": "即将到期",
+    "overdue": "已逾期",
+    "closed": "已闭环",
+}
+SLA_STATE_COLORS = {
+    "none": "#8A968F",
+    "ok": "#059669",
+    "due_soon": "#D97706",
+    "overdue": "#DC2626",
+    "closed": "#8A968F",
+}
+
+
+# ---------- P1-7 运营看板视图 ----------
+DASHBOARD_VIEW_SCOPES = {"personal": "个人视图", "department": "部门默认视图"}
+
+
+# ---------- P1-5 导入结果口径（结果报告与重复候选） ----------
+IMPORT_OUTCOME_NAME = {
+    "created": "新增",
+    "updated": "更新",
+    "merged": "合并",
+    "skipped": "跳过",
+    "failed": "失败",
 }
 
 # Word 导入模板中「漏洞信息表格」的行标签 -> 字段映射

@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import (
@@ -10,22 +10,33 @@ from app.constants import (
     ASSET_STATUS,
     ASSET_STATUS_COLOR,
     AUDIT_ACTIONS,
+    DASHBOARD_VIEW_SCOPES,
     EXPORT_JOB_STATUS_COLOR,
     EXPORT_JOB_STATUS_NAME,
     IMPORT_BATCH_STATUS_COLOR,
     IMPORT_BATCH_STATUS_NAME,
+    IMPORT_OUTCOME_NAME,
     IMPORT_RECORD_STATUS_COLOR,
     IMPORT_RECORD_STATUS_NAME,
+    MESSAGE_TYPES,
     NONPEN_ITEM_ACTION_NAMES,
     NONPEN_ITEM_ACTIONS,
     NONPEN_ITEM_COLORS,
     NONPEN_ITEM_STATUS,
     NONPEN_ITEMS,
     NOTIFY_CHANNEL_TYPES,
+    NOTIFY_DELIVERY_STATUS_COLOR,
+    NOTIFY_DELIVERY_STATUS_NAME,
     NOTIFY_EVENTS,
+    PAT_SCOPES,
     PERMISSIONS,
+    REPORT_TEMPLATE_TYPES,
+    SLA_DAY_BASIS,
+    SLA_STATE_COLORS,
+    SLA_STATES,
     TESTING_PLAN_STATUS,
     TESTING_PLAN_STATUS_COLOR,
+    TODO_TYPES,
     URL_TAG,
     URL_TAG_COLOR,
     VUL_LAYER,
@@ -39,7 +50,7 @@ from app.constants import (
 from app.core.config import settings
 from app.core.deps import get_current_user, require_perm
 from app.db import get_session
-from app.models import DictOption, Message, User, VulnType
+from app.models import DictOption, User, VulnType
 from app.schemas import DictOptionIn, DictOptionOut, VulnTypeIn, VulnTypeOut
 
 router = APIRouter(tags=["通用"])
@@ -81,12 +92,22 @@ async def _name_dicts(session: AsyncSession) -> dict:
         "testing_plan_status": TESTING_PLAN_STATUS,
         "import_batch_status": IMPORT_BATCH_STATUS_NAME,
         "import_record_status": IMPORT_RECORD_STATUS_NAME,
+        "import_outcome": IMPORT_OUTCOME_NAME,
         "export_job_status": EXPORT_JOB_STATUS_NAME,
         "permissions": PERMISSIONS,
         # 审计动作（登录/操作日志筛选下拉）与通知渠道字典（F3/F7）
         "audit_actions": AUDIT_ACTIONS,
         "notify_channel_types": NOTIFY_CHANNEL_TYPES,
         "notify_events": NOTIFY_EVENTS,
+        # P1-1 / P1-2 / P1-3 / P1-4 / P1-6 / P1-7 新增字典
+        "sla_state": SLA_STATES,
+        "sla_day_basis": SLA_DAY_BASIS,
+        "message_type": MESSAGE_TYPES,
+        "todo_type": TODO_TYPES,
+        "notify_delivery_status": NOTIFY_DELIVERY_STATUS_NAME,
+        "pat_scope": PAT_SCOPES,
+        "report_template_type": REPORT_TEMPLATE_TYPES,
+        "dashboard_view_scope": DASHBOARD_VIEW_SCOPES,
     }
 
 
@@ -103,6 +124,8 @@ def _color_dicts() -> dict:
         "import_batch_status": IMPORT_BATCH_STATUS_COLOR,
         "import_record_status": IMPORT_RECORD_STATUS_COLOR,
         "export_job_status": EXPORT_JOB_STATUS_COLOR,
+        "sla_state": SLA_STATE_COLORS,
+        "notify_delivery_status": NOTIFY_DELIVERY_STATUS_COLOR,
     }
 
 
@@ -245,38 +268,3 @@ async def upload_image(file: UploadFile, _: User = Depends(get_current_user)):
     name = f"{uuid.uuid4().hex}{ext}"
     (settings.storage_sub("uploads", "images") / name).write_bytes(data)
     return {"url": f"/storage/uploads/images/{name}"}
-
-
-@router.get("/messages")
-async def list_messages(
-    unread_only: bool = False,
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-):
-    cond = [Message.user_id == user.id]
-    if unread_only:
-        cond.append(Message.is_read.is_(False))
-    rows = (
-        await session.execute(
-            select(Message).where(*cond).order_by(Message.id.desc()).limit(50)
-        )
-    ).scalars().all()
-    return [
-        {
-            "id": m.id, "title": m.title, "content": m.content,
-            "is_read": m.is_read, "create_time": m.create_time,
-        }
-        for m in rows
-    ]
-
-
-@router.post("/messages/read")
-async def mark_read(
-    user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_session),
-):
-    await session.execute(
-        update(Message).where(Message.user_id == user.id).values(is_read=True)
-    )
-    await session.commit()
-    return {"msg": "ok"}

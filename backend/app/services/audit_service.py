@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.client_info import get_client_ip, get_user_agent
+from app.core.log_context import current_request_id
 from app.core.timeutil import now
 from app.models import OperationLog, User
 
@@ -49,19 +50,26 @@ async def audit(
     """
     ip = ""
     ua = ""
+    pat_name = ""
     if request is not None:
         ip = get_client_ip(request)[:64]
         ua = get_user_agent(request)[:256]
+        # 开放 API 写操作：把 PAT 名称并入 detail，便于审计按令牌溯源（P1-6）
+        pat_name = str(getattr(request.state, "pat_name", "") or "")
     username = user if isinstance(user, str) else getattr(user, "username", "") or ""
     user_id = getattr(user, "id", None) if not isinstance(user, str) else None
+    payload = dict(detail or {})
+    if pat_name and "pat_name" not in payload:
+        payload["pat_name"] = pat_name
     try:
         session.add(OperationLog(
             user_id=user_id,
             username=username,
             action=action,
-            detail=json.dumps(detail, ensure_ascii=False) if detail else "",
+            detail=json.dumps(payload, ensure_ascii=False) if payload else "",
             ip=ip,
             user_agent=ua,
+            request_id=current_request_id(),
             create_time=now(),
         ))
         await session.commit()

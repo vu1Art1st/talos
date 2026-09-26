@@ -29,6 +29,10 @@ class ImportRecordOut(BaseModel):
     status: str = "parsed"
     parse_error: str = ""
     vul_id: int | None = None
+    # ---- P1-5 数据治理 ----
+    merge_vul_id: int | None = None  # 选择「合并到已有漏洞」时的目标
+    outcome: str = ""  # created / updated / merged / skipped / failed
+    outcome_reason: str = ""
 
 
 class ImportRecordUpdateIn(BaseModel):
@@ -83,3 +87,52 @@ class BatchConfirmOut(BaseModel):
     failed: int
     report_ids: list[int] = []  # 本次生成/关联的报告，前端据此调批量导出
     details: list[BatchConfirmItemOut] = []
+
+
+# ---------- P1-5 数据治理：字段修正流水、重复候选、失败重试 ----------
+class ImportRecordChangeOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    record_id: int
+    field: str = ""
+    old_value: str = ""
+    new_value: str = ""
+    source: str = "manual"
+    username: str = ""
+    create_time: datetime | None = None
+
+
+class ImportDuplicateCandidateOut(BaseModel):
+    vul_id: int
+    title: str = ""
+    level: int = 30
+    status: int = 10
+    affected_url: str = ""
+    testing_plan_id: int | None = None
+    ticket_id: str = ""
+    similarity: float = 0.0
+
+
+class ImportDuplicateGroupOut(BaseModel):
+    record_id: int
+    title: str = ""
+    level: int = 30
+    affected_url: str = ""
+    merge_vul_id: int | None = None
+    candidates: list[ImportDuplicateCandidateOut] = []
+
+
+class ImportRecordMergeIn(BaseModel):
+    """合并到已有漏洞（`vul_id`）或取消合并（`vul_id=None` → 保留为独立记录）。"""
+
+    vul_id: int | None = None
+
+
+class ImportRetryOut(BaseModel):
+    batch_id: int
+    scope: str = "failed"  # failed（仅失败记录）/ batch（整批重解析）
+    retried: int = 0
+    resolved: int = 0
+    still_failed: int = 0
+    msg: str = ""

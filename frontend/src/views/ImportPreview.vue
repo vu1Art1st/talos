@@ -15,6 +15,8 @@
           <span v-if="batch.meta_json?.is_retest" class="ktag">复测</span>
         </template>
         <div class="flex-1" />
+        <!-- P1-5：重复漏洞候选检查（标题/URL/等级/工单/相似度并列，可合并或保留为独立记录） -->
+        <el-button :loading="dupLoading" @click="openDuplicates">重复候选检查</el-button>
         <el-button type="primary" :disabled="!selected.length" @click="confirm">
           确认入库（{{ selected.length }} 条）
         </el-button>
@@ -61,7 +63,11 @@
           <i></i>{{ importRecordMeta(rec.status).label }}
         </span>
         <span v-if="rec.parse_error" class="ktag">{{ rec.parse_error }}</span>
+        <span v-if="rec.merge_vul_id" class="ktag" style="color: var(--tl-primary)">
+          合并到漏洞 #{{ rec.merge_vul_id }}
+        </span>
         <div class="flex-1" />
+        <el-button v-if="rec.merge_vul_id" size="small" link @click="mergeRecord(rec, null)">取消合并</el-button>
         <el-button v-if="rec.status !== 'confirmed' && rec.status !== 'discarded'" size="small"
                    @click="editing = editing === rec.id ? null : rec.id">
           {{ editing === rec.id ? '收起' : '修正' }}
@@ -125,6 +131,50 @@
     <el-empty v-if="!records.length" description="该批次没有解析出漏洞记录，请检查文档是否符合模板" :image-size="80" />
 
     <ImportLevelMismatchDialog v-model="mismatchVisible" :items="mismatchItems" />
+
+    <!-- P1-5 重复候选：标题 / URL / 等级 / 关联工单 / 相似度并列；可合并或保留为独立记录 -->
+    <el-dialog v-model="dupVisible" title="重复漏洞候选" width="960px">
+      <div class="text-xs text-gray-400 mb-2">
+        相似度 ≥ 50%（或 URL 命中）的已入库漏洞会被列为候选；选择「合并」后该记录入库时将更新目标漏洞而非新建。
+      </div>
+      <el-empty v-if="!duplicates.length" description="未发现重复候选，可按独立记录入库" :image-size="70" />
+      <div v-for="g in duplicates" :key="g.record_id" class="dup-group">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="text-sm font-semibold">{{ g.title }}</span>
+          <span class="dot-tag" :style="levelDotStyle(g.level)"><i></i>{{ meta?.vul_level?.[g.level] }}</span>
+          <span v-if="g.merge_vul_id" class="ktag" style="color: var(--tl-primary)">已选合并 #{{ g.merge_vul_id }}</span>
+        </div>
+        <el-table :data="g.candidates" size="small" stripe>
+          <el-table-column label="候选漏洞" min-width="240" show-overflow-tooltip>
+            <template #default="{ row }">
+              <el-link type="primary" @click="router.push(`/vulns/${row.vul_id}`)">#{{ row.vul_id }} {{ row.title }}</el-link>
+            </template>
+          </el-table-column>
+          <el-table-column label="等级" width="90">
+            <template #default="{ row }">
+              <span class="dot-tag" :style="levelDotStyle(row.level)"><i></i>{{ meta?.vul_level?.[row.level] }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="状态" width="110">
+            <template #default="{ row }">{{ meta?.vul_status?.[row.status] ?? row.status }}</template>
+          </el-table-column>
+          <el-table-column label="关联工单" width="140">
+            <template #default="{ row }">{{ row.ticket_id || '-' }}</template>
+          </el-table-column>
+          <el-table-column label="相似度" width="100">
+            <template #default="{ row }"><span class="num">{{ Math.round(row.similarity * 100) }}%</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" class-name="op-col">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" link
+                         :disabled="g.merge_vul_id === row.vul_id"
+                         @click="mergeRecord(g, row.vul_id)">合并到该漏洞</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-button size="small" link class="mt-1" @click="mergeRecord(g, null)">保留为独立记录</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -141,7 +191,7 @@ import { dotStyle, importRecordMeta, levelDotStyle } from '../utils/colors'
 import { safeHtml } from '../utils/html'
 import { joinAffectedUrl, parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
 import type {
-  Asset, ImportBatch, ImportLevelMismatch, ImportRecord, Items, Report, TestingPlan,
+  Asset, ImportBatch, ImportDuplicateGroup, ImportLevelMismatch, ImportRecord, Items, Report, TestingPlan,
 } from '../types'
 
 const auth = useAuthStore()
@@ -215,6 +265,30 @@ async function saveRecord(rec: ImportRecord) {
 async function discard(rec: ImportRecord) {
   await client.post(`/imports/records/${rec.id}/discard`)
   checked[rec.id] = false
+  await load()
+}
+
+// ---------- P1-5 重复候选与合并 ----------
+const dupVisible = ref(false)
+const dupLoading = ref(false)
+const duplicates = ref<ImportDuplicateGroup[]>([])
+
+async function openDuplicates() {
+  dupLoading.value = true
+  try {
+    duplicates.value = (await client.get<ImportDuplicateGroup[]>(`/imports/${route.params.id}/duplicates`)).data
+    dupVisible.value = true
+  } finally {
+    dupLoading.value = false
+  }
+}
+
+/** 合并到已有漏洞（vulId）或保留为独立记录（null）；对单条记录与候选分组两种入参通用 */
+async function mergeRecord(target: ImportRecord | ImportDuplicateGroup, vulId: number | null) {
+  const recordId = 'record_id' in target ? target.record_id : target.id
+  await client.post(`/imports/records/${recordId}/merge`, { vul_id: vulId })
+  target.merge_vul_id = vulId
+  ElMessage.success(vulId ? `已选择合并到漏洞 #${vulId}` : '已设为独立记录')
   await load()
 }
 

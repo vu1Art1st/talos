@@ -73,11 +73,15 @@ async def create_pat(
         token_hash=token_hash,
         prefix=prefix,
         expires_at=now() + timedelta(days=body.expire_days),
+        # P1-6：scope 决定该令牌可执行的能力（读 / 工单写 / 管理只读），默认 full 兼容现状
+        scope=body.scope,
     )
     session.add(row)
     await session.commit()
     await session.refresh(row)
-    await audit(session, request, "pat_create", user, {"target": f"pats/{row.id}", "name": row.name})
+    await audit(session, request, "pat_create", user, {
+        "target": f"pats/{row.id}", "name": row.name, "scope": row.scope,
+    })
     return PatCreatedOut(**PatOut.model_validate(row).model_dump(), token=token)
 
 

@@ -7,6 +7,7 @@ from app.api.v1 import (
     dashboard,
     imports,
     knowledge,
+    messages,
     misc,
     nonpen,
     notify,
@@ -16,7 +17,9 @@ from app.api.v1 import (
     remote_testing,
     reports,
     search,
+    sla,
     spring_action,
+    templates,
     testing_plan,
     users,
     vulns,
@@ -41,4 +44,7 @@ api_router.include_router(open_api.router)
 api_router.include_router(open_plans.router)
 api_router.include_router(audit.router)
 api_router.include_router(notify.router)
+api_router.include_router(sla.router)
+api_router.include_router(templates.router)
+api_router.include_router(messages.router)
 api_router.include_router(misc.router)

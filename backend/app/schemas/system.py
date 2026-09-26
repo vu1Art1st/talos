@@ -1,9 +1,14 @@
-"""系统域 schema：审计日志（F7）、个人访问令牌（F6）、通知渠道（F3）。"""
+"""系统域 schema：审计日志（F7）、个人访问令牌（F6）、通知渠道与投递记录（P1-3）。"""
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.constants import NOTIFY_CHANNEL_TYPES, NOTIFY_EVENTS
+from app.constants import (
+    NOTIFY_CHANNEL_TYPES,
+    NOTIFY_EVENTS,
+    PAT_DEFAULT_SCOPE,
+    PAT_SCOPES,
+)
 from app.core.outbound import assert_public_url
 
 
@@ -20,22 +25,33 @@ class OperationLogOut(BaseModel):
     detail: str = ""
     ip: str = ""
     user_agent: str = ""
+    # 请求追踪 ID（P1-6）：与响应头 X-Request-Id 同值
+    request_id: str = ""
     create_time: datetime
 
 
-# ---------- 个人访问令牌（F6） ----------
+# ---------- 个人访问令牌（F6 / P1-6） ----------
 PAT_EXPIRE_DAYS_CHOICES = (7, 30, 90, 365)
 
 
 class PatCreateIn(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     expire_days: int = Field(ge=1, le=365)
+    # scope 见 constants.PAT_SCOPES；默认 full = 现状能力，避免存量调用方回归
+    scope: str = PAT_DEFAULT_SCOPE
 
     @field_validator("expire_days")
     @classmethod
     def _check_choices(cls, v: int) -> int:
         if v not in PAT_EXPIRE_DAYS_CHOICES:
             raise ValueError(f"有效期仅支持 {list(PAT_EXPIRE_DAYS_CHOICES)} 天档位")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def _check_scope(cls, v: str) -> str:
+        if v not in PAT_SCOPES:
+            raise ValueError(f"scope 仅支持 {list(PAT_SCOPES)}")
         return v
 
 
@@ -46,6 +62,7 @@ class PatOut(BaseModel):
     expires_at: datetime
     last_used_at: datetime | None = None
     is_active: bool = True
+    scope: str = PAT_DEFAULT_SCOPE
     create_time: datetime
 
     model_config = {"from_attributes": True}
@@ -107,3 +124,35 @@ class NotifyChannelOut(BaseModel):
     update_time: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ---------- 通知投递记录（P1-3 可观测与失败恢复） ----------
+class NotifyDeliveryOut(BaseModel):
+    id: int
+    channel_id: int | None = None
+    channel_name: str = ""
+    channel_type: str = ""
+    event: str = ""
+    title: str = ""
+    target: str = ""
+    status: str = "pending"
+    attempts: int = 0
+    http_status: int = 0
+    last_error: str = ""
+    next_retry_at: datetime | None = None
+    dead_letter_reason: str = ""
+    request_time: datetime | None = None
+    last_attempt_at: datetime | None = None
+    finish_time: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class NotifyTestOut(BaseModel):
+    """测试发送回执：不再只返回「已入队」，而是给出投递记录 ID 与本次实际结果。"""
+
+    delivery_id: int
+    status: str = "pending"
+    http_status: int = 0
+    error: str = ""
+    msg: str = ""

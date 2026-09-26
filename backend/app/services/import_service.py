@@ -30,7 +30,7 @@ from app.models import (
     Vul,
     VulLog,
 )
-from app.services import plan_service, report_meta, vul_service
+from app.services import plan_service, report_meta, sla_service, stats_cache, template_service, vul_service
 from app.services.report_builder import build_report_docx
 from app.services.report_html import vuln_section_html
 
@@ -380,19 +380,29 @@ async def confirm_one_record(
     session: AsyncSession, batch: ImportBatch, rec: ImportRecord,
     plan: TestingPlan | None, asset: Asset | None, report: Report | None,
     user: User, kb_map: dict[int, KnowledgeEntry], is_retest: bool, created: int,
-) -> tuple[Vul, bool]:
-    """确认单条解析记录：知识库回填 → 去重合并/新建漏洞 → 写日志 → 关联报告章节。
+) -> tuple[Vul, bool, str]:
+    """确认单条解析记录：知识库回填 → 去重合并 / 合并到指定漏洞 / 新建 → 写日志 → 关联章节。
 
-    返回 (漏洞, 是否新建)；created 为已处理的记录条数，用于报告章节排序。
+    返回 (漏洞, 是否新建, 入库结果)；created 为已处理的记录条数，用于报告章节排序。
+    入库结果（写入 `rec.outcome`，供结果报告使用）：created / updated / merged。
+
+    P1-5：`rec.merge_vul_id` 非空表示用户在重复候选视图中显式选择「合并到已有漏洞」，
+    此时不再按标题去重，直接更新该漏洞；目标漏洞已被删除时降级为常规去重/新建并记录原因。
     """
     description_html, solution_html = apply_knowledge_backfill(rec, kb_map.get(rec.vul_type))
-    existing = (
+    merged_target = None
+    if rec.merge_vul_id:
+        merged_target = await session.get(Vul, rec.merge_vul_id)
+        if merged_target is None:
+            rec.outcome_reason = "原合并目标漏洞已删除，已按常规去重规则处理"
+    existing = merged_target or (
         await find_existing_report_vul(session, plan, batch.doc_kind, rec.title)
         if plan is not None else None
     )
     if existing is not None:
         vul = update_vul_from_retest(existing, rec, description_html, solution_html, is_retest)
         is_new = False
+        outcome = "merged" if merged_target is not None else "updated"
     else:
         # 报告格式导入：漏洞提交时间取报告时间（标题日期 14:00），保证按月统计口径一致
         submit_time = report.create_time if report is not None else None
@@ -403,20 +413,28 @@ async def confirm_one_record(
         session.add(vul)
         await session.flush()
         is_new = True
+        outcome = "created"
     log_content = f"来源批次 #{batch.id}（{batch.filename}）"
+    if outcome == "merged":
+        log_content += f"；按人工选择合并到已有漏洞 #{vul.id}"
     if rec.level_mismatch:
         # 汇总表与详情等级不一致时以详情为准，写入日志便于追溯误判修复过程
         log_content += (
             f"；风险问题详情等级「{rec.level_detail_text}」与汇总表「{rec.level_summary_text}」"
             f"不一致，已采用详情等级"
         )
+    action = {
+        "created": "Word导入创建",
+        "merged": "Word导入合并",
+        "updated": "Word导入复测更新",
+    }[outcome]
     session.add(VulLog(
         vul_id=vul.id, user_id=user.id, username=user.username,
-        action="Word导入创建" if is_new else "Word导入复测更新",
-        content=log_content,
+        action=action, content=log_content,
     ))
     rec.status = "confirmed"
     rec.vul_id = vul.id
+    rec.outcome = outcome
     # 关联到指定报告：自动追加为漏洞章节
     if report is not None:
         session.add(ReportSection(
@@ -426,7 +444,7 @@ async def confirm_one_record(
             content_html=vuln_section_html(vul),
             vul_id=vul.id,
         ))
-    return vul, is_new
+    return vul, is_new, outcome
 
 
 async def finalize_confirm(
@@ -499,7 +517,13 @@ async def auto_export_report(
     export_dir = settings.storage_sub("exports")
     stamp = now().strftime("%Y%m%d%H%M%S")
     docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
-    await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls)
+    # P1-4：自动导出同样按报告类型选择启用模板（与手动导出同一口径），无模板时回退包内默认
+    report_type = "retest" if plan_service.is_retest_report_title(report.title) else "penetration"
+    tpl = await template_service.pick_template(session, report_type)
+    template_path = template_service.template_file(tpl)
+    await asyncio.to_thread(
+        build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls, template_path,
+    )
 
     # 导出版本号 +1；flush+refresh 后以最终状态写指纹，供下次导出去重判断
     report.version += 1
@@ -514,6 +538,9 @@ async def auto_export_report(
         creator_id=user.id,
         report_snapshot=report.fingerprint(),
         dedup_key=dedup_key,
+        template_id=tpl.id if tpl else None,
+        template_version=tpl.version if tpl else 0,
+        template_name=tpl.name if tpl else "",
     )
     if auto_time is not None:
         job.create_time = auto_time
@@ -615,13 +642,21 @@ async def confirm_batch_internal(
     kb_map = await load_knowledge_map(session, records)
     created = 0
     new_vul_ids: list[int] = []
+    new_vuln_objs: list[Vul] = []
     for rec in records:
-        vul, is_new = await confirm_one_record(
+        vul, is_new, _outcome = await confirm_one_record(
             session, batch, rec, plan, asset, report, user, kb_map, is_retest, created,
         )
         if is_new:
             new_vul_ids.append(vul.id)
+            new_vuln_objs.append(vul)
         created += 1
+    # P1-1 SLA：新入库漏洞按当前策略计算修复截止时间（与站内录入同一实现）
+    if new_vuln_objs:
+        sla_config = await sla_service.get_config(session)
+        policies = await sla_service.load_policies(session)
+        for vul in new_vuln_objs:
+            sla_service.apply_to_vul(vul, sla_config, policies)
 
     # 报告导入复测没有「发起复测」入口可携带源报告，本批章节已入库后按同一规则推断并补写
     # （轮次 src_report_id 是报告维度复测三态的唯一权威判据；推断不出时留空，读取侧另有覆盖代偿）
@@ -659,6 +694,8 @@ async def confirm_batch_internal(
     if plan is not None and not is_retest:
         await plan_service.refresh_mandays(session, plan.id)
     await session.commit()
+    # 看板/统计缓存失效（P1-7）：导入确认会显著改变漏洞分布
+    stats_cache.invalidate()
     msg = f"成功处理 {created} 条漏洞记录"
     if plan is not None:
         msg += f"，已关联测试计划「{plan.system_name}」"

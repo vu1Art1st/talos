@@ -18,6 +18,8 @@ const router = createRouter({
       redirect: '/dashboard',
       children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '安全态势' } },
+        { path: 'todos', name: 'todos', component: () => import('../views/TodoWorkbench.vue'), meta: { title: '个人待办' } },
+        { path: 'messages', name: 'messages', component: () => import('../views/MessageCenter.vue'), meta: { title: '消息中心' } },
         { path: 'vulns', name: 'vulns', component: () => import('../views/VulnList.vue'), meta: { title: '历史漏洞库' } },
         { path: 'vulns/new', name: 'vuln-new', component: () => import('../views/VulnEdit.vue'), meta: { title: '提交漏洞' } },
         { path: 'vulns/:id', name: 'vuln-detail', component: () => import('../views/VulnDetail.vue'), meta: { title: '漏洞详情' } },
@@ -38,6 +40,8 @@ const router = createRouter({
         { path: 'roles', name: 'roles', component: () => import('../views/RoleList.vue'), meta: { title: '权限管理' } },
         { path: 'audit', name: 'audit', component: () => import('../views/AuditLog.vue'), meta: { title: '审计日志' } },
         { path: 'notify-channels', name: 'notify-channels', component: () => import('../views/NotifyChannelList.vue'), meta: { title: '通知渠道' } },
+        { path: 'sla-config', name: 'sla-config', component: () => import('../views/SlaConfig.vue'), meta: { title: 'SLA 配置' } },
+        { path: 'report-templates', name: 'report-templates', component: () => import('../views/ReportTemplateList.vue'), meta: { title: '报告模板' } },
         { path: 'tokens', name: 'tokens', component: () => import('../views/TokenList.vue'), meta: { title: '访问令牌' } },
       ],
     },

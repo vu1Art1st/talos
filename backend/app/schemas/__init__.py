@@ -12,6 +12,30 @@ from .common import (
     VulnTypeIn,
     VulnTypeOut,
 )
+from .dashboard import DashboardQuery, DashboardViewIn, DashboardViewOut
+from .message import (
+    MessageOut,
+    MessagePage,
+    MessageReadIn,
+    TodoItemOut,
+    TodoSummaryOut,
+)
+from .sla import (
+    SlaConfigIn,
+    SlaConfigOut,
+    SlaExtendIn,
+    SlaExtensionOut,
+    SlaPolicyIn,
+    SlaPolicyOut,
+    SlaRecalculateIn,
+    SlaRecalculateOut,
+)
+from .template import (
+    ReportTemplateOut,
+    TemplatePreviewOut,
+    TemplatePublishIn,
+    TemplateValidateOut,
+)
 from .auth import (
     GroupIn,
     GroupMemberIn,
@@ -65,8 +89,13 @@ from .import_ import (
     BatchConfirmOut,
     ImportBatchOut,
     ImportConfirmIn,
+    ImportDuplicateCandidateOut,
+    ImportDuplicateGroupOut,
+    ImportRecordChangeOut,
+    ImportRecordMergeIn,
     ImportRecordOut,
     ImportRecordUpdateIn,
+    ImportRetryOut,
 )
 from .report import (
     ExportCheckIn,
@@ -104,6 +133,8 @@ from .special import (
 from .system import (
     NotifyChannelIn,
     NotifyChannelOut,
+    NotifyDeliveryOut,
+    NotifyTestOut,
     OperationLogOut,
     PatCreateIn,
     PatCreatedOut,

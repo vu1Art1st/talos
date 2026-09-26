@@ -40,11 +40,15 @@
       <el-table-column prop="create_time" label="上传时间" width="170" sortable="custom">
         <template #default="{ row }">{{ fmtDateTime(row.create_time) }}</template>
       </el-table-column>
-      <el-table-column label="操作" width="160" fixed="right" class-name="op-col">
+      <el-table-column label="操作" width="280" fixed="right" class-name="op-col">
         <template #default="{ row }">
           <el-button size="small" type="primary" link :disabled="row.status === 'parsing' || row.status === 'pending'"
                      @click="router.push(`/reports/imports/${row.id}`)">预览确认</el-button>
           <el-button size="small" type="primary" link @click="previewRef?.open(`/imports/${row.id}/preview`, row.filename)">预览</el-button>
+          <!-- P1-5：只重试失败记录（批次解析失败时整批重建），保留原批次审计链 -->
+          <el-button v-if="row.status !== 'confirmed'" size="small" link :loading="retrying === row.id"
+                     @click="retryFailed(row)">重试失败</el-button>
+          <el-button size="small" link @click="downloadResult(row)">结果报告</el-button>
           <el-popconfirm title="确认删除该批次？" @confirm="removeBatch(row.id)">
             <template #reference>
               <el-button size="small" type="danger" link>删除</el-button>
@@ -178,6 +182,27 @@ async function removeBatch(id: number) {
   await client.delete(`/imports/${id}`)
   ElMessage.success('删除成功')
   await load()
+}
+
+// ---------- P1-5 数据治理 ----------
+const retrying = ref<number | null>(null)
+
+async function retryFailed(row: ImportBatch) {
+  retrying.value = row.id
+  try {
+    const { data } = await client.post<{ msg: string; resolved: number; still_failed: number }>(
+      `/imports/${row.id}/retry-failed`,
+    )
+    ElMessage[data.still_failed ? 'warning' : 'success'](data.msg || '重试完成')
+    await load()
+  } finally {
+    retrying.value = null
+  }
+}
+
+async function downloadResult(row: ImportBatch) {
+  const resp = await client.get<Blob>(`/imports/${row.id}/result-report`, { responseType: 'blob' })
+  saveBlob(resp.data, `导入结果_${row.filename.replace(/\.docx$/i, '')}.xlsx`)
 }
 
 onMounted(async () => {

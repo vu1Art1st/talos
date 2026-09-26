@@ -14,7 +14,6 @@ from app.core.xlsx import load_xlsx, xlsx_response
 from app.db import get_session
 from app.models import (
     ImportRecord,
-    Message,
     NonpenPlan,
     Report,
     ReportSection,
@@ -376,25 +375,26 @@ async def _ensure_no_vuln_completable(session: AsyncSession, plan: TestingPlan, 
         raise HTTPException(400, "该计划存在关联漏洞，不能确认无漏洞，请先处理漏洞后走复测流程")
 
 
-def _notify_no_vuln_done(
+async def _notify_no_vuln_done(
     session: AsyncSession, plan: TestingPlan, user: User, report: Report | None
 ) -> None:
-    """站内信告知测试人员与计划创建人（去重，排除操作人本人）。"""
+    """站内信告知测试人员与计划创建人（去重，排除操作人本人）。P1-2：统一经 message_service。"""
+    from app.services import message_service
+
     notice_ids = {u.id for u in plan.testers}
     if plan.creator_id:
         notice_ids.add(plan.creator_id)
     notice_ids.discard(user.id)
     report_hint = f"，已生成报告《{report.title}》" if report is not None else ""
-    for uid in notice_ids:
-        session.add(Message(
-            user_id=uid,
-            msg_type="plan",
-            title=f"测试计划「{plan.system_name}」已确认无漏洞",
-            content=(
-                f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
-                f"状态流转为「测试通过」{report_hint}"
-            ),
-        ))
+    await message_service.create_messages(
+        session, sorted(notice_ids), "plan",
+        f"测试计划「{plan.system_name}」已确认无漏洞",
+        content=(
+            f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
+            f"状态流转为「测试通过」{report_hint}"
+        ),
+        link=f"/testing-plans?system={plan.id}",
+    )
 
 
 @router.post("/testing-plans/{row_id}/complete-no-vuln", response_model=TestingPlanOut)
@@ -433,7 +433,7 @@ async def complete_plan_no_vuln(
         await session.refresh(plan, attribute_names=["reports"])
         await plan_service.refresh_mandays(session, plan.id)
 
-    _notify_no_vuln_done(session, plan, user, report)
+    await _notify_no_vuln_done(session, plan, user, report)
     await session.commit()
     await session.refresh(plan)
     await audit(session, request, "plan_transition", user, {

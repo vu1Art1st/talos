@@ -89,6 +89,13 @@ class ExportJob(Base):
     # 幂等键（P0-2）：仅自动导出使用（`auto:<批次ID>`），唯一索引保证「同一批次重复确认
     # 不会生成第二条导出记录与第二份文件」；手动导出留 NULL（唯一索引允许多个 NULL）。
     dedup_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # ---- P1-4 报告模板中心：导出所用模板（历史报告可追溯） ----
+    # template_id 为空表示使用包内默认模板（settings.REPORT_TEMPLATE）
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("report_templates.id", ondelete="SET NULL"), nullable=True,
+    )
+    template_version: Mapped[int] = mapped_column(Integer, default=0)
+    template_name: Mapped[str] = mapped_column(String(128), default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     finish_time: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

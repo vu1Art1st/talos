@@ -53,6 +53,14 @@ class VulOut(VulIn):
     notice_time: datetime | None = None
     fix_time: datetime | None = None
     update_time: datetime | None = None
+    # ---- P1-1 SLA 修复时限（派生字段，与列表/看板/导出共用 sla_service 判定） ----
+    due_at: datetime | None = None
+    # none / ok / due_soon / overdue / closed（见 constants.SLA_STATES）
+    sla_state: str = "none"
+    # 剩余小时（已逾期为负）；未设置截止时间时为 None
+    sla_remaining_hours: float | None = None
+    # 逾期天数（未逾期为 0）
+    sla_overdue_days: float | None = None
 
 
 class VulBatchIn(BaseModel):

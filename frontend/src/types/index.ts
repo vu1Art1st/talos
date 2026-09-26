@@ -154,8 +154,12 @@ export type UserForm = Omit<User, 'id' | 'permissions'> & { id: number | null; p
 /** API 令牌（令牌列表） */
 export interface ApiToken {
   id: number
+  /** 令牌名称 */
+  name?: string
   /** 令牌前缀（仅展示用，完整值只在创建时返回一次） */
   prefix: string
+  /** 令牌 scope（`meta.pat_scope` 映射名称）：read / plan_write / admin_read / full */
+  scope?: string
   create_time?: string | null
   expires_at?: string | null
   last_used_at?: string | null
@@ -297,6 +301,216 @@ export interface SpringAction {
 /** 专项行动新增/编辑表单模型（`useCrudDialog.empty` 形状） */
 export type SpringActionForm = Omit<SpringAction, 'id'> & { id: number | null }
 
+/** 通知投递记录（P1-3，`GET /notify-channels/deliveries`） */
+export interface NotifyDelivery {
+  id: number
+  channel_id?: number | null
+  channel_name?: string
+  channel_type?: string
+  event?: string
+  title?: string
+  /** 目标摘要（已脱敏：webhook 主机名 / 邮件域名） */
+  target?: string
+  /** pending 待投递 / success 已送达 / failed 待重试 / dead 死信 */
+  status: string
+  attempts?: number
+  http_status?: number
+  last_error?: string | null
+  next_retry_at?: string | null
+  dead_letter_reason?: string | null
+  request_time?: string | null
+  last_attempt_at?: string | null
+  finish_time?: string | null
+}
+
+/** 测试发送回执（P1-3，`POST /notify-channels/{id}/test`） */
+export interface NotifyTestResult {
+  delivery_id: number
+  status: string
+  http_status: number
+  error?: string
+  msg?: string
+}
+
+/** SLA 全局配置（P1-1，`GET/PUT /sla/config`） */
+export interface SlaConfig {
+  id?: number
+  enabled: boolean
+  /** natural 自然日 / workday 工作日 */
+  day_basis: string
+  default_days: number
+  /** 到期前提醒提前量（小时） */
+  warn_hours: number
+  allow_extend: boolean
+  /** 工作日（0=周一 … 6=周日） */
+  workdays: number[]
+  /** 节假日日期（YYYY-MM-DD） */
+  holidays: string[]
+  /** 停止计时的漏洞状态码 */
+  stop_statuses: number[]
+  remark?: string
+  updated_by?: number | null
+  update_time?: string | null
+}
+
+/** SLA 等级策略（P1-1） */
+export interface SlaPolicy {
+  id?: number
+  level: number
+  days: number
+  enabled: boolean
+  remark?: string
+  create_time?: string | null
+  update_time?: string | null
+}
+
+/** SLA 延期流水（P1-1） */
+export interface SlaExtension {
+  id: number
+  vul_id: number
+  old_due_at?: string | null
+  new_due_at: string
+  reason?: string
+  username?: string
+  create_time?: string | null
+}
+
+/** SLA 派生状态码（`meta.sla_state` 映射名称） */
+export type SlaState = 'none' | 'ok' | 'due_soon' | 'overdue' | 'closed'
+
+/** SLA 统计（`GET /sla/stats` 与看板 stats.sla 同构） */
+export interface SlaStats {
+  enabled: boolean
+  sla_total: number
+  overdue: number
+  due_soon: number
+  overdue_rate: number
+  avg_fix_days: number | null
+  avg_overdue_days: number | null
+  by_level: { level: number; name: string; total: number; overdue: number; overdue_rate: number }[]
+  by_department: { department: string; total: number; overdue: number; overdue_rate: number }[]
+  by_source: { source: number | null; name: string; total: number; overdue: number; overdue_rate: number }[]
+}
+
+/** 运营指标（P1-7，看板 stats.ops） */
+export interface OpsStats {
+  retest_backlog_vulns: number
+  retest_backlog_plans: number
+  retest_backlog: number
+  undelivered_reports: number
+  open_vulns: number
+}
+
+/** 报告模板（P1-4，`/report-templates`） */
+export interface ReportTemplate {
+  id: number
+  name: string
+  /** penetration 渗透测试报告 / retest 复测报告 / all 通用 */
+  report_type: string
+  version: number
+  is_active: boolean
+  original_filename?: string
+  size_bytes?: number
+  /** 校验通过的锚点清单 */
+  anchors?: { index: number; desc: string; rows?: number; cols?: number }[]
+  remark?: string
+  creator_id?: number | null
+  create_time?: string | null
+  update_time?: string | null
+}
+
+/** 站内消息（P1-2，`GET /messages`） */
+export interface MessageItem {
+  id: number
+  msg_type: string
+  title: string
+  content: string
+  /** 站内深链（如 /vulns/12），空串表示无跳转 */
+  link?: string
+  is_read: boolean
+  create_time?: string | null
+}
+
+/** 站内消息分页响应（含未读总数） */
+export interface MessagePage {
+  total: number
+  unread: number
+  items: MessageItem[]
+}
+
+/** 待办分组（P1-2，`GET /todos`） */
+export interface TodoGroup {
+  category: string
+  name: string
+  count: number
+  items: Record<string, unknown>[]
+}
+
+/** 个人待办聚合结果 */
+export interface TodoSummary {
+  total: number
+  groups: TodoGroup[]
+}
+
+/** 看板视图（P1-7，`/dashboard/views`） */
+export interface DashboardView {
+  id: number
+  user_id: number
+  name: string
+  /** personal 个人视图 / department 部门默认视图 */
+  scope: string
+  department?: string
+  query?: { date_from?: string; date_to?: string; department?: string; source?: number | null; level?: number | null }
+  is_default: boolean
+  create_time?: string | null
+  update_time?: string | null
+}
+
+/** 导入记录字段修正流水（P1-5） */
+export interface ImportRecordChange {
+  id: number
+  record_id: number
+  field: string
+  old_value?: string
+  new_value?: string
+  /** manual 人工修正 / knowledge 知识库回填 */
+  source?: string
+  username?: string
+  create_time?: string | null
+}
+
+/** 重复候选（P1-5） */
+export interface ImportDuplicateCandidate {
+  vul_id: number
+  title: string
+  level: number
+  status: number
+  affected_url?: string
+  testing_plan_id?: number | null
+  ticket_id?: string
+  similarity: number
+}
+
+/** 重复候选分组（P1-5，`GET /imports/{id}/duplicates`） */
+export interface ImportDuplicateGroup {
+  record_id: number
+  title: string
+  level: number
+  affected_url?: string
+  merge_vul_id?: number | null
+  candidates: ImportDuplicateCandidate[]
+}
+
+/** 失败记录重试结果（P1-5） */
+export interface ImportRetryResult {
+  batch_id: number
+  scope: string
+  retried: number
+  resolved: number
+  still_failed: number
+  msg?: string
+}
+
 /** 导入批次（`GET /imports/{id}` 的 batch） */
 export interface ImportBatch {
   id: number
@@ -315,7 +529,9 @@ export interface ImportBatch {
 /** 导入记录的解析结果行（预览 / 修正 / 批量确认用） */
 export interface ImportRecord {
   id: number
-  /** parsed 待入库 / confirmed 已入库 / discarded 已丢弃 / failed 解析失败 */
+  /** 文档内序号（结果报告与失败记录重试定位用） */
+  seq?: number
+  /** parsed 待入库 / confirmed 已入库 / discarded 已丢弃 / error 解析异常 */
   status: string
   title: string
   level: number
@@ -327,7 +543,18 @@ export interface ImportRecord {
   reproduce_html?: string | null
   solution_html?: string | null
   retest_html?: string | null
-  /** 解析失败原因（status === 'failed' 时展示） */
+  /** 等级来源：detail / summary / template / default（P1-5 数据链） */
+  level_source?: string
+  level_summary_text?: string
+  level_detail_text?: string
+  /** 汇总表与详情等级不一致（导入前弹窗提醒） */
+  level_mismatch?: boolean
+  /** 人工选择的合并目标漏洞（P1-5 重复候选处理） */
+  merge_vul_id?: number | null
+  /** 入库结果：created / updated / merged / skipped / failed */
+  outcome?: string
+  outcome_reason?: string
+  /** 解析失败原因（status === 'error' 时展示） */
   parse_error?: string | null
 }
 
@@ -462,6 +689,15 @@ export interface Vuln {
   score?: number
   fix_time?: string | null
   notice_time?: string | null
+  // ---- P1-1 SLA（派生字段，与列表/看板/导出/开放 API 同源） ----
+  /** 修复截止时间（未启用 SLA 或该等级不适用时为 null） */
+  due_at?: string | null
+  /** none / ok / due_soon / overdue / closed */
+  sla_state?: SlaState
+  /** 剩余小时（已逾期为负）；未设置截止时间时为 null */
+  sla_remaining_hours?: number | null
+  /** 逾期天数（未逾期为 0） */
+  sla_overdue_days?: number | null
 }
 
 /** 漏洞操作日志（`GET /vulns/{id}/logs`，详情页时间线） */
@@ -579,6 +815,10 @@ export interface ExportJob {
   has_file?: boolean
   /** 失败原因（status === 'failed' 时展示） */
   error?: string | null
+  // ---- P1-4 模板中心：本次导出所用模板（template_id 为空＝包内默认模板） ----
+  template_id?: number | null
+  template_name?: string
+  template_version?: number
 }
 
 /** 报告导出格式（与后端导出接口一致） */
@@ -789,4 +1029,9 @@ export interface DashboardStats {
   by_type: TypeCount[]
   by_department: DashboardDepartment[]
   trend: DashboardTrendPoint[]
+  // ---- P1-1 / P1-7 扩展：SLA 与运营指标（与列表、导出、开放 API 同源） ----
+  sla?: SlaStats
+  ops?: OpsStats
+  /** 统计生成时间（短 TTL 缓存），前端可展示"数据截至" */
+  cached_at?: string
 }

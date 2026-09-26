@@ -5,6 +5,7 @@ import {
   dotStyle,
   exportJobName,
   exportJobSoftStyle,
+  importOutcomeMeta,
   importStatusMeta,
   isDarkTheme,
   levelBadgeStyle,
@@ -15,8 +16,13 @@ import {
   nonpenActions,
   nonpenItemMeta,
   nonpenItems,
+  notifyDeliveryMeta,
+  patScopeName,
+  patScopeOptions,
   retestStateName,
   retestStateSoftStyle,
+  slaStateMeta,
+  slaStateSoftStyle,
   softStyle,
   statusColorByName,
   statusLabel,
@@ -96,6 +102,33 @@ describe('colors 字典注册表（meta 单源）', () => {
 
   it('softStyle 生成半透明底 + 同色文字', () => {
     expect(softStyle('#DC2626')).toEqual({ background: '#DC26261f', color: '#DC2626' })
+  })
+
+  // P1 批次新增字典：/meta 未下发时按原值兜底，不抛错
+  it('P1 新增字典（SLA / 投递 / scope）在 meta 缺省时回退原值', () => {
+    expect(slaStateMeta('overdue').label).toBe('overdue')
+    expect(slaStateSoftStyle('overdue')).toEqual(softStyle('#8A968F'))
+    expect(notifyDeliveryMeta('dead').label).toBe('dead')
+    expect(patScopeName('plan_write')).toBe('plan_write')
+    expect(patScopeOptions()).toEqual([])
+    expect(importOutcomeMeta('merged').label).toBe('merged')
+  })
+
+  it('P1 新增字典注入后按码查询名称与色值', () => {
+    applyDictMeta({
+      ...metaFixture(),
+      sla_state: { overdue: '已逾期' },
+      notify_delivery_status: { dead: '死信' },
+      pat_scope: { read: '只读' },
+      colors: {
+        ...metaFixture().colors,
+        sla_state: { overdue: '#DC2626' },
+        notify_delivery_status: { dead: '#DC2626' },
+      },
+    })
+    expect(slaStateMeta('overdue')).toEqual({ label: '已逾期', color: '#DC2626' })
+    expect(notifyDeliveryMeta('dead').label).toBe('死信')
+    expect(patScopeOptions()).toEqual([{ value: 'read', label: '只读' }])
   })
 
   it('statusSoftStyleWithRetest 复测未通过覆盖状态色，普通状态走字典色', () => {

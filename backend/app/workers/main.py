@@ -1,23 +1,35 @@
-"""arq 后台任务：Word 解析 / 报告导出 / 邮件发送 / 渠道通知（webhook+邮件）。
+"""arq 后台任务：Word 解析 / 报告导出 / 渠道通知投递 / SLA 扫描 / 定期清理。
 
 启动 worker: arq app.workers.main.WorkerSettings
 """
 import asyncio
 import logging
-import smtplib
 from dataclasses import replace
-from email.header import Header
-from email.mime.text import MIMEText
 
-import httpx
 from arq import cron
 from arq.connections import RedisSettings
 from app.core.config import settings
-from app.core.outbound import assert_public_url
 from app.core.timeutil import now
 from app.db import async_session_maker
-from app.models import ImportBatch, ImportRecord, ExportJob, Report, User
-from app.services import report_meta, task_dedup, task_lifecycle
+from app.models import (
+    ExportJob,
+    ImportBatch,
+    ImportRecord,
+    NotifyDelivery,
+    Report,
+    ReportTemplate,
+    User,
+)
+from app.services import (
+    idempotency,
+    message_service,
+    notify_service,
+    report_meta,
+    sla_service,
+    task_dedup,
+    task_lifecycle,
+    template_service,
+)
 from app.services.docx_parser import parse_any_docx
 from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
@@ -139,10 +151,19 @@ async def export_report_task(ctx, job_id: int) -> None:
             export_dir = settings.storage_sub("exports")
             stamp = now().strftime("%Y%m%d%H%M%S")
             docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
+            # P1-4 模板中心：按导出任务记录的模板生成；无模板/文件缺失时回退包内默认模板，
+            # 保证「不存在可用模板时系统仍可导出」与「DOCX/PDF 使用同一模板版本」。
+            tpl_row = (
+                await session.get(ReportTemplate, job.template_id)
+                if job.template_id is not None else None
+            )
+            template_path = template_service.template_file(tpl_row)
             # 生成 docx / 转 PDF 是长耗时步骤：先续租，避免被启动回收扫描判为孤儿任务
             task_lifecycle.heartbeat(job)
             await session.commit()
-            await asyncio.to_thread(build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls)
+            await asyncio.to_thread(
+                build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls, template_path,
+            )
 
             if job.fmt == "pdf":
                 pdf_path = docx_path.replace(".docx", ".pdf")
@@ -177,98 +198,92 @@ async def export_report_task(ctx, job_id: int) -> None:
         logger.info("报告导出完成 job_id=%s report_id=%s fmt=%s", job_id, job.report_id, job.fmt)
 
 
-def _send_mail_sync(to: list[str], subject: str, body: str) -> None:
-    if not settings.SMTP_HOST or not to:
-        return
-    msg = MIMEText(body, "html", "utf-8")
-    msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
-    msg["To"] = ",".join(to)
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
-        if settings.SMTP_USER:
-            server.login(settings.SMTP_USER, settings.SMTP_PASS)
-        server.sendmail(msg["From"], to, msg.as_string())
+async def send_notify_task(ctx, delivery_id: int) -> None:
+    """渠道通知投递（F3 + P1-3）：按投递记录执行一次外发。
+
+    - 投递记录是幂等的锚点：`job_id=f"notify:{id}"` 保证同一记录不会被重复入队；
+    - 失败**不抛异常**：可重试错误写入 `next_retry_at`（`retry_deliveries_task` 会重投），
+      永久错误或超过上限进死信；状态与错误均可查询。
+    """
+    async with async_session_maker() as session:
+        row = await session.get(NotifyDelivery, delivery_id)
+        if row is None or row.status in ("success", "dead"):
+            return
+        await notify_service.send_delivery(session, row)
+        await session.commit()
+        logger.info(
+            "通知投递完成 delivery_id=%s status=%s attempts=%s",
+            delivery_id, row.status, row.attempts,
+        )
 
 
-async def send_mail_task(ctx, to: list[str], subject: str, body: str) -> None:
-    await asyncio.to_thread(_send_mail_sync, to, subject, body)
+async def retry_deliveries_task(ctx) -> None:
+    """重投到期的失败通知（P1-3）：进程重启后待重试记录仍在库中，由本任务继续投递。"""
+    async with async_session_maker() as session:
+        n = await notify_service.retry_due_deliveries(session)
+        await session.commit()
+    if n:
+        logger.info("已重投到期通知 %s 条", n)
 
 
-async def send_notify_task(
-    ctx, channel_type: str, config: dict, title: str, body: str, dedup_key: str = "",
-) -> None:
-    """渠道通知（F3）：企业微信/钉钉 webhook 与邮件，尽力而为（失败仅告警不重试）。
+async def sla_scan_task(ctx) -> None:
+    """SLA 到期前提醒与逾期升级（P1-1）。
 
-    **幂等（P0-2）**：`dedup_key` 非空时先抢占（`services.task_dedup`）；抢占失败说明同一
-    业务事件的通知已经投递过（队列重试 / 进程内重放），直接返回，不产生重复通知。
-    发送失败则释放幂等键，使重试仍然有效（否则一次网络抖动会让通知永久丢失）。
-
-    出站前再次校验 webhook 目标（审计 TALOS-2026-003）：写入侧校验无法覆盖「存量渠道配置」
-    与「DNS 记录事后变化」两种情况，故发送前再判一次；不允许跟随重定向（重定向目标同样可能
-    指向内网）。校验不通过仅告警并跳过，不影响业务主流程。"""
-    if dedup_key and not await _claim_notify_dedup(dedup_key):
-        logger.info("通知重复投递已忽略 dedup_key=%s", dedup_key)
-        return
-    try:
-        if channel_type in ("wecom", "dingtalk"):
-            url = (config or {}).get("url") or ""
-            if not url:
-                return
-            try:
-                url = assert_public_url(url, field="webhook 地址")
-            except ValueError as exc:
-                logger.warning("webhook 目标被拒绝，已跳过发送 type=%s: %s", channel_type, exc)
-                return
-            if channel_type == "wecom":
-                payload = {"msgtype": "markdown", "markdown": {"content": f"**{title}**\n{body}"}}
-            else:
-                payload = {"msgtype": "markdown", "markdown": {"title": title, "text": f"#### {title}\n\n{body}"}}
-            async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-                resp = await client.post(url, json=payload)
-                if resp.status_code != 200:
-                    logger.warning("webhook 通知发送失败 type=%s status=%s", channel_type, resp.status_code)
-        elif channel_type == "email":
-            recipients = (config or {}).get("recipients") or []
-            html = f"<p><strong>{title}</strong></p>" + "".join(
-                f"<p>{line}</p>" for line in body.splitlines() if line.strip()
+    同一漏洞同一到期时间的同一类提醒只产生一次（`task_dedup` 幂等键
+    `sla:<kind>:<vul_id>:<due_at>`）；站内消息与渠道通知同源触发。
+    """
+    async with async_session_maker() as session:
+        config = await sla_service.get_config(session)
+        if not config.enabled:
+            return
+        reminders = await sla_service.collect_reminders(session, config)
+        fired = 0
+        for vul, kind in reminders:
+            due_key = vul.due_at.strftime("%Y%m%d%H%M") if vul.due_at else ""
+            key = f"sla:{kind}:{vul.id}:{due_key}"
+            if not await task_dedup.claim_dedup_key(session, key):
+                continue
+            await session.flush()
+            info = sla_service.evaluate(vul, config)
+            label = "即将到期" if kind == "sla_due_soon" else "已逾期"
+            due_text = vul.due_at.strftime("%Y-%m-%d %H:%M") if vul.due_at else ""
+            await message_service.create_message(
+                session, vul.submitter_id, "sla", f"SLA {label}：{vul.title}",
+                content=(
+                    f"修复截止时间 {due_text}，当前状态：{label}。"
+                    + (f"已逾期 {info['sla_overdue_days']} 天。" if kind == "sla_overdue" else "")
+                ),
+                link=f"/vulns/{vul.id}",
             )
-            await asyncio.to_thread(_send_mail_sync, recipients, title, html)
-    except Exception as exc:  # noqa: BLE001  通知失败不影响业务
-        logger.warning("通知发送异常 type=%s: %s", channel_type, exc)
-        if dedup_key:
-            # 发送失败释放幂等键：否则队列重试会被自己的幂等键挡住，通知永久丢失
-            await _release_notify_dedup(dedup_key)
-
-
-async def _claim_notify_dedup(key: str) -> bool:
-    """抢占通知幂等键（独立短事务并在抢占后立即提交，保证跨进程可见）。"""
-    async with async_session_maker() as session:
-        claimed = await task_dedup.claim_dedup_key(session, key)
+            await notify_service.notify_inline(
+                session, kind, title=vul.title, due_at=due_text,
+                overdue_days=info["sla_overdue_days"],
+            )
+            fired += 1
         await session.commit()
-        return claimed
-
-
-async def _release_notify_dedup(key: str) -> None:
-    """释放通知幂等键（发送失败时调用，使重试仍可执行）。"""
-    async with async_session_maker() as session:
-        await task_dedup.release_dedup_key(session, key)
-        await session.commit()
+    if fired:
+        logger.info("SLA 扫描：已发出 %s 条到期/逾期提醒", fired)
 
 
 async def cleanup_previews_task(ctx) -> None:
-    """定期清理超过 30 分钟未再打开的临时预览 PDF，并回收过期的任务幂等键。"""
+    """定期清理临时预览 PDF、过期幂等键、超保留期消息、投递记录与 API 幂等键。"""
     await asyncio.to_thread(cleanup_stale_previews, 30)
     async with async_session_maker() as session:
         removed = await task_dedup.cleanup_dedup_keys(session)
+        messages = await message_service.cleanup_messages(session)
+        deliveries = await notify_service.cleanup_deliveries(session)
+        api_keys = await idempotency.cleanup(session)
         await session.commit()
-    if removed:
-        logger.info("已回收过期任务幂等键 %s 条", removed)
+    if removed or messages or deliveries or api_keys:
+        logger.info(
+            "清理完成：幂等键=%s 消息=%s 投递记录=%s 接口幂等键=%s",
+            removed, messages, deliveries, api_keys,
+        )
 
 
 TASK_FUNCS = {
     "parse_import_task": parse_import_task,
     "export_report_task": export_report_task,
-    "send_mail_task": send_mail_task,
     "send_notify_task": send_notify_task,
 }
 
@@ -295,6 +310,10 @@ class WorkerSettings:
         cron(cleanup_previews_task, minute=set(range(0, 60, 10))),
         # 兜底扫描（P0-3）：与 SWEEP_INTERVAL_SECONDS=300 同频
         cron(recover_tasks_task, minute=set(range(0, 60, 5))),
+        # 通知投递重试（P1-3）：待重试记录持久化在库，进程重启后由本任务继续投递
+        cron(retry_deliveries_task, minute=set(range(0, 60, 5))),
+        # SLA 到期前提醒与逾期升级（P1-1）：每 15 分钟扫一次，幂等键保证同一次变化只提醒一次
+        cron(sla_scan_task, minute=set(range(0, 60, 15))),
     ]
     # 每次连接尝试的超时统一取 settings.REDIS_TIMEOUT（避免无超时挂起，见 G7）；
     # 重试次数保持 arq 默认（worker 需容忍 Redis 短暂不可用，属既有容错语义，不改）

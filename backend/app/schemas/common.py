@@ -65,8 +65,19 @@ OptAffectedUrl = Annotated[str | None, AfterValidator(_normalize_optional_affect
 
 
 class Page(BaseModel, Generic[T]):
+    """通用分页响应。
+
+    P1-6 起附带可选的分页元数据（`page`/`size`/`has_more`/`next_cursor`）：
+    存量调用方只读 `total`/`items`，新增字段为兼容性扩展；开放 API 在提供 `cursor`
+    时继续返回同一结构，`next_cursor` 为下一页游标（None 表示已到末页）。
+    """
+
     total: int
     items: list[T]
+    page: int | None = None
+    size: int | None = None
+    has_more: bool | None = None
+    next_cursor: str | None = None
 
 
 class UserBrief(BaseModel):

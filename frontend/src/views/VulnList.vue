@@ -73,6 +73,12 @@
                               range-separator="至" start-placeholder="开始" end-placeholder="结束"
                               value-format="YYYY-MM-DD" class="w-full" @change="reload" />
             </div>
+            <div>
+              <div class="filter-label">SLA 状态</div>
+              <el-select v-model="query.sla_state" placeholder="全部" clearable class="w-full" @change="reload">
+                <el-option v-for="o in slaStateOpts" :key="o.value" :label="o.label" :value="o.value" />
+              </el-select>
+            </div>
           </div>
           <div class="flex items-center justify-between mt-3 pt-3" style="border-top: 1px solid var(--tl-border)">
             <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
@@ -206,6 +212,18 @@
         <el-table-column prop="submit_time" label="提交时间" width="170" sortable="custom">
           <template #default="{ row }"><span class="num">{{ fmtDateTime(row.submit_time) }}</span></template>
         </el-table-column>
+        <!-- P1-1 SLA：截止时间与剩余/逾期（与看板、导出、开放 API 同一判定） -->
+        <el-table-column label="修复时限" width="200">
+          <template #default="{ row }">
+            <div v-if="row.due_at" class="flex flex-col gap-0.5">
+              <span class="num text-xs">{{ fmtDateTime(row.due_at) }}</span>
+              <span class="dot-tag" :style="dotStyle(slaStateMeta(row.sla_state).color)">
+                <i></i>{{ slaStateMeta(row.sla_state).label }} · {{ fmtSlaRemaining(row.sla_remaining_hours) }}
+              </span>
+            </div>
+            <span v-else class="text-xs text-gray-400">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
           <template #default="{ row }">
             <el-button size="small" type="primary" link @click.stop="router.push(`/vulns/${row.id}/edit`)">
@@ -245,9 +263,10 @@ import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import {
-  levelColor, levelDotStyle, levelName, STAT_CARD_COLORS, statusDotStyle, statusLabel,
+  dotStyle, levelColor, levelDotStyle, levelName, slaStateMeta, slaStateOptions,
+  STAT_CARD_COLORS, statusDotStyle, statusLabel,
 } from '../utils/colors'
-import { fmtDateTime } from '../utils/format'
+import { fmtDateTime, fmtSlaRemaining } from '../utils/format'
 import type { QueryParams, Vuln, VulnPivotRow, VulnStats } from '../types'
 
 const auth = useAuthStore()
@@ -257,9 +276,12 @@ const selected = ref<Vuln[]>([])
 const query = reactive({
   statuses: [], levels: [], vul_types: [], system_types: [], test_types: [],
   asset_ids: [], departments: [], dateRange: [],
+  sla_state: '',
   mine: false,
 })
 const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Vuln>('/vulns', { extraParams: filterParams })
+
+const slaStateOpts = computed(() => slaStateOptions())
 
 // 已启用的筛选维度数（用于「筛选」按钮徽标）
 const activeFilterCount = computed(() => {
@@ -272,6 +294,7 @@ const activeFilterCount = computed(() => {
   if (query.asset_ids.length) n++
   if (query.departments.length) n++
   if (query.dateRange && query.dateRange.length === 2) n++
+  if (query.sla_state) n++
   if (query.mine) n++
   return n
 })
@@ -286,6 +309,7 @@ function resetFilters() {
   query.asset_ids = []
   query.departments = []
   query.dateRange = []
+  query.sla_state = ''
   query.mine = false
   reload()
 }
@@ -339,6 +363,7 @@ function filterParams(): QueryParams {
     p.submit_time_from = query.dateRange[0]
     p.submit_time_to = query.dateRange[1]
   }
+  if (query.sla_state) p.sla_state = query.sla_state
   return p
 }
 

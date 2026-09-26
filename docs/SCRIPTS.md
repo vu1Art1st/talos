@@ -43,7 +43,7 @@
 | `clean.sh` | 104 | 活跃·开发辅助（2026-09-22 新增） | 本地垃圾清理（默认预演，`--apply` 执行）；详见 §2.14 |
 | `clean.ps1` | 115 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Apply`）；详见 §2.14 |
 
-### 1.2 后端脚本 `backend/scripts/`（18 个，2 218 行）
+### 1.2 后端脚本 `backend/scripts/`（21 个，含 P0-4 / P1-5 两个性能基准脚本）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
@@ -67,6 +67,8 @@
 | `probe_api.py` | 110 | 活跃·开发辅助（2026-09-21 新增） | AGENTS.md「验收口径·接口探针」（本地 / 容器 / CI 共用一份口径）；详见 §3.12 |
 | `prune_test_schemas.py` | 99 | 活跃·开发辅助（2026-09-21 新增） | `scripts/test.sh --prune` / `test.ps1 -Prune`；详见 §3.14 |
 | `check_api_contract.py` | 216 | 活跃·开发辅助（2026-09-22 新增） | 前后端契约检查（OpenAPI ↔ `src/types/index.ts`）；`.githooks/pre-push` 与 AGENTS.md「常用命令」；详见 §3.13 |
+| `benchmark_lists.py` | — | 活跃·开发辅助（2026-09-26 补登） | 列表查询性能基准（独立 schema 造数 + P50/P95 + `EXPLAIN`），P0-4 配套；详见 §3.15 |
+| `bench_import.py` | 157 | 活跃·开发辅助（2026-09-26 新增） | 导入解析性能基准（20 份上限口径的耗时 / 内存 / 磁盘峰值），P1-5 配套；详见 §3.16 |
 
 ### 1.3 依赖矩阵
 
@@ -450,7 +452,26 @@
   不触碰 `public`；输出以 `RESULT` 开头便于从 SQLAlchemy echo 中筛选。
 - **依赖**：完整 app 配置 + `app.db`（engine 在导入时按 `VP_DB_SCHEMA` 固定 search_path，故环境变量须先于导入设置）。
 
-### 3.16 `enable_trgm_indexes.py` — 前后通配符检索索引（活跃·常规运维·可选）
+### 3.16 `bench_import.py` — 导入解析性能基准（活跃·开发辅助）
+
+- **用途**：在「单次 20 份报告」上限口径下，用与线上一致的解析路径（`services/docx_parser.parse_any_docx`
+  的报告分支）测量解析耗时、`tracemalloc` 内存峰值与磁盘占用，作为导入链路的回归基线（ROADMAP P1-5）。
+- **调用**（backend 目录，.venv 解释器；无需数据库与 Redis）：
+  ```bash
+  .venv/Scripts/python -m scripts.bench_import                       # 20 份 × 12 漏洞
+  .venv/Scripts/python -m scripts.bench_import --files 5 --vulns 6    # 小样本自检
+  .venv/Scripts/python -m scripts.bench_import --out storage/bench_import.json
+  ```
+- **产物**：stdout 表格 + JSON（默认 `storage/bench_import.json`），字段含 `records` / `seconds` /
+  `seconds_per_file` / `peak_memory_mb` / `docx_disk_mb` / `images_disk_mb`。
+- **基线（2.21.0 / 2026-09-26，Windows 本机，Python 3.12.11）**：20 份 × 12 漏洞 = 240 条记录，
+  **3.85s（0.193s/份）**、tracemalloc 峰值 **13.8MB（0.69MB/份）**、docx 磁盘 **0.7MB**、
+  解析图片 0.0MB、等级不一致 0 条。判断回归时以 ±50% 为阈值，超出需先排除环境噪声再定位。
+- **口径说明**：`tracemalloc` 只统计 Python 侧分配（不含 docx 库 C 侧开销），属**保守下界**；
+  生成的 docx 落临时目录并在结束时删除，不写入 `storage/`（除结果 JSON 外）。
+- **依赖**：完整 app 配置（脚本内 `VP_DEBUG=1` 占位，不连库/不连 Redis）。
+
+### 3.17 `enable_trgm_indexes.py` — 前后通配符检索索引（活跃·常规运维·可选）
 
 - **用途**：为列表页的 `%keyword%` 检索列（漏洞标题 / 资产名 / 两表测试系统名）建立 pg_trgm
   GIN 三元组索引，替代高成本顺序扫描。评估与实测数据见 `docs/DEPLOY.md` §10.4 与 `docs/RELEASE.md`。

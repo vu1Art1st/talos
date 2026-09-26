@@ -59,6 +59,16 @@ export interface DictMetaPayload {
   import_batch_status: NameDict
   import_record_status: NameDict
   export_job_status: NameDict
+  // P1 批次新增字典（缺省时走空对象兜底，不改变既有行为）
+  sla_state?: NameDict
+  sla_day_basis?: NameDict
+  message_type?: NameDict
+  todo_type?: NameDict
+  notify_delivery_status?: NameDict
+  pat_scope?: NameDict
+  report_template_type?: NameDict
+  dashboard_view_scope?: NameDict
+  import_outcome?: NameDict
   colors: {
     vul_level: NameDict
     vul_status: NameDict
@@ -70,6 +80,8 @@ export interface DictMetaPayload {
     import_batch_status: NameDict
     import_record_status: NameDict
     export_job_status: NameDict
+    sla_state?: NameDict
+    notify_delivery_status?: NameDict
   }
   nonpen: {
     items: NonpenItemDef[]
@@ -99,6 +111,9 @@ const dict = reactive({
     importBatchStatus: {} as NameDict,
     importRecordStatus: {} as NameDict,
     exportJobStatus: {} as NameDict,
+    // P1 批次新增色值字典
+    slaState: {} as NameDict,
+    notifyDeliveryStatus: {} as NameDict,
   },
   nonpen: {
     items: [] as NonpenItemDef[],
@@ -106,6 +121,16 @@ const dict = reactive({
     actions: {} as Record<string, string[]>,
     actionNames: {} as NameDict,
   },
+  // P1 批次字典
+  slaStateNames: {} as NameDict,
+  slaDayBasisNames: {} as NameDict,
+  messageTypeNames: {} as NameDict,
+  todoTypeNames: {} as NameDict,
+  notifyDeliveryStatusNames: {} as NameDict,
+  patScopeNames: {} as NameDict,
+  reportTemplateTypeNames: {} as NameDict,
+  dashboardViewScopeNames: {} as NameDict,
+  importOutcomeNames: {} as NameDict,
 })
 
 /** 把 /meta 响应注入注册表（auth store fetchMeta 调用，全站唯一入口）。
@@ -133,6 +158,18 @@ export function applyDictMeta(meta: DictMetaPayload) {
   dict.nonpen.status = meta.nonpen.status ?? {}
   dict.nonpen.actions = meta.nonpen.actions ?? {}
   dict.nonpen.actionNames = meta.nonpen.action_names ?? {}
+  // P1 批次字典：后端未下发时保持空对象（调用方兜底原文）
+  dict.slaStateNames = meta.sla_state ?? {}
+  dict.slaDayBasisNames = meta.sla_day_basis ?? {}
+  dict.messageTypeNames = meta.message_type ?? {}
+  dict.todoTypeNames = meta.todo_type ?? {}
+  dict.notifyDeliveryStatusNames = meta.notify_delivery_status ?? {}
+  dict.patScopeNames = meta.pat_scope ?? {}
+  dict.reportTemplateTypeNames = meta.report_template_type ?? {}
+  dict.dashboardViewScopeNames = meta.dashboard_view_scope ?? {}
+  dict.importOutcomeNames = meta.import_outcome ?? {}
+  dict.colors.slaState = meta.colors.sla_state ?? {}
+  dict.colors.notifyDeliveryStatus = meta.colors.notify_delivery_status ?? {}
 }
 
 /* ============================================================
@@ -266,3 +303,56 @@ export const retestStateName = (state?: string | null) =>
   RETEST_STATE_META[state ?? 'none']?.name ?? RETEST_STATE_META.none.name
 export const retestStateSoftStyle = (state?: string | null) =>
   softStyle(RETEST_STATE_META[state ?? 'none']?.color ?? RETEST_STATE_META.none.color)
+
+/* ============================================================
+   P1 批次字典出口（SLA / 站内消息 / 通知投递 / 令牌 scope / 模板 / 看板视图 / 导入结果）
+   ============================================================ */
+
+export const slaStateMeta = (state?: string | null) => ({
+  label: dict.slaStateNames[state ?? 'none'] ?? (state ?? 'none'),
+  color: tone(dict.colors.slaState[state ?? 'none'] ?? FALLBACK_COLOR),
+})
+export const slaStateSoftStyle = (state?: string | null) => {
+  const meta = slaStateMeta(state)
+  return softStyle(meta.color)
+}
+export const slaDayBasisName = (basis?: string | null) =>
+  dict.slaDayBasisNames[basis ?? 'natural'] ?? (basis ?? 'natural')
+
+export const messageTypeName = (t: string) => dict.messageTypeNames[t] ?? t
+export const todoTypeName = (t: string) => dict.todoTypeNames[t] ?? t
+
+export const notifyDeliveryMeta = (s: string) => ({
+  label: dict.notifyDeliveryStatusNames[s] ?? s,
+  color: tone(dict.colors.notifyDeliveryStatus[s] ?? FALLBACK_COLOR),
+})
+export const notifyDeliverySoftStyle = (s: string) => softStyle(notifyDeliveryMeta(s).color)
+
+export const patScopeName = (s?: string | null) => dict.patScopeNames[s ?? 'full'] ?? (s ?? 'full')
+export const reportTemplateTypeName = (t?: string | null) =>
+  dict.reportTemplateTypeNames[t ?? 'all'] ?? (t ?? 'all')
+export const dashboardViewScopeName = (s?: string | null) =>
+  dict.dashboardViewScopeNames[s ?? 'personal'] ?? (s ?? 'personal')
+export const importOutcomeMeta = (s?: string | null) => ({
+  label: s ? (dict.importOutcomeNames[s] ?? s) : '未入库',
+  color: tone(
+    s === 'created' ? STAT_CARD_COLORS.green
+      : s === 'updated' ? STAT_CARD_COLORS.blue
+        : s === 'merged' ? '#7C3AED'
+          : s === 'failed' ? STAT_CARD_COLORS.red
+            : s === 'skipped' ? STAT_CARD_COLORS.gray
+              : FALLBACK_COLOR,
+  ),
+})
+export const patScopeOptions = () =>
+  Object.keys(dict.patScopeNames).map(k => ({ value: k, label: dict.patScopeNames[k] }))
+export const reportTemplateTypeOptions = () =>
+  Object.keys(dict.reportTemplateTypeNames).map(k => ({ value: k, label: dict.reportTemplateTypeNames[k] }))
+export const slaDayBasisOptions = () =>
+  Object.keys(dict.slaDayBasisNames).map(k => ({ value: k, label: dict.slaDayBasisNames[k] }))
+export const slaStateOptions = () =>
+  Object.keys(dict.slaStateNames).map(k => ({ value: k, label: dict.slaStateNames[k] }))
+export const messageTypeOptions = () =>
+  Object.keys(dict.messageTypeNames).map(k => ({ value: k, label: dict.messageTypeNames[k] }))
+export const notifyDeliveryStatusOptions = () =>
+  Object.keys(dict.notifyDeliveryStatusNames).map(k => ({ value: k, label: dict.notifyDeliveryStatusNames[k] }))

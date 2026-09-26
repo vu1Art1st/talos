@@ -671,6 +671,29 @@ async def _count_vulns_by_plan(
     return {pid: int(count) for pid, count in rows}
 
 
+async def _count_overdue_by_plan(session: AsyncSession, ids: list[int]) -> dict[int, int]:
+    """按工单统计 SLA 逾期漏洞数（P1-1）。
+
+    与列表 / 看板 / 开放 API 共用 `sla_service.overdue_condition`（有截止时间、已过期、
+    未闭环），保证「导出」与界面口径一致；SLA 未启用时返回空表（导出列全为 0）。
+    """
+    from app.services import sla_service
+
+    if not ids:
+        return {}
+    config = await sla_service.get_config(session)
+    if not config.enabled:
+        return {}
+    rows = (
+        await session.execute(
+            select(Vul.testing_plan_id, func.count(Vul.id))
+            .where(Vul.testing_plan_id.in_(ids), *sla_service.overdue_condition(config))
+            .group_by(Vul.testing_plan_id)
+        )
+    ).all()
+    return {pid: int(count) for pid, count in rows if pid is not None}
+
+
 async def _conclusion_aggregate(
     session: AsyncSession, cond: list, date_from: str = "", date_to: str = "",
 ) -> dict:
@@ -685,6 +708,7 @@ async def _conclusion_aggregate(
     ids = [p.id for p in plans]
     linked_count = await _count_vulns_by_plan(session, ids)
     open_count = await _count_vulns_by_plan(session, ids, only_open=True)
+    overdue_count = await _count_overdue_by_plan(session, ids)
     rounds = (
         await session.execute(
             select(
@@ -732,6 +756,7 @@ async def _conclusion_aggregate(
             "first_test_done_time": p.first_test_done_time,
             "retest_done_time": p.retest_done_time,
             "rectify_state": _rectify_state(p.status),
+            "sla_overdue": overdue_count.get(p.id, 0),
         })
     return {
         "rows": rows,
