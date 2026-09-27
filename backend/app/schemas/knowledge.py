@@ -24,7 +24,7 @@ class KnowledgeIn(BaseModel):
 
     @field_validator("vulnerability_name", mode="after")
     @classmethod
-    def _clean_name(cls, v: str) -> str:
+    def _clean_name(_cls, v: str) -> str:
         v = v.strip()
         if not v:
             raise ValueError("漏洞名称不能为空")
@@ -32,7 +32,7 @@ class KnowledgeIn(BaseModel):
 
     @field_validator("references", mode="after")
     @classmethod
-    def _clean_references(cls, v: list[str]) -> list[str]:
+    def _clean_references(_cls, v: list[str]) -> list[str]:
         # 去除空白项，仅接受 http/https 链接，避免 javascript: 等危险协议入库
         cleaned = [s.strip() for s in v if s and s.strip()]
         for url in cleaned:

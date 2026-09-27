@@ -158,7 +158,10 @@ async def _user_with_perms(client: AsyncClient, auth: dict, username: str, perms
     """建「角色 + 用户」并返回可用请求头（角色名 = 用户名 + 角色，便于用例间隔离）。"""
     resp = await client.post(
         "/api/v1/roles", headers=auth,
-        json={"name": f"{username}角色", "permissions": perms, "remark": ""},
+        json={
+            "name": f"{username}角色", "permissions": perms,
+            "data_scope": "all", "remark": "",
+        },
     )
     assert resp.status_code == 200, resp.text
     resp = await client.post(

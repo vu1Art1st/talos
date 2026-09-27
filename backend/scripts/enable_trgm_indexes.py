@@ -1,4 +1,4 @@
-"""启用 pg_trgm 前后通配符索引（ROADMAP P0-4 的评估落地，显式运维动作）。
+"""启用 pg_trgm 前后通配符索引（P0-4 评估落地，P2-4 扩展字段，显式运维动作）。
 
 **评估结论**（2026-09-26，本机 PostgreSQL 16 + 10 万漏洞基准，见 `scripts/benchmark_lists.py --trgm`）：
 
@@ -12,7 +12,8 @@
 而全新库是 `create_all` 建的（不走迁移）会漏建索引——两条路径无法保持一致。故改为**显式、
 可重入**的运维脚本：先报告可用性，再按结果决定是否建索引，最后打印 EXPLAIN 证据。
 
-覆盖的列（与列表页 `%keyword%` 检索一一对应）：漏洞标题 / 资产名称 / 工单测试系统（两表）。
+覆盖的列与全局搜索 `%keyword%` 检索对应：漏洞标题 / 影响 URL、资产名称 / 子系统、
+渗透 / 漏扫工单计划名与测试系统、报告标题 / 项目名 / 章节标题 / 章节正文。
 
 用法（生产/本地均可在容器或本机执行；幂等，可重复运行）：
 
@@ -40,9 +41,17 @@ from app.db import async_session_maker, engine  # noqa: E402
 # (索引名, 表名, 列名)：与列表页模糊检索的热点列一一对应
 TRGM_INDEXES = (
     ("ix_trgm_vulns_title", "vulns", "title"),
+    ("ix_trgm_vulns_affected_url", "vulns", "affected_url"),
     ("ix_trgm_assets_name", "assets", "name"),
+    ("ix_trgm_assets_sub_system", "assets", "sub_system"),
     ("ix_trgm_testing_plans_system_name", "testing_plans", "system_name"),
+    ("ix_trgm_testing_plans_plan_name", "testing_plans", "plan_name"),
     ("ix_trgm_nonpen_plans_system_name", "nonpen_plans", "system_name"),
+    ("ix_trgm_nonpen_plans_plan_name", "nonpen_plans", "plan_name"),
+    ("ix_trgm_reports_title", "reports", "title"),
+    ("ix_trgm_reports_project_name", "reports", "project_name"),
+    ("ix_trgm_report_sections_title", "report_sections", "title"),
+    ("ix_trgm_report_sections_content_html", "report_sections", "content_html"),
 )
 
 

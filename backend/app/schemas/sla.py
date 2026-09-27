@@ -33,14 +33,14 @@ class SlaConfigIn(BaseModel):
 
     @field_validator("day_basis")
     @classmethod
-    def _check_basis(cls, v: str) -> str:
+    def _check_basis(_cls, v: str) -> str:
         if v not in SLA_DAY_BASIS:
             raise ValueError(f"计时口径仅支持 {list(SLA_DAY_BASIS)}")
         return v
 
     @field_validator("workdays")
     @classmethod
-    def _check_workdays(cls, v: list[int]) -> list[int]:
+    def _check_workdays(_cls, v: list[int]) -> list[int]:
         bad = [x for x in v if x not in range(7)]
         if bad:
             raise ValueError(f"星期序号必须是 0-6（0=周一），非法值：{bad}")
@@ -48,12 +48,12 @@ class SlaConfigIn(BaseModel):
 
     @field_validator("holidays")
     @classmethod
-    def _check_holidays(cls, v: list[str]) -> list[str]:
+    def _check_holidays(_cls, v: list[str]) -> list[str]:
         return _check_holidays(v)
 
     @field_validator("stop_statuses")
     @classmethod
-    def _check_stop_statuses(cls, v: list[int]) -> list[int]:
+    def _check_stop_statuses(_cls, v: list[int]) -> list[int]:
         bad = [x for x in v if x not in VUL_STATUS]
         if bad:
             raise ValueError(f"停止计时状态非法：{bad}")
@@ -76,7 +76,7 @@ class SlaPolicyIn(BaseModel):
 
     @field_validator("level")
     @classmethod
-    def _check_level(cls, v: int) -> int:
+    def _check_level(_cls, v: int) -> int:
         if v not in (10, 20, 30, 40, 50):
             raise ValueError("漏洞等级仅支持 10/20/30/40/50")
         return v
@@ -117,7 +117,7 @@ class SlaRecalculateIn(BaseModel):
 
     @field_validator("scope")
     @classmethod
-    def _check_scope(cls, v: str) -> str:
+    def _check_scope(_cls, v: str) -> str:
         if v not in ("open", "all"):
             raise ValueError("重算范围仅支持 open / all")
         return v

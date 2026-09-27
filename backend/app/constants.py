@@ -143,6 +143,14 @@ PERMISSION_CATALOG = [
 
 PERMISSIONS = [p["key"] for p in PERMISSION_CATALOG]
 
+# P2-1 数据范围：拥有 * 的角色始终为 all；其余角色按此字段限制业务对象可见集合。
+DATA_SCOPES = {
+    "all": "全部数据",
+    "department": "本组织数据",
+    "own": "本人数据",
+    "none": "无业务数据",
+}
+
 # 审计动作（F7 登录与操作审计）：login_ 前缀为登录事件，其余为敏感操作；
 # 经 /meta 下发供审计查询页筛选下拉使用，新增动作必须在此登记
 AUDIT_ACTIONS = {

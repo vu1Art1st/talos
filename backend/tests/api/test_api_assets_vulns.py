@@ -404,3 +404,15 @@ async def test_global_search(client: AsyncClient, auth: dict):
     body = resp.json()
     assert any(a["name"] == "搜索目标系统Alpha" for a in body["assets"])
     assert body["vulns"] == []
+
+    # P2-4：实体类型过滤与命中摘要
+    resp = await client.get(
+        "/api/v1/search", headers=auth, params={"q": "Alpha", "types": "vulns"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assets"] == []
+    resp = await client.get(
+        "/api/v1/search", headers=auth, params={"q": "Alpha", "types": "assets"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["assets"][0]["snippet"]

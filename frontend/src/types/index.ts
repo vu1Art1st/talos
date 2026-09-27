@@ -130,6 +130,8 @@ export interface Role {
   name: string
   /** 权限码列表（按分组渲染勾选态） */
   permissions: string[]
+  /** P2-1 数据范围：all / department / own / none */
+  data_scope: 'all' | 'department' | 'own' | 'none'
   remark?: string | null
 }
 
@@ -143,6 +145,8 @@ export interface User {
   realname: string
   email?: string | null
   role_id?: number | null
+  /** 用户所属组织 ID 列表（P2-1 数据范围） */
+  group_ids?: number[]
   is_active: boolean
   /** 权限码列表（权限查看弹窗按分组渲染） */
   permissions?: string[]

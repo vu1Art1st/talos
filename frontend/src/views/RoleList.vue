@@ -11,6 +11,13 @@
     <el-table v-loading="loading" :data="roles" stripe>
       <el-table-column type="index" label="序号" width="64" />
       <el-table-column prop="name" label="角色名称" width="160" show-overflow-tooltip />
+      <el-table-column label="数据范围" width="120">
+        <template #default="{ row }">
+          <span class="tl-tag" :style="softStyle(STAT_CARD_COLORS.blue)">
+            {{ scopeLabel(row.data_scope) }}
+          </span>
+        </template>
+      </el-table-column>
       <el-table-column label="权限" min-width="300">
         <template #default="{ row }">
           <template v-if="row.permissions.includes('*')">
@@ -54,6 +61,11 @@
     <el-form ref="roleFormRef" :model="roleForm" :rules="roleRules" label-width="90px">
       <el-form-item label="角色名称" prop="name">
         <el-input v-model="roleForm.name" maxlength="64" />
+      </el-form-item>
+      <el-form-item label="数据范围">
+        <el-select v-model="roleForm.data_scope" class="w-full">
+          <el-option v-for="s in scopeOptions" :key="s.value" :label="s.label" :value="s.value" />
+        </el-select>
       </el-form-item>
       <el-form-item label="权限配置">
         <div class="w-full">
@@ -100,6 +112,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
+import { useAuthStore } from '../stores/auth'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import type { Role, RoleForm } from '../types'
 
@@ -107,18 +120,24 @@ interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }
 
 const roles = ref<Role[]>([])
+const auth = useAuthStore()
 const loading = ref(false)
 const catalog = ref<PermGroup[]>([])
 const catalogLoading = ref(false)
 const roleDialog = ref(false)
 const roleSaving = ref(false)
-const roleForm = reactive<RoleForm>({ id: null, name: '', permissions: [], remark: '' })
+const roleForm = reactive<RoleForm>({
+  id: null, name: '', permissions: [], data_scope: 'department', remark: '',
+})
 const roleFormRef = ref<FormInstance>()
 const roleRules: FormRules = {
   name: [{ required: true, whitespace: true, message: '请填写角色名称', trigger: 'blur' }],
 }
 
 const allKeys = computed(() => catalog.value.flatMap((g) => g.items.map((it) => it.key)))
+const scopeOptions = computed(() =>
+  Object.entries(auth.meta?.data_scope ?? {}).map(([value, label]) => ({ value, label })),
+)
 const labelMap = computed(() => {
   const m = new Map<string, string>()
   for (const g of catalog.value) for (const it of g.items) m.set(it.key, it.label)
@@ -177,10 +196,17 @@ function clearAll() {
   roleForm.permissions = []
 }
 
+function scopeLabel(value: Role['data_scope']) {
+  return auth.meta?.data_scope?.[value] ?? value
+}
+
 function openRole(row?: Role) {
   Object.assign(roleForm, row
-    ? { id: row.id, name: row.name, permissions: [...row.permissions], remark: row.remark }
-    : { id: null, name: '', permissions: [], remark: '' })
+    ? {
+        id: row.id, name: row.name, permissions: [...row.permissions],
+        data_scope: row.data_scope, remark: row.remark,
+      }
+    : { id: null, name: '', permissions: [], data_scope: 'department' as const, remark: '' })
   roleDialog.value = true
 }
 
@@ -206,6 +232,6 @@ async function removeRole(id: number) {
 }
 
 onMounted(async () => {
-  await Promise.all([loadRoles(), loadCatalog()])
+  await Promise.all([loadRoles(), loadCatalog(), auth.fetchMeta()])
 })
 </script>

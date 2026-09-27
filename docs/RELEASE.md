@@ -25,6 +25,34 @@
 
 ---
 
+## [2.22.0] - 2026-09-27
+
+ROADMAP「批次 C：数据边界与恢复能力」——P2-1（角色数据范围）/ P2-4（性能与检索底座）/ P2-5（可观测与恢复演练）落地。本版本为**向下兼容的功能新增**（数据范围作为新能力平滑接入，`*` 角色恒为 `all`、既有未配置 scope 的角色由管理员显式设置，开放 API 契约不变），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **P2-1 角色数据范围（数据级 RBAC）**：
+  - 新增 `app/core/data_scope.py`，经 SQLAlchemy `do_orm_execute` 对业务实体（资产 / 漏洞 / 工单 / 报告 / 通知 / 导入导出 / 操作日志等 20+ 表）统一注入 `department / own / none` 过滤条件；
+  - `roles` 表新增 `data_scope` 列（默认 `department`），`permissions=["*"]` 角色始终按 `all` 处理；无组织归属的 department 用户不自动获得全量兜底，由管理员先补齐组织关系；
+  - 路由不再各自用 `department=` 参数模拟权限，数据范围由认证依赖写入 `session.info` 统一收敛。
+- **P2-5 运行指标**：新增 `app/services/metrics_service.py`，输出 Prometheus 文本格式（明确不含对象名 / URL / 令牌 / 错误正文），覆盖 DB 查询计数、慢查询与依赖健康等。
+- **命令面板**：前端 `CmdPalette.vue`（⌘K）支持页面跳转 + 动作 + 全局搜索（`/api/v1/search`）。
+- **恢复演练脚本**：新增 `scripts/restore-drill.sh`（恢复演练 / 灾备校验，RPO / RTO 归入 P2-5）。
+
+### 变更
+
+- 迁移 `a9b0c1d2e3f4_p2_role_data_scope`：`roles.data_scope` 列 + `group_users(user_id / group_id)` 双索引（降级路径：删除索引与列）；trigram 索引仍按既有决策由 `scripts/enable_trgm_indexes.py` 显式运维启用，不放进迁移。
+- 多端点接入数据范围过滤：`health` / `images` / `auth` / `misc` / `search` / `users` 及 `stats_service`；`core/deps.py` / `core/query.py` / `db.py` 相应调整。
+- 前端 `RoleList.vue` / `UserList.vue` 接入数据范围展示与设置；`types/index.ts` / `utils/colors.ts` 同步。
+- 文档同步：`ROADMAP.md`（完成结构收敛，P2-1/4/5 收口、未排期项集中归档）、`USER_GUIDE` / `DEPLOY` / `SCRIPTS` 校订。
+
+### 修复
+
+- 数据范围过滤下的查询口径统一与统计缓存接入 scope；通知 / 投递任务的跨任务权限快照为 P2-1 收尾项（待补）。
+- 新增 `test_api_data_scope.py` / `test_data_scope.py` / `test_metrics.py` 守护数据范围与指标行为。
+
+---
+
 ## [2.21.0] - 2026-09-26
 
 ROADMAP「P1：业务闭环与运营能力」——P1-1 ~ P1-7 全部完成。本版本无破坏性接口变更（开放 API 全部为

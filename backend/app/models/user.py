@@ -13,6 +13,9 @@ class Role(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64), unique=True)
     permissions: Mapped[list] = mapped_column(JSON, default=list)
+    # P2-1 数据范围：all / department / own / none。拥有 * 的角色始终按 all 处理，
+    # 该字段用于其余角色的资源可见范围；缺省 department，禁止无归属用户回退为全量。
+    data_scope: Mapped[str] = mapped_column(String(16), default="department", server_default="department")
     remark: Mapped[str] = mapped_column(String(255), default="")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
 
@@ -39,6 +42,11 @@ class User(Base):
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     role: Mapped[Role | None] = relationship(back_populates="users", lazy="selectin")
+    # P2-1：用户可属于多个组织；组织名称用于兼容既有 department 字符串字段。
+    groups: Mapped[list["Group"]] = relationship(
+        secondary="group_users",
+        lazy="selectin",
+    )
 
 
 class PersonalAccessToken(Base):

@@ -37,6 +37,7 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert meta["colors"]["vul_level"]["10"] == "#DC2626"
     assert meta["import_batch_status"]["parsed"] == "待确认"
     assert meta["export_job_status"]["done"] == "已完成"
+    assert meta["data_scope"]["department"] == "本组织数据"
     # 报告「草稿/已定稿」状态功能已取消：名称与色值字典不再随 /meta 下发
     assert "report_status" not in meta
     assert "report_status" not in meta["colors"]

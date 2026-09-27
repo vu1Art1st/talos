@@ -238,11 +238,18 @@ async def build_stats(
     写入路径显式失效，避免大库重复计算；缓存键覆盖全部筛选参数，保证
     「同一筛选条件在列表、看板、导出、开放 API 得到一致的分母与结果」。
     """
+    from app.core.data_scope import current_data_scope
     from app.services import sla_service, stats_cache
+
+    scope = current_data_scope(session)
+    scope_key = (
+        (scope.mode, scope.user_id, scope.group_ids, scope.group_names, scope.group_user_ids)
+        if scope else ("legacy",)
+    )
 
     key = stats_cache.cache_key(
         date_from=date_from, date_to=date_to, department=department,
-        source=source, level=level,
+        source=source, level=level, scope=scope_key,
     )
     cached = stats_cache.get(key)
     if cached is not None:

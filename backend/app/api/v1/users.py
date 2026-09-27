@@ -1,15 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.api.v1.auth import build_user_out
 from app.constants import PERMISSION_CATALOG, PERMISSIONS
+from app.core.data_scope import unscoped_statement
 from app.core.deps import get_current_user, require_any_perm, require_perm
 from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_sort
 from app.core.security import hash_password
 from app.db import get_session
-from app.models import Group, GroupMember, Role, User
+from app.models import Group, GroupMember, GroupUser, Role, User
 from app.schemas import (
     GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut,
     PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut,
@@ -17,6 +18,20 @@ from app.schemas import (
 from app.services.audit_service import audit
 
 router = APIRouter(tags=["用户与权限"])
+
+
+async def _sync_user_groups(session: AsyncSession, user: User, group_ids: list[int]) -> None:
+    """用户组织归属的唯一写入入口；不存在的组织直接 400，避免静默丢配置。"""
+    ids = {int(gid) for gid in group_ids}
+    if ids:
+        valid = set(
+            (await session.execute(select(Group.id).where(Group.id.in_(ids)))).scalars().all()
+        )
+        if valid != ids:
+            raise HTTPException(400, "包含不存在的组织")
+    await session.execute(delete(GroupUser).where(GroupUser.user_id == user.id))
+    for gid in sorted(ids):
+        session.add(GroupUser(user_id=user.id, group_id=gid))
 
 
 # ---------- 用户 ----------
@@ -33,7 +48,9 @@ async def list_users(
     cond = []
     if search:
         cond.append(User.username.ilike(f"%{search}%") | User.realname.ilike(f"%{search}%"))
-    stmt = select(User).options(selectinload(User.role)).where(*cond)
+    stmt = select(User).options(
+        selectinload(User.role), selectinload(User.groups)
+    ).where(*cond)
     stmt = apply_sort(
         stmt, User, sort, order,
         {"id", "username", "realname", "email", "is_active", "create_time", "last_login"},
@@ -62,7 +79,11 @@ async def create_user(
     operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    exists = (await session.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
+    exists = (
+        await session.execute(unscoped_statement(
+            select(User).where(User.username == body.username)
+        ))
+    ).scalar_one_or_none()
     if exists:
         raise HTTPException(400, "用户名已存在")
     if not body.password:
@@ -78,8 +99,11 @@ async def create_user(
         must_change_password=True,
     )
     session.add(user)
+    await session.flush()
+    await _sync_user_groups(session, user, body.group_ids)
     await session.commit()
     await session.refresh(user)
+    await session.refresh(user, attribute_names=["groups"])
     await audit(session, request, "user_create", operator, {"target": f"users/{user.id}", "username": user.username})
     return build_user_out(user)
 
@@ -101,6 +125,7 @@ async def update_user(
         user.token_version += 1
     user.is_active = body.is_active
     user.role_id = body.role_id
+    await _sync_user_groups(session, user, body.group_ids)
     if body.password:
         user.password_hash = hash_password(body.password)
         user.must_change_password = True
@@ -108,6 +133,7 @@ async def update_user(
         user.token_version += 1
     await session.commit()
     await session.refresh(user)
+    await session.refresh(user, attribute_names=["groups"])
     await audit(session, request, "user_update", operator, {"target": f"users/{user.id}", "username": user.username})
     return build_user_out(user)
 
@@ -162,7 +188,12 @@ async def create_role(
     operator: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    role = Role(name=body.name, permissions=body.permissions, remark=body.remark)
+    role = Role(
+        name=body.name,
+        permissions=body.permissions,
+        data_scope=body.data_scope,
+        remark=body.remark,
+    )
     session.add(role)
     await session.commit()
     await session.refresh(role)
@@ -181,6 +212,7 @@ async def update_role(
     role = await get_or_404(session, Role, role_id, "角色不存在")
     role.name = body.name
     role.permissions = body.permissions
+    role.data_scope = body.data_scope
     role.remark = body.remark
     await session.commit()
     await audit(session, request, "role_update", operator, {"op": "update", "role": role.name})
@@ -225,7 +257,9 @@ async def create_group(
     name = body.name.strip()
     if not name:
         raise HTTPException(400, "组织名称不能为空")
-    exists = (await session.execute(select(Group).where(Group.name == name))).scalar_one_or_none()
+    exists = (
+        await session.execute(unscoped_statement(select(Group).where(Group.name == name)))
+    ).scalar_one_or_none()
     if exists is not None:
         raise HTTPException(400, "同名组织已存在")
     group = Group(name=name, remark=body.remark)

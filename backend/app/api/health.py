@@ -11,9 +11,10 @@
 import logging
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.services.health_service import probe_dependencies
+from app.services.metrics_service import collect_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -43,3 +44,12 @@ async def health_ready(request: Request):
         logger.warning("就绪探针失败，未就绪的必需依赖：%s", failed)
         return JSONResponse(status_code=503, content=payload)
     return payload
+
+
+@router.get("/api/health/metrics", response_class=PlainTextResponse)
+async def health_metrics(request: Request):
+    """Prometheus 文本指标（P2-5）。仅返回聚合值，禁止放入对象名、URL 或错误正文。"""
+    return PlainTextResponse(
+        await collect_metrics(request.app),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )

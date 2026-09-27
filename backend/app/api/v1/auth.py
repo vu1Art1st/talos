@@ -32,6 +32,7 @@ def build_user_out(user: User) -> UserOut:
     out = UserOut.model_validate(user)
     out.role_name = user.role.name if user.role else ""
     out.permissions = sorted(user_permissions(user))
+    out.group_ids = sorted(g.id for g in (getattr(user, "groups", []) or []))
     return out
 
 

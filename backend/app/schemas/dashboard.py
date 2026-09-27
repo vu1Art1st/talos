@@ -25,7 +25,7 @@ class DashboardViewIn(BaseModel):
 
     @field_validator("scope")
     @classmethod
-    def _check_scope(cls, v: str) -> str:
+    def _check_scope(_cls, v: str) -> str:
         if v not in DASHBOARD_VIEW_SCOPES:
             raise ValueError(f"视图类型仅支持 {list(DASHBOARD_VIEW_SCOPES)}")
         return v

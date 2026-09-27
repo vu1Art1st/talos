@@ -221,8 +221,12 @@ async def _q_vul_keyword(session, page: int):
 
 # pg_trgm 评估覆盖的「前后通配符」列（与 P0-4 评估项对应）
 _TRGM_COLUMNS = (
-    ("vulns", "title"), ("assets", "name"),
-    ("testing_plans", "system_name"), ("nonpen_plans", "system_name"),
+    ("vulns", "title"), ("vulns", "affected_url"),
+    ("assets", "name"), ("assets", "sub_system"),
+    ("testing_plans", "system_name"), ("testing_plans", "plan_name"),
+    ("nonpen_plans", "system_name"), ("nonpen_plans", "plan_name"),
+    ("reports", "title"), ("reports", "project_name"),
+    ("report_sections", "title"), ("report_sections", "content_html"),
 )
 
 

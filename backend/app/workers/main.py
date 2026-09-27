@@ -8,7 +8,10 @@ from dataclasses import replace
 
 from arq import cron
 from arq.connections import RedisSettings
+from sqlalchemy import select
+
 from app.core.config import settings
+from app.core.data_scope import install_data_scope
 from app.core.timeutil import now
 from app.db import async_session_maker
 from app.models import (
@@ -127,9 +130,18 @@ async def export_report_task(ctx, job_id: int) -> None:
         await session.commit()
 
         try:
-            report = await session.get(Report, job.report_id)
+            # P2-1：导出任务按发起人重新安装数据范围。导出期间权限被撤销 / 组织调整后，
+            # 任务不能再凭旧 job 记录读取越权报告。
+            if job.creator_id is not None:
+                creator = await session.get(User, job.creator_id)
+                if creator is None or not creator.is_active:
+                    raise task_lifecycle.PermanentTaskError("导出发起账号不存在或已禁用")
+                await install_data_scope(session, creator)
+            report = (
+                await session.execute(select(Report).where(Report.id == job.report_id))
+            ).scalar_one_or_none()
             if report is None:
-                raise task_lifecycle.PermanentTaskError("报告不存在")
+                raise task_lifecycle.PermanentTaskError("报告不存在或发起人已无权访问")
 
             # 发起导出报告的账号：版本变更记录「修改人」列使用（而非报告作者）
             generator = None

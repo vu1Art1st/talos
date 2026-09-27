@@ -8,6 +8,12 @@
           <input ref="inputRef" v-model="q" placeholder="搜索漏洞、资产、工单、报告或跳转页面…" @input="onSearch" />
           <kbd class="kbd">esc</kbd>
         </div>
+        <div class="cmdk-filters">
+          <button v-for="f in typeFilters" :key="f.value" type="button"
+                  :class="{ active: typeFilter === f.value }" @click="pickType(f.value)">
+            {{ f.label }}
+          </button>
+        </div>
         <div ref="listRef" class="cmdk-list">
           <template v-for="group in groups" :key="group.name">
             <template v-if="group.items.length">
@@ -15,8 +21,8 @@
               <div v-for="item in group.items" :key="item.key" class="cmdk-item"
                    :class="{ sel: item.key === selKey }" @mouseenter="selKey = item.key" @click="run(item)">
                 <el-icon v-if="item.icon" :size="14"><component :is="item.icon" /></el-icon>
-                <span class="cmdk-label">{{ item.label }}</span>
-                <span v-if="item.sub" class="cmdk-sub">{{ item.sub }}</span>
+                <span class="cmdk-label" :class="{ rich: item.html }" v-html="item.html || item.label"></span>
+                <span v-if="item.sub" class="cmdk-sub" v-html="item.subHtml || item.sub"></span>
                 <kbd v-if="item.hint" class="kbd">{{ item.hint }}</kbd>
               </div>
             </template>
@@ -44,15 +50,28 @@ import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { useUiStore } from '../stores/ui'
+import { highlight } from '../utils/highlight'
 
 interface CmdItem {
   key: string
   label: string
+  html?: string
   icon?: unknown
   sub?: string
+  subHtml?: string
   hint?: string
+  path?: string
   run: () => void
 }
+
+interface RecentCmd {
+  key: string
+  label: string
+  sub: string
+  path: string
+}
+
+const RECENT_KEY = 'talos.cmdk.recent.v1'
 
 const ui = useUiStore()
 const theme = useThemeStore()
@@ -64,6 +83,15 @@ const inputRef = ref<HTMLInputElement>()
 const listRef = ref<HTMLElement>()
 const selKey = ref('')
 const results = ref<CmdItem[]>([])
+const recent = ref<RecentCmd[]>([])
+const typeFilter = ref<'all' | 'vulns' | 'assets' | 'plans' | 'reports'>('all')
+const typeFilters = [
+  { value: 'all', label: '全部' },
+  { value: 'vulns', label: '漏洞' },
+  { value: 'assets', label: '资产' },
+  { value: 'plans', label: '工单' },
+  { value: 'reports', label: '报告' },
+] as const
 
 /* ---- 静态跳转项（与侧边栏同源，按权限显隐） ---- */
 const jumpItems = computed<CmdItem[]>(() => {
@@ -115,6 +143,11 @@ const groups = computed(() => {
   const hit = (it: CmdItem) => !kw || it.label.toLowerCase().includes(kw) || (it.sub ?? '').toLowerCase().includes(kw)
   return [
     { name: '搜索结果', items: results.value },
+    ...(!kw ? [{ name: '最近访问', items: recent.value.map((item): CmdItem => ({
+      key: `recent-${item.key}`, label: item.label, sub: item.sub,
+      path: item.path,
+      run: () => { router.push(item.path); close() },
+    })) }] : []),
     { name: '快速跳转', items: jumpItems.value.filter(hit) },
     { name: '操作', items: actionItems.value.filter(hit) },
   ]
@@ -131,24 +164,38 @@ function onSearch() {
   if (!kw) { results.value = []; return }
   searchTimer = setTimeout(async () => {
     try {
-      const { data } = await client.get('/search', { params: { q: kw } })
+      const { data } = await client.get('/search', {
+        params: { q: kw, types: typeFilter.value === 'all' ? undefined : typeFilter.value },
+      })
       const r = data ?? {}
       const items: CmdItem[] = []
       for (const v of r.vulns ?? []) items.push({
-        key: `s-vuln-${v.id}`, label: v.title ?? String(v.id), sub: '漏洞', icon: Warning,
+        key: `s-vuln-${v.id}`, label: v.title ?? String(v.id),
+        html: highlight(v.title ?? String(v.id), kw),
+        sub: `漏洞 · ${v.snippet ?? ''}`, subHtml: highlight(`漏洞 · ${v.snippet ?? ''}`, kw),
+        icon: Warning, path: `/vulns/${v.id}`,
         run: () => { router.push(`/vulns/${v.id}`); close() },
       })
       for (const a of r.assets ?? []) items.push({
-        key: `s-asset-${a.id}`, label: a.name ?? String(a.id), sub: '资产', icon: Monitor,
+        key: `s-asset-${a.id}`, label: a.name ?? String(a.id),
+        html: highlight(a.name ?? String(a.id), kw),
+        sub: `资产 · ${a.snippet ?? ''}`, subHtml: highlight(`资产 · ${a.snippet ?? ''}`, kw),
+        icon: Monitor, path: '/assets',
         run: () => { router.push('/assets'); close() },
       })
       for (const pl of r.plans ?? []) items.push({
         key: `s-plan-${pl.type}-${pl.id}`, label: pl.title ?? String(pl.id),
-        sub: pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单', icon: Tickets,
+        html: highlight(pl.title ?? String(pl.id), kw),
+        sub: `${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'} · ${pl.snippet ?? ''}`,
+        subHtml: highlight(`${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'} · ${pl.snippet ?? ''}`, kw),
+        icon: Tickets, path: pl.type === 'nonpen' ? '/nonpen-plans' : '/testing-plans',
         run: () => { router.push(pl.type === 'nonpen' ? '/nonpen-plans' : '/testing-plans'); close() },
       })
       for (const rp of r.reports ?? []) items.push({
-        key: `s-report-${rp.id}`, label: rp.title ?? String(rp.id), sub: '报告', icon: Document,
+        key: `s-report-${rp.id}`, label: rp.title ?? String(rp.id),
+        html: highlight(rp.title ?? String(rp.id), kw),
+        sub: `报告 · ${rp.snippet ?? ''}`, subHtml: highlight(`报告 · ${rp.snippet ?? ''}`, kw),
+        icon: Document, path: `/reports/${rp.id}`,
         run: () => { router.push(`/reports/${rp.id}`); close() },
       })
       results.value = items.slice(0, 8)
@@ -161,10 +208,37 @@ function open() {
   ui.openCmdk()
   q.value = ''
   results.value = []
+  try {
+    const parsed = JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]') as unknown
+    recent.value = Array.isArray(parsed)
+      ? parsed.filter((item): item is RecentCmd => (
+          !!item && typeof item === 'object'
+          && typeof (item as RecentCmd).key === 'string'
+          && typeof (item as RecentCmd).label === 'string'
+          && typeof (item as RecentCmd).path === 'string'
+        )).slice(0, 5)
+      : []
+  } catch { recent.value = [] }
   nextTick(() => inputRef.value?.focus())
 }
 function close() { ui.closeCmdk() }
-function run(item: CmdItem) { item.run() }
+function run(item: CmdItem) {
+  if (item.path) {
+    const entry: RecentCmd = {
+      key: item.key.replace(/^recent-/, ''),
+      label: item.label,
+      sub: item.sub?.split(' · ')[0] || '最近访问',
+      path: item.path,
+    }
+    recent.value = [entry, ...recent.value.filter((x) => x.key !== entry.key)].slice(0, 5)
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recent.value))
+  }
+  item.run()
+}
+function pickType(value: typeof typeFilter.value) {
+  typeFilter.value = value
+  onSearch()
+}
 function move(delta: number) {
   const list = flat.value
   if (!list.length) return
@@ -232,6 +306,25 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
 }
 .cmdk-input input::placeholder { color: var(--tl-text-3); }
 .cmdk-list { padding: 8px; max-height: 320px; overflow-y: auto; }
+.cmdk-filters {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+}
+.cmdk-filters button {
+  border: 1px solid var(--tl-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tl-text-3);
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.cmdk-filters button.active {
+  border-color: var(--tl-border-strong);
+  background: var(--tl-surface-2);
+  color: var(--tl-text-1);
+}
 .cmdk-group {
   font-size: 10.5px;
   font-weight: 600;
@@ -252,6 +345,7 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
 .cmdk-item:hover, .cmdk-item.sel { background: var(--tl-surface-2); color: var(--tl-text-1); }
 .cmdk-item.sel { outline: 1px solid var(--tl-border-strong); }
 .cmdk-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cmdk-label.rich { min-width: 0; }
 .cmdk-sub { font-size: 10.5px; color: var(--tl-text-3); flex: none; }
 .cmdk-item .kbd { margin-left: auto; }
 .cmdk-empty { padding: 28px 0; text-align: center; color: var(--tl-text-3); font-size: 12.5px; }

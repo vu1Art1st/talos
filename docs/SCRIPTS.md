@@ -19,7 +19,7 @@
 
 ## 一、总览
 
-### 1.1 部署与开发/测试脚本 `scripts/`（13 个部署脚本 + `test` / `clean` / `e2e` 三个辅助脚本的 sh+ps1 双份，合计 1 844 行）
+### 1.1 部署与开发/测试脚本 `scripts/`（14 个部署脚本 + `test` / `clean` / `e2e` 三个辅助脚本的 sh+ps1 双份，合计 1 987 行）
 
 | 脚本 | 行数 | 状态 | 调用方 / 出处 |
 |---|---|---|---|
@@ -31,6 +31,7 @@
 | `docker-cmd.sh` | 13 | 活跃·库文件（2026-09-17 新增） | 被 `backup-common.sh`、`migrate.sh`、`upgrade.sh` source（S-5：`$DOCKER` 前缀统一实现） |
 | `restore.sh` | 77 | 活跃·常规运维 | README.md:85、DEPLOY.md:258 |
 | `restore-local.sh` | 106 | 活跃·开发辅助（2026-09-22 新增） | 把生产备份导入本地/裸 PostgreSQL（DBngin / WSL 直连）；DEPLOY.md「九」；详见 §2.15 |
+| `restore-drill.sh` | 143 | 活跃·常规运维（2026-09-27 新增） | P2-5 恢复演练：导入独立临时库、执行 Alembic、校验关键计数并写 `backups/restore_drills/latest.json`；详见 §2.16 |
 | `notify.sh` | 27 | 活跃·库依赖 | `backup-common.sh:45-49`、`upgrade.sh:161`（升级末尾有 fail-open 步骤失败时） |
 | `install-cron.sh` | 27 | 活跃·一次性安装 | RELEASE.md:385 |
 | `disk-usage.sh` | 127 | 活跃·排障工具 | DEPLOY.md 附「文件与磁盘」（磁盘排查双视角判据） |
@@ -78,7 +79,9 @@
 | `rsync` | `backup.sh:19`、`backup-incremental.sh:18` |
 | `sha256sum` | `backup.sh:20`、`backup-incremental.sh:19`、`backup-common.sh:76` |
 | `zstd`（备份侧可选 / **恢复侧必需**） | `backup-common.sh:25`（备份机缺失时自动回退 gzip，仅提示变慢）；但 `restore.sh` / `restore-local.sh` 解压 `.zst` 产物时**必须**存在，否则直接失败（无回退路径，2026-09-22 校正口径） |
-| `psql`（客户端） | `restore-local.sh`（本地/裸 PG 恢复：DBngin 自带 16.14、WSL-Kali 18.1 均已实测可用） |
+| `psql`（客户端） | `restore-local.sh`（本地/裸 PG 恢复：DBngin 自带 16.14、WSL-Kali 18.1 均已实测可用）；`restore-drill.sh`（导入与计数校验） |
+| `dropdb` / `createdb` | `restore-drill.sh`（重建独立演练库；不触碰业务库） |
+| `backend/.venv` + `python3` | `restore-drill.sh`（执行 Alembic 迁移、写 JSON 演练报告） |
 | `flock` | `backup-common.sh:53`（缺失直接 `die`） |
 | `curl` | `notify.sh:22` |
 | `crontab` | `install-cron.sh` |
@@ -250,6 +253,21 @@
   `restore-local.sh backups/anchors/2026/09/20260910_101126 --dsn postgresql://vulnplatform@127.0.0.1:5432/<临时库>`：
   **1.3 s 完成**，落库后 30 张表 / 261 漏洞 / 108 报告 / `alembic_version=d6e7f8a9b0c1`，与备份一致；随后 `scripts.migrate`
   补齐 5 个迁移到 head。现场操作步骤见 `docs/DEPLOY.md`「九、把生产备份导入本地开发库」。
+
+### 2.16 `restore-drill.sh` — 备份恢复演练（活跃·常规运维）
+
+面向 P2-5：以最近一次 `backups/latest` 为输入，在独立 PostgreSQL 数据库
+`vulnplatform_restore_drill` 中执行 `restore-local.sh -> alembic upgrade head -> 关键计数校验`。
+成功结果写入 `backups/restore_drills/latest.json`，失败也会写入失败摘要并保留临时库供排查。
+
+```bash
+bash scripts/restore-drill.sh
+bash scripts/restore-drill.sh backups/anchors/2026/09/<时间戳>
+```
+
+依赖 `psql` / `dropdb` / `createdb` / `python3`、可连接的 PostgreSQL、`backend/.venv` 与
+`.env` 中的连接凭据。脚本不使用批量删库命令（先 `dropdb --if-exists` 再重建），不触碰
+生产库，不自动删除演练库；确认结果后再由运维清理。
 
 ---
 

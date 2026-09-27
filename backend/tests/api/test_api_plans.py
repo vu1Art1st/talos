@@ -385,7 +385,10 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     # 非管理员权限边界：状态修改与录入漏洞仅限认领者
     resp = await client.post(
         "/api/v1/roles", headers=auth,
-        json={"name": "计划测试员", "permissions": ["special:manage", "vuln:submit"], "remark": ""},
+        json={
+            "name": "计划测试员", "permissions": ["special:manage", "vuln:submit"],
+            "data_scope": "all", "remark": "",
+        },
     )
     role_id = resp.json()["id"]
     resp = await client.post(

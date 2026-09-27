@@ -68,6 +68,7 @@ export interface DictMetaPayload {
   pat_scope?: NameDict
   report_template_type?: NameDict
   dashboard_view_scope?: NameDict
+  data_scope?: NameDict
   import_outcome?: NameDict
   colors: {
     vul_level: NameDict

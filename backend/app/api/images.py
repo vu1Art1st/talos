@@ -19,10 +19,14 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.data_scope import bound_scope_statement
 from app.core.deps import get_image_viewer
 from app.core.storage import resolve_storage_path
-from app.models import User
+from app.db import async_session_maker, get_session
+from app.models import ImportRecord, KnowledgeEntry, ReportSection, User, Vul
 
 router = APIRouter(tags=["图片"])
 
@@ -31,10 +35,56 @@ router = APIRouter(tags=["图片"])
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:png|jpe?g|gif|webp|bmp)$")
 
 
+def _reference_stmt(model, name: str):
+    if model is ReportSection:
+        return select(model.id).where(model.content_html.contains(name)).limit(1)
+    if model is Vul:
+        return select(model.id).where(or_(
+            model.description_html.contains(name),
+            model.reproduce_html.contains(name),
+            model.solution_html.contains(name),
+            model.retest_html.contains(name),
+        )).limit(1)
+    if model is ImportRecord:
+        return select(model.id).where(or_(
+            model.description_html.contains(name),
+            model.reproduce_html.contains(name),
+            model.solution_html.contains(name),
+            model.retest_html.contains(name),
+        )).limit(1)
+    return select(model.id).where(or_(
+        model.description_html.contains(name),
+        model.harm_html.contains(name),
+        model.solution_html.contains(name),
+    )).limit(1)
+
+
+async def _has_visible_reference(session: AsyncSession, name: str) -> bool:
+    for model in (ReportSection, Vul, ImportRecord, KnowledgeEntry):
+        stmt = bound_scope_statement(session, _reference_stmt(model, name))
+        if (await session.execute(stmt)).scalar_one_or_none() is not None:
+            return True
+    return False
+
+
+async def _has_any_reference(name: str) -> bool:
+    async with async_session_maker() as session:
+        for model in (ReportSection, Vul, ImportRecord, KnowledgeEntry):
+            if (await session.execute(_reference_stmt(model, name))).scalar_one_or_none() is not None:
+                return True
+    return False
+
+
 @router.get("/storage/uploads/images/{name}")
-async def download_image(name: str, _: User = Depends(get_image_viewer)):
-    """下发富文本图片（需登录；越界/不存在一律 404）。"""
+async def download_image(
+    name: str,
+    _: User = Depends(get_image_viewer),
+    session: AsyncSession = Depends(get_session),
+):
+    """下发富文本图片（需登录 + 对象 scope；越界/越权/不存在统一 404）。"""
     if not _IMAGE_NAME_RE.match(name):
+        raise HTTPException(404, "图片不存在")
+    if not await _has_visible_reference(session, name) and await _has_any_reference(name):
         raise HTTPException(404, "图片不存在")
     path = resolve_storage_path(f"uploads/images/{name}", not_found_detail="图片不存在")
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"

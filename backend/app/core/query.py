@@ -68,7 +68,12 @@ def apply_sort(stmt, model, sort: str, order: str, allowed: set[str], default_or
 
 async def get_or_404(session: AsyncSession, model, pk, detail: str = "资源不存在"):
     """按主键获取实体，不存在则抛出 404。"""
-    obj = await session.get(model, pk)
+    from app.core.data_scope import bound_scope_statement, current_data_scope
+
+    stmt = select(model).where(model.id == pk)
+    if current_data_scope(session) is not None:
+        stmt = bound_scope_statement(session, stmt)
+    obj = (await session.execute(stmt)).scalar_one_or_none()
     if obj is None:
         raise HTTPException(404, detail)
     return obj
@@ -80,7 +85,12 @@ async def delete_by_id_if_exists(session: AsyncSession, model, pk) -> bool:
     不负责 commit，由调用方决定提交时机；用于「删除成功」语义的删除端点，
     避免各路由重复 get → if → delete 样板。
     """
-    obj = await session.get(model, pk)
+    from app.core.data_scope import bound_scope_statement, current_data_scope
+
+    stmt = select(model).where(model.id == pk)
+    if current_data_scope(session) is not None:
+        stmt = bound_scope_statement(session, stmt)
+    obj = (await session.execute(stmt)).scalar_one_or_none()
     if obj is None:
         return False
     await session.delete(obj)

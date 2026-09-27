@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.21.0"
+    APP_VERSION: str = "2.22.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     REPORT_TEMPLATE: str = str(Path(__file__).resolve().parent.parent / "templates" / "report_template.docx")
 
     STORAGE_DIR: str = "storage"
+    # P2-5：备份 / 恢复演练报告的只读可见目录；容器部署可挂载仓库 backups/ 后覆盖。
+    BACKUP_DIR: str = "backups"
 
     SMTP_HOST: str = ""
     SMTP_PORT: int = 25

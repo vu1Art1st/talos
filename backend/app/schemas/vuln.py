@@ -120,7 +120,7 @@ class VulRetestRecordIn(BaseModel):
 
     @field_validator("title", mode="after")
     @classmethod
-    def _clean_title(cls, v: str | None) -> str | None:
+    def _clean_title(_cls, v: str | None) -> str | None:
         if v is None:
             return None
         v = v.strip()

@@ -59,7 +59,7 @@ from app.constants import (  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 from app.db import Base, async_session_maker, engine  # noqa: E402
 from app.models import (  # noqa: E402
-    Asset, DictOption, Group, GroupMember, KnowledgeEntry,
+    Asset, DictOption, Group, GroupMember, GroupUser, KnowledgeEntry,
     Message, NonpenPlan, RemoteTesting, Report, ReportSection, Role, SpringAction,
     TestingPlan, TestingPlanRetestRound, User, Vul, VulLog, VulRetestRecord,
 )
@@ -276,12 +276,15 @@ async def reset_and_seed() -> None:
 
     async with async_session_maker() as session:
         # ---------- 角色 / 用户 ----------
-        role_admin = Role(name="管理员", permissions=["*"], remark="全部权限")
+        role_admin = Role(name="管理员", permissions=["*"], data_scope="all", remark="全部权限")
         role_tester = Role(name="测试工程师", permissions=[
             "dashboard:view", "asset:manage", "vuln:submit", "vuln:audit",
             "vuln:manage", "import:manage", "report:manage", "special:manage",
-        ], remark="安全测试团队")
-        role_viewer = Role(name="观察员", permissions=["dashboard:view"], remark="只读看板")
+        ], data_scope="department", remark="安全测试团队")
+        role_viewer = Role(
+            name="观察员", permissions=["dashboard:view"], data_scope="department",
+            remark="只读看板",
+        )
         session.add_all([role_admin, role_tester, role_viewer])
         await session.flush()
 
@@ -308,6 +311,8 @@ async def reset_and_seed() -> None:
             groups.append(g)
             session.add(g)
         await session.flush()
+        for i, user in enumerate(testers):
+            session.add(GroupUser(user_id=user.id, group_id=groups[i % len(groups)].id))
         member_names = {
             0: ("孙晓东", "周琳"), 1: ("吴建国", "郑洁"), 2: ("冯军", "蒋敏"),
             3: ("韩雪", "杨帆"), 4: ("朱丽华", "秦浩"), 5: ("许文强", "何佳"),

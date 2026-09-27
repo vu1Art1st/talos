@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import PAT_ADMIN_READ_SCOPES, PAT_PLAN_WRITE_SCOPES, PAT_READ_SCOPES
 from app.core.config import settings
+from app.core.data_scope import install_data_scope
 from app.core.ratelimit import get_failures, incr_failure
 from app.core.security import IMAGE_COOKIE, decode_token
 from app.core.timeutil import now
@@ -52,7 +53,9 @@ async def _load_user_by_access_token(session: AsyncSession, token: str) -> User:
     user_id, ver = decoded
     user = (
         await session.execute(
-            select(User).options(selectinload(User.role)).where(User.id == user_id)
+            select(User)
+            .options(selectinload(User.role), selectinload(User.groups))
+            .where(User.id == user_id)
         )
     ).scalar_one_or_none()
     if user is None or not user.is_active:
@@ -70,6 +73,7 @@ async def get_current_user(
 ) -> User:
     user = await _load_user_by_access_token(session, token)
     _enforce_password_change(user, request.url.path)
+    await install_data_scope(session, user)
     return user
 
 
@@ -93,7 +97,9 @@ async def get_image_viewer(
         token = request.cookies.get(IMAGE_COOKIE, "")
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "未登录或登录已过期")
-    return await _load_user_by_access_token(session, token)
+    user = await _load_user_by_access_token(session, token)
+    await install_data_scope(session, user)
+    return user
 
 
 def user_permissions(user: User) -> set[str]:
@@ -123,7 +129,10 @@ async def resolve_pat_row(
     pat = (
         await session.execute(
             select(PersonalAccessToken)
-            .options(selectinload(PersonalAccessToken.user))
+            .options(
+                selectinload(PersonalAccessToken.user).selectinload(User.role),
+                selectinload(PersonalAccessToken.user).selectinload(User.groups),
+            )
             .where(PersonalAccessToken.token_hash == token_hash)
         )
     ).scalar_one_or_none()
@@ -159,6 +168,7 @@ async def resolve_pat_row(
 async def resolve_pat(session: AsyncSession, token: str, *, rate_limited: bool = True) -> User:
     """按 sha256 校验个人访问令牌并返回所属用户（图片端点等无响应上下文场景使用）。"""
     pat = await resolve_pat_row(session, token, rate_limited=rate_limited)
+    await install_data_scope(session, pat.user)
     return pat.user
 
 
@@ -179,6 +189,7 @@ async def get_pat_user(
     request.state.pat_scope = pat.scope or "full"
     user = pat.user
     _enforce_password_change(user, request.url.path)
+    await install_data_scope(session, user)
     return user
 
 

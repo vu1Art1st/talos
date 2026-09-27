@@ -616,7 +616,7 @@ wsl -d kali-linux zstd -d -f -o "C:\Users\<你>\AppData\Local\Temp\db.sql" "E:\G
 
 ---
 
-## 十、健康探针与后台任务恢复（2.20.3 / P0-3）
+## 十、健康探针、任务恢复与可观测性（P0-3 / P2-5）
 
 ### 10.1 三档健康探针
 
@@ -637,7 +637,11 @@ worker 心跳键为 `arq:health-check`（worker 每 30s 续期，TTL 61s）：�
 ```bash
 curl -s -o /dev/null -w 'health=%{http_code}\n'  http://127.0.0.1/api/health
 curl -s http://127.0.0.1/api/health/ready | python3 -m json.tool
+curl -s http://127.0.0.1/api/health/metrics | head -40
 ```
+
+`/api/health/metrics` 为 P2-5 的 Prometheus 文本指标出口，覆盖数据库连接池、依赖状态、
+任务数量、磁盘和备份 / 恢复演练状态；指标只含聚合值，不带对象名、URL、令牌或错误正文。
 
 ### 10.2 后台任务租约与自动恢复
 
@@ -675,11 +679,45 @@ sudo docker compose logs --tail 2000 api | grep 'rid=<粘贴的 request_id>'
 sudo docker compose logs --tail 2000 api | grep 'job_id=<导出任务ID>'
 ```
 
-### 10.4 可选：启用 pg_trgm 前后通配符索引（P0-4）
+### 10.4 备份与恢复演练（P2-5）
+
+**目标口径**：生产备份写入仓库根 `backups/`；数据库、`storage` 和密钥材料必须分开保管。
+正式环境应给出并定期核对 RPO / RTO，不接受“备份文件存在但无法恢复”的假绿。
+
+恢复演练脚本会把 `backups/latest` 导入独立的 `vulnplatform_restore_drill` 数据库，执行
+Alembic `upgrade head`，核对表数和关键业务计数，并把结果写入
+`backups/restore_drills/latest.json`，供 `/api/health/metrics` 与季度验收读取：
+
+```bash
+# WSL / Linux，仓库根目录；目标 PostgreSQL 需可连接且具有建库权限
+bash scripts/restore-drill.sh
+
+# 查看最近一次机器可读结果
+python3 -m json.tool backups/restore_drills/latest.json
+```
+
+脚本只操作临时库，不触碰生产库；失败时保留临时库与日志，处理后重跑即可。默认 RPO 以最近一次
+成功备份的年龄衡量，RTO 以演练脚本实测耗时衡量。未另行约定时采用参考目标 **RPO ≤ 24 小时、
+RTO ≤ 2 小时**；正式服务级别目标由部署方按业务影响确认后写回本节。
+
+告警至少覆盖：
+
+- `talos_dependency_up{dependency="database"|"redis"|"worker"} == 0` 持续 5 分钟：先看
+  `/api/health/ready`，数据库故障按恢复手册处理，Redis / worker 故障检查容器与队列心跳；
+- `talos_backup_age_seconds > 129600`：检查备份 cron、磁盘空间与 `backups/latest`；
+- `talos_restore_drill_success == 0` 或演练年龄超过季度：运行 `scripts/restore-drill.sh` 并处理报告；
+- `talos_disk_used_ratio > 0.85`：清理导出产物 / Docker 构建缓存，按 `disk-usage.sh` 双视角排查；
+- `talos_task_count{status="dead"}` 或 `failed` 增长：按 kind 查看任务错误与死信原因，修复后重试。
+
+若 API 容器内看不到宿主 `backups/`，用 `VP_BACKUP_DIR` 指向只读挂载路径；未挂载时
+`talos_backup_present=0`，恢复演练仍可在宿主机执行并作为发布验收证据。
+
+### 10.5 可选：启用 pg_trgm 前后通配符索引（P0-4 / P2-4）
 
 列表关键词走 `%keyword%`（B-tree 无法命中）。基准实测（10 万漏洞、关键词具选择性）：
 `P95 43.5ms → 5.3ms`，执行计划由 `Seq Scan` 变为 `Bitmap Index Scan on ix_trgm_vulns_title`。
 该脚本幂等、可先试运行；需要 `CREATE EXTENSION pg_trgm` 权限（compose 的 `postgres` 用户满足）。
+P2-4 已把全局搜索覆盖的标题、影响 URL、计划名、报告项目名和章节标题 / 正文纳入该脚本。
 
 ```bash
 sudo docker compose run --rm api python -m scripts.enable_trgm_indexes --dry-run

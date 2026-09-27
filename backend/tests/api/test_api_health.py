@@ -62,6 +62,13 @@ async def test_health_probes_and_request_id(client: AsyncClient, fast_gotenberg)
     resp = await client.get("/api/health/live", headers={"X-Request-Id": "trace-abc"})
     assert resp.headers.get("X-Request-Id") == "trace-abc"
 
+    metrics = await client.get("/api/health/metrics")
+    assert metrics.status_code == 200, metrics.text
+    assert "talos_app_up 1" in metrics.text
+    assert "talos_dependency_up{dependency=\"database\"} 1" in metrics.text
+    assert "talos_task_count{kind=\"export\",status=\"pending\"}" in metrics.text
+    assert "postgresql://" not in metrics.text
+
 
 async def test_ready_fails_when_database_down(client: AsyncClient, monkeypatch, fast_gotenberg):
     """必需依赖（数据库）不可用 → 503，且不泄露内部错误细节。"""

@@ -114,7 +114,7 @@ class TestingPlanOut(TestingPlanIn):
 
     @field_validator("asset_ids", "target_urls", mode="before")
     @classmethod
-    def _normalize_json_lists(cls, v):
+    def _normalize_json_lists(_cls, v):
         """旧库迁移后 JSON 列可能为 NULL，归一化为空数组避免序列化失败。"""
         return v or []
 
@@ -144,7 +144,7 @@ class NonpenPlanIn(BaseModel):
 
     @field_validator("test_items", mode="after")
     @classmethod
-    def _check_test_items(cls, v):
+    def _check_test_items(_cls, v):
         for k in v:
             if k not in NONPEN_ITEMS:
                 raise ValueError(f"不支持的测试项：{k}")
@@ -185,7 +185,7 @@ class NonpenPlanOut(BaseModel):
 
     @field_validator("asset_ids", mode="before")
     @classmethod
-    def _normalize_asset_ids(cls, v):
+    def _normalize_asset_ids(_cls, v):
         return v or []
 
 

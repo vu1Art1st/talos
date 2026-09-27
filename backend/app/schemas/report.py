@@ -102,7 +102,7 @@ class ExportJobOut(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _derive_has_file(cls, data):
+    def _derive_has_file(_cls, data):
         # 兼容 from_attributes 的 ORM 实例与普通 dict 两种输入
         if isinstance(data, BaseModel):
             source = data.__dict__

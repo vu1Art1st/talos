@@ -42,14 +42,14 @@ class PatCreateIn(BaseModel):
 
     @field_validator("expire_days")
     @classmethod
-    def _check_choices(cls, v: int) -> int:
+    def _check_choices(_cls, v: int) -> int:
         if v not in PAT_EXPIRE_DAYS_CHOICES:
             raise ValueError(f"有效期仅支持 {list(PAT_EXPIRE_DAYS_CHOICES)} 天档位")
         return v
 
     @field_validator("scope")
     @classmethod
-    def _check_scope(cls, v: str) -> str:
+    def _check_scope(_cls, v: str) -> str:
         if v not in PAT_SCOPES:
             raise ValueError(f"scope 仅支持 {list(PAT_SCOPES)}")
         return v
@@ -83,14 +83,14 @@ class NotifyChannelIn(BaseModel):
 
     @field_validator("type")
     @classmethod
-    def _check_type(cls, v: str) -> str:
+    def _check_type(_cls, v: str) -> str:
         if v not in NOTIFY_CHANNEL_TYPES:
             raise ValueError(f"不支持的通知渠道类型: {v}")
         return v
 
     @field_validator("events")
     @classmethod
-    def _check_events(cls, v: list[str]) -> list[str]:
+    def _check_events(_cls, v: list[str]) -> list[str]:
         unknown = [e for e in v if e not in NOTIFY_EVENTS]
         if unknown:
             raise ValueError(f"未知的事件代码: {unknown}")
@@ -98,7 +98,7 @@ class NotifyChannelIn(BaseModel):
 
     @field_validator("config")
     @classmethod
-    def _check_config(cls, v: dict, info) -> dict:
+    def _check_config(_cls, v: dict, info) -> dict:
         ctype = info.data.get("type")
         if ctype in ("wecom", "dingtalk"):
             # 出站目标校验（审计 TALOS-2026-003）：除协议外还要求解析结果为公网地址，

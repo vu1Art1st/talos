@@ -220,7 +220,10 @@ async def test_open_api_plan_write(client: AsyncClient, auth: dict):
     # 无 special:manage 权限的账号，其令牌写操作 403（读仍放行）
     resp = await client.post(
         "/api/v1/roles", headers=auth,
-        json={"name": "无专项写入权限", "permissions": ["vuln:submit"], "remark": ""},
+        json={
+            "name": "无专项写入权限", "permissions": ["vuln:submit"],
+            "data_scope": "all", "remark": "",
+        },
     )
     role_id = resp.json()["id"]
     resp = await client.post(

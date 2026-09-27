@@ -68,6 +68,12 @@
           <el-option v-for="r in roles" :key="r.id" :label="r.name" :value="r.id" />
         </el-select>
       </el-form-item>
+      <el-form-item label="所属组织">
+        <el-select v-model="userForm.group_ids" multiple filterable clearable class="w-full"
+                   placeholder="用于部门数据范围">
+          <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.id" />
+        </el-select>
+      </el-form-item>
       <el-form-item label="状态">
         <el-switch v-model="userForm.is_active" active-text="正常" inactive-text="禁用" />
       </el-form-item>
@@ -110,7 +116,7 @@ import client from '../api/client'
 import { useListPage } from '../composables/useListPage'
 import { dotStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'
-import type { Role, User, UserForm } from '../types'
+import type { Group, Role, User, UserForm } from '../types'
 
 interface PermItem { key: string; label: string; desc: string }
 interface PermGroup { group: string; items: PermItem[] }
@@ -118,13 +124,17 @@ interface PermGroup { group: string; items: PermItem[] }
 const { items: users, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<User>('/users')
 
 const roles = ref<Role[]>([])
+const groups = ref<Group[]>([])
 const catalog = ref<PermGroup[]>([])
 const catalogLoading = ref(false)
 const userDialog = ref(false)
 const permDialog = ref(false)
 const permUser = ref<User | null>(null)
 const userSaving = ref(false)
-const userForm = reactive<UserForm>({ id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
+const userForm = reactive<UserForm>({
+  id: null, username: '', password: '', realname: '', email: '',
+  role_id: null, group_ids: [], is_active: true,
+})
 const userFormRef = ref<FormInstance>()
 const userRules: FormRules = {
   username: [{ required: true, whitespace: true, message: '请填写用户名', trigger: 'blur' }],
@@ -133,6 +143,11 @@ const userRules: FormRules = {
 async function loadRoles() {
   const { data } = await client.get<Role[]>('/roles')
   roles.value = data
+}
+
+async function loadGroups() {
+  const { data } = await client.get<Group[]>('/groups')
+  groups.value = data
 }
 
 async function loadCatalog() {
@@ -148,7 +163,10 @@ async function loadCatalog() {
 function openUser(row?: User) {
   Object.assign(userForm, row
     ? { ...row, password: '' }
-    : { id: null, username: '', password: '', realname: '', email: '', role_id: null, is_active: true })
+    : {
+        id: null, username: '', password: '', realname: '', email: '',
+        role_id: null, group_ids: [], is_active: true,
+      })
   userDialog.value = true
 }
 
@@ -186,6 +204,6 @@ function openPerm(row: User) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(1), loadRoles(), loadCatalog()])
+  await Promise.all([load(1), loadRoles(), loadGroups(), loadCatalog()])
 })
 </script>

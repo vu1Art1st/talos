@@ -1,5 +1,6 @@
 """认证与用户域模型：令牌、用户、角色、组织。"""
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -39,6 +40,7 @@ class UserOut(BaseModel):
     role_id: int | None = None
     role_name: str = ""
     permissions: list[str] = []
+    group_ids: list[int] = []
     create_time: datetime | None = None
     last_login: datetime | None = None
 
@@ -51,6 +53,7 @@ class UserIn(BaseModel):
     phone: str = ""
     is_active: bool = True
     role_id: int | None = None
+    group_ids: list[int] = []
 
 
 class RoleOut(BaseModel):
@@ -59,12 +62,14 @@ class RoleOut(BaseModel):
     id: int
     name: str
     permissions: list[str] = []
+    data_scope: Literal["all", "department", "own", "none"] = "department"
     remark: str = ""
 
 
 class RoleIn(BaseModel):
     name: str
     permissions: list[str] = []
+    data_scope: Literal["all", "department", "own", "none"] = "department"
     remark: str = ""
 
 

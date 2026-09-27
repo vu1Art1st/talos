@@ -47,14 +47,20 @@ async def init_db() -> None:
     async with async_session_maker() as session:
         role = (await session.execute(select(Role).where(Role.name == "超级管理员"))).scalar_one_or_none()
         if role is None:
-            role = Role(name="超级管理员", permissions=["*"], remark="内置角色，拥有全部权限")
+            role = Role(
+                name="超级管理员", permissions=["*"], data_scope="all",
+                remark="内置角色，拥有全部权限",
+            )
             session.add(role)
             session.add(Role(name="安全工程师", permissions=[
                 "dashboard:view", "asset:manage",
                 "vuln:submit", "vuln:audit", "vuln:manage",
                 "import:manage", "report:manage", "special:manage",
-            ], remark="内置角色"))
-            session.add(Role(name="研发人员", permissions=["dashboard:view", "vuln:submit"], remark="内置角色"))
+            ], data_scope="department", remark="内置角色"))
+            session.add(Role(
+                name="研发人员", permissions=["dashboard:view", "vuln:submit"],
+                data_scope="own", remark="内置角色",
+            ))
             await session.flush()
 
         user = (await session.execute(select(User).where(User.username == "admin"))).scalar_one_or_none()

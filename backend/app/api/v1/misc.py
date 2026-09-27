@@ -11,6 +11,7 @@ from app.constants import (
     ASSET_STATUS_COLOR,
     AUDIT_ACTIONS,
     DASHBOARD_VIEW_SCOPES,
+    DATA_SCOPES,
     EXPORT_JOB_STATUS_COLOR,
     EXPORT_JOB_STATUS_NAME,
     IMPORT_BATCH_STATUS_COLOR,
@@ -108,6 +109,7 @@ async def _name_dicts(session: AsyncSession) -> dict:
         "pat_scope": PAT_SCOPES,
         "report_template_type": REPORT_TEMPLATE_TYPES,
         "dashboard_view_scope": DASHBOARD_VIEW_SCOPES,
+        "data_scope": DATA_SCOPES,
     }
 
 
