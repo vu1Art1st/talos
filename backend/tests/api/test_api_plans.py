@@ -18,6 +18,7 @@ from _helpers import (
     _get_plan,
     _list_plan_names,
     _list_plans,
+    _user_with_perms,
 )
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -525,6 +526,114 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
         f"/api/v1/testing-plans/{plan_id}", headers=auth2, json={**plan_body, "status": 60},
     )
     assert resp.status_code == 403
+
+
+async def test_plan_quit_rolls_back_last_tester_without_progress(client: AsyncClient, auth: dict):
+    """最后一名测试人员退出且无业务进展时，初测中自动回退为未测试。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "退领回退系统", "status": 10},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    auth2 = await _user_with_perms(client, auth, "plan_quit_tester", ["special:manage"])
+    try:
+        assert (await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth)).json()["status"] == 20
+        assert (await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth2)).json()["status"] == 20
+
+        resp = await client.post(f"/api/v1/testing-plans/{plan_id}/quit", headers=auth2)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == 20
+        assert len(resp.json()["testers"]) == 1
+
+        resp = await client.post(f"/api/v1/testing-plans/{plan_id}/quit", headers=auth)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == 10
+        assert resp.json()["testers"] == []
+    finally:
+        await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+
+
+async def test_plan_manual_rollback_requires_admin_and_no_progress(client: AsyncClient, auth: dict):
+    """人工纠错仅管理员可用，且工单必须无测试人员、无关联业务数据。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "人工纠错系统", "status": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    auth2 = await _user_with_perms(client, auth, "plan_rollback_tester", ["special:manage"])
+    try:
+        assert (await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=auth2)).status_code == 200
+        resp = await client.put(
+            f"/api/v1/testing-plans/{plan_id}", headers=auth2,
+            json={"system_name": "人工纠错系统", "status": 10},
+        )
+        assert resp.status_code == 403
+        assert "仅管理员" in resp.json()["detail"]
+
+        resp = await client.put(
+            f"/api/v1/testing-plans/{plan_id}", headers=auth,
+            json={"system_name": "人工纠错系统", "status": 10},
+        )
+        assert resp.status_code == 400
+
+        resp = await client.post(f"/api/v1/testing-plans/{plan_id}/quit", headers=auth2)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == 10
+
+        # 无测试人员的误录工单可由管理员直接纠错
+        resp = await client.post(
+            "/api/v1/testing-plans", headers=auth,
+            json={"system_name": "管理员纠错系统", "status": 20},
+        )
+        assert resp.status_code == 200, resp.text
+        clean_id = resp.json()["id"]
+        resp = await client.put(
+            f"/api/v1/testing-plans/{clean_id}", headers=auth,
+            json={"system_name": "管理员纠错系统", "status": 10},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == 10
+        await client.delete(f"/api/v1/testing-plans/{clean_id}", headers=auth)
+    finally:
+        await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+
+
+async def test_plan_rollback_rejects_business_progress(client: AsyncClient, auth: dict):
+    """存在漏洞、报告或复测轮次时，管理员纠错也必须拒绝。"""
+    from app.db import async_session_maker
+    from app.models import Report, TestingPlanRetestRound, Vul
+
+    cases = []
+    try:
+        for system_name in ("进展漏洞系统", "进展报告系统", "进展轮次系统"):
+            resp = await client.post(
+                "/api/v1/testing-plans", headers=auth,
+                json={"system_name": system_name, "status": 20},
+            )
+            assert resp.status_code == 200, resp.text
+            cases.append(resp.json()["id"])
+
+        async with async_session_maker() as session:
+            session.add(Vul(title="回退进展漏洞", testing_plan_id=cases[0]))
+            session.add(Report(title="回退进展报告", testing_plan_id=cases[1]))
+            session.add(TestingPlanRetestRound(plan_id=cases[2], source="测试进展"))
+            await session.commit()
+
+        for plan_id, system_name in zip(
+            cases, ("进展漏洞系统", "进展报告系统", "进展轮次系统"), strict=True,
+        ):
+            resp = await client.put(
+                f"/api/v1/testing-plans/{plan_id}", headers=auth,
+                json={"system_name": system_name, "status": 10},
+            )
+            assert resp.status_code == 400, resp.text
+
+    finally:
+        for plan_id in cases:
+            await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+
 
 async def test_testing_plan_detail(client: AsyncClient, auth: dict):
     """单条计划详情端点：返回关联字段；不存在 404；无 special:manage 权限 403。"""

@@ -60,11 +60,28 @@ async def update_plan(
     session: AsyncSession, row: TestingPlan, data: dict, user: User,
 ) -> tuple[TestingPlan, int]:
     """全量更新渗透测试工单，返回 (工单, 更新前状态) 供调用方按需写审计日志。"""
+    locked = await plan_service.get_plan_for_update(session, row.id)
+    if locked is None:
+        raise HTTPException(404, "渗透测试工单不存在")
+    row = locked
     old_status = row.status
     new_status = data.get("status", row.status)
-    if new_status != row.status and not plan_service.can_operate(user, row):
+    reset_to_untested = old_status == PlanStatus.TESTING and new_status == PlanStatus.UNTESTED
+    if reset_to_untested:
+        if not plan_service.is_admin(user):
+            raise HTTPException(403, "仅管理员可将「初测中」纠错为「未测试」")
+        if not await plan_service.can_reset_to_untested(session, row):
+            raise HTTPException(
+                400,
+                "仅无测试人员且未关联漏洞、报告或复测轮次的工单可回退为「未测试」",
+            )
+    elif new_status != row.status and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
-    if new_status != row.status and not vul_service.can_plan_transition(row.status, new_status):
+    if (
+        not reset_to_untested
+        and new_status != row.status
+        and not vul_service.can_plan_transition(row.status, new_status)
+    ):
         raise HTTPException(400, "不允许从当前状态流转到目标状态")
     # 编辑页直接流转为「测试通过」时，同样要求计划无关联漏洞（与无漏洞完结接口口径一致）
     if new_status == PlanStatus.PASSED and row.status != PlanStatus.PASSED:

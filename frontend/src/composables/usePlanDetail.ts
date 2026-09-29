@@ -81,8 +81,8 @@ export function usePlanDetail(
   }
 
   async function quit() {
-    await client.post(`/testing-plans/${getPlanId()}/quit`)
-    ElMessage.success('已退出该计划')
+    const { data } = await client.post<TestingPlan>(`/testing-plans/${getPlanId()}/quit`)
+    ElMessage.success(data.status === 10 ? '已退出该计划，状态已回到未测试' : '已退出该计划')
     await reloadAfterChange()
   }
 

@@ -2,7 +2,7 @@
 from app.core.timeutil import now
 
 from fastapi import HTTPException
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -18,9 +18,14 @@ from app.models import (
 )
 
 
+def is_admin(user: User) -> bool:
+    """是否具备全量管理权限（角色权限包含通配符 *）。"""
+    return "*" in user_permissions(user)
+
+
 def can_operate(user: User, plan: TestingPlan) -> bool:
     """认领者或管理员（权限含 *）才可修改测试状态、生成报告等计划级操作。"""
-    if "*" in user_permissions(user):
+    if is_admin(user):
         return True
     return any(u.id == user.id for u in plan.testers)
 
@@ -32,6 +37,43 @@ def is_plan_claimant(user: User, plan: TestingPlan) -> bool:
     「录入漏洞阶段仅认领该计划的账号可修改和录入漏洞，其他账号无权限」，
     即使管理员未认领该计划也不能录入/编辑其漏洞（可先认领后再操作）。"""
     return any(u.id == user.id for u in plan.testers)
+
+
+async def get_plan_for_update(session: AsyncSession, plan_id: int) -> TestingPlan | None:
+    """锁定并重新加载工单，串行化认领、退领与状态纠错的状态判断。"""
+    stmt = (
+        select(TestingPlan)
+        .where(TestingPlan.id == plan_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def plan_has_progress(session: AsyncSession, plan_id: int) -> bool:
+    """工单是否已有不可由退领/纠错静默撤销的业务进展。"""
+    checks = (
+        select(exists().where(Vul.testing_plan_id == plan_id)),
+        select(exists().where(Report.testing_plan_id == plan_id)),
+        select(exists().where(TestingPlanRetestRound.plan_id == plan_id)),
+    )
+    for stmt in checks:
+        if await session.scalar(stmt):
+            return True
+    return False
+
+
+async def can_reset_to_untested(
+    session: AsyncSession,
+    plan: TestingPlan,
+    *,
+    testers: list[User] | None = None,
+) -> bool:
+    """校验工单是否可安全回退为未测试：无测试人员且无关联业务数据。"""
+    current_testers = plan.testers if testers is None else testers
+    if plan.status != PlanStatus.TESTING or current_testers:
+        return False
+    return not await plan_has_progress(session, plan.id)
 
 
 async def get_plan_or_400(session: AsyncSession, plan_id: int) -> TestingPlan:

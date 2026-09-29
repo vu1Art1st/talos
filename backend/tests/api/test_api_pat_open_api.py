@@ -179,6 +179,17 @@ async def test_open_api_plan_write(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 400
 
+    # 管理员安全纠错：无测试人员、无业务进展时 20 → 10；恢复后继续验证后续流程
+    resp = await client.put(
+        f"/api/v1/open/testing-plans/{plan_id}", headers=pat, json={**update_body, "status": 10},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == 10
+    resp = await client.put(
+        f"/api/v1/open/testing-plans/{plan_id}", headers=pat, json=update_body,
+    )
+    assert resp.status_code == 200, resp.text
+
     # 必填校验 422（system_name 为空）
     resp = await client.post(
         "/api/v1/open/testing-plans", headers=pat, json={"system_name": ""},

@@ -344,7 +344,8 @@
         </el-form-item>
         <el-form-item label="测试状态">
           <el-select v-model="form.status" class="w-full" :disabled="!statusEditable">
-            <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)" />
+            <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)"
+                       :disabled="statusOptionDisabled(Number(code))" />
           </el-select>
         </el-form-item>
         <el-form-item label="工单提起">
@@ -613,6 +614,25 @@ const canOperate = (row: TestingPlan) => isAdmin.value || isTester(row)
 // 状态：新建时仅管理员可指定；编辑时须为认领者或管理员
 const statusEditable = computed(() =>
   form.value.id ? (dialogRow.value ? canOperate(dialogRow.value) : false) : isAdmin.value)
+// 初测中 → 未测试仅作为管理员安全纠错：无测试人员且无漏洞、报告、复测轮次
+const canResetToUntested = computed(() => {
+  const row = dialogRow.value
+  return Boolean(
+    row
+    && isAdmin.value
+    && form.value.status === 20
+    && !(row.testers?.length)
+    && !(row.vuls?.length)
+    && !(row.reports?.length)
+    && !(row.retest_rounds?.length),
+  )
+})
+
+function statusOptionDisabled(code: number) {
+  if (code !== 10 || !form.value.id || form.value.status === 10) return false
+  return !canResetToUntested.value
+}
+
 // 有关联漏洞时统计自动重算，禁止手填
 const statsAuto = computed(() => (dialogRow.value?.vuls?.length ?? 0) > 0)
 // 有关联初测报告（标题不含「复测」）时实际人天自动计算，禁止手填；复测报告人天不计入统计

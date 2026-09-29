@@ -121,6 +121,49 @@ describe('TestingPlanList 工单列表页', () => {
     wrapper.unmount()
   })
 
+  it('新建表单自动填充为未测试状态', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const addBtn = wrapper.findAll('button').find((b) => b.text().includes('新增渗透测试工单'))
+    expect(addBtn, '新增入口应可见').toBeTruthy()
+    await addBtn!.trigger('click')
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { form: { status: number } }
+    expect(vm.form.status).toBe(10)
+    wrapper.unmount()
+  })
+
+  it('存在业务进展时禁用「未测试」回退选项', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans') {
+        return {
+          data: {
+            items: [{
+              id: 7, system_name: '已有进展系统', status: 20, testers: [],
+              vuls: [{ id: 11, title: '已录入漏洞' }], reports: [], retest_rounds: [],
+            }],
+            total: 1,
+          },
+        }
+      }
+      return base?.(url, ...rest)
+    })
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const editBtn = wrapper.findAll('button').find((b) => b.text() === '编辑')
+    expect(editBtn, '编辑入口应可见').toBeTruthy()
+    await editBtn!.trigger('click')
+    await flushPromises()
+
+    const vm = wrapper.vm as unknown as { statusOptionDisabled: (code: number) => boolean }
+    expect(vm.statusOptionDisabled(10)).toBe(true)
+    wrapper.unmount()
+  })
+
   it('结论接口按当前筛选参数请求，返回内容渲染进结论面板', async () => {
     const wrapper = mountPage()
     await flushPromises()

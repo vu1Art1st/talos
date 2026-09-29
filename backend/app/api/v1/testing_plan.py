@@ -315,7 +315,9 @@ async def claim_testing_plan(
     session: AsyncSession = Depends(get_session),
 ):
     """认领测试计划：当前用户加入测试人员（幂等）；未测试状态自动进入初测中。"""
-    row = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    row = await plan_service.get_plan_for_update(session, row_id)
+    if row is None:
+        raise HTTPException(404, "渗透测试工单不存在")
     if all(u.id != user.id for u in row.testers):
         row.testers.append(user)
     if row.status == 10:
@@ -333,14 +335,27 @@ async def claim_testing_plan(
 @router.post("/testing-plans/{row_id}/quit", response_model=TestingPlanOut)
 async def quit_testing_plan(
     row_id: int,
+    request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """退出认领：当前用户移出测试人员列表。"""
-    row = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
+    """退出认领；无测试人员且无业务进展时，将初测中安全回退为未测试。"""
+    row = await plan_service.get_plan_for_update(session, row_id)
+    if row is None:
+        raise HTTPException(404, "渗透测试工单不存在")
+    old_status = row.status
     row.testers = [u for u in row.testers if u.id != user.id]
+    rolled_back = await plan_service.can_reset_to_untested(session, row)
+    if rolled_back:
+        row.status = PlanStatus.UNTESTED
     await session.commit()
     await session.refresh(row)
+    await audit(session, request, "plan_quit", user, {
+        "target": f"testing-plans/{row_id}", "system": row.system_name,
+        "rolled_back": rolled_back,
+        "from": TESTING_PLAN_STATUS.get(old_status, str(old_status)),
+        "to": TESTING_PLAN_STATUS.get(row.status, str(row.status)),
+    })
     return row
 
 
