@@ -115,6 +115,7 @@ from .report import (
 )
 from .special import (
     CompleteNoVulnIn,
+    CompleteNoVulnOut,
     NonpenItemIgnoreIn,
     NonpenItemTransitionIn,
     NonpenPlanIn,
@@ -128,8 +129,10 @@ from .special import (
     SpringActionOut,
     SpringActionVulDraft,
     SpringReportParseOut,
+    TestingPlanFilterOptionsOut,
     TestingPlanIn,
     TestingPlanOut,
+    TestingPlanTesterOption,
 )
 from .system import (
     NotifyChannelIn,

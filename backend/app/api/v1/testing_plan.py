@@ -18,10 +18,19 @@ from app.models import (
     Report,
     ReportSection,
     TestingPlan,
+    testing_plan_testers,
     User,
     Vul,
 )
-from app.schemas import CompleteNoVulnIn, Page, TestingPlanIn, TestingPlanOut
+from app.schemas import (
+    CompleteNoVulnIn,
+    CompleteNoVulnOut,
+    Page,
+    TestingPlanFilterOptionsOut,
+    TestingPlanIn,
+    TestingPlanOut,
+    TestingPlanTesterOption,
+)
 from app.services import plan_crud, plan_io, plan_query, plan_service, vul_service
 from app.services.audit_service import audit
 from app.services.notify_service import notify
@@ -212,6 +221,39 @@ async def import_testing_plans(
     return await plan_io.upsert_plans(session, wb, user)
 
 
+@router.get("/testing-plans/filter-options", response_model=TestingPlanFilterOptionsOut)
+async def testing_plan_filter_options(
+    _: User = Depends(require_any_perm("special:manage", "vuln:submit")),
+    session: AsyncSession = Depends(get_session),
+):
+    """聚合筛选候选值：只返回实际工单出现过的系统/类型/部门/测试人员。"""
+    async def distinct_values(column) -> list[str]:
+        rows = (
+            await session.execute(
+                select(column).where(column != "").distinct().order_by(column)
+            )
+        ).scalars().all()
+        return list(rows)
+
+    tester_rows = (
+        await session.execute(
+            select(User.id, User.realname, User.username)
+            .join(testing_plan_testers, testing_plan_testers.c.user_id == User.id)
+            .distinct()
+            .order_by(User.realname, User.username)
+        )
+    ).all()
+    return TestingPlanFilterOptionsOut(
+        system_names=await distinct_values(TestingPlan.system_name),
+        test_types=await distinct_values(TestingPlan.test_type),
+        departments=await distinct_values(TestingPlan.department),
+        testers=[
+            TestingPlanTesterOption(id=user_id, name=realname or username, username=username)
+            for user_id, realname, username in tester_rows
+        ],
+    )
+
+
 # 注意：需注册在 /testing-plans/stats、/testing-plans/export、
 # /testing-plans/import/template 等静态路径之后，防止路径吞噬
 @router.get("/testing-plans/{row_id}", response_model=TestingPlanOut)
@@ -398,7 +440,7 @@ async def _notify_no_vuln_done(
     )
 
 
-@router.post("/testing-plans/{row_id}/complete-no-vuln", response_model=TestingPlanOut)
+@router.post("/testing-plans/{row_id}/complete-no-vuln", response_model=CompleteNoVulnOut)
 async def complete_plan_no_vuln(
     row_id: int,
     body: CompleteNoVulnIn,
@@ -441,7 +483,21 @@ async def complete_plan_no_vuln(
         "target": f"testing-plans/{row_id}", "system": plan.system_name,
         "to": TESTING_PLAN_STATUS.get(PlanStatus.PASSED, "测试通过"), "no_vuln": True,
     })
-    return plan
+    warnings: list[str] = []
+    if plan.actual_mandays == 0:
+        if plan.actual_mandays_override:
+            reason = "已启用实际人天手动修正，但修正值仍为 0"
+        elif not any(not plan_service.is_retest_report_title(r.title) for r in plan.reports):
+            reason = "没有初测报告且未手工填写"
+        else:
+            reason = "初测报告测试周期未形成有效人天"
+        warnings.append(
+            f"工单「{plan.ticket_id or plan.system_name}」已流转为「测试通过」，"
+            f"但实际人天为 0：{reason}，请补录或手工修正"
+        )
+    return CompleteNoVulnOut.model_validate(plan).model_copy(
+        update={"warnings": warnings}
+    )
 
 
 @router.post("/testing-plans/{row_id}/attach-vulns", response_model=TestingPlanOut)

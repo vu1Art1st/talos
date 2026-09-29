@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.constants import TESTING_PLAN_STATUS, PlanStatus
 from app.core.filters import to_float
 from app.core.sanitize import excel_safe
-from app.models import TestingPlan, User
+from app.models import Report, TestingPlan, User
 from app.schemas import PlanImportResultOut
-from app.services import ticket_service
+from app.services import plan_service, ticket_service
 
 PLAN_EXCEL_HEADERS = [
     "ID", "渗透测试工单名称", "测试系统", "测试类型", "所属部门",
@@ -114,6 +114,21 @@ async def _load_occupied_tickets(session: AsyncSession) -> dict[str, int | str]:
     return occupied
 
 
+async def _load_initial_report_plan_ids(session: AsyncSession) -> set[int]:
+    """返回已有关联初测报告的工单 ID，供导入时判断人天告警。"""
+    rows = (
+        await session.execute(
+            select(Report.testing_plan_id, Report.title).where(
+                Report.testing_plan_id.is_not(None)
+            )
+        )
+    ).all()
+    return {
+        plan_id for plan_id, title in rows
+        if plan_id is not None and not plan_service.is_retest_report_title(title)
+    }
+
+
 def _apply_cells(plan: TestingPlan, cells: list[str], user_map: dict) -> None:
     """把一行 Excel 单元格写入计划实体（不含序号分配与唯一性校验）。"""
     plan.plan_name = cells[1]
@@ -150,6 +165,7 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
     """
     user_map = await _load_user_map(session)
     occupied = await _load_occupied_tickets(session)
+    plans_with_initial_report = await _load_initial_report_plan_ids(session)
 
     ws = wb.active
     result = PlanImportResultOut()
@@ -186,6 +202,12 @@ async def upsert_plans(session: AsyncSession, wb, user: User) -> PlanImportResul
             result.created += 1
         else:
             result.updated += 1
+        has_initial_report = not is_new and plan.id in plans_with_initial_report
+        if plan.actual_mandays == 0 and not has_initial_report:
+            ticket_ref = plan.ticket_id or "未生成工单ID"
+            result.warnings.append(
+                f"第{idx}行（{ticket_ref}，{system_name}）：无初测报告且实际人天为 0"
+            )
     await ticket_service.commit_or_conflict(session)
     return result
 

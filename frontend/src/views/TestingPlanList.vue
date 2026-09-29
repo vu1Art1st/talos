@@ -33,24 +33,29 @@
         </template>
         <div ref="filterPanelRef" class="filter-panel">
           <div class="mb-2 text-sm font-medium">聚合筛选（支持条件分组与嵌套）</div>
+          <div class="filter-presets">
+            <span class="filter-presets__label">快捷预设</span>
+            <el-button
+              size="small"
+              :type="hasPreset('pending') ? 'primary' : 'default'"
+              plain
+              @click="applyPreset('pending')"
+            >待办流程</el-button>
+            <el-button
+              size="small"
+              :type="hasPreset('unclaimed') ? 'primary' : 'default'"
+              plain
+              @click="applyPreset('unclaimed')"
+            >无人认领</el-button>
+            <el-button
+              size="small"
+              :type="hasPreset('my_tests') ? 'primary' : 'default'"
+              plain
+              :disabled="!auth.user?.id"
+              @click="applyPreset('my_tests')"
+            >当前可测试</el-button>
+          </div>
           <FilterBuilder v-model="filterTree" :fields="filterFields" @change="onFiltersChange" />
-        </div>
-      </el-popover>
-      <!-- 快捷筛选：三项布尔筛选收纳为下拉多选，勾选任意条件即触发筛选 -->
-      <el-popover trigger="click" placement="bottom-start" :width="240">
-        <template #reference>
-          <el-button :type="quickFilterCount ? 'primary' : 'default'">
-            <el-icon class="mr-1"><Filter /></el-icon>快捷筛选
-            <span v-if="quickFilterCount" class="filter-count">{{ quickFilterCount }}</span>
-          </el-button>
-        </template>
-        <div class="quick-filter-panel">
-          <div class="mb-2 text-sm font-medium">快捷筛选</div>
-          <el-checkbox-group v-model="quickFilters" class="quick-filter-group" @change="onQuickFilterChange">
-            <el-checkbox value="my_tests">显示当前可测试系统</el-checkbox>
-            <el-checkbox value="unclaimed">显示无人认领的测试</el-checkbox>
-            <el-checkbox value="pending">显示待办流程</el-checkbox>
-          </el-checkbox-group>
         </div>
       </el-popover>
       <template #actions>
@@ -139,9 +144,7 @@
               :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
         <el-empty :image-size="80"
-                  :description="pending
-                    ? '暂无待办流程，所有渗透测试工单均已进入终态'
-                    : '暂无符合条件的渗透测试工单，请调整筛选条件'" />
+                  description="暂无符合条件的渗透测试工单，请调整筛选条件" />
       </template>
       <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
@@ -449,6 +452,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
 import { Download, Filter, Upload } from '@element-plus/icons-vue'
+import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   levelBadgeStyle,
@@ -475,7 +479,9 @@ import { useAssetSelect } from '../composables/useAssetSelect'
 import { useClickOutside } from '../composables/useClickOutside'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
-import type { Asset, FilterFieldDef, QueryParams, TestingPlan } from '../types'
+import type {
+  Asset, FilterFieldDef, QueryParams, TestingPlan, TestingPlanFilterOptions,
+} from '../types'
 import { usePlanConclusion } from '../composables/usePlanConclusion'
 import { usePlanCrud } from '../composables/usePlanCrud'
 import { usePlanFilters } from '../composables/usePlanFilters'
@@ -492,11 +498,10 @@ function triggerReload() {
 
 // ---------- 筛选状态（审计 E-2：已下沉至 composables/usePlanFilters.ts） ----------
 const {
-  quickFilters, pending, quickFilterCount, onQuickFilterChange,
   rangeKind, customRange, onRangeChange,
-  filterVisible, filterTree, filterCount, onFiltersChange,
+  filterVisible, filterTree, filterCount, hasPreset, applyPreset, onFiltersChange,
   periodLabel, buildParams, disposeFilters,
-} = usePlanFilters(triggerReload)
+} = usePlanFilters(triggerReload, { getCurrentUserId: () => auth.user?.id })
 
 // 聚合筛选面板：manual 模式下 el-popover 不监听外部点击，点空白处不会收回 —— 由本函数补回。
 // ignoreSelectors 放行面板内 el-select / el-date-picker / el-popconfirm 的 teleport 浮层，
@@ -519,6 +524,14 @@ const { items, total, page, size, search, sort, loading, load, onSortChange, onS
 const statusMap = ref<Record<number, string>>({})
 const dialogRow = ref<TestingPlan | null>(null)
 const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
+const filterOptions = ref<TestingPlanFilterOptions>({
+  system_names: [], test_types: [], departments: [], testers: [],
+})
+
+async function loadFilterOptions() {
+  const { data } = await client.get<TestingPlanFilterOptions>('/testing-plans/filter-options')
+  filterOptions.value = data
+}
 
 // 时间范围筛选状态（rangeKind / customRange / onRangeChange）已下沉至 composables/usePlanFilters.ts
 
@@ -532,19 +545,48 @@ const {
 
 // 支持聚合筛选的列字段定义（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
 const filterFields = computed<FilterFieldDef[]>(() => [
-  { key: 'system_name', label: '测试系统', type: 'text' },
-  { key: 'test_type', label: '测试类型', type: 'text', options: testTypes.value.map((t) => ({ label: t, value: t })) },
-  { key: 'department', label: '所属部门', type: 'text', options: departments.value.map((d) => ({ label: d, value: d })) },
-  { key: 'receive_time', label: '需求接收', type: 'date' },
   {
-    key: 'status', label: '状态', type: 'enum',
+    key: 'system_name', label: '测试系统', type: 'text', group: 'common',
+    multiple: true, operators: ['eq', 'ne'],
+    options: filterOptions.value.system_names.map((name) => ({ label: name, value: name })),
+  },
+  {
+    key: 'test_type', label: '测试类型', type: 'text', group: 'common',
+    multiple: true, operators: ['eq', 'ne'],
+    options: filterOptions.value.test_types.map((name) => ({ label: name, value: name })),
+  },
+  {
+    key: 'department', label: '所属部门', type: 'text', group: 'common',
+    multiple: true, operators: ['eq', 'ne'],
+    options: filterOptions.value.departments.map((name) => ({ label: name, value: name })),
+  },
+  {
+    key: 'status', label: '状态', type: 'enum', group: 'common',
+    multiple: true, operators: ['eq', 'ne'],
     options: Object.entries(statusMap.value).map(([k, v]) => ({ label: v, value: Number(k) })),
   },
-  { key: 'first_test_done_time', label: '初测完成', type: 'date' },
-  { key: 'retest_done_time', label: '复测完成', type: 'date' },
-  { key: 'est_mandays', label: '预估人天', type: 'number' },
-  { key: 'actual_mandays', label: '实际人天', type: 'number' },
-  { key: 'testers', label: '测试人员', type: 'text' },
+  {
+    key: 'testers', label: '测试人员', type: 'text', group: 'common',
+    multiple: true, operators: ['eq', 'ne'],
+    options: [
+      ...filterOptions.value.testers.map((tester) => ({
+        label: tester.name, value: tester.id,
+      })),
+      { label: '未认领', value: '__unclaimed__' },
+    ],
+  },
+  {
+    key: 'receive_time', label: '需求接收', type: 'date', group: 'advanced',
+    operators: ['gte', 'lte', 'between'],
+  },
+  {
+    key: 'est_mandays', label: '预估人天', type: 'number', group: 'advanced',
+    operators: ['gte', 'lte', 'between'],
+  },
+  {
+    key: 'actual_mandays', label: '实际人天', type: 'number', group: 'advanced',
+    operators: ['gte', 'lte', 'between'],
+  },
 ])
 
 // ---------- 统计面板（审计 E-2：已下沉至 composables/usePlanStats.ts，维度常量随之下沉） ----------
@@ -842,7 +884,9 @@ onMounted(async () => {
   const meta = await auth.fetchMeta()
   statusMap.value = meta?.testing_plan_status ?? {}
   window.addEventListener('resize', onResize)
-  await Promise.all([load(1), loadStats(), loadConclusion(), loadTestTypes(), loadDepartments()])
+  await Promise.all([
+    load(1), loadStats(), loadConclusion(), loadTestTypes(), loadDepartments(), loadFilterOptions(),
+  ])
 })
 
 onBeforeUnmount(() => {
@@ -868,17 +912,18 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 /* 筛选按钮上的条件数徽标 */
-/* 快捷筛选下拉：纵向排列 + 每项可整行点击 */
-.quick-filter-panel :deep(.el-checkbox-group) {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.quick-filter-panel :deep(.el-checkbox) {
-  margin-right: 0;
-  height: 32px;
+/* 快捷预设：直接写入下方条件树 */
+.filter-presets {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.filter-presets__label {
+  font-size: 12px;
+  color: var(--tl-text-3);
+  margin-right: 2px;
 }
 
 /* ---------- 创建漏扫基线工单（联动） ---------- */

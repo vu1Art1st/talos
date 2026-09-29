@@ -44,7 +44,7 @@
 | `clean.sh` | 104 | 活跃·开发辅助（2026-09-22 新增） | 本地垃圾清理（默认预演，`--apply` 执行）；详见 §2.14 |
 | `clean.ps1` | 115 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Apply`）；详见 §2.14 |
 
-### 1.2 后端脚本 `backend/scripts/`（21 个，含 P0-4 / P1-5 两个性能基准脚本）
+### 1.2 后端脚本 `backend/scripts/`（22 个，含 P0-4 / P1-5 两个性能基准脚本）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
@@ -52,6 +52,7 @@
 |---|---|---|---|
 | `migrate.py` | 50 | 活跃·发布流程 | `scripts/migrate.sh:10`、DEPLOY.md:121,321 |
 | `backfill_retest.py` | 47 | 活跃·发布流程 | `upgrade.sh:128`（每次升级自动执行）；已改用 `_common.run`（M-2） |
+| `backfill_report_mandays.py` | 85 | 活跃·发布流程 | `upgrade.sh`（每次升级自动执行，失败不阻断但汇总告警）；重算历史报告实际人天并刷新关联工单（幂等、`--dry-run`） |
 | `sync_knowledge_templates.py` | 154 | 活跃·常规运维 | USER_GUIDE.md:251-257、RELEASE.md:166 |
 | `seed_dev_data.py` | 582 | 活跃·开发辅助 | RELEASE.md:706 |
 | `knowledge_data.py` | 42 | 活跃·共享模块 | 被 `seed_dev_data.py` 导入（模板库数据唯一加载实现） |
@@ -98,12 +99,12 @@
 
 ### 2.1 `upgrade.sh` — 一键升级编排
 
-- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 重启服务；末段对 fail-open 步骤的失败做汇总告警。
+- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 回填报告实际人天 → 重启服务；末段对 fail-open 步骤的失败做汇总告警。
 - **调用**：`bash scripts/upgrade.sh [--no-backup] [--no-pull] [--anchor]`（仓库根目录，见脚本 3-8 行）。
-- **依赖**：`.env`（37 行强制校验）、`git`、`docker`；内部依次调用 `scripts/backup.sh` 或 `backup-incremental.sh`（72/75 行）、`scripts/notify.sh`（161 行，仅在有 fail-open 步骤失败时）、`scripts/migrate.sh`（124 行）、`python -m scripts.backfill_retest`（128 行）、`python -m scripts.backfill_retest_src_report`（135 行）。
+- **依赖**：`.env`（37 行强制校验）、`git`、`docker`；内部依次调用备份脚本、`scripts/notify.sh`、`scripts/migrate.sh`、`python -m scripts.backfill_retest`、`python -m scripts.backfill_retest_src_report` 与 `python -m scripts.backfill_report_mandays`。
 - **执行场景**：服务器版本升级；**不要**只 `git pull` 后 `up -d`（DEPLOY.md:336）。
 - **关键顺序约定**：数据库迁移在 api 启动**之前**用一次性容器执行（脚本 10-11 行注释），避免 `create_all` 抢先建表导致迁移冲突。
-- **失败影响（2026-09-22 整改）**：**硬依赖**（`git pull` / 镜像构建 / 数据库迁移）失败即中止（`set -euo pipefail`，报错本身即告警）；**可失败的维护步骤**一律 fail-open 但不允许静默——经 `record_warning`（46-57 行辅助函数）登记后，升级末尾统一汇总打印并渠道通知（153-162 行）：升级前备份失败、构建缓存清理失败（`builder prune`）、两个回填步骤失败。起因：`[4.6/5]` 源报告回填曾静默失败（原 `|| echo` 的单行提示被后续输出淹没），导致报告维度复测三态长期显示「未发起复测」而无人察觉。
+- **失败影响（2026-09-22 整改）**：**硬依赖**（`git pull` / 镜像构建 / 数据库迁移）失败即中止（`set -euo pipefail`，报错本身即告警）；**可失败的维护步骤**一律 fail-open 但不允许静默——经 `record_warning` 登记后，升级末尾统一汇总打印并渠道通知：升级前备份失败、构建缓存清理失败（`builder prune`）及三个回填步骤失败。起因：`[4.6/5]` 源报告回填曾静默失败（原 `|| echo` 的单行提示被后续输出淹没），导致报告维度复测三态长期显示「未发起复测」而无人察觉。
 - **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码全部改为 `$DOCKER`，并在脚本第 16-18 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
 
 ### 2.2 `migrate.sh` — 生产库结构迁移
@@ -292,6 +293,13 @@ bash scripts/restore-drill.sh backups/anchors/2026/09/<时间戳>
 - **依赖**：`app.services.vul_service.sync_vul_retest_html`（复用业务侧聚合实现，保证与线上同口径；批次 D 重构后曾残留在 `app.api.v1.vulns`，已于 `[2.18.1]` 修正）、`VulRetestRecord` 表。
 - **幂等性**：是——只处理 `retest_html` 中仍含旧式编号（`复测记录\s*\d+\s*：`，28 行）的漏洞，且刻意**不重写**「报告复测处理」直接写入的内容。
 - **执行场景**：升级流程内置；数据修复时手工执行。
+
+### 3.2.1 `backfill_report_mandays.py` — 历史报告实际人天回填（活跃·发布流程）
+
+- **用途**：扫描 `actual_mandays=0` 且 `test_start/test_end` 可解析、结束日期不早于开始日期的报告，按含首尾口径重算实际人天，并刷新关联工单。
+- **调用**：`python -m scripts.backfill_report_mandays`；`scripts/upgrade.sh` 每次升级自动执行，失败不阻断但由 `record_warning` 汇总告警；诊断用 `--dry-run`。
+- **关联工单口径**：`actual_mandays_override=false` 的工单按初测报告自动刷新；`override=true` 的工单保留人工值，仅修正报告字段。
+- **备份与幂等**：落库前写入 `storage/backups/report_actual_mandays_<时间戳>.json`；已重算报告不再满足 `actual_mandays=0`，重复执行无变更。
 
 ### 3.3 `sync_knowledge_templates.py` — 漏洞模板库同步（活跃·常规运维）
 

@@ -119,6 +119,12 @@ class TestingPlanOut(TestingPlanIn):
         return v or []
 
 
+class CompleteNoVulnOut(TestingPlanOut):
+    """无漏洞结项结果：原工单字段 + 非阻断数据质量告警。"""
+
+    warnings: list[str] = []
+
+
 class PlanImportResultOut(BaseModel):
     """测试计划导入结果：按 ID 更新、无 ID 新增。"""
 
@@ -127,6 +133,24 @@ class PlanImportResultOut(BaseModel):
     updated: int = 0
     failed: int = 0
     errors: list[str] = []
+    warnings: list[str] = []
+
+
+class TestingPlanTesterOption(BaseModel):
+    """工单筛选测试人员候选：姓名展示、用户名消歧，落库筛选使用 id。"""
+
+    id: int
+    name: str
+    username: str
+
+
+class TestingPlanFilterOptionsOut(BaseModel):
+    """渗透测试工单聚合筛选候选值（来自现有工单实际数据）。"""
+
+    system_names: list[str] = []
+    test_types: list[str] = []
+    departments: list[str] = []
+    testers: list[TestingPlanTesterOption] = []
 
 
 class NonpenPlanIn(BaseModel):

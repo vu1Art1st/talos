@@ -3,7 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import dayjs from 'dayjs'
 
 import client from '../api/client'
-import type { Report } from '../types'
+import type { CompleteNoVulnResult, Report } from '../types'
 
 interface PlanReportsOptions {
   /** 取当前工单 id */
@@ -109,14 +109,22 @@ export function usePlanReports(opts: PlanReportsOptions) {
   async function completeNoVuln() {
     noVulnSubmitting.value = true
     try {
-      await client.post(`/testing-plans/${opts.getPlanId()}/complete-no-vuln`, {
-        conclusion: noVulnConclusion.value,
-        generate_report: noVulnGenReport.value,
-        title: noVulnGenReport.value ? noVulnTitle.value.trim() : '',
-      })
-      ElMessage.success('已确认无漏洞，计划流转为「测试通过」')
+      const { data } = await client.post<CompleteNoVulnResult>(
+        `/testing-plans/${opts.getPlanId()}/complete-no-vuln`, {
+          conclusion: noVulnConclusion.value,
+          generate_report: noVulnGenReport.value,
+          title: noVulnGenReport.value ? noVulnTitle.value.trim() : '',
+        },
+      )
       noVulnVisible.value = false
       await opts.onChanged()
+      if (data.warnings.length > 0) {
+        await ElMessageBox.alert(data.warnings.join('\n'), '实际人天为 0', {
+          type: 'warning',
+        })
+      } else {
+        ElMessage.success('已确认无漏洞，计划流转为「测试通过」')
+      }
     } finally {
       noVulnSubmitting.value = false
     }

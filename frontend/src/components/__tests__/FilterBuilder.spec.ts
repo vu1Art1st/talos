@@ -9,7 +9,10 @@ import { countFilterRules, createFilterGroup, normalizeFilterTree } from '../../
 
 const FIELDS: FilterFieldDef[] = [
   { key: 'system_name', label: '测试系统', type: 'text' },
-  { key: 'status', label: '状态', type: 'enum', options: [{ label: '初测完成', value: 30 }] },
+  {
+    key: 'status', label: '状态', type: 'enum', multiple: true, operators: ['eq', 'ne'],
+    options: [{ label: '未测试', value: 10 }, { label: '初测完成', value: 30 }],
+  },
 ]
 
 /** 数值字段（人天）：验证 number 类型走数值输入与比较/区间操作符 */
@@ -166,6 +169,17 @@ describe('FilterBuilder 聚合筛选条件树编辑器', () => {
     expect(wrapper.findAll('.filter-row')).toHaveLength(1)
     expect(wrapper.text()).toContain('另有 1 条未填写完整')
     expect(wrapper.text()).not.toContain('预估人天 大于等于')
+    wrapper.unmount()
+  })
+
+  it('候选字段历史单值回显为多选标签，并只提供等值操作符', () => {
+    const model = normalizeFilterTree([{ field: 'status', op: 'eq', value: 30, not: false }])
+    const wrapper = mountBuilder(model)
+    const rule = ruleOf(wrapper.vm.$props.modelValue.children[0])
+
+    expect(rule.value).toBe(30)
+    expect(wrapper.text()).toContain('状态 等于 初测完成')
+    expect(wrapper.findAll('.filter-op .el-select__wrapper').length).toBe(1)
     wrapper.unmount()
   })
 })

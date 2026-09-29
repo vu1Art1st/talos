@@ -138,6 +138,14 @@ if ! $DOCKER compose run --rm api python -m scripts.backfill_retest_src_report; 
     "$DOCKER compose run --rm api python -m scripts.backfill_retest_src_report"
 fi
 
+# [4.7/5] 存量报告实际人天回填（测试周期有效但字段为 0；同步刷新未人工修正的关联工单，幂等）
+echo "[4.7/5] 存量报告实际人天回填"
+if ! $DOCKER compose run --rm api python -m scripts.backfill_report_mandays; then
+  echo "   先诊断（只统计不落库）：$DOCKER compose run --rm api python -m scripts.backfill_report_mandays --dry-run"
+  record_warning "存量报告实际人天回填" "部分历史报告及关联工单的实际人天仍为 0" \
+    "$DOCKER compose run --rm api python -m scripts.backfill_report_mandays"
+fi
+
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d"
 $DOCKER compose up -d

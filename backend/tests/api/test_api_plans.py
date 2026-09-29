@@ -63,6 +63,10 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
         assert await _list_plan_names(client, auth, q(dept, rule("status", "eq", 10))) == {A}
         # NOT 取反：部门=专属部门 且 状态≠10
         assert await _list_plan_names(client, auth, q(dept, rule("status", "ne", 10))) == {C}
+        # 候选字段多值：一条规则表达集合，OR 树不再需要重复建规则
+        assert await _list_plan_names(client, auth, q(dept, rule("status", "eq", [10, 60]))) == {A, C}
+        assert await _list_plan_names(client, auth, q(dept, rule("status", "ne", [10]))) == {C}
+        assert await _list_plan_names(client, auth, q(rule("system_name", "eq", [A, C]))) == {A, C}
         # OR 组合：规则间按顺序左结合（AND 优先），用唯一系统名避免受其他测试数据影响
         assert await _list_plan_names(
             client, auth,
@@ -296,6 +300,90 @@ async def test_testing_plan_search_by_ticket_id(client: AsyncClient, auth: dict)
     finally:
         for p in created:
             await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+
+async def test_testing_plan_search_abbreviated_derived_ticket_id(client: AsyncClient, auth: dict):
+    """自动编号完整派生文本参与模糊搜索：0818-1 命中单条，0818- 命中自动+手动编号。"""
+    DEPT = "工单ID片段搜索部门"
+    base = {
+        "test_type": "渗透测试", "department": DEPT, "receive_time": "2027-08-18",
+    }
+    created: list[dict] = []
+
+    for suffix in ("自动一", "自动二"):
+        resp = await client.post(
+            "/api/v1/testing-plans", headers=auth,
+            json={**base, "system_name": f"片段搜索系统-{suffix}"},
+        )
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json())
+
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={**base, "system_name": "片段搜索系统-手动", "ticket_id_manual": "20270818-MANUAL"},
+    )
+    assert resp.status_code == 200, resp.text
+    created.append(resp.json())
+
+    def q(keyword: str) -> dict:
+        return {"search": keyword, "department": DEPT}
+
+    try:
+        first, second, _manual = created
+        assert await _list_plan_names(client, auth, q(first["ticket_id"][4:])) == {
+            first["system_name"],
+        }
+        assert await _list_plan_names(client, auth, q(second["ticket_id"][4:])) == {
+            second["system_name"],
+        }
+        assert await _list_plan_names(client, auth, q("0818-")) == {
+            p["system_name"] for p in created
+        }
+    finally:
+        for p in created:
+            await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
+
+async def test_testing_plan_filter_options_and_tester_multi(client: AsyncClient, auth: dict):
+    """候选接口来自实际数据；测试人员按 ID 多选，未认领是特殊候选。"""
+    DEPT = "候选值筛选部门"
+    A = "候选值系统-已认领"
+    B = "候选值系统-未认领"
+    created: list[dict] = []
+    for system_name in (A, B):
+        resp = await client.post(
+            "/api/v1/testing-plans", headers=auth,
+            json={
+                "system_name": system_name, "test_type": "候选值测试类型",
+                "department": DEPT, "receive_time": "2027-09-01",
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json())
+
+    resp = await client.post(f"/api/v1/testing-plans/{created[0]['id']}/claim", headers=auth)
+    assert resp.status_code == 200, resp.text
+    me = (await client.get("/api/v1/auth/me", headers=auth)).json()
+
+    try:
+        options = (await client.get("/api/v1/testing-plans/filter-options", headers=auth)).json()
+        assert A in options["system_names"]
+        assert "候选值测试类型" in options["test_types"]
+        assert DEPT in options["departments"]
+        assert any(item["id"] == me["id"] for item in options["testers"])
+
+        def q(tester_values) -> dict:
+            return {"filters": json.dumps({"logic": "and", "children": [
+                {"kind": "rule", "field": "department", "op": "eq", "value": DEPT},
+                {"kind": "rule", "field": "testers", "op": "eq", "value": tester_values},
+            ]})}
+
+        assert await _list_plan_names(client, auth, q([me["id"]])) == {A}
+        assert await _list_plan_names(client, auth, q(["__unclaimed__"])) == {B}
+    finally:
+        for p in created:
+            await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
+
 
 async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     """测试计划工作台：认领/退出、录入漏洞统计重算、报告关联三方状态联动。"""
@@ -739,6 +827,9 @@ async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     # 缺测试系统 → 失败
     ws.append(["", "", "", "黑盒测试", "导入专用部门", "", "", "", "", "", "", "", "",
                0, 0, 0, 0, 0, 0, 0])
+    # 新工单、无初测报告且实际人天为 0 → 非阻断告警
+    ws.append(["", "", "导入零人天系统", "渗透测试", "导入专用部门", "", "",
+               "初测中", "", "2025-11-02", "", "", "", 2, 0, 0, 0, 0, 0, 0])
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
@@ -750,11 +841,14 @@ async def test_testing_plan_excel_import(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 200, resp.text
     result = resp.json()
-    assert result["total"] == 3
-    assert result["created"] == 1
+    assert result["total"] == 4
+    assert result["created"] == 2
     assert result["updated"] == 1
     assert result["failed"] == 1
     assert "测试系统为必填项" in result["errors"][0]
+    assert len(result["warnings"]) == 1
+    assert "导入零人天系统" in result["warnings"][0]
+    assert "无初测报告且实际人天为 0" in result["warnings"][0]
 
     # 新增行校验：状态/人天/测试人员匹配
     resp = await client.get(
@@ -948,6 +1042,7 @@ async def test_plan_complete_no_vuln_flow(client: AsyncClient, auth: dict):
     assert plan["no_vul_conclusion"] == "覆盖 OWASP Top 10 主要攻击面，未发现安全漏洞"
     assert plan["first_test_done_time"]
     assert len(plan["reports"]) == 1
+    assert plan["warnings"] == []
     report_brief = plan["reports"][0]
     assert "无漏洞闭环系统" in report_brief["title"]
     assert "渗透测试报告（无漏洞）" in report_brief["title"]
@@ -1023,6 +1118,8 @@ async def test_plan_complete_no_vuln_requires_no_vulns(client: AsyncClient, auth
     plan = resp.json()
     assert plan["status"] == 70
     assert plan["reports"] == []
+    assert len(plan["warnings"]) == 1
+    assert "没有初测报告且未手工填写" in plan["warnings"][0]
 
     # 直接向已通过计划创建漏洞（不经 attach-vulns）同样自动重开
     resp = await client.post(

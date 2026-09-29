@@ -1,37 +1,57 @@
 import { computed, ref } from 'vue'
 
-import type { FilterGroup, QueryParams } from '../types'
+import type { FilterGroup, FilterRule, QueryParams } from '../types'
 import { DATE_RANGE_OPTIONS, computeDateRange } from '../utils/dateRange'
 import {
   cloneFilterNode,
   countFilterRules,
   createFilterGroup,
+  filterTreeEquals,
   filterTreeToPayload,
   normalizeFilterTree,
   pruneFilterTree,
 } from '../utils/filterTree'
 
-/**
- * 工单列表的筛选状态与查询参数拼装（审计 E-2 从 views/TestingPlanList.vue 抽出）。
- *
- * 覆盖三类筛选：快捷筛选（多选下拉）、统计周期（初测完成 / 复测发起 / 复测完成 / 复测报告生成）、
- * 聚合筛选条件树（分组嵌套，可持久化）。
- * `buildParams()` 是**列表 / 统计 / 结论 / 导出四处唯一的参数口径**，避免各调用点各拼一份导致筛选不一致。
- *
- * @param onChange 任一筛选条件变化时的回调（由调用方落到列表回到首页 + 刷新统计）
- */
-export function usePlanFilters(onChange: () => void) {
-  // ---------- 快捷筛选：三项布尔筛选收敛为单个下拉多选，myTests/unclaimed/pending 由勾选项派生 ----------
-  const quickFilters = ref<string[]>([])
-  const myTests = computed(() => quickFilters.value.includes('my_tests'))
-  const unclaimed = computed(() => quickFilters.value.includes('unclaimed'))
-  const pending = computed(() => quickFilters.value.includes('pending'))
-  const quickFilterCount = computed(() => quickFilters.value.length)
+export type PlanFilterPreset = 'my_tests' | 'unclaimed' | 'pending'
 
-  function onQuickFilterChange() {
-    onChange()
+interface PlanFilterOptions {
+  getCurrentUserId: () => number | null | undefined
+}
+
+const UNCLAIMED_TESTER = '__unclaimed__'
+const PENDING_STATUSES = [10, 20, 50]
+const ACTIVE_TESTER_STATUSES = [20, 40, 50]
+let presetUid = 1_000_000
+
+function presetRule(field: string, value: string[] | number[]): FilterRule {
+  return {
+    kind: 'rule', field, op: 'eq', value, not: false, _uid: presetUid++,
   }
+}
 
+function presetNode(preset: PlanFilterPreset, userId?: number | null) {
+  if (preset === 'pending') return presetRule('status', PENDING_STATUSES)
+  if (preset === 'unclaimed') return presetRule('testers', [UNCLAIMED_TESTER])
+  if (!userId) return null
+  return {
+    kind: 'group' as const,
+    logic: 'and' as const,
+    not: false,
+    children: [
+      presetRule('testers', [userId]),
+      presetRule('status', ACTIVE_TESTER_STATUSES),
+    ],
+    _uid: presetUid++,
+  }
+}
+
+/**
+ * 工单列表的筛选状态与查询参数拼装。
+ *
+ * 顶部只保留关键词与统计周期；快捷筛选作为预设写入统一条件树，确保列表 / 统计 /
+ * 结论 / 导出共用同一 `filters` 参数。
+ */
+export function usePlanFilters(onChange: () => void, options: PlanFilterOptions) {
   // ---------- 统计周期筛选（初测完成 / 复测发起 / 复测完成 / 复测报告生成） ----------
   const rangeKind = ref<string>('')
   const customRange = ref<[string, string] | null>(null)
@@ -55,17 +75,13 @@ export function usePlanFilters(onChange: () => void) {
   const filterVisible = ref(false)
   const RULES_KEY = 'testing_plan_filters'
 
-  // 聚合筛选可选字段（与后端 _PLAN_FILTER_FIELDS 白名单保持一致）
+  // 已从界面删除的初测/复测完成字段由白名单自动剪枝，不污染新条件树。
   const FILTER_FIELDS = new Set([
     'system_name', 'test_type', 'department', 'receive_time',
-    'status', 'first_test_done_time', 'retest_done_time', 'est_mandays',
-    'actual_mandays', 'testers',
+    'status', 'est_mandays', 'actual_mandays', 'testers',
   ])
 
-  /**
-   * localStorage 中的历史条件（不可信来源）：字段名按白名单过滤后才进入条件树。
-   * 兼容两种历史形态 —— 旧扁平规则数组（按 connector 左结合折叠）与新版分组树。
-   */
+  /** localStorage 中的历史条件：字段名按白名单过滤后才进入条件树。 */
   function loadFilterTree(): FilterGroup {
     try {
       const saved: unknown = JSON.parse(localStorage.getItem(RULES_KEY) || 'null')
@@ -81,11 +97,26 @@ export function usePlanFilters(onChange: () => void) {
   const filterCount = computed(() => countFilterRules(pruneFilterTree(filterTree.value)))
   let filterTimer: ReturnType<typeof setTimeout> | null = null
 
-  // 条件变化：持久化 + 防抖刷新列表与统计
-  function onFiltersChange() {
+  function persistFilters() {
     localStorage.setItem(RULES_KEY, JSON.stringify(cloneFilterNode(filterTree.value)))
     if (filterTimer) clearTimeout(filterTimer)
     filterTimer = setTimeout(() => onChange(), 250)
+  }
+
+  function onFiltersChange() {
+    persistFilters()
+  }
+
+  function hasPreset(preset: PlanFilterPreset): boolean {
+    const node = presetNode(preset, options.getCurrentUserId())
+    return node !== null && filterTree.value.children.some((child) => filterTreeEquals(child, node))
+  }
+
+  function applyPreset(preset: PlanFilterPreset) {
+    const node = presetNode(preset, options.getCurrentUserId())
+    if (!node || hasPreset(preset)) return
+    filterTree.value.children.push(node)
+    persistFilters()
   }
 
   /** 组件卸载时清理防抖计时器 */
@@ -93,11 +124,7 @@ export function usePlanFilters(onChange: () => void) {
     if (filterTimer) clearTimeout(filterTimer)
   }
 
-  /**
-   * 查询参数拼装（列表 / 统计 / 结论 / 导出共用）。
-   * @param search 关键词（来自 useListPage）
-   * @param sort   排序（来自 useListPage）
-   */
+  /** 查询参数拼装：列表 / 统计 / 结论 / 导出共用。 */
   function buildParams(
     search: string, sort: { prop?: string; order?: string },
   ): QueryParams {
@@ -111,9 +138,6 @@ export function usePlanFilters(onChange: () => void) {
     if (countFilterRules(pruned)) {
       params.filters = JSON.stringify(filterTreeToPayload(pruned))
     }
-    if (myTests.value) params.my_tests = true
-    if (unclaimed.value) params.unclaimed = true
-    if (pending.value) params.pending = true
     if (sort.prop) {
       params.sort = sort.prop
       params.order = sort.order
@@ -122,12 +146,6 @@ export function usePlanFilters(onChange: () => void) {
   }
 
   return {
-    quickFilters,
-    myTests,
-    unclaimed,
-    pending,
-    quickFilterCount,
-    onQuickFilterChange,
     rangeKind,
     customRange,
     onRangeChange,
@@ -135,6 +153,8 @@ export function usePlanFilters(onChange: () => void) {
     filterVisible,
     filterTree,
     filterCount,
+    hasPreset,
+    applyPreset,
     onFiltersChange,
     disposeFilters,
     buildParams,

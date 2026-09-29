@@ -25,6 +25,23 @@
 
 ---
 
+## [2.22.2] - 2026-09-29
+
+多选筛选表达补全与历史数据修正，按项目版本规则定为 `PATCH`（无新增面向用户的独立功能模块、无迁移，既有单值筛选契约不变）。
+
+### 变更
+
+- **多选筛选表达补全**：`core/filters.py::build_filter_expr` 的 `eq` / `ne` 现支持传入多值数组，渲染为 `col.in_(values)` / `col.not_in(values)`；新增 `normalize_filter_values`（标量转单项数组、空数组 / 全空值明确拒绝 400）。前端 `utils/filterTree.ts` / `composables/usePlanFilters.ts` / `components/FilterRuleRow.vue` 配套支持多选，与后端同一口径。
+- **报告人天回填与导入告警**：`services/plan_io.py` 导入时按已关联初测报告判断人天告警；新增 `scripts/backfill_report_mandays.py`（幂等扫描 `actual_mandays=0` 的存量报告，复用 `core.timeutil.mandays_between` 重算并刷新关联工单，已人工修正的工单保持不变；支持 `--dry-run` 与自动备份）。
+
+### 修复
+
+- 多选筛选边界归一（空值 / 单值 / 多值统一路径），避免空多选静默跳过或报错。
+- 回归：`backend/tests/test_filters.py`、`test_api_plans.py`、`test_api_nonpen.py`、`test_api_pat_open_api.py`；前端 `FilterBuilder.spec.ts` / `filterTree.spec.ts` / `TestingPlanList.spec.ts` 及新增 `usePlanFilters` / `usePlanImportExport` / `usePlanReports` 单测；新增 `backend/tests/test_backfill_report_mandays.py`。
+- 文档同步：`DEPLOY.md` / `SCRIPTS.md` / `USER_GUIDE.md`；`scripts/upgrade.sh` 登记回填脚本。
+
+---
+
 ## [2.22.1] - 2026-09-28
 
 「个人待办」交互纠偏两处：卡片「查看全部」原先跳转到渗透测试工单等列表页，与「查看该分类全部待办」的语义不符；点单条**工单**条目原先只落到工单列表页、定位不到具体工单。本次为**向下兼容的问题修复**（新增只读明细接口，既有 `/todos` 聚合契约不变，深链参数为新增消费方），按项目版本规则定为 `PATCH`。

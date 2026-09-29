@@ -69,6 +69,12 @@ export const DEFAULT_OP_BY_TYPE: Record<FilterFieldDef['type'], string> = {
   date: 'eq',
 }
 
+function defaultOpOf(field: FilterFieldDef | undefined): string {
+  const preferred = DEFAULT_OP_BY_TYPE[field?.type ?? 'text']
+  if (!field?.operators?.length || field.operators.includes(preferred)) return preferred
+  return field.operators[0]
+}
+
 /** 序列化载荷（请求体形态：仅保留后端需要的字段） */
 export interface FilterRulePayload {
   kind: 'rule'
@@ -105,12 +111,13 @@ export function createFilterGroup(): FilterGroup {
 function defaultRuleValue(field: FilterFieldDef | undefined, op: string): FilterRule['value'] {
   if (op === 'between') return [null, null]
   if (!filterOpNeedsValue(op)) return null
+  if (field?.multiple) return []
   return field?.type === 'number' ? null : ''
 }
 
 export function createFilterRule(fields: FilterFieldDef[]): FilterRule {
   const field = fields[0]
-  const op = DEFAULT_OP_BY_TYPE[field?.type ?? 'text']
+  const op = defaultOpOf(field)
   return {
     kind: 'rule',
     field: field?.key ?? '',
@@ -127,13 +134,20 @@ export function fieldOf(fields: FilterFieldDef[], key: string): FilterFieldDef |
 
 /** 规则当前字段可用的操作符列表 */
 export function opOptionsOf(rule: FilterRule, fields: FilterFieldDef[]): FilterOpOption[] {
-  return OP_OPTIONS_BY_TYPE[fieldOf(fields, rule.field)?.type ?? 'text']
+  const field = fieldOf(fields, rule.field)
+  const options = OP_OPTIONS_BY_TYPE[field?.type ?? 'text']
+  if (!field?.operators?.length) return options
+  const selected = options.find((option) => option.value === rule.op)
+  const allowed = options.filter((option) => field.operators?.includes(option.value))
+  return selected && !allowed.some((option) => option.value === selected.value)
+    ? [...allowed, selected]
+    : allowed
 }
 
 /** 切换字段：操作符与取值一并重置为该字段类型的默认形态 */
 export function applyFilterRuleField(rule: FilterRule, fields: FilterFieldDef[]): void {
   const field = fieldOf(fields, rule.field)
-  rule.op = DEFAULT_OP_BY_TYPE[field?.type ?? 'text']
+  rule.op = defaultOpOf(field)
   rule.value = defaultRuleValue(field, rule.op)
 }
 
@@ -149,6 +163,9 @@ export function isFilterRuleComplete(rule: FilterRule): boolean {
     if (!Array.isArray(rule.value) || rule.value.length !== 2) return false
     const [lo, hi] = rule.value
     return lo !== null && lo !== '' && hi !== null && hi !== ''
+  }
+  if (Array.isArray(rule.value)) {
+    return rule.value.some((item) => item !== null && item !== '')
   }
   return rule.value !== null && rule.value !== ''
 }
@@ -286,9 +303,15 @@ export function filterTreeToPayload(group: FilterGroup): FilterGroupPayload {
 }
 
 function optionLabel(field: FilterFieldDef | undefined, value: FilterRule['value']): string {
-  if (Array.isArray(value) || value === null) return '?'
-  const hit = field?.options?.find((o) => String(o.value) === String(value))
-  return hit ? hit.label : String(value)
+  if (value === null) return '?'
+  const values = Array.isArray(value) ? value : [value]
+  const labels = values
+    .filter((item): item is string | number => item !== null && item !== '')
+    .map((item) => {
+      const hit = field?.options?.find((option) => String(option.value) === String(item))
+      return hit ? hit.label : String(item)
+    })
+  return labels.length ? labels.join('、') : '?'
 }
 
 /**

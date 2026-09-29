@@ -90,6 +90,16 @@ describe('TestingPlanList 工单列表页', () => {
           },
         }
       }
+      if (url === '/testing-plans/filter-options') {
+        return {
+          data: {
+            system_names: ['商城系统'],
+            test_types: ['黑盒'],
+            departments: ['安全部'],
+            testers: [{ id: 1, name: '管理员', username: 'admin' }],
+          },
+        }
+      }
       return { data: [] }
     })
   })
@@ -106,6 +116,7 @@ describe('TestingPlanList 工单列表页', () => {
     expect(urls).toContain('/testing-plans')
     expect(urls).toContain('/testing-plans/stats')
     expect(urls).toContain('/testing-plans/conclusion')
+    expect(urls).toContain('/testing-plans/filter-options')
     expect(wrapper.text()).toContain('商城系统')
     wrapper.unmount()
   })

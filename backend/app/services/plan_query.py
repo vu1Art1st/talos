@@ -13,13 +13,14 @@ import re
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException
-from sqlalchemy import String, and_, exists, func, literal_column, or_, select
+from sqlalchemy import String, and_, exists, func, literal, literal_column, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import NONPEN_ITEMS, TESTING_PLAN_STATUS, PlanStatus, VulStatus
 from app.core.filters import (
     build_filter_expr,
     build_tree_condition,
+    normalize_filter_values,
     parse_filter_tree,
     split_range,
     to_float,
@@ -58,6 +59,26 @@ def _auto_ticket_id_cond(model, date_like: str, seq: int):
 
 # 漏扫基线工单「可进行」判定所用的可测试状态（与 models/special.NonpenPlan.actionable 同口径）
 NONPEN_ACTIONABLE_STATUSES = ("not_started", "testing", "retesting")
+UNCLAIMED_TESTER = "__unclaimed__"
+
+
+def _auto_ticket_id_expr(model):
+    """自动编号的展示文本：YYYYMMDD-N。仅用于模糊匹配，精确占用仍需 `_auto_ticket_id_cond`。"""
+    return (
+        func.replace(model.receive_time, "-", "")
+        + literal("-")
+        + func.cast(model.ticket_seq, String)
+    )
+
+
+def _auto_ticket_id_text_cond(model, pattern: str):
+    """自动编号完整展示文本的模糊匹配；手动改号后的残留序号不得参与。"""
+    return and_(
+        model.ticket_id_manual == "",
+        model.receive_time != "",
+        model.ticket_seq > 0,
+        _auto_ticket_id_expr(model).ilike(pattern),
+    )
 
 
 def nonpen_actionable_condition():
@@ -99,6 +120,7 @@ def nonpen_search_condition(search: str):
         NonpenPlan.receive_time.ilike(pat),
         func.replace(NonpenPlan.receive_time, "-", "").ilike(pat),
         func.cast(NonpenPlan.ticket_seq, String).ilike(pat),
+        _auto_ticket_id_text_cond(NonpenPlan, pat),
     ]
     # 完整工单ID匹配：YYYYMMDD-N（如 20260810-3）→ 手动指定值本身，或自动编号的日期+当日序号组合
     m = re.fullmatch(r"(\d{8})-(\d+)", search)
@@ -120,6 +142,7 @@ def plan_search_condition(search: str):
         TestingPlan.receive_time.ilike(pat),
         func.replace(TestingPlan.receive_time, "-", "").ilike(pat),
         func.cast(TestingPlan.ticket_seq, String).ilike(pat),
+        _auto_ticket_id_text_cond(TestingPlan, pat),
     ]
     # 完整工单ID匹配：YYYYMMDD-N（如 20260727-1）→ 手动指定值本身，或自动编号的日期+当日序号组合
     m = re.fullmatch(r"(\d{8})-(\d+)", search)
@@ -347,6 +370,7 @@ def _ticket_id_filter_expr(op: str, value) -> object:
             TestingPlan.receive_time.ilike(f"%{sv}%"),
             func.replace(TestingPlan.receive_time, "-", "").ilike(f"%{sv}%"),
             func.cast(TestingPlan.ticket_seq, String).ilike(f"%{sv}%"),
+            _auto_ticket_id_text_cond(TestingPlan, f"%{sv}%"),
         )
         return expr if op == "contains" else ~expr
     if op == "starts_with":
@@ -372,10 +396,45 @@ def _ticket_id_filter_expr(op: str, value) -> object:
 
 
 def _testers_filter_expr(op: str, value) -> object:
-    """测试人员筛选：多对多关联 users 表，按姓名/用户名模糊匹配。"""
+    """测试人员筛选：多选按用户 ID 精确匹配（含未认领），历史标量继续按姓名/用户名匹配。"""
     if op in ("is_empty", "is_not_empty"):
         sub = exists().where(testing_plan_testers.c.testing_plan_id == TestingPlan.id)
         return ~sub if op == "is_empty" else sub
+    if isinstance(value, (list, tuple)):
+        if op not in ("eq", "ne"):
+            raise HTTPException(400, "测试人员多选仅支持等于/不等于操作符")
+        values = normalize_filter_values(value)
+        user_ids: list[int] = []
+        names: list[str] = []
+        unclaimed = False
+        for item in values:
+            text = str(item)
+            if text == UNCLAIMED_TESTER:
+                unclaimed = True
+            elif text.isdigit():
+                user_ids.append(int(text))
+            else:
+                names.append(text)
+        conds = []
+        if user_ids:
+            conds.append(exists().where(
+                testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+                testing_plan_testers.c.user_id.in_(user_ids),
+            ))
+        if names:
+            conds.append(exists().where(
+                testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+                testing_plan_testers.c.user_id == User.id,
+                or_(*[User.realname == name for name in names], *[User.username == name for name in names]),
+            ))
+        if unclaimed:
+            conds.append(~exists().where(
+                testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+            ))
+        if not conds:
+            raise HTTPException(400, "测试人员筛选至少需要一个有效值")
+        expr = or_(*conds)
+        return expr if op == "eq" else ~expr
     sv = str(value) if value is not None else ""
     pat = f"%{sv}%"
     if op == "starts_with":

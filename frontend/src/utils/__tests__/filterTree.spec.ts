@@ -20,7 +20,10 @@ import {
 
 const FIELDS: FilterFieldDef[] = [
   { key: 'system_name', label: '测试系统', type: 'text' },
-  { key: 'status', label: '状态', type: 'enum', options: [{ label: '初测完成', value: 30 }] },
+  {
+    key: 'status', label: '状态', type: 'enum', multiple: true, operators: ['eq', 'ne'],
+    options: [{ label: '未测试', value: 10 }, { label: '初测完成', value: 30 }],
+  },
 ]
 
 const rule = (field: string, op: string, value: unknown, extra: Record<string, unknown> = {}) => ({
@@ -166,6 +169,39 @@ describe('filterTree 条件树工具', () => {
     node.field = 'status'
     applyFilterRuleField(node, FIELDS)
     expect(node.op).toBe('eq')
+    expect(node.value).toEqual([])
+  })
+
+  it('候选字段多选：空数组不生效，多值保持单条规则并生成集合预览', () => {
+    const node = createFilterRule(FIELDS)
+    node.field = 'status'
+    applyFilterRuleField(node, FIELDS)
+    expect(isFilterRuleComplete(node)).toBe(false)
+
+    node.value = [10, 30]
+    expect(isFilterRuleComplete(node)).toBe(true)
+    expect(opOptionsOf(node, FIELDS).map((option) => option.value)).toEqual(['eq', 'ne'])
+
+    const tree = createFilterGroup()
+    tree.children.push(node)
+    expect(countFilterRules(tree)).toBe(1)
+    expect(describeFilterTree(tree, FIELDS)).toBe('状态 等于 未测试、初测完成')
+    expect(filterTreeToPayload(tree).children[0]).toMatchObject({
+      kind: 'rule', field: 'status', op: 'eq', value: [10, 30],
+    })
+  })
+
+  it('字段限制操作符时使用受支持的首个默认操作符', () => {
+    const fields: FilterFieldDef[] = [
+      { key: 'system_name', label: '测试系统', type: 'text', operators: ['eq', 'ne'] },
+      { key: 'receive_time', label: '需求接收', type: 'date', operators: ['gte', 'lte', 'between'] },
+    ]
+    const node = createFilterRule(fields)
+    expect(node.op).toBe('eq')
+
+    node.field = 'receive_time'
+    applyFilterRuleField(node, fields)
+    expect(node.op).toBe('gte')
     expect(node.value).toBe('')
   })
 

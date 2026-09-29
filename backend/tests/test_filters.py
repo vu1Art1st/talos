@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import DateTime, String, column
+from sqlalchemy import DateTime, Integer, String, column
 from sqlalchemy.dialects import postgresql
 
 from app.core.filters import (
@@ -297,3 +297,17 @@ def test_date_string_filter_keeps_string_semantics():
         "receive_time IS NOT NULL AND receive_time != '' "
         "AND receive_time >= '2026-01-01' AND receive_time <= '2026-01-31'"
     )
+
+
+def test_text_and_enum_multi_value_filter_semantics():
+    """候选字段数组仅支持等值集合：eq→IN，ne→NOT IN，非法形态明确 400。"""
+    col = column("status", Integer)
+    assert str(build_filter_expr(col, "enum", False, "eq", [10, 20])
+               .compile(compile_kwargs={"literal_binds": True})) == "status IN (10, 20)"
+    assert str(build_filter_expr(col, "enum", False, "ne", [10, 20])
+               .compile(compile_kwargs={"literal_binds": True})) == "(status NOT IN (10, 20))"
+
+    for op, value in [("eq", []), ("contains", [10, 20])]:
+        with pytest.raises(HTTPException) as exc:
+            build_filter_expr(col, "enum", False, op, value)
+        assert exc.value.status_code == 400

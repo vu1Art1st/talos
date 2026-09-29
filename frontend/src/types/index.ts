@@ -879,6 +879,21 @@ export interface TestingPlan {
   no_vul_conclusion?: string
 }
 
+/** 测试计划 Excel 导入结果 */
+export interface PlanImportResult {
+  total: number
+  created: number
+  updated: number
+  failed: number
+  errors: string[]
+  warnings: string[]
+}
+
+/** 无漏洞结项结果：工单字段 + 非阻断数据质量告警 */
+export interface CompleteNoVulnResult extends TestingPlan {
+  warnings: string[]
+}
+
 /** 复测轮次记录（工单「复测轮数」弹层展示） */
 export interface RetestRound {
   id: number
@@ -917,6 +932,25 @@ export interface FilterFieldDef {
   label: string
   type: 'text' | 'number' | 'date' | 'enum'
   options?: FilterFieldOption[]
+  /** 候选字段允许多选；仅等于/不等于读取数组 */
+  multiple?: boolean
+  /** 字段允许的新规则操作符；未填写时使用类型默认全集 */
+  operators?: string[]
+  /** 字段选择器分组 */
+  group?: 'common' | 'advanced'
+}
+
+export interface TestingPlanTesterOption {
+  id: number
+  name: string
+  username: string
+}
+
+export interface TestingPlanFilterOptions {
+  system_names: string[]
+  test_types: string[]
+  departments: string[]
+  testers: TestingPlanTesterOption[]
 }
 
 /** 单条筛选条件（叶子节点）；`_uid` 仅供前端渲染 key，不参与请求 */

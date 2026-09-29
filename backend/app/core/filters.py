@@ -50,6 +50,15 @@ def split_range(value) -> tuple:
     raise HTTPException(400, "between 操作符需要两个值（如 [起始值, 结束值]）")
 
 
+def normalize_filter_values(value) -> list:
+    """候选字段多选值归一化：标量转单项数组，空数组/全空值明确拒绝。"""
+    values = list(value) if isinstance(value, (list, tuple)) else [value]
+    values = [item for item in values if item is not None]
+    if not values:
+        raise HTTPException(400, "多选筛选至少需要一个值")
+    return values
+
+
 def to_float(text) -> float:
     """宽松数字解析：空值/非法输入归 0，供筛选与 Excel 单元格取数共用。"""
     try:
@@ -133,6 +142,13 @@ def build_filter_expr(col, ftype: str, is_datetime: bool, op: str, value) -> obj
     if is_datetime:
         return datetime_filter_expr(col, op, value)
     if ftype in ("text", "enum"):
+        if isinstance(value, (list, tuple)):
+            values = normalize_filter_values(value)
+            if op == "eq":
+                return col.in_(values)
+            if op == "ne":
+                return col.not_in(values)
+            raise HTTPException(400, "多选仅支持等于/不等于操作符")
         if op == "contains":
             return col.ilike(f"%{value}%")
         if op == "not_contains":

@@ -7,7 +7,9 @@
       placeholder="选择字段"
       @change="onFieldChange"
     >
-      <el-option v-for="f in fields" :key="f.key" :label="f.label" :value="f.key" />
+      <el-option-group v-for="group in fieldGroups" :key="group.label" :label="group.label">
+        <el-option v-for="f in group.fields" :key="f.key" :label="f.label" :value="f.key" />
+      </el-option-group>
     </el-select>
 
     <el-select v-model="rule.op" class="filter-op" placeholder="操作符" @change="onOpChange">
@@ -44,6 +46,25 @@
             class="w-full"
           />
         </template>
+
+        <el-select
+          v-else-if="usesMultipleValue"
+          v-model="multipleValue"
+          multiple
+          filterable
+          clearable
+          collapse-tags
+          collapse-tags-tooltip
+          placeholder="选择值"
+          class="w-full"
+        >
+          <el-option
+            v-for="o in fieldOf(fields, rule.field)?.options ?? []"
+            :key="String(o.value)"
+            :label="o.label"
+            :value="o.value"
+          />
+        </el-select>
 
         <el-select
           v-else-if="fieldOf(fields, rule.field)?.type === 'enum'"
@@ -126,7 +147,7 @@
 </template>
 
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { Close } from '@element-plus/icons-vue'
 
 import type { FilterFieldDef, FilterRule } from '../types'
@@ -145,6 +166,37 @@ const emit = defineEmits<{
 }>()
 
 watch(() => props.rule, () => emit('change'), { deep: true })
+
+const fieldGroups = computed(() => [
+  {
+    label: '常用字段',
+    fields: props.fields.filter((field) => field.group !== 'advanced'),
+  },
+  {
+    label: '高级条件',
+    fields: props.fields.filter((field) => field.group === 'advanced'),
+  },
+].filter((group) => group.fields.length > 0))
+
+/** Element Plus 多选只接受数组；兼容历史持久化下来的单值。 */
+const multipleValue = computed<(string | number)[]>({
+  get: () => {
+    if (Array.isArray(props.rule.value)) {
+      return props.rule.value.filter(
+        (item): item is string | number => item !== null && item !== '',
+      )
+    }
+    return props.rule.value === null || props.rule.value === '' ? [] : [props.rule.value]
+  },
+  set: (value) => {
+    props.rule.value = value
+  },
+})
+
+const usesMultipleValue = computed(() => {
+  const field = fieldOf(props.fields, props.rule.field)
+  return Boolean(field?.multiple && ['eq', 'ne'].includes(props.rule.op))
+})
 
 /** 区间取值的两个输入框：形态非法时补成 [null, null]（历史/手改数据兜底） */
 function betweenValue(rule: FilterRule): (string | number | null)[] {

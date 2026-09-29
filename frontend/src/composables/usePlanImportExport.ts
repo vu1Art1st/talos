@@ -2,7 +2,7 @@ import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import client from '../api/client'
-import type { QueryParams } from '../types'
+import type { PlanImportResult, QueryParams } from '../types'
 import { saveBlob } from '../utils/download'
 
 interface PlanImportExportOptions {
@@ -39,11 +39,17 @@ export function usePlanImportExport(opts: PlanImportExportOptions) {
     try {
       const fd = new FormData()
       fd.append('file', options.file)
-      const { data } = await client.post('/testing-plans/import', fd)
-      if (data.failed > 0) {
+      const { data } = await client.post<PlanImportResult>('/testing-plans/import', fd)
+      if (data.failed > 0 || data.warnings.length > 0) {
+        const sections = [
+          `共 ${data.total} 行，新增 ${data.created} 行，更新 ${data.updated} 行，失败 ${data.failed} 行。`,
+        ]
+        if (data.errors.length > 0) sections.push(`失败明细：\n${data.errors.join('\n')}`)
+        if (data.warnings.length > 0) sections.push(`0 人天告警：\n${data.warnings.join('\n')}`)
         await ElMessageBox.alert(
-          `共 ${data.total} 行，新增 ${data.created} 行，更新 ${data.updated} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}`,
-          '导入结果', { dangerouslyUseHTMLString: true },
+          sections.join('\n\n'),
+          data.failed > 0 ? '导入结果' : '导入完成，存在 0 人天风险',
+          { type: data.failed > 0 ? 'error' : 'warning' },
         )
       } else {
         ElMessage.success(`导入完成：新增 ${data.created} 条，更新 ${data.updated} 条`)

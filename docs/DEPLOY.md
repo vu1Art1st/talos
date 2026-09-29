@@ -170,6 +170,7 @@ sudo docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGR
 | 2.12.2 | `scripts.fix_retest_section_dup` | 剥离存量报告章节正文尾部内嵌的「复测详情」副本（见下） |
 | 2.20.3 | `scripts.enable_trgm_indexes` | 建立前后通配符检索的 pg_trgm GIN 索引（可选，见「十、」） |
 | — | `scripts.backfill_retest` | 复测聚合标题回填，`upgrade.sh` 已自动执行（见 3.2） |
+| — | `scripts.backfill_report_mandays` | 历史报告实际人天回填并刷新关联工单，`upgrade.sh` 已自动执行（幂等，支持 `--dry-run`） |
 
 #### 2.12.2 清理存量报告章节的复测详情副本
 

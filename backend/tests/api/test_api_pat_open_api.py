@@ -98,10 +98,14 @@ async def test_open_api_plan_read(client: AsyncClient, auth: dict):
     # 列表与详情（先在站内造一条，保证有数据）
     created = await client.post(
         "/api/v1/testing-plans", headers=auth,
-        json={"system_name": "开放API只读系统", "test_type": "渗透测试", "status": 10},
+        json={
+            "system_name": "开放API只读系统", "test_type": "渗透测试", "status": 10,
+            "receive_time": "2027-08-20",
+        },
     )
     assert created.status_code == 200, created.text
-    plan_id = created.json()["id"]
+    created_plan = created.json()
+    plan_id = created_plan["id"]
 
     resp = await client.get("/api/v1/open/testing-plans", headers=pat, params={"size": 5})
     assert resp.status_code == 200, resp.text
@@ -118,6 +122,11 @@ async def test_open_api_plan_read(client: AsyncClient, auth: dict):
         "/api/v1/open/testing-plans", headers=pat, params={"search": "开放API只读系统"},
     )
     assert [p["id"] for p in resp.json()["items"]] == [plan_id]
+    resp = await client.get(
+        "/api/v1/open/testing-plans", headers=pat,
+        params={"search": created_plan["ticket_id"][4:]},
+    )
+    assert plan_id in [p["id"] for p in resp.json()["items"]]
 
     # 漏扫基线工单列表可读
     assert (await client.get("/api/v1/open/nonpen-plans", headers=pat)).status_code == 200

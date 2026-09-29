@@ -104,3 +104,47 @@ async def test_nonpen_search_ticket_id_excludes_ghost_seq(client: AsyncClient, a
         for plan_id in created:
             await client.delete(f"/api/v1/nonpen-plans/{plan_id}", headers=auth)
 
+
+async def test_nonpen_search_abbreviated_derived_ticket_id(client: AsyncClient, auth: dict):
+    """漏扫工单与渗透工单同口径：日期尾部+连字符+序号可命中自动编号完整值。"""
+    payload = {
+        "department": "漏扫片段搜索部门", "receive_time": "2027-08-19",
+        "test_items": ["baseline"],
+    }
+    created: list[dict] = []
+    for suffix in ("自动一", "自动二"):
+        resp = await client.post(
+            "/api/v1/nonpen-plans", headers=auth,
+            json={**payload, "system_name": f"漏扫片段系统-{suffix}"},
+        )
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json())
+    resp = await client.post(
+        "/api/v1/nonpen-plans", headers=auth,
+        json={**payload, "system_name": "漏扫片段系统-手动", "ticket_id_manual": "20270819-MANUAL"},
+    )
+    assert resp.status_code == 200, resp.text
+    created.append(resp.json())
+
+    try:
+        first, second, _manual = created
+        for expected in (first, second):
+            resp = await client.get(
+                "/api/v1/nonpen-plans", headers=auth,
+                params={"search": expected["ticket_id"][4:], "size": 100},
+            )
+            assert resp.status_code == 200, resp.text
+            ids = [item["id"] for item in resp.json()["items"]]
+            assert expected["id"] in ids
+            assert created[1 if expected is first else 0]["id"] not in ids
+
+        resp = await client.get(
+            "/api/v1/nonpen-plans", headers=auth, params={"search": "0819-", "size": 100},
+        )
+        assert resp.status_code == 200, resp.text
+        ids = {item["id"] for item in resp.json()["items"]}
+        assert {item["id"] for item in created} <= ids
+    finally:
+        for item in created:
+            await client.delete(f"/api/v1/nonpen-plans/{item['id']}", headers=auth)
+
