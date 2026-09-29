@@ -456,6 +456,15 @@ export interface TodoSummary {
   groups: TodoGroup[]
 }
 
+/** 单个待办分类的完整明细（`GET /todos/{category}`，工作台卡片内展开） */
+export interface TodoItemPage {
+  category: string
+  name: string
+  /** 该分类待办总数（用于「加载更多」进度与结束判定） */
+  total: number
+  items: Record<string, unknown>[]
+}
+
 /** 看板视图（P1-7，`/dashboard/views`） */
 export interface DashboardView {
   id: number

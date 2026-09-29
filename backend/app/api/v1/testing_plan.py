@@ -393,7 +393,8 @@ async def _notify_no_vuln_done(
             f"{user.realname or user.username} 确认该计划测试完成且未发现安全漏洞，"
             f"状态流转为「测试通过」{report_hint}"
         ),
-        link=f"/testing-plans?system={plan.id}",
+        # `plan` 参数才会被 TestingPlanList 解析为「打开该工单的流程抽屉」（原先的 `system` 无人消费，属失效深链）
+        link=f"/testing-plans?plan={plan.id}",
     )
 
 

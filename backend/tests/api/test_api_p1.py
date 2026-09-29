@@ -214,6 +214,30 @@ async def test_message_center_and_todos(client: AsyncClient, auth: dict):
     assert "my_vulns" in groups and groups["my_vulns"]["count"] >= 1
     assert any(item.get("id") == vul_id for item in groups["my_vulns"]["items"])
 
+    # 工单类待办深链必须直达该工单的流程抽屉（`?plan=<id>`），只给 `/testing-plans` 会退化为列表页
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth, json={"system_name": "P1待办深链工单"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    todos = (await client.get("/api/v1/todos", headers=submitter)).json()
+    unclaimed = next(g for g in todos["groups"] if g["category"] == "plan_unclaimed")
+    item = next(i for i in unclaimed["items"] if i["id"] == plan_id)
+    assert item["link"] == f"/testing-plans?plan={plan_id}"
+
+    # 单分类完整明细（工作台「查看全部」在卡片内展开，不跳转列表页）：分页取全量
+    resp = await client.get("/api/v1/todos/my_vulns", headers=submitter, params={"page": 1, "size": 1})
+    assert resp.status_code == 200, resp.text
+    detail = resp.json()
+    assert detail["category"] == "my_vulns" and detail["total"] == groups["my_vulns"]["count"]
+    assert len(detail["items"]) == 1
+    # 越界页返回空明细但 total 不变（前端据此停止「加载更多」）
+    resp = await client.get("/api/v1/todos/my_vulns", headers=submitter, params={"page": 99, "size": 20})
+    assert resp.status_code == 200
+    assert resp.json()["items"] == [] and resp.json()["total"] == detail["total"]
+    # 未知分类明确 404，不落回任何默认列表
+    assert (await client.get("/api/v1/todos/not_a_category", headers=submitter)).status_code == 404
+
 
 # ---------- P1-4 报告模板 ----------
 async def test_report_template_publish_validation_and_rollback(client: AsyncClient, auth: dict):

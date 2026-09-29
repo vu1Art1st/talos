@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
+import { reactive } from 'vue'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
 
@@ -9,11 +10,19 @@ vi.mock('../../api/client', () => clientMockFactory())
 
 // mock 路由：组件内多处 router.push 跳漏洞/报告详情页；导入链会拉起 router/index.ts。
 // 抽屉状态写入 query（?plan=&vuln=）故需 useRoute；replace 要返回 Promise（组件内 .catch 兜底）。
+// query 为响应式对象：深链（?plan=<id> 变化）用例需要驱动抽屉自动打开。
+const routeState = reactive<{
+  path: string
+  fullPath: string
+  params: Record<string, unknown>
+  query: Record<string, unknown>
+}>({ path: '/testing-plans', fullPath: '/testing-plans', params: {}, query: {} })
+
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
-    useRoute: () => ({ path: '/testing-plans', fullPath: '/testing-plans', params: {}, query: {} }),
+    useRoute: () => routeState,
     useRouter: () => ({
       push: vi.fn().mockResolvedValue(undefined),
       replace: vi.fn().mockResolvedValue(undefined),
@@ -39,9 +48,13 @@ vi.mock('echarts', () => ({
 }))
 
 import TestingPlanList from '../TestingPlanList.vue'
+import PlanWorkflowDrawer from '../../components/PlanWorkflowDrawer.vue'
 
 describe('TestingPlanList 工单列表页', () => {
   beforeEach(() => {
+    routeState.query = {}
+    routeState.path = '/testing-plans'
+    routeState.fullPath = '/testing-plans'
     getMock.mockReset()
     getMock.mockImplementation(async (url: string) => {
       if (url === '/testing-plans') {
@@ -112,6 +125,48 @@ describe('TestingPlanList 工单列表页', () => {
     expect(wrapper.text()).toContain('初测发现漏洞')
     expect(wrapper.text()).toContain('未完成整改')
     expect(wrapper.text()).toContain('周期内发起复测')
+    wrapper.unmount()
+  })
+
+  it('深链 ?plan=<id> 直接打开该工单的流程抽屉（个人待办 / 站内信条目点击的落点）', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: '深链工单', status: 10, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '7' }
+    routeState.fullPath = '/testing-plans?plan=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    // 抽屉按工单 ID 拉取详情 = 已直达该工单（而非停在列表页）
+    expect(getMock.mock.calls.map((c) => c[0])).toContain('/testing-plans/7')
+    expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('抽屉打开后 URL 参数变化也能打开对应工单（组件复用、onMounted 不再触发）', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(false)
+
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/9') {
+        return { data: { id: 9, system_name: '复用页深链工单', status: 10, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '9' }
+    await flushPromises()
+
+    expect(getMock.mock.calls.map((c) => c[0])).toContain('/testing-plans/9')
+    expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(true)
     wrapper.unmount()
   })
 })

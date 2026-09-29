@@ -25,6 +25,20 @@
 
 ---
 
+## [2.22.1] - 2026-09-28
+
+「个人待办」交互纠偏两处：卡片「查看全部」原先跳转到渗透测试工单等列表页，与「查看该分类全部待办」的语义不符；点单条**工单**条目原先只落到工单列表页、定位不到具体工单。本次为**向下兼容的问题修复**（新增只读明细接口，既有 `/todos` 聚合契约不变，深链参数为新增消费方），按项目版本规则定为 `PATCH`。
+
+### 修复
+
+- **个人待办「查看全部」改为卡片内展开**（`frontend/src/views/TodoWorkbench.vue`）：点击后在**本卡片**展开该分类的全部待办，超过 20 条按页「加载更多（已显示 N / 总数）」；再次点击「收起」回到最近 8 条预览。**不再触发任何跳转到渗透测试工单页等列表页的行为**；条目自身深链（如 `/vulns/{id}`）与「刷新」保持不变。
+- **新增 `GET /todos/{category}`**（`backend/app/api/v1/messages.py` / `app/schemas/message.py`）：单分类待办明细分页接口（`page` / `size`，`size` 上限 100），与 `/todos` 聚合共用同一查询构造器（`_todo_group`）保证口径一致；未知分类返回 404，越界页返回空明细但保留 `total`（供前端停止加载）。
+- 回归：`backend/tests/api/test_api_p1.py` 补单分类明细分页 / 越界页 / 未知分类断言；新增 `frontend/src/views/__tests__/TodoWorkbench.spec.ts` 锁定「展开与收起均不发生路由跳转」。
+- **待办工单条目直达工单抽屉**（`backend/app/api/v1/messages.py` / `frontend/src/views/TestingPlanList.vue`）：待认领 / 待复测条目的深链由 `/testing-plans`（仅列表页）改为 **`/testing-plans?plan=<id>`**；工单列表页新增 `route.query.plan` 监听，组件复用（`onMounted` 不再触发）时也按参数打开对应工单的流程抽屉。同时修正工单「测试通过」站内信的失效深链（`/testing-plans?system=<id>` 无人消费 → `?plan=<id>`）。
+- 回归：`TestingPlanList.spec.ts` 补「首屏深链 `?plan=`」与「已挂载后参数变化」两条抽屉自动打开用例；`TodoWorkbench.spec.ts` 补「点工单条目按深链直达」。
+
+---
+
 ## [2.22.0] - 2026-09-27
 
 ROADMAP「批次 C：数据边界与恢复能力」——P2-1（角色数据范围）/ P2-4（性能与检索底座）/ P2-5（可观测与恢复演练）落地。本版本为**向下兼容的功能新增**（数据范围作为新能力平滑接入，`*` 角色恒为 `all`、既有未配置 scope 的角色由管理员显式设置，开放 API 契约不变），按项目版本规则定为 `MINOR`。

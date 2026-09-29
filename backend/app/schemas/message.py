@@ -38,3 +38,12 @@ class TodoItemOut(BaseModel):
 class TodoSummaryOut(BaseModel):
     total: int
     groups: list[TodoItemOut] = Field(default_factory=list)
+
+
+class TodoItemPageOut(BaseModel):
+    """单个待办分类的完整明细（`GET /todos/{category}`，工作台展开态用）。"""
+
+    category: str
+    name: str
+    total: int
+    items: list[dict] = Field(default_factory=list)

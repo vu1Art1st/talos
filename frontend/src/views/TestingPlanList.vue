@@ -819,6 +819,16 @@ onMounted(() => {
   }
 })
 
+// 路由参数变化（个人待办 / 站内信深链 ?plan=<id>）：组件复用、onMounted 不再触发时也要打开抽屉，
+// 保证「点工单条目 → 直达该工单的流程抽屉」而不是停留在列表页。
+watch(() => route.query.plan, (q) => {
+  const id = Number(q)
+  if (!Number.isInteger(id) || id <= 0) return
+  if (workflowVisible.value && workflowPlanId.value === id) return
+  workflowPlanId.value = id
+  workflowVisible.value = true
+})
+
 // 抽屉内发生认领/漏洞/报告/复测等变更后刷新列表与统计
 async function onWorkflowChanged() {
   await Promise.all([load(), loadStats()])
