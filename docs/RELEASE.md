@@ -25,6 +25,20 @@
 
 ---
 
+## [2.23.1] - 2026-09-30
+
+前端构建与依赖现代化（向下兼容的构建/依赖调整，无后端 schema 变更、无对外 API 破坏），按项目版本规则定为 `PATCH`。
+
+### 变更
+
+- **Tailwind v3 → v4 迁移**：移除 `postcss.config.js` 与 `tailwind.config.js`，改用 `@tailwindcss/vite` 插件（`vite.config.ts`）；`style.css` 以 `@import "tailwindcss/..."` + `@custom-variant dark` + `@theme` 取代原 config 的 extend 主题；灰阶 / surface 改为引用运行时 `--tl-gray-*` 令牌，明暗切换由变量翻转、视图无需再写 `dark:` 变体。
+- **构建与运行环境升级**：Vite / Vitest 升级（Dockerfile 注释对应 Vite 8 / Vitest 5 / jsdom 30）；`package.json` 新增 `engines.node` 约束（`^22.22.2 || >=24.15.0`），Dockerfile 基础镜像 `node:22.22.2-alpine`。
+- **富文本编辑器依赖整合**：tiptap `v2 → v3`，移除分散的 `@tiptap/extension-*` 导入、`RichEditor.vue` 适配新版 API；新增 `RichEditor.spec.ts` 单测。
+- **周边依赖升级**：vue 3.5 / vue-router 5 / pinia 4 / echarts 6 / element-plus 2.14 / markdown-it 15 / axios / dayjs / dompurify 等。
+- **文档同步**：`AGENTS.md`（暗黑模式灰阶令牌映射、构建 / Node 版本说明）、`README.md`、`docs/LOCAL_DEV_SETUP.md` 校订。
+
+---
+
 ## [2.23.0] - 2026-09-30
 
 ### 变更

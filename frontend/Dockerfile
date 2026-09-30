@@ -1,4 +1,5 @@
-FROM node:22-alpine AS build
+# Node 版本需满足 frontend/package.json 的 engines（Vite 8 / Vitest 5 / jsdom 30）
+FROM node:22.22.2-alpine AS build
 
 # 使用国内镜像源加速依赖下载；构建时可通过 --build-arg NPM_REGISTRY=xxx 覆盖
 # 依赖安装统一走 pnpm（与本地开发一致），--frozen-lockfile 保证与 pnpm-lock.yaml 严格对齐

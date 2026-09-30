@@ -56,6 +56,12 @@ psql "postgresql://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform" -c "SELECT
 redis-cli -p 6379 ping   # 期望 PONG
 ```
 
+### 4. 前端工具链前置
+
+- Node.js **^22.22.2 或 >=24.15.0**：Vite 8 / Vitest 5 / jsdom 30 的下限，`frontend/package.json`
+  的 `engines` 已声明；低于该版本时 `pnpm install` / 单测会给出不支持告警。
+- pnpm **11.6.0**：由 `frontend/package.json` 的 `packageManager` 固定，容器构建经 corepack 使用同一版本。
+
 ## 二、日常使用
 
 ```bash

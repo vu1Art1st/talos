@@ -45,11 +45,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
-import Link from '@tiptap/extension-link'
-import Table from '@tiptap/extension-table'
-import TableRow from '@tiptap/extension-table-row'
-import TableCell from '@tiptap/extension-table-cell'
-import TableHeader from '@tiptap/extension-table-header'
+import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
 import client from '../api/client'
 
 const props = defineProps<{ modelValue: string; placeholder?: string }>()
@@ -66,10 +62,15 @@ const fileInput = ref<HTMLInputElement>()
 
 const editor = new Editor({
   extensions: [
-    // 禁用标题：目录层级由导出模板统一管理，正文不允许出现 h1-h6
-    StarterKit.configure({ heading: false }),
+    // 禁用标题：目录层级由导出模板统一管理，正文不允许出现 h1-h6。
+    // StarterKit 3 默认新增 link / underline / trailingNode，这里显式对齐 2.x 行为。
+    StarterKit.configure({
+      heading: false,
+      link: { openOnClick: false },
+      underline: false,
+      trailingNode: false,
+    }),
     Image.configure({ inline: false }),
-    Link.configure({ openOnClick: false }),
     Table.configure({ resizable: true }),
     TableRow,
     TableHeader,
@@ -99,7 +100,7 @@ const editor = new Editor({
 watch(
   () => props.modelValue,
   (val) => {
-    if (val !== editor.getHTML()) editor.commands.setContent(val || '', false)
+    if (val !== editor.getHTML()) editor.commands.setContent(val || '', { emitUpdate: false })
   },
 )
 

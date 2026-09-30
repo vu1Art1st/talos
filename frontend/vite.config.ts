@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 
 // 端口支持环境变量覆盖（dev.sh / dev.ps1 会注入），默认前端 27014、后端 27015
 const frontendPort = Number(process.env.VP_FRONTEND_PORT || 27014)
@@ -10,9 +11,14 @@ const backendPort = Number(process.env.VP_BACKEND_PORT || 27015)
 const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf-8'))
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [vue(), tailwindcss()],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+  },
+  build: {
+    // 避免构建产物目录 /assets/ 与 SPA 路由 /assets 冲突：
+    // nginx 的 try_files 会把 /assets 301 到 /assets/，随后因目录无 index.html 返回 403。
+    assetsDir: 'static',
   },
   // 单测（vitest）：纯逻辑测试用 node 环境即可，无需 jsdom
   test: {

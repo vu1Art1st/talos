@@ -9,7 +9,7 @@ Talos 漏洞管理平台：漏洞全生命周期管理（前身洞察 2.0 / insi
 | 层 | 选型 |
 |---|---|
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic · arq + Redis |
-| 前端 | Vue 3 (`<script setup>` + TS) · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
+| 前端 | Vue 3 (`<script setup>` + TS) · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 3 |
 | 数据库 | PostgreSQL 16（开发 / 测试 / 生产统一；本地由 DBngin 原生托管，见 `docs/LOCAL_DEV_SETUP.md`） |
 | 部署 | Docker Compose（api / worker / frontend / postgres / redis） |
 
@@ -136,7 +136,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 视图/组件冒烟测试统一复用 `src/__tests__/helpers/clientMock.ts`（`clientMockFactory()` + `getMock`），禁止在各 spec 内重复书写 axios client 的 `vi.mock` 样板。
 - **编辑型页面的未保存内容防护（P0-5，新代码强制）**：保存状态与离页判定统一走 `src/composables/useAutosave.ts`，状态机固定为 `saved / dirty / saving / failed / conflict`，离页判定唯一入口是 `confirmLeave()`（无修改直接放行 → 有修改先补存一次 → 仍失败再弹「继续保存 / 放弃修改 / 留在当前页」）。**路由离开、退出登录 / 切换账号（`utils/unsavedGuard.ts::confirmLeaveAll`，`auth.logout` 前置校验）、浏览器关闭标签页（`beforeunload`）三条路径必须复用同一判定**，禁止各自实现提示逻辑。保存失败不得跳全屏错误页（自行给请求加 `meta: { skipErrorPage: true }`），须保留本地输入并在界面给出状态与重试入口；409 / 版本冲突必须由用户显式选择，禁止静默覆盖他人内容。
 - 状态标签统一 `tl-tag` 类 + `softStyle()` 柔和样式；表格行内允许「色点 + 文字」dot-tag 变体（等级/状态语义），色值仍走 colors.ts 字典注册表，禁止视图内硬编码。
-- Tailwind 灰阶类（`text-gray-*` / `bg-gray-*` / `border-gray-*` / `bg-white`）已映射到 `--tl-gray-*` 令牌自动适配暗黑模式，可直接使用；新增样式优先用令牌，保证明暗两态可用。
+- **Tailwind 4 主题以 CSS 为准**：品牌/强调色、语义字号、圆角、阴影与灰阶映射统一定义在 `src/style.css` 的 `@theme` 中，`tailwind.config.js` / `postcss.config.js` 已移除（经 `@tailwindcss/vite` 接入；不引入 preflight 以避免与 Element Plus 冲突）。灰阶类（`text-gray-*` / `bg-gray-*` / `border-gray-*` / `bg-white`）已映射到 `--tl-gray-*` 令牌自动适配暗黑模式，可直接使用；新增样式优先用令牌，保证明暗两态可用。
 - 日期区间选择器（`el-date-picker[type=daterange]`）的根节点即 `.el-input__wrapper`，Element Plus 给该类设了 `flex-grow: 1`；放进 flex 行（`.tl-filterbar` 或自写 `flex` 容器）会被拉伸撑满、`!w-*` 失效。固定宽度必须同时写 `!grow-0`（`flex-grow: 0 !important`）。
 - **来源感知返回（返回导航专项，2026-09-22 落地；原专项设计稿已删除，结论归并于此，git 历史即归档）**：返回/取消/保存后的跳转一律走 `src/composables/useNavBack.ts`（`resolveBackPath` / `goBack` / `withRedirect`），三层兜底 = 显式 `redirect` 查询参数 > 站内历史（`history.state.back`）> 安全默认页，站点内路径归一化复用 `utils/errorPage.ts::normalizeRedirect`。**禁止**裸 `router.back()`（直接粘贴 URL 进入时会退出站点）与硬编码 `router.push('/xxx')` 作为返回目标；跨页跳转需用 `withRedirect(path, from)` 透传来源。
 - **页面状态外化到 URL**：抽屉等「离开即销毁」的上下文用查询参数承载（如 `?plan=<工单ID>&vuln=<漏洞ID>`，`replace` 写入不污染历史栈），使回退/刷新/分享后可恢复；同页 query 变化不得重置滚动位置。
@@ -177,10 +177,10 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 **验收口径（改动涉及运行时必做）**：
 
 - **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **293 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
-- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **24 files / 138 passed**）+ `pnpm run build`。
+- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **38 files / 221 passed**）+ `pnpm run build`。
 - **端到端（E2E）**（涉及前端交互或前后端联调时）：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`（或 `bash scripts/e2e.sh`）—— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + api 27016 + 前端 27017 + 独立 storage），跑 3 条黄金链路（登录 / 新建漏洞含影响URL 批量粘贴 / 报告编辑器渲染），每条都断言**控制台 0 error**。只有 3 条是**刻意**的：广度仍由分级浏览器冒烟负责，E2E 的维护成本与抖动风险不允许铺页面（取舍见 `playwright.config.ts`）。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
-- **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器数据为 `admin1/123456`，用 `--username/--password` 覆盖。
+- **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器账号以实际种子库为准（本机容器实测 `admin1/admin123`），用 `--username/--password` 覆盖。
 - **浏览器冒烟**（前端改动）：Chrome DevTools 逐页检查**控制台 0 错误/警告** + 关键 DOM（表格行、抽屉步骤条等）渲染；**默认不执行写操作**，避免污染共享数据。**按影响面分级执行**（2026-09-22 起，避免每次改动都跑满 12 页）：
   - **发布前（广度）**：12 组页面 —— `/dashboard`、`/testing-plans`（含流程抽屉 6 步）、`/nonpen-plans`、`/vulns`、`/reports`、`/knowledge`、`/assets` + `/assets/groups`、`/users`、`/roles`、`/tokens`、`/notify-channels`、`/audit`（建议同时覆盖专项三域的 `/remote-testings`、`/spring-actions`）。判据：控制台 0 错误/警告 + 表格/抽屉有真实数据渲染 + 该页 XHR 全 200；
   - **日常改动（深度）**：只跑**受影响页面**（改报告编辑器 → `/reports` + `/reports/:id`；改工单 → `/testing-plans` + `/nonpen-plans`；改导入 → `/reports/imports`），其余留待发布前；
