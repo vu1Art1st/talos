@@ -67,7 +67,7 @@
     </div>
   </el-card>
 
-  <PdfPreviewDialog ref="previewRef" />
+  <FilePreviewDialog ref="previewRef" />
   <ImportBatchConfirmDialog v-model="batchDialogVisible" :batch-ids="selectedIds"
                             @success="onBatchConfirmSuccess" />
 </template>
@@ -79,7 +79,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import client from '../api/client'
 import type { UploadFile, UploadUserFile } from 'element-plus'
 import ImportBatchConfirmDialog, { type BatchConfirmResult } from '../components/ImportBatchConfirmDialog.vue'
-import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import FilePreviewDialog from '../components/FilePreviewDialog.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useListPage } from '../composables/useListPage'
 import { saveBlob } from '../utils/download'
@@ -88,7 +88,7 @@ import { fmtDateTime } from '../utils/format'
 import type { ApiErrorShape, ImportBatch } from '../types'
 
 const router = useRouter()
-const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
+const previewRef = ref<InstanceType<typeof FilePreviewDialog>>()
 const uploadRef = ref()
 const fileList = ref<UploadUserFile[]>([])
 const uploading = ref(false)

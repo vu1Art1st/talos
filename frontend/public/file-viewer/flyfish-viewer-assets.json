@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "rendererAssetManifests": [
+    {
+      "rendererId": "archive",
+      "assets": [
+        {
+          "id": "libarchive-worker",
+          "rendererId": "archive",
+          "kind": "worker",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/libarchive/worker-bundle.js",
+          "optionPath": "archive.workerUrl",
+          "description": "libarchive.js module worker used for broad archive format parsing."
+        },
+        {
+          "id": "libarchive-wasm",
+          "rendererId": "archive",
+          "kind": "wasm",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/libarchive/libarchive.wasm",
+          "optionPath": "archive.wasmUrl",
+          "description": "libarchive.js WebAssembly module expected next to the public worker."
+        }
+      ]
+    },
+    {
+      "rendererId": "office-presentation",
+      "assets": [
+        {
+          "id": "pptx-worker",
+          "rendererId": "office-presentation",
+          "kind": "worker",
+          "target": "public",
+          "required": false,
+          "defaultPath": "vendor/pptx/pptx.worker.js",
+          "optionPath": "presentation.workerUrl",
+          "description": "Optional @file-viewer/pptx worker for stable PPTX parsing in IIFE, CDN, and offline deployments."
+        }
+      ]
+    },
+    {
+      "rendererId": "office-word-openxml",
+      "assets": [
+        {
+          "id": "docx-worker",
+          "rendererId": "office-word-openxml",
+          "kind": "worker",
+          "target": "public",
+          "required": false,
+          "defaultPath": "vendor/docx/docx.worker.js",
+          "optionPath": "docx.workerUrl",
+          "description": "Optional @file-viewer/docx worker for off-main-thread DOCX ZIP/XML parsing."
+        },
+        {
+          "id": "docx-worker-jszip",
+          "rendererId": "office-word-openxml",
+          "kind": "script",
+          "target": "public",
+          "required": false,
+          "defaultPath": "vendor/docx/jszip.min.js",
+          "optionPath": "docx.workerJsZipUrl",
+          "description": "JSZip runtime loaded by the @file-viewer/docx worker for fully offline DOCX parsing."
+        }
+      ]
+    },
+    {
+      "rendererId": "pdf",
+      "assets": [
+        {
+          "id": "pdf-worker",
+          "rendererId": "pdf",
+          "kind": "worker",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/pdf/pdf.worker.mjs",
+          "optionPath": "pdf.workerUrl",
+          "description": "PDF.js module worker copied into viewer assets for offline PDF rendering."
+        },
+        {
+          "id": "pdf-cmaps",
+          "rendererId": "pdf",
+          "kind": "directory",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/pdf/cmaps/",
+          "optionPath": "pdf.cMapUrl",
+          "description": "PDF.js packed CMaps used for CJK and embedded text decoding."
+        },
+        {
+          "id": "pdf-wasm",
+          "rendererId": "pdf",
+          "kind": "wasm-directory",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/pdf/wasm/",
+          "optionPath": "pdf.wasmUrl",
+          "description": "PDF.js WebAssembly helpers for image decoding and fully self-hosted PDF rendering."
+        },
+        {
+          "id": "pdf-standard-fonts",
+          "rendererId": "pdf",
+          "kind": "directory",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/pdf/standard_fonts/",
+          "optionPath": "pdf.standardFontDataUrl",
+          "description": "PDF.js standard font data used when PDF files reference base fonts."
+        },
+        {
+          "id": "pdf-cjk-font-fallback",
+          "rendererId": "pdf",
+          "kind": "directory",
+          "target": "public",
+          "required": true,
+          "defaultPath": "vendor/pdf/fonts/",
+          "optionPath": "pdf.cjkFontFallbackPath",
+          "description": "Self-hosted Noto Sans SC variable font shards used for missing unembedded CJK fonts."
+        }
+      ]
+    },
+    {
+      "rendererId": "spreadsheet-openxml",
+      "assets": [
+        {
+          "id": "spreadsheet-worker",
+          "rendererId": "spreadsheet-openxml",
+          "kind": "worker",
+          "target": "public",
+          "required": false,
+          "defaultPath": "vendor/xlsx/sheet.worker.js",
+          "optionPath": "spreadsheet.workerUrl",
+          "description": "Optional Spreadsheet worker for off-main-thread styled-exceljs workbook parsing."
+        }
+      ]
+    }
+  ]
+}

@@ -19,7 +19,7 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 
 - **Word 报告导入**：按固定模板上传初测/复测 Word 报告，后台自动解析（含图片提取）、预览确认后批量入库；导入列表支持批量关联工单与确认导出
 - **在线报告编辑**：TipTap 富文本编辑器，支持表格/图片/代码块，3 秒防抖自动保存 + 乐观锁防冲突（409 不覆盖他人内容）+ 离页保护（路由离开 / 退出登录 / 关闭标签页均先补存并提示），可一键插入已有漏洞章节
-- **一键导出**：Word（docx）与 PDF（Gotenberg 引擎）版式一致；目录以 TOC 域承载，打开文档自动刷新；导出走任务队列，支持重复导出检测与导出历史
+- **一键导出**：生成 Word（docx）报告并保留导出历史；预览由 File Viewer 在浏览器内完成，可按需打印或另存为 PDF
 - **报告测试目标自动解析**：被测账号、测试周期、参测人员、被测系统 URL 等字段按「工单 → 资产」链路自动带出
 
 ### 专项工单
@@ -42,8 +42,8 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
 | 数据库/队列 | PostgreSQL 16（开发 / 测试 / 生产统一，本地由 DBngin 托管）· Redis · arq 异步任务队列 |
 | 前端 | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
-| 文档处理 | python-docx（解析）· htmldocx + pygments（导出）· Gotenberg（PDF 转换） |
-| 部署 | Docker Compose（api / worker / frontend / postgres / redis / gotenberg） |
+| 文档处理 | python-docx（解析）· htmldocx + pygments（Word 导出）· File Viewer（浏览器预览与打印） |
+| 部署 | Docker Compose（api / worker / frontend / postgres / redis） |
 
 ## 快速部署（Docker Compose）
 
@@ -140,16 +140,11 @@ cd frontend
 pnpm test                               # 前端 vitest
 ```
 
-## PDF 转换服务（Gotenberg）
+## 文档预览与 PDF
 
-`VP_GOTENBERG_URL` 指定 DOCX→PDF 转换服务地址，供「报告 PDF 导出」与「导入原件在线预览」使用（后端默认 `http://localhost:3000`，所有配置项统一 `VP_` 前缀，可写入 `.env` 或以环境变量注入）。
+报告导出统一生成本地 DOCX。在线预览由 File Viewer 在浏览器内解析，不经过服务端转换；需要 PDF 时，在预览弹窗点击“打印 / 另存为 PDF”，由浏览器打印对话框完成。
 
-| 环境 | 配置方式 |
-| --- | --- |
-| Docker Compose | 已内置 `gotenberg/gotenberg:8` 服务并注入地址，开箱即用 |
-| 本地开发 | 可选：`docker run --rm -p 3000:3000 gotenberg/gotenberg:8`（默认值即指向此地址） |
-
-未部署 Gotenberg 时仅 PDF 预览/导出返回 502 并提示「转换服务不可用」，其余功能不受影响。生产建议将其置于内网、不对外暴露 3000 端口。
+目标浏览器为 Chrome / Edge。建议选择 A4、关闭浏览器页眉页脚；浏览器打印不会生成服务端导出记录，也无法保证自动更新 Word 目录域页码。
 
 ## 目录结构
 

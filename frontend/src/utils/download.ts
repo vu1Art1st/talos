@@ -18,7 +18,7 @@ export function saveReportBlob(
   fallbackTitle = 'report',
 ): void {
   saveBlob(data, `${job.title || fallbackTitle}.${job.fmt}`)
-  if (job.fmt === 'docx' && !job.toc_auto_updated) {
+  if (!job.toc_auto_updated) {
     showTocNotice()
   }
 }

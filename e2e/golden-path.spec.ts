@@ -100,6 +100,10 @@ test('新建漏洞：影响URL 批量粘贴自动切分并提交成功', async (
 
 test('报告中心：打开报告编辑器并完成渲染', async ({ page }) => {
   await login(page)
+
+  const workerAsset = await page.request.get('/file-viewer/vendor/docx/docx.worker.js')
+  expect(workerAsset.ok()).toBeTruthy()
+
   await page.goto('/reports')
 
   const firstRow = page.locator('tbody tr').first()
@@ -109,4 +113,5 @@ test('报告中心：打开报告编辑器并完成渲染', async ({ page }) => 
   await expect(page).toHaveURL(/\/reports\/\d+$/)
   // 编辑器骨架：富文本区与章节导航均渲染（不深入断言正文，避免耦合具体报告内容）
   await expect(page.locator('.ProseMirror').first()).toBeVisible()
+  await expect(page.getByRole('button', { name: '导出 PDF' })).toHaveCount(0)
 })

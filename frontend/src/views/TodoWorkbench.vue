@@ -2,7 +2,7 @@
   <div class="flex flex-col gap-4" v-loading="loading">
     <div class="flex items-center gap-3">
       <span class="text-sm font-semibold">个人待办</span>
-      <span class="text-xs text-gray-400">按你的权限聚合：待认领 / 我提交的漏洞 / 待复测 / 待确认导入 / SLA 临期与逾期</span>
+      <span class="text-xs text-gray-400">按权限聚合原有待办，并新增已认领的进行中 / 已完成工单</span>
       <div class="flex-1" />
       <el-button class="btn-min" @click="load">刷新</el-button>
     </div>
@@ -69,12 +69,19 @@ const CATEGORY_COLORS: Record<string, string> = {
   import_pending: STAT_CARD_COLORS.blue,
   sla_due: STAT_CARD_COLORS.orange,
   sla_overdue: STAT_CARD_COLORS.red,
+  plan_in_progress: STAT_CARD_COLORS.blue,
+  plan_completed: STAT_CARD_COLORS.green,
 }
 
 const categoryColor = (c: string) => CATEGORY_COLORS[c] ?? STAT_CARD_COLORS.gray
 
 function itemTitle(category: string, it: Record<string, unknown>): string {
-  if (category === 'plan_unclaimed' || category === 'retest') {
+  if (
+    category === 'plan_unclaimed'
+    || category === 'retest'
+    || category === 'plan_in_progress'
+    || category === 'plan_completed'
+  ) {
     return `${it.system_name ?? ''}（${it.ticket_id ?? '-'}）`
   }
   if (category === 'import_pending') return String(it.filename ?? '')
@@ -87,6 +94,9 @@ function itemExtra(category: string, it: Record<string, unknown>): string {
   }
   if (category === 'plan_unclaimed') return String(it.department ?? '')
   if (category === 'import_pending') return `${it.total ?? 0} 条记录`
+  if (category === 'plan_in_progress' || category === 'plan_completed') {
+    return String(it.status_name ?? it.department ?? '')
+  }
   return ''
 }
 

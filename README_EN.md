@@ -19,7 +19,7 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 
 - **Word report import**: upload initial/retest Word reports against a fixed template; the backend parses them automatically (images included), and records are batch-created after preview confirmation. The import list supports batch linking to tickets and confirmed exports
 - **Online report editing**: TipTap rich-text editor with tables/images/code blocks, autosave with optimistic locking, and one-click insertion of existing vulnerability sections
-- **One-click export**: Word (docx) and PDF (via Gotenberg) share identical layouts; the table of contents is a TOC field that refreshes on open; exports run through a job queue with duplicate-export detection and export history
+- **One-click export**: Word (docx) reports retain export history; File Viewer previews documents in the browser and can print or save a temporary PDF on demand
 - **Automatic report metadata**: tested accounts, test period, participants, and tested-system URLs are resolved automatically via the ticket → asset chain
 
 ### Special-Purpose Tickets
@@ -42,8 +42,8 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 | Backend | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
 | Database / Queue | PostgreSQL 16 (unified across dev / test / production; hosted locally by DBngin) · Redis · arq async task queue |
 | Frontend | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
-| Document Processing | python-docx (parsing) · htmldocx + pygments (export) · Gotenberg (PDF conversion) |
-| Deployment | Docker Compose (api / worker / frontend / postgres / redis / gotenberg) |
+| Document Processing | python-docx (parsing) · htmldocx + pygments (Word export) · File Viewer (browser preview and print) |
+| Deployment | Docker Compose (api / worker / frontend / postgres / redis) |
 
 ## Quick Start (Docker Compose)
 
@@ -143,16 +143,11 @@ cd frontend
 pnpm test                               # frontend vitest
 ```
 
-## PDF Conversion Service (Gotenberg)
+## Document Preview and PDF
 
-`VP_GOTENBERG_URL` points to the DOCX→PDF conversion service, used by "report PDF export" and "imported-file online preview" (backend default `http://localhost:3000`; all settings use the `VP_` prefix and can go into `.env` or environment variables).
+Report export produces a local DOCX file. File Viewer renders DOCX directly in the browser without server-side conversion. To create a PDF, open the preview and choose "Print / Save as PDF"; the browser print dialog produces the file.
 
-| Environment | Configuration |
-| --- | --- |
-| Docker Compose | A `gotenberg/gotenberg:8` service is included and the URL is injected — works out of the box |
-| Local development | Optional: `docker run --rm -p 3000:3000 gotenberg/gotenberg:8` (the default value already points here) |
-
-Without Gotenberg, only PDF preview/export returns 502 with a "conversion service unavailable" notice; all other features are unaffected. In production, keep Gotenberg on the internal network and do not expose port 3000.
+Chrome and Edge are the target browsers. Select A4 and disable browser headers and footers. Browser printing does not create a server export record and cannot guarantee updating Word TOC page numbers.
 
 ## Project Layout
 

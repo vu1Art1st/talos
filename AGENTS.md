@@ -11,7 +11,7 @@ Talos 漏洞管理平台：漏洞全生命周期管理（前身洞察 2.0 / insi
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic · arq + Redis |
 | 前端 | Vue 3 (`<script setup>` + TS) · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
 | 数据库 | PostgreSQL 16（开发 / 测试 / 生产统一；本地由 DBngin 原生托管，见 `docs/LOCAL_DEV_SETUP.md`） |
-| 部署 | Docker Compose（api / worker / frontend / postgres / redis / gotenberg） |
+| 部署 | Docker Compose（api / worker / frontend / postgres / redis） |
 
 ## 常用命令
 

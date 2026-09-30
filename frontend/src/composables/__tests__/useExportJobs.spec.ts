@@ -69,13 +69,13 @@ describe('useExportJobs', () => {
   it('submitExport 取消时不提交任务；确认后提交并提示', async () => {
     postMock.mockResolvedValueOnce({ data: { duplicate: true } })
     confirmMock.mockRejectedValueOnce(new Error('cancel'))
-    expect(await useExportJobs().submitExport(9, 'pdf', '标题')).toBe(false)
+    expect(await useExportJobs().submitExport(9, 'docx', '标题')).toBe(false)
     expect(postMock).toHaveBeenCalledTimes(1) // 仅 export-check，未提交导出
 
     postMock.mockResolvedValueOnce({ data: { duplicate: false } })
     postMock.mockResolvedValueOnce({ data: {} })
-    expect(await useExportJobs().submitExport(9, 'pdf', '标题')).toBe(true)
-    expect(postMock).toHaveBeenLastCalledWith('/reports/9/export', { fmt: 'pdf' })
+    expect(await useExportJobs().submitExport(9, 'docx', '标题')).toBe(true)
+    expect(postMock).toHaveBeenLastCalledWith('/reports/9/export', { fmt: 'docx' })
     expect(ElMessage.success).toHaveBeenCalled()
   })
 

@@ -1,3 +1,5 @@
+// file-viewer:generated-integration
+import "../file-viewer.generated.mjs";
 import { createApp, type Component } from 'vue'
 import { createPinia } from 'pinia'
 import ElementPlus from 'element-plus'

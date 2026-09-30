@@ -3,14 +3,13 @@
 依赖分级（口径见 ROADMAP P0-3）：
 - **必需**：PostgreSQL（业务唯一事实源）；队列启用时 Redis 与 arq worker 也是必需依赖
   （`DISABLE_QUEUE=1` 的单机/测试形态下二者不参与判定）。
-- **可选**：Gotenberg（PDF 转换）。不可用只降级为「PDF 导出不可用」，不应让整个实例 unready。
+- 当前所有登记依赖均参与 ready 判定。
 
 返回结构刻意保持「无敏感信息」：只给依赖名、ok 布尔与分类后的原因文案，
 不含 DSN、密码、内网地址或完整异常堆栈（堆栈留在服务端日志）。
 """
 import logging
 
-import httpx
 from fastapi import FastAPI
 from sqlalchemy import text
 
@@ -21,8 +20,6 @@ logger = logging.getLogger(__name__)
 DB = "database"
 REDIS = "redis"
 WORKER = "worker"
-GOTENBERG = "gotenberg"
-
 # arq worker 心跳键（与 workers/main.WorkerSettings.health_check_key 一致）
 WORKER_HEALTH_KEY = "arq:health-check"
 
@@ -82,21 +79,9 @@ async def _check_queue(app: FastAPI) -> dict:
     }
 
 
-async def _check_gotenberg() -> dict:
-    """Gotenberg 为可选能力：失败只标注状态，不影响整体 ready。"""
-    try:
-        async with httpx.AsyncClient(timeout=settings.HEALTH_PROBE_TIMEOUT) as client:
-            resp = await client.get(f"{settings.GOTENBERG_URL}/health")
-        return {"ok": resp.status_code < 500, "required": False}
-    except Exception as exc:  # noqa: BLE001
-        logger.info("健康检查：Gotenberg 不可用（可选依赖）: %s", exc)
-        return {"ok": False, "required": False, "reason": _reason(exc)}
-
-
 async def probe_dependencies(app: FastAPI) -> tuple[dict, bool]:
     """返回 (逐项依赖状态, 是否就绪)。就绪 = 所有必需依赖均 ok。"""
     checks = {DB: await _check_db()}
     checks.update(await _check_queue(app))
-    checks[GOTENBERG] = await _check_gotenberg()
     ready = all(c["ok"] for c in checks.values() if c["required"])
     return checks, ready

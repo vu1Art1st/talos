@@ -180,9 +180,6 @@
           <el-button class="w-full" @click="doExport('docx')">
             <el-icon class="mr-1"><Document /></el-icon>导出 Word
           </el-button>
-          <el-button class="w-full !ml-0" @click="doExport('pdf')">
-            <el-icon class="mr-1"><Printer /></el-icon>导出 PDF
-          </el-button>
         </div>
       </el-card>
 
@@ -202,7 +199,7 @@
             <div class="flex-1" />
             <!-- has_file=false 为导入报告自动生成的导出记录（无实际文件），仅展示状态与时间，不提供预览/下载 -->
             <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link
-                       @click="previewRef?.open(`/reports/exports/${job.id}/preview`, job.title || report.title)">预览</el-button>
+                       @click="previewRef?.open(`/reports/exports/${job.id}/preview`, `${job.title || report.title}.docx`)">预览</el-button>
             <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link class="!ml-0" @click="download(job)">下载</el-button>
             <el-popconfirm v-if="job.status === 'done' || job.status === 'failed'"
                            title="确认删除该导出记录及报告文件？" @confirm="removeJob(job)">
@@ -219,7 +216,7 @@
   <!-- 首屏加载占位：避免数据未到时的空白闪现 -->
   <div v-else v-loading="true" class="h-64" element-loading-text="加载中..." />
 
-  <PdfPreviewDialog ref="previewRef" />
+  <FilePreviewDialog ref="previewRef" />
 
   <el-dialog
              :close-on-click-modal="false" v-model="vulnFormVisible" title="录入漏洞" width="800px" top="6vh">
@@ -234,9 +231,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowLeft, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
-import type { ExportJob, ReportDetail, ReportSection, VulnState } from '../types'
+import type { ExportFormat, ExportJob, ReportDetail, ReportSection, VulnState } from '../types'
 import RichEditor from '../components/RichEditor.vue'
-import PdfPreviewDialog from '../components/PdfPreviewDialog.vue'
+import FilePreviewDialog from '../components/FilePreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
 import VulnRetestPanel from '../components/VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
@@ -273,7 +270,7 @@ const report = ref<ReportDetail | null>(null)
 const sections = computed<ReportSection[]>(() => report.value?.sections ?? [])
 const meta = ref<Record<string, Record<number, string>> | null>(null)
 const jobs = ref<ExportJob[]>([])
-const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
+const previewRef = ref<InstanceType<typeof FilePreviewDialog>>()
 // 报告编辑页「录入漏洞」：与测试流程录入漏洞完全一致（VulnFormPanel），预关联本报告测试计划
 const vulnFormVisible = ref(false)
 // 系统内启用用户选项与已选作者（author 字段以、拼接存储）
@@ -532,7 +529,7 @@ async function onVulnFormSaved() {
   ElMessage.success('漏洞已录入')
 }
 
-async function doExport(fmt: string) {
+async function doExport(fmt: ExportFormat = 'docx') {
   // 导出前先落库（导出走服务端报告内容）；保存失败时中止导出，避免导出旧内容
   if (hasUnsaved.value && !(await saveNow())) return
   if (!report.value) return

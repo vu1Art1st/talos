@@ -62,7 +62,7 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     assert saved["title"] == "季度渗透测试报告 V2"
     assert saved["target_ip"] == "10.0.0.8"
 
-    # 导出 docx（pdf 依赖 Gotenberg，容器环境验证）
+    # 导出 docx
     resp = await client.post(
         f"/api/v1/reports/{report_id}/export", headers=auth, json={"fmt": "docx"}
     )
@@ -72,9 +72,27 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     job = await _wait_job(client, auth, report_id, job_id)
     assert job["status"] == "done", job
 
-    resp = await client.get(f"/api/v1/reports/exports/{job_id}/download", headers=auth)
-    assert resp.status_code == 200
-    assert resp.content[:2] == b"PK"  # docx 是 zip 容器
+    download_resp = await client.get(f"/api/v1/reports/exports/{job_id}/download", headers=auth)
+    assert download_resp.status_code == 200
+    assert download_resp.content[:2] == b"PK"  # docx 是 zip 容器
+    preview_resp = await client.get(f"/api/v1/reports/exports/{job_id}/preview", headers=auth)
+    assert preview_resp.status_code == 200
+    assert preview_resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert preview_resp.content[:2] == b"PK"
+
+    resp = await client.post(
+        f"/api/v1/reports/{report_id}/export", headers=auth, json={"fmt": "pdf"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "仅支持导出 DOCX"
+    resp = await client.post(
+        "/api/v1/reports/batch-export", headers=auth,
+        json={"report_ids": [report_id], "fmt": "pdf"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "仅支持导出 DOCX"
 
     # 导出成功后导出版本 +1；测试周期在字段为空时自动预填（开始=最早提交日期，结束=当天）
     from app.core.timeutil import now as _tnow
@@ -89,7 +107,7 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
 
     from docx import Document
 
-    doc = Document(BytesIO(resp.content))
+    doc = Document(BytesIO(download_resp.content))
     texts = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
     assert "商城安全测试" in texts  # 封面第二行=系统名称(project_name)，报告标题作为文件名
     assert any(t == "风险问题详情" for t in texts)
@@ -368,7 +386,7 @@ async def test_report_export_duplicate_check(client: AsyncClient, auth: dict):
     job = await _wait_job(client, auth, report_id, resp.json()["id"])
     assert job["status"] == "done", job
 
-    # 内容未变 → 重复（附完整提示信息）；其他格式无历史 → 不重复
+    # 内容未变 → 重复（附完整提示信息）
     data = await check_export()
     assert data["duplicate"] is True
     assert data["fmt"] == "docx"
@@ -377,7 +395,11 @@ async def test_report_export_duplicate_check(client: AsyncClient, auth: dict):
     assert data["last_time"] is not None
     assert data["last_version"] == 2  # 初始 v1 + 导出成功后版本 +1
     assert data["last_file_name"].endswith(".docx")
-    assert (await check_export("pdf"))["duplicate"] is False
+    resp = await client.post(
+        f"/api/v1/reports/{report_id}/export-check", headers=auth, json={"fmt": "pdf"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "仅支持导出 DOCX"
 
     # 编辑报告（revision/update_time 变化）→ 不再重复
     detail = (await client.get(f"/api/v1/reports/{report_id}", headers=auth)).json()

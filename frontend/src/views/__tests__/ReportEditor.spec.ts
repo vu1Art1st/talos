@@ -86,7 +86,7 @@ describe('ReportEditor 视图', () => {
           RichEditor: { template: '<div class="rich-stub" />' },
           VulnFormPanel: { template: '<div class="vuln-stub" />' },
           VulnRetestPanel: { template: '<div class="retest-stub" />' },
-          PdfPreviewDialog: { template: '<div class="pdf-stub" />' },
+          FilePreviewDialog: { template: '<div class="file-preview-stub" />' },
         },
       },
     })

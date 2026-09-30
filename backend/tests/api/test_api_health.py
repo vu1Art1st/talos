@@ -1,7 +1,7 @@
 """API 集成测试：健康检查探针（ROADMAP P0-3）。
 
-口径：数据库为必需依赖；队列启用时 Redis 与 worker 心跳同为必需；Gotenberg 为可选能力
-（不可用不影响就绪）。探针响应不得包含敏感信息（DSN / 密码 / 内网地址）。
+口径：数据库为必需依赖；队列启用时 Redis 与 worker 心跳同为必需。
+探针响应不得包含敏感信息（DSN / 密码 / 内网地址）。
 """
 import pytest
 from httpx import AsyncClient
@@ -30,15 +30,7 @@ class _BrokenPool:
         raise ConnectionError("connection refused")
 
 
-@pytest.fixture
-def fast_gotenberg(monkeypatch):
-    """把 Gotenberg 指向必然拒绝连接的端口：探测快速失败，且不影响就绪判定。"""
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "GOTENBERG_URL", "http://127.0.0.1:1")
-
-
-async def test_health_probes_and_request_id(client: AsyncClient, fast_gotenberg):
+async def test_health_probes_and_request_id(client: AsyncClient):
     """兼容探针恒 200；live 不查依赖；ready 返回逐项状态且响应头带 request_id。"""
     resp = await client.get("/api/health")
     assert resp.status_code == 200 and resp.json() == {"status": "ok"}
@@ -55,8 +47,7 @@ async def test_health_probes_and_request_id(client: AsyncClient, fast_gotenberg)
     # 测试环境 VP_DISABLE_QUEUE=1 → Redis / worker 不参与就绪判定
     assert body["checks"]["redis"]["required"] is False
     assert body["checks"]["worker"]["required"] is False
-    # Gotenberg 为可选依赖：不可用也不得让实例 unready
-    assert body["checks"]["gotenberg"]["required"] is False
+    assert "gotenberg" not in body["checks"]
 
     # 传入的 request_id 被复用（便于前端 / 网关串联日志）
     resp = await client.get("/api/health/live", headers={"X-Request-Id": "trace-abc"})
@@ -70,7 +61,7 @@ async def test_health_probes_and_request_id(client: AsyncClient, fast_gotenberg)
     assert "postgresql://" not in metrics.text
 
 
-async def test_ready_fails_when_database_down(client: AsyncClient, monkeypatch, fast_gotenberg):
+async def test_ready_fails_when_database_down(client: AsyncClient, monkeypatch):
     """必需依赖（数据库）不可用 → 503，且不泄露内部错误细节。"""
     import app.db as db_module
 
@@ -90,7 +81,7 @@ async def test_ready_fails_when_database_down(client: AsyncClient, monkeypatch, 
     assert "10.1.2.3" not in resp.text
 
 
-async def test_ready_reflects_queue_dependencies(client: AsyncClient, monkeypatch, fast_gotenberg):
+async def test_ready_reflects_queue_dependencies(client: AsyncClient, monkeypatch):
     """故障注入：队列启用时 Redis 断连 / 无 worker 心跳 / 全部正常三种状态。"""
     from app.core.config import settings
     from app.main import app

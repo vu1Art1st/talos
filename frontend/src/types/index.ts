@@ -835,7 +835,7 @@ export interface ExportJob {
 }
 
 /** 报告导出格式（与后端导出接口一致） */
-export type ExportFormat = 'docx' | 'pdf'
+export type ExportFormat = 'docx'
 
 /**
  * 测试工单。

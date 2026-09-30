@@ -1,4 +1,3 @@
-import logging
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
@@ -10,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import VulStatus
+from app.constants import DOCX_MIME, VulStatus
 from app.core.deps import require_perm
 from app.core.timeutil import mandays_between, now
 from app.core.query import get_or_404, paginate, apply_sort
@@ -30,7 +29,6 @@ from app.schemas import (
 )
 from app.services import plan_service, template_service, vul_service
 from app.services.audit_service import audit
-from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.services.notify_service import notify
 from app.services.report_html import vuln_section_html as _vuln_section_html
 from app.services.report_retest import create_retest_report, snapshot_vul_edits
@@ -337,7 +335,9 @@ async def batch_export(
     """批量导出：复用最近一次成功导出的文件，否则创建导出任务并排队生成。
 
     返回 [{report_id, job_id, status, title}]，前端据此轮询批量状态后打包下载。"""
-    fmt = body.fmt if body.fmt in ("docx", "pdf") else "docx"
+    if body.fmt != "docx":
+        raise HTTPException(400, "仅支持导出 DOCX")
+    fmt = body.fmt
     jobs: list[dict] = []
     pending: list[ExportJob] = []
     for rid in body.report_ids:
@@ -621,7 +621,9 @@ async def check_export_duplicate(
 
     指纹包含报告编辑版本、报告更新时间与关联漏洞编辑时间快照，任一变化即视为内容有变。
     """
-    fmt = body.fmt if body.fmt in ("docx", "pdf") else "docx"
+    if body.fmt != "docx":
+        raise HTTPException(400, "仅支持导出 DOCX")
+    fmt = body.fmt
     report = await _get_report(session, report_id)
     last = (
         await session.execute(
@@ -666,8 +668,8 @@ async def export_report(
     user: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    if body.fmt not in ("docx", "pdf"):
-        raise HTTPException(400, "仅支持导出 docx 或 pdf")
+    if body.fmt != "docx":
+        raise HTTPException(400, "仅支持导出 DOCX")
     report = await _get_report(session, report_id)
     # 测试周期自动预填（仅当字段为空，不覆盖用户已填写值）：
     # 开始日期 = 关联漏洞最早提交日期，结束日期 = 当天
@@ -754,24 +756,20 @@ async def preview_export(
     _: User = Depends(require_perm("report:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """在线预览导出文件：pdf 直接返回，docx 临时转为 PDF 展示。"""
+    """在线预览导出文件：直接返回 DOCX，由前端 File Viewer 渲染。"""
     job = await session.get(ExportJob, job_id)
     if job is None or job.status != "done":
         raise HTTPException(404, "导出文件不存在或尚未生成完成")
+    if job.fmt != "docx":
+        raise HTTPException(404, "导出文件不是 DOCX")
     path = Path(job.file_path)
     if not path.exists():
         raise HTTPException(404, "导出文件已被清理")
-    cleanup_stale_previews()  # 顺带清理过期预览
-    try:
-        pdf_path = await ensure_pdf_preview(str(path))
-    except Exception:
-        logging.getLogger(__name__).exception("预览转换失败 job_id=%s", job_id)
-        raise HTTPException(502, "预览转换失败，请稍后重试或联系管理员")
     report = await session.get(Report, job.report_id)
-    filename = quote(f"{job.title or (report.title if report else 'report')}.pdf")
+    filename = quote(f"{job.title or (report.title if report else 'report')}.docx")
     return FileResponse(
-        pdf_path,
-        media_type="application/pdf",
+        path,
+        media_type=DOCX_MIME,
         headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
     )
 

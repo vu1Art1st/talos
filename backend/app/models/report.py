@@ -78,7 +78,7 @@ class ExportJob(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     report_id: Mapped[int] = mapped_column(ForeignKey("reports.id"), index=True)
     title: Mapped[str] = mapped_column(String(255), default="")  # 导出时的报告名快照，用于区分初测/复测报告
-    fmt: Mapped[str] = mapped_column(String(8), default="docx")  # docx / pdf
+    fmt: Mapped[str] = mapped_column(String(8), default="docx")  # 当前只写 docx，保留列兼容历史记录
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending/running/done/failed
     file_path: Mapped[str] = mapped_column(String(512), default="")
     error: Mapped[str] = mapped_column(Text, default="")

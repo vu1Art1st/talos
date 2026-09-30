@@ -147,8 +147,8 @@ if ! $DOCKER compose run --rm api python -m scripts.backfill_report_mandays; the
 fi
 
 # [5/5] 拉起 / 刷新全部服务
-echo "[5/5] 启动全部服务 docker compose up -d"
-$DOCKER compose up -d
+echo "[5/5] 启动全部服务 docker compose up -d --remove-orphans"
+$DOCKER compose up -d --remove-orphans
 
 echo "========== 升级完成：${OLD_COMMIT} -> ${NEW_COMMIT} =========="
 $DOCKER compose ps

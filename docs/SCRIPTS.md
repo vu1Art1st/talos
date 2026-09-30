@@ -99,12 +99,13 @@
 
 ### 2.1 `upgrade.sh` — 一键升级编排
 
-- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 回填报告实际人天 → 重启服务；末段对 fail-open 步骤的失败做汇总告警。
+- **用途**：拉代码 → 备份 → 重建镜像 → 清理构建缓存 → 迁移数据库 → 回填复测标题 → 回填复测轮次源报告 → 回填报告实际人天 → 重启服务并清理已删除服务的 orphan 容器；末段对 fail-open 步骤的失败做汇总告警。
 - **调用**：`bash scripts/upgrade.sh [--no-backup] [--no-pull] [--anchor]`（仓库根目录，见脚本 3-8 行）。
 - **依赖**：`.env`（37 行强制校验）、`git`、`docker`；内部依次调用备份脚本、`scripts/notify.sh`、`scripts/migrate.sh`、`python -m scripts.backfill_retest`、`python -m scripts.backfill_retest_src_report` 与 `python -m scripts.backfill_report_mandays`。
 - **执行场景**：服务器版本升级；**不要**只 `git pull` 后 `up -d`（DEPLOY.md:336）。
 - **关键顺序约定**：数据库迁移在 api 启动**之前**用一次性容器执行（脚本 10-11 行注释），避免 `create_all` 抢先建表导致迁移冲突。
 - **失败影响（2026-09-22 整改）**：**硬依赖**（`git pull` / 镜像构建 / 数据库迁移）失败即中止（`set -euo pipefail`，报错本身即告警）；**可失败的维护步骤**一律 fail-open 但不允许静默——经 `record_warning` 登记后，升级末尾统一汇总打印并渠道通知：升级前备份失败、构建缓存清理失败（`builder prune`）及三个回填步骤失败。起因：`[4.6/5]` 源报告回填曾静默失败（原 `|| echo` 的单行提示被后续输出淹没），导致报告维度复测三态长期显示「未发起复测」而无人察觉。
+- **2026-09-30 验证补充**：升级完成后执行 `sudo docker compose config --services`，服务清单不得包含 `gotenberg`；再检查 `/api/health/ready` 不含 `gotenberg` 项，并访问报告预览页确认 File Viewer DOCX 渲染与“打印 / 另存为 PDF”正常。
 - **备注**：**2026-09-17 已修复 S-5** —— 原 `sudo docker compose …` 硬编码全部改为 `$DOCKER`，并在脚本第 16-18 行 source `scripts/docker-cmd.sh`（root → `docker`，非 root → `sudo docker`，且尊重调用方预设的 `$DOCKER`）。
 
 ### 2.2 `migrate.sh` — 生产库结构迁移

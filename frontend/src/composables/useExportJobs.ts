@@ -4,7 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ElMessageBoxOptions } from 'element-plus'
 import dayjs from 'dayjs'
 import client from '../api/client'
-import type { ExportJob } from '../types'
+import type { ExportFormat, ExportJob } from '../types'
 import { saveBlob, saveReportBlob } from '../utils/download'
 
 // 导出记录类型上提到 src/types（审计 E-5）：本文件改为转出，保证「单一来源」
@@ -22,7 +22,11 @@ export function useExportJobs() {
   }
 
   /** 重复导出检查：与最近一次同格式成功导出完全一致时弹确认；返回是否继续 */
-  async function confirmDuplicateExport(reportId: number | string, fmt: string, fallbackTitle: string): Promise<boolean> {
+  async function confirmDuplicateExport(
+    reportId: number | string,
+    fmt: ExportFormat,
+    fallbackTitle: string,
+  ): Promise<boolean> {
     try {
       const { data } = await client.post(`/reports/${reportId}/export-check`, { fmt })
       if (!data.duplicate) return true
@@ -50,7 +54,11 @@ export function useExportJobs() {
   }
 
   /** 提交导出任务（含重复确认）；返回是否已提交 */
-  async function submitExport(reportId: number | string, fmt: string, fallbackTitle: string): Promise<boolean> {
+  async function submitExport(
+    reportId: number | string,
+    fmt: ExportFormat,
+    fallbackTitle: string,
+  ): Promise<boolean> {
     if (!(await confirmDuplicateExport(reportId, fmt, fallbackTitle))) return false
     await client.post(`/reports/${reportId}/export`, { fmt })
     ElMessage.success('导出任务已提交，生成完成后可在导出记录中下载')

@@ -34,7 +34,6 @@ from app.services import (
     template_service,
 )
 from app.services.docx_parser import parse_any_docx
-from app.services.exporter import cleanup_stale_previews, convert_docx_to_pdf
 from app.services.report_builder import build_report_docx
 
 logger = logging.getLogger(__name__)
@@ -164,27 +163,20 @@ async def export_report_task(ctx, job_id: int) -> None:
             stamp = now().strftime("%Y%m%d%H%M%S")
             docx_path = str(export_dir / f"report_{report.id}_{stamp}.docx")
             # P1-4 模板中心：按导出任务记录的模板生成；无模板/文件缺失时回退包内默认模板，
-            # 保证「不存在可用模板时系统仍可导出」与「DOCX/PDF 使用同一模板版本」。
+            # 保证「不存在可用模板时系统仍可导出」并记录本次使用的模板版本。
             tpl_row = (
                 await session.get(ReportTemplate, job.template_id)
                 if job.template_id is not None else None
             )
             template_path = template_service.template_file(tpl_row)
-            # 生成 docx / 转 PDF 是长耗时步骤：先续租，避免被启动回收扫描判为孤儿任务
+            # 生成 DOCX 是长耗时步骤：先续租，避免被启动回收扫描判为孤儿任务
             task_lifecycle.heartbeat(job)
             await session.commit()
             await asyncio.to_thread(
                 build_report_docx, meta, vulns, sections, docx_path, assets, plan_urls, template_path,
             )
 
-            if job.fmt == "pdf":
-                pdf_path = docx_path.replace(".docx", ".pdf")
-                task_lifecycle.heartbeat(job)
-                await session.commit()
-                await convert_docx_to_pdf(docx_path, pdf_path)
-                job.file_path = pdf_path
-            else:
-                job.file_path = docx_path
+            job.file_path = docx_path
 
             job.status = "done"
             # 导出成功后报告导出版本 +1（编辑保存不影响该版本号）
@@ -277,9 +269,8 @@ async def sla_scan_task(ctx) -> None:
         logger.info("SLA 扫描：已发出 %s 条到期/逾期提醒", fired)
 
 
-async def cleanup_previews_task(ctx) -> None:
-    """定期清理临时预览 PDF、过期幂等键、超保留期消息、投递记录与 API 幂等键。"""
-    await asyncio.to_thread(cleanup_stale_previews, 30)
+async def cleanup_task(ctx) -> None:
+    """定期清理过期幂等键、超保留期消息、投递记录与 API 幂等键。"""
     async with async_session_maker() as session:
         removed = await task_dedup.cleanup_dedup_keys(session)
         messages = await message_service.cleanup_messages(session)
@@ -319,7 +310,7 @@ async def recover_tasks_task(ctx) -> None:
 class WorkerSettings:
     functions = list(TASK_FUNCS.values())
     cron_jobs = [
-        cron(cleanup_previews_task, minute=set(range(0, 60, 10))),
+        cron(cleanup_task, minute=set(range(0, 60, 10))),
         # 兜底扫描（P0-3）：与 SWEEP_INTERVAL_SECONDS=300 同频
         cron(recover_tasks_task, minute=set(range(0, 60, 5))),
         # 通知投递重试（P1-3）：待重试记录持久化在库，进程重启后由本任务继续投递

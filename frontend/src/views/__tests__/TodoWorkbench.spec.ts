@@ -20,7 +20,15 @@ const PREVIEW = 8
 const TOTAL = 25
 
 function mkItem(id: number) {
-  return { id, title: `待办漏洞 ${id}`, level: 20, level_name: '高危', link: `/vulns/${id}` }
+  return {
+    id,
+    ticket_id: `T-20260929-${id}`,
+    system_name: `进行中系统 ${id}`,
+    department: '安全部',
+    status: 20,
+    status_name: '初测中',
+    link: `/testing-plans?plan=${id}`,
+  }
 }
 
 describe('TodoWorkbench 个人待办', () => {
@@ -33,16 +41,16 @@ describe('TodoWorkbench 个人待办', () => {
           data: {
             total: TOTAL,
             groups: [{
-              category: 'my_vulns', name: '我提交的漏洞', count: TOTAL,
+              category: 'plan_in_progress', name: '进行中工单', count: TOTAL,
               items: Array.from({ length: PREVIEW }, (_, i) => mkItem(i + 1)),
             }],
           },
         }
       }
-      if (url === '/todos/my_vulns') {
+      if (url === '/todos/plan_in_progress') {
         return {
           data: {
-            category: 'my_vulns', name: '我提交的漏洞', total: TOTAL,
+            category: 'plan_in_progress', name: '进行中工单', total: TOTAL,
             items: Array.from({ length: 20 }, (_, i) => mkItem(i + 1)),
           },
         }
@@ -70,7 +78,7 @@ describe('TodoWorkbench 个人待办', () => {
     await flushPromises()
 
     // 明细通过分页接口拉取（page=1, size=20），展开后展示的是服务端返回的完整条目
-    const detail = getMock.mock.calls.find((c) => c[0] === '/todos/my_vulns')
+    const detail = getMock.mock.calls.find((c) => c[0] === '/todos/plan_in_progress')
     expect(detail, '应请求单分类明细接口').toBeTruthy()
     expect(detail?.[1]?.params).toEqual({ page: 1, size: 20 })
     expect(wrapper.findAll('.todo-list li')).toHaveLength(20)
@@ -89,10 +97,10 @@ describe('TodoWorkbench 个人待办', () => {
     await flushPromises()
 
     getMock.mockImplementation(async (url: string) => {
-      if (url === '/todos/my_vulns') {
+      if (url === '/todos/plan_in_progress') {
         return {
           data: {
-            category: 'my_vulns', name: '我提交的漏洞', total: TOTAL,
+            category: 'plan_in_progress', name: '进行中工单', total: TOTAL,
             items: Array.from({ length: 5 }, (_, i) => mkItem(i + 21)),
           },
         }
@@ -119,8 +127,12 @@ describe('TodoWorkbench 个人待办', () => {
           data: {
             total: 1,
             groups: [{
-              category: 'plan_unclaimed', name: '待认领工单', count: 1,
-              items: [{ id: 5, ticket_id: 'T-20260928-001', system_name: '深链系统', department: '安全部', link: '/testing-plans?plan=5' }],
+              category: 'plan_in_progress', name: '进行中工单', count: 1,
+              items: [{
+                id: 5, ticket_id: 'T-20260929-001', system_name: '深链系统',
+                department: '安全部', status: 20, status_name: '初测中',
+                link: '/testing-plans?plan=5',
+              }],
             }],
           },
         }
@@ -134,6 +146,37 @@ describe('TodoWorkbench 个人待办', () => {
     await flushPromises()
 
     expect(pushSpy).toHaveBeenCalledWith('/testing-plans?plan=5')
+    wrapper.unmount()
+  })
+
+  it('原有待办与新增已认领工单分类同时渲染', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/todos') {
+        return {
+          data: {
+            total: 2,
+            groups: [
+              {
+                category: 'my_vulns', name: '我提交的漏洞', count: 1,
+                items: [mkItem(21)],
+              },
+              {
+                category: 'plan_completed', name: '已完成工单', count: 1,
+                items: [{ ...mkItem(22), status: 60, status_name: '复测完成' }],
+              },
+            ],
+          },
+        }
+      }
+      return { data: [] }
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('我提交的漏洞')
+    expect(wrapper.text()).toContain('已完成工单')
+    expect(wrapper.findAll('.todo-card')).toHaveLength(2)
+    expect(wrapper.text()).toContain('复测完成')
     wrapper.unmount()
   })
 })

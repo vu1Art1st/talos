@@ -207,36 +207,96 @@ async def test_message_center_and_todos(client: AsyncClient, auth: dict):
     assert resp.status_code == 200
     assert (await client.get("/api/v1/messages/unread-count", headers=submitter)).json()["unread"] == 0
 
-    # 待办聚合：提交人能看到自己提交的未闭环漏洞
+    # 原有待办：提交人能看到自己提交的未闭环漏洞
     resp = await client.get("/api/v1/todos", headers=submitter)
     assert resp.status_code == 200, resp.text
-    groups = {g["category"]: g for g in resp.json()["groups"]}
-    assert "my_vulns" in groups and groups["my_vulns"]["count"] >= 1
-    assert any(item.get("id") == vul_id for item in groups["my_vulns"]["items"])
+    submitter_groups = {g["category"]: g for g in resp.json()["groups"]}
+    assert "my_vulns" in submitter_groups and submitter_groups["my_vulns"]["count"] >= 1
+    assert any(item.get("id") == vul_id for item in submitter_groups["my_vulns"]["items"])
 
-    # 工单类待办深链必须直达该工单的流程抽屉（`?plan=<id>`），只给 `/testing-plans` 会退化为列表页
+    # 原有待认领工单仍存在；深链必须直达该工单的流程抽屉
     resp = await client.post(
-        "/api/v1/testing-plans", headers=auth, json={"system_name": "P1待办深链工单"},
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "P1待办-待认领工单"},
     )
     assert resp.status_code == 200, resp.text
-    plan_id = resp.json()["id"]
+    unclaimed_plan_for_legacy_id = resp.json()["id"]
     todos = (await client.get("/api/v1/todos", headers=submitter)).json()
     unclaimed = next(g for g in todos["groups"] if g["category"] == "plan_unclaimed")
-    item = next(i for i in unclaimed["items"] if i["id"] == plan_id)
-    assert item["link"] == f"/testing-plans?plan={plan_id}"
+    item = next(i for i in unclaimed["items"] if i["id"] == unclaimed_plan_for_legacy_id)
+    assert item["link"] == f"/testing-plans?plan={unclaimed_plan_for_legacy_id}"
 
-    # 单分类完整明细（工作台「查看全部」在卡片内展开，不跳转列表页）：分页取全量
+    # 新增分类：未认领的初测中工单不属于已认领工单
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "P1待办-未认领初测中", "status": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    unclaimed_plan_id = resp.json()["id"]
+    todos = (await client.get("/api/v1/todos", headers=auth)).json()
+    todo_items = [item for group in todos["groups"] for item in group["items"]]
+    assert all(item["id"] != unclaimed_plan_id for item in todo_items)
+
+    # 新增分类：已认领且初测中 → 进行中工单
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "P1待办-进行中工单", "status": 20},
+    )
+    in_progress_plan_id = resp.json()["id"]
+    assert (await client.post(
+        f"/api/v1/testing-plans/{in_progress_plan_id}/claim", headers=auth,
+    )).status_code == 200
+    todos = (await client.get("/api/v1/todos", headers=auth)).json()
+    groups = {g["category"]: g for g in todos["groups"]}
+    item = next(i for i in groups["plan_in_progress"]["items"] if i["id"] == in_progress_plan_id)
+    assert item["status_name"] == "初测中"
+    assert item["link"] == f"/testing-plans?plan={in_progress_plan_id}"
+
+    # 新增分类：已认领且复测完成 / 测试通过 → 已完成工单
+    completed_ids = []
+    for system_name, status, status_name in (
+        ("P1待办-复测完成", 60, "复测完成"),
+        ("P1待办-测试通过", 70, "测试通过"),
+    ):
+        resp = await client.post(
+            "/api/v1/testing-plans", headers=auth,
+            json={"system_name": system_name, "status": status},
+        )
+        assert resp.status_code == 200, resp.text
+        plan_id = resp.json()["id"]
+        completed_ids.append(plan_id)
+        assert (await client.post(
+            f"/api/v1/testing-plans/{plan_id}/claim", headers=auth,
+        )).status_code == 200
+    todos = (await client.get("/api/v1/todos", headers=auth)).json()
+    groups = {g["category"]: g for g in todos["groups"]}
+    completed_items = {
+        item["id"]: item for item in groups["plan_completed"]["items"] if item["id"] in completed_ids
+    }
+    assert {item["status_name"] for item in completed_items.values()} == {
+        "复测完成", "测试通过",
+    }
+
+    # 原有分类单分类完整明细分页口径不变
     resp = await client.get("/api/v1/todos/my_vulns", headers=submitter, params={"page": 1, "size": 1})
     assert resp.status_code == 200, resp.text
     detail = resp.json()
-    assert detail["category"] == "my_vulns" and detail["total"] == groups["my_vulns"]["count"]
+    assert detail["category"] == "my_vulns"
+    assert detail["total"] == submitter_groups["my_vulns"]["count"]
     assert len(detail["items"]) == 1
     # 越界页返回空明细但 total 不变（前端据此停止「加载更多」）
     resp = await client.get("/api/v1/todos/my_vulns", headers=submitter, params={"page": 99, "size": 20})
     assert resp.status_code == 200
     assert resp.json()["items"] == [] and resp.json()["total"] == detail["total"]
+    # 新增分类同样支持单分类明细分页
+    resp = await client.get(
+        "/api/v1/todos/plan_in_progress", headers=auth, params={"page": 1, "size": 1},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["category"] == "plan_in_progress"
+    assert resp.json()["total"] == groups["plan_in_progress"]["count"]
     # 未知分类明确 404，不落回任何默认列表
-    assert (await client.get("/api/v1/todos/not_a_category", headers=submitter)).status_code == 404
+    assert (await client.get("/api/v1/todos/not_a_category", headers=auth)).status_code == 404
 
 
 # ---------- P1-4 报告模板 ----------

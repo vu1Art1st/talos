@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "framework": "vue3",
+  "profile": "custom",
+  "formats": [
+    "docx"
+  ],
+  "capabilities": [],
+  "assetTarget": "public/file-viewer",
+  "generatedModule": "file-viewer.generated.mjs",
+  "packageManager": "pnpm",
+  "packageManagerVersion": "11.6.0",
+  "managedPackages": [
+    "@file-viewer/assets-standard",
+    "@file-viewer/core",
+    "@file-viewer/renderer-word",
+    "@file-viewer/vue3"
+  ],
+  "locale": "en",
+  "assetBaseUrl": "/file-viewer/"
+}

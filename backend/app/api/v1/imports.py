@@ -1,6 +1,7 @@
 import logging
 import uuid
 from io import BytesIO
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
@@ -33,7 +34,6 @@ from app.schemas import (
 from app.services import import_governance, import_service
 from app.services.audit_service import audit
 from app.services.docx_parser import _map_level_report, build_import_template
-from app.services.exporter import cleanup_stale_previews, ensure_pdf_preview
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/imports", tags=["Word导入"])
@@ -449,20 +449,15 @@ async def preview_batch(
     _: User = Depends(require_perm("import:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    """在线预览导入原文件：docx 临时转为 PDF 展示。"""
+    """在线预览导入原文件：直接返回原始 DOCX，由前端 File Viewer 渲染。"""
     batch = await get_or_404(session, ImportBatch, batch_id, "导入批次不存在")
-    cleanup_stale_previews()  # 顺带清理过期预览
-    try:
-        pdf_path = await ensure_pdf_preview(batch.file_path)
-    except FileNotFoundError:
+    path = Path(batch.file_path)
+    if not path.is_file():
         raise HTTPException(404, "导入文件已被清理")
-    except Exception:
-        logger.exception("预览转换失败 batch_id=%s", batch_id)
-        raise HTTPException(502, "预览转换失败，请稍后重试或联系管理员")
-    filename = quote(f"{batch.filename.rsplit('.', 1)[0]}.pdf")
+    filename = quote(batch.filename or path.name)
     return FileResponse(
-        pdf_path,
-        media_type="application/pdf",
+        path,
+        media_type=DOCX_MIME,
         headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
     )
 

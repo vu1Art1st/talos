@@ -44,11 +44,10 @@ describe('saveReportBlob', () => {
     spy.mockRestore()
   })
 
-  it('pdf 或已自动更新目录时不提示', async () => {
+  it('目录已自动更新时不提示', async () => {
     stubDownloadApis()
     const toc = await import('../tocNotice')
     const spy = vi.spyOn(toc, 'showTocNotice').mockImplementation(() => {})
-    saveReportBlob(new Blob(['x']), { fmt: 'pdf', toc_auto_updated: false }, 'fallback')
     saveReportBlob(new Blob(['x']), { fmt: 'docx', toc_auto_updated: true }, 'fallback')
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()

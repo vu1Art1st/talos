@@ -250,6 +250,8 @@ TODO_TYPES = {
     "import_pending": "待确认导入",
     "sla_due": "SLA 临期",
     "sla_overdue": "SLA 逾期",
+    "plan_in_progress": "进行中工单",
+    "plan_completed": "已完成工单",
 }
 
 
@@ -333,7 +335,7 @@ VUL_TYPE_REVERSE = {v: k for k, v in VUL_TYPE.items()}
 
 
 # ---------- 界面展示色值与展示名（/meta 下发，前端唯一色源，改此处即全端生效） ----------
-# 屏幕展示口径；Word/PDF 导出的打印色板在 services/report_builder.py 独立维护（打印色与屏幕色语义不同）
+# 屏幕展示口径；Word 导出与浏览器打印的色板在 services/report_builder.py 独立维护（打印色与屏幕色语义不同）
 VUL_LEVEL_COLOR = {
     10: "#DC2626",  # 严重 红
     20: "#EA580C",  # 高危 橙

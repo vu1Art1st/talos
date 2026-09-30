@@ -75,7 +75,12 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
   function mountDrawer() {
     return mount(PlanWorkflowDrawer, {
       props: { planId: 1, visible: true },
-      global: { plugins: [ElementPlus] },
+      global: {
+        plugins: [ElementPlus],
+        stubs: {
+          FilePreviewDialog: { template: '<div class="file-preview-stub" />' },
+        },
+      },
     })
   }
 

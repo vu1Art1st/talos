@@ -27,13 +27,6 @@ services:
       timeout: 3s
       retries: 10
 
-  gotenberg:
-    image: gotenberg/gotenberg:8
-    restart: unless-stopped
-    environment:
-      TZ: Asia/Shanghai
-    command: ["gotenberg", "--api-timeout=120s"]
-
   api:
     build:
       context: ./backend
@@ -45,7 +38,6 @@ services:
       VP_TIMEZONE: ${VP_TIMEZONE:-Asia/Shanghai}
       VP_DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vulnplatform}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:-vulnplatform}
       VP_REDIS_URL: redis://redis:6379/0
-      VP_GOTENBERG_URL: http://gotenberg:3000
       VP_SECRET_KEY: ${VP_SECRET_KEY:?set VP_SECRET_KEY in .env, e.g. openssl rand -hex 32}
       VP_STORAGE_DIR: /app/storage
       # 渠道通知邮件（F3）：VP_SMTP_HOST 留空则邮件通道禁用（webhook 通知不受影响）

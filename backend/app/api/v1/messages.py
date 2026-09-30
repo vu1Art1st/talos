@@ -1,7 +1,7 @@
 """站内通知中心与个人待办工作台（P1-2）。
 
 - `/messages*`：站内消息（分页、按类型筛选、单条/批量已读、未读数）；
-- `/todos`：个人待办聚合（待认领 / 我提交的漏洞 / 待复测 / 待确认导入 / SLA 临期与逾期）。
+- `/todos`：个人待办聚合（原有待办分类 + 已认领的进行中 / 已完成工单）。
 
 消息写入的唯一入口是 `services/message_service.create_message`，本模块只读与置已读。
 """
@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import exists, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import MESSAGE_TYPES, VUL_LEVEL, PlanStatus
+from app.constants import MESSAGE_TYPES, TESTING_PLAN_STATUS, VUL_LEVEL, PlanStatus
 from app.core.deps import get_current_user, user_permissions
 from app.core.query import paginate
 from app.db import get_session
@@ -259,6 +259,49 @@ async def _sla_todo(
     return TodoItemOut(category=category, name=name, count=count, items=items)
 
 
+async def _claimed_plan_todos(
+    session: AsyncSession,
+    user: User,
+    *,
+    category: str,
+    name: str,
+    statuses: tuple[PlanStatus, ...],
+    offset: int = 0,
+    limit: int = _TODO_ITEM_LIMIT,
+) -> TodoItemOut:
+    """当前用户已认领且状态命中的工单；认领关系是唯一可见性边界。"""
+    cond = [
+        TestingPlan.status.in_(statuses),
+        exists().where(
+            testing_plan_testers.c.testing_plan_id == TestingPlan.id,
+            testing_plan_testers.c.user_id == user.id,
+        ),
+    ]
+    count = (await session.execute(select(func.count(TestingPlan.id)).where(*cond))).scalar_one()
+    rows = (
+        await session.execute(
+            select(TestingPlan)
+            .where(*cond)
+            .order_by(TestingPlan.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars().all()
+    items = [
+        {
+            "id": p.id,
+            "ticket_id": p.ticket_id,
+            "system_name": p.system_name,
+            "department": p.department,
+            "status": p.status,
+            "status_name": TESTING_PLAN_STATUS.get(p.status, ""),
+            "link": _PLAN_LINK.format(id=p.id),
+        }
+        for p in rows
+    ]
+    return TodoItemOut(category=category, name=name, count=count, items=items)
+
+
 async def _todo_group(
     session: AsyncSession, user: User, category: str, *,
     offset: int = 0, limit: int = _TODO_ITEM_LIMIT,
@@ -275,6 +318,17 @@ async def _todo_group(
     if category in ("sla_due", "sla_overdue"):
         state = "due_soon" if category == "sla_due" else "overdue"
         return await _sla_todo(session, user, state, offset=offset, limit=limit)
+    if category == "plan_in_progress":
+        return await _claimed_plan_todos(
+            session, user, category=category, name="进行中工单",
+            statuses=(PlanStatus.TESTING,), offset=offset, limit=limit,
+        )
+    if category == "plan_completed":
+        return await _claimed_plan_todos(
+            session, user, category=category, name="已完成工单",
+            statuses=(PlanStatus.RETEST_DONE, PlanStatus.PASSED),
+            offset=offset, limit=limit,
+        )
     raise HTTPException(404, "未知的待办分类")
 
 
@@ -283,12 +337,14 @@ async def list_todos(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """个人待办聚合：按用户权限收敛可见范围，权限不足的分类返回 0 且不带明细。"""
+    """个人待办聚合：原有分类 + 当前用户已认领的进行中 / 已完成工单。"""
     categories = (
         "plan_unclaimed", "my_vulns", "retest", "import_pending", "sla_due", "sla_overdue",
+        "plan_in_progress", "plan_completed",
     )
     groups = [await _todo_group(session, user, c) for c in categories]
-    groups = [g for g in groups if g.count > 0 or g.category in ("my_vulns", "retest")]
+    always_visible = ("my_vulns", "retest", "plan_in_progress", "plan_completed")
+    groups = [g for g in groups if g.count > 0 or g.category in always_visible]
     return TodoSummaryOut(total=sum(g.count for g in groups), groups=groups)
 
 

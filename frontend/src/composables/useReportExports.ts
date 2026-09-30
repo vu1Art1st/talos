@@ -15,7 +15,7 @@ export function useReportExports(getSystemName: () => string) {
   const { fetchJobs, submitExport, downloadJob, removeExportJob: deleteExportJob } = useExportJobs()
 
   const exportJobs = ref<Record<number, ExportJob[]>>({})
-  const exporting = ref<Record<number, string>>({})
+  const exporting = ref<Record<number, ExportFormat>>({})
   // 当前展开导出历史的报告 ID（点击箭头展示该报告的导出版本列表）
   const expandedExportId = ref<number | null>(null)
   let pollTimer: number | undefined

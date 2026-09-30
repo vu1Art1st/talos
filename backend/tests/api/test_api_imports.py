@@ -45,6 +45,12 @@ async def test_word_import_flow(client: AsyncClient, auth: dict):
 
     detail = await _wait_batch(client, auth, batch_id)
     assert detail["batch"]["status"] == "parsed", detail
+    resp = await client.get(f"/api/v1/imports/{batch_id}/preview", headers=auth)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert resp.content[:2] == b"PK"
     records = detail["records"]
     assert len(records) == 1
     rec = records[0]

@@ -100,6 +100,16 @@ bash scripts/upgrade.sh
 # 可选： --no-backup 跳过升级前备份， --no-pull 跳过 git pull
 ```
 
+升级完成后核对：
+
+```bash
+docker compose config --services       # 不得包含 gotenberg
+docker compose ps
+curl -fsS http://127.0.0.1:27012/api/health/ready
+```
+
+报告预览使用浏览器内 File Viewer；确认 DOCX 正常渲染，预览弹窗的“打印 / 另存为 PDF”可打开 Chrome / Edge 打印对话框。
+
 或手动分步执行：
 
 ```bash
@@ -327,7 +337,7 @@ bash scripts/backup-incremental.sh  # 差异快照：每日 02:00 + 每次 upgra
 - **只想把备份数据导入本地开发库**（不起容器栈、目标是 DBngin）：见「九、把生产备份导入本地开发库」，不要在本地用本节的 `restore.sh`（它面向容器栈）。
 - **`POSTGRES_USER/DB/PASSWORD` 必须与备份来源一致**，否则库名 / 连接对不上。
 - `VP_SECRET_KEY` 保持一致可避免已登录用户令牌失效（改了不会丢数据，仅需重新登录）。
-- `redis` / `gotenberg` 无状态，不用迁移。
+- `redis` 无状态，不用迁移。
 - 恢复务必对准**空库**（新卷）执行，不要在已有业务数据的库上导入。
 - **恢复完成后先跑一次 `bash scripts/migrate.sh` 再访问页面**（见「七、恢复后页面 500 排查」），
   否则备份库结构落后于代码版本时，新功能页面会因缺列报 500。
@@ -462,7 +472,7 @@ bash scripts/upgrade.sh
 | 文件 | 内容 | 实测 |
 |---|---|---|
 | `db.sql.zst` | `pg_dump --clean --if-exists` 纯文本 SQL（UTF8） | 293 KB → 解压 3.2 MB / 6 206 行 / 30 张表 / 30 段 `COPY` |
-| `storage.tar.zst` | `/app/storage` 整卷（`uploads/` + `previews/` + 导出产物） | 1.8 GB |
+| `storage.tar.zst` | `/app/storage` 整卷（`uploads/` + 导出产物等） | 1.8 GB |
 | `MANIFEST.json` | `git_commit` / `db_sha256` / `storage_sha256` / `status=complete` | `git_commit=2f0fa7e` |
 
 落库前先做三项检查（**落库本身是破坏性的**：会清空目标库）：
@@ -625,11 +635,11 @@ wsl -d kali-linux zstd -d -f -o "C:\Users\<你>\AppData\Local\Temp\db.sql" "E:\G
 |---|---|---|
 | `/api/health` | 兼容旧探针 | 恒 200，只表示进程在跑（不查依赖） |
 | `/api/health/live` | 存活探针 | 恒 200；**不查依赖**（依赖故障时应重启前先排障，而非被编排杀掉） |
-| `/api/health/ready` | 就绪探针 | 逐项返回依赖状态；任一**必需**依赖失败返回 **503**，可选依赖失败不影响状态码 |
+| `/api/health/ready` | 就绪探针 | 逐项返回依赖状态；任一必需依赖失败返回 **503** |
 
 依赖分级：**PostgreSQL 恒为必需**；队列启用时（`VP_DISABLE_QUEUE=0`）**Redis 与 arq worker 心跳
-同为必需**；**Gotenberg 为可选**（不可用只降级「PDF 导出不可用」）。
-响应形如 `{"status":"ready","checks":{"database":{"ok":true,"required":true},"redis":{...},"worker":{...},"gotenberg":{"ok":false,"required":false,"reason":"连接超时"}}}` ——
+同为必需**。
+响应形如 `{"status":"ready","checks":{"database":{"ok":true,"required":true},"redis":{...},"worker":{...}}}` ——
 只含依赖名、`ok` 与归类后的原因文案，**不含 DSN / 凭据 / 内网地址**。
 
 worker 心跳键为 `arq:health-check`（worker 每 30s 续期，TTL 61s）：探针读到该键才认为有存活 worker，

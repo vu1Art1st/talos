@@ -27,7 +27,7 @@
       <el-alert v-if="plan.status === 70" type="success" :closable="false" show-icon
                 title="本计划已确认无漏洞（测试通过），测试流程已闭环">
         <template #default>
-          <div>{{ plan.no_vul_conclusion || '测试完成且未发现安全漏洞，无漏洞报告见下方报告区，可导出 Word/PDF 归档。' }}</div>
+          <div>{{ plan.no_vul_conclusion || '测试完成且未发现安全漏洞，无漏洞报告见下方报告区，可导出 Word 归档。' }}</div>
           <div class="text-xs mt-1">若后续补录/关联新漏洞，计划将自动重开为「初测中」。</div>
         </template>
       </el-alert>
@@ -276,9 +276,6 @@
             <el-button size="small" plain :loading="exporting[r.id] === 'docx'" @click="doExport(r, 'docx')">
               导出 Word
             </el-button>
-            <el-button size="small" plain :loading="exporting[r.id] === 'pdf'" @click="doExport(r, 'pdf')">
-              导出 PDF
-            </el-button>
             <el-popconfirm v-if="canOperate" title="确认删除该报告？将一并移除其导出记录" width="240"
                            @confirm="removeReport(r)">
               <template #reference>
@@ -296,7 +293,7 @@
             </el-button>
             <div v-if="expandedExportId === r.id" class="mt-2 flex flex-col gap-1">
               <div v-if="!exportJobs[r.id]?.length" class="text-xs text-gray-400">
-                暂无导出记录，点击「导出 Word / 导出 PDF」生成
+                暂无导出记录，点击「导出 Word」生成
               </div>
               <div v-for="job in exportJobs[r.id]" :key="job.id" class="flex items-center gap-2 text-xs">
                 <span class="uppercase font-mono text-gray-400">{{ job.fmt }}</span>
@@ -308,7 +305,7 @@
                 <span class="text-gray-300">{{ fmtDateTime(job.create_time) }}</span>
                 <div class="flex-1" />
                 <el-button v-if="job.status === 'done'" size="small" type="primary" link
-                           @click="previewRef?.open(`/reports/exports/${job.id}/preview`, job.title || r.title)">
+                           @click="previewRef?.open(`/reports/exports/${job.id}/preview`, `${job.title || r.title}.docx`)">
                   预览
                 </el-button>
                 <el-button v-if="job.status === 'done'" size="small" type="primary" link class="!ml-0"
@@ -352,7 +349,7 @@
         </template>
       </el-dialog>
 
-    <PdfPreviewDialog ref="previewRef" />
+    <FilePreviewDialog ref="previewRef" />
   </el-drawer>
 </template>
 
@@ -389,7 +386,7 @@ import { useReportExports } from '../composables/useReportExports'
 import { withRedirect } from '../composables/useNavBack'
 import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
-import PdfPreviewDialog from './PdfPreviewDialog.vue'
+import FilePreviewDialog from './FilePreviewDialog.vue'
 import VulnDetailDialog from './VulnDetailDialog.vue'
 
 // 测试计划统一流程抽屉：认领 → 录入漏洞 → 生成报告 → 发起复测 → 复测处理 → 复测完成，
@@ -469,7 +466,7 @@ const vulnFormVisible = ref(false)
 const vulnDetailVisible = ref(false)
 const detailVulnId = ref<number | null>(null)
 
-const previewRef = ref<InstanceType<typeof PdfPreviewDialog>>()
+const previewRef = ref<InstanceType<typeof FilePreviewDialog>>()
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
 const isTester = computed(() => plan.value?.testers?.some((u) => u.id === auth.user?.id) ?? false)
