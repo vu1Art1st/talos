@@ -12,8 +12,15 @@
 而全新库是 `create_all` 建的（不走迁移）会漏建索引——两条路径无法保持一致。故改为**显式、
 可重入**的运维脚本：先报告可用性，再按结果决定是否建索引，最后打印 EXPLAIN 证据。
 
-覆盖的列与全局搜索 `%keyword%` 检索对应：漏洞标题 / 影响 URL、资产名称 / 子系统、
-渗透 / 漏扫工单计划名与测试系统、报告标题 / 项目名 / 章节标题 / 章节正文。
+覆盖的列与两类 `%keyword%` 检索对应：
+1. 全局搜索：漏洞标题 / 影响 URL、资产名称 / 子系统、渗透 / 漏扫工单计划名与测试系统、
+   报告标题 / 项目名 / 章节标题 / 章节正文；
+2. 图片鉴权引用查询（`api/images.py` 的 `IMAGE_REFERENCE_COLUMNS`，批次 E-1.1）：漏洞、
+   导入记录与知识库条目各富文本列——图片名是 32 位十六进制串，前导通配无索引即全表扫描。
+3. 审计检索（`api/v1/audit.py`）：`operation_logs` 的用户名 / IP / 详情三列（批次 E-1.4）。
+4. 函数 / 类型转换后再模糊匹配的列（批次 E-1.5）：工单的「日期去横线」「序号转文本」「二者拼接」
+   与资产的 JSON 转文本。PostgreSQL 只在**索引表达式与查询表达式形状一致**时才会使用，
+   故这些条目必须与 `plan_query` / `assets.py` 里 SQLAlchemy 生成的表达式逐字对应。
 
 用法（生产/本地均可在容器或本机执行；幂等，可重复运行）：
 
@@ -38,7 +45,7 @@ from sqlalchemy import text  # noqa: E402
 
 from app.db import async_session_maker, engine  # noqa: E402
 
-# (索引名, 表名, 列名)：与列表页模糊检索的热点列一一对应
+# (索引名, 表名, 目标)：目标可以是列名，也可以是 SQL 表达式（两种都会原样写进 gin(...)）。
 TRGM_INDEXES = (
     ("ix_trgm_vulns_title", "vulns", "title"),
     ("ix_trgm_vulns_affected_url", "vulns", "affected_url"),
@@ -52,6 +59,43 @@ TRGM_INDEXES = (
     ("ix_trgm_reports_project_name", "reports", "project_name"),
     ("ix_trgm_report_sections_title", "report_sections", "title"),
     ("ix_trgm_report_sections_content_html", "report_sections", "content_html"),
+    # 图片鉴权引用列（api/images.py 的 IMAGE_REFERENCE_COLUMNS）：与上面的列表检索列同属
+    # 前导通配场景，缺一个就会让图片请求在该表上退化全表扫描；两者一致性由
+    # tests/test_image_reference_indexes.py 守卫。
+    ("ix_trgm_vulns_description_html", "vulns", "description_html"),
+    ("ix_trgm_vulns_reproduce_html", "vulns", "reproduce_html"),
+    ("ix_trgm_vulns_solution_html", "vulns", "solution_html"),
+    ("ix_trgm_vulns_retest_html", "vulns", "retest_html"),
+    ("ix_trgm_import_records_description_html", "import_records", "description_html"),
+    ("ix_trgm_import_records_reproduce_html", "import_records", "reproduce_html"),
+    ("ix_trgm_import_records_solution_html", "import_records", "solution_html"),
+    ("ix_trgm_import_records_retest_html", "import_records", "retest_html"),
+    ("ix_trgm_knowledge_entries_description_html", "knowledge_entries", "description_html"),
+    ("ix_trgm_knowledge_entries_harm_html", "knowledge_entries", "harm_html"),
+    ("ix_trgm_knowledge_entries_solution_html", "knowledge_entries", "solution_html"),
+    # 审计检索列（api/v1/audit.py 对 username / ip / detail 各有一处 ilike '%kw%'）
+    ("ix_trgm_operation_logs_username", "operation_logs", "username"),
+    ("ix_trgm_operation_logs_ip", "operation_logs", "ip"),
+    ("ix_trgm_operation_logs_detail", "operation_logs", "detail"),
+    # ---- E-1.5：plan_query 的工单检索（plan_name / system_name 已在上面）----
+    ("ix_trgm_testing_plans_department", "testing_plans", "department"),
+    ("ix_trgm_testing_plans_test_type", "testing_plans", "test_type"),
+    ("ix_trgm_testing_plans_ticket_id_manual", "testing_plans", "ticket_id_manual"),
+    ("ix_trgm_testing_plans_receive_time", "testing_plans", "receive_time"),
+    ("ix_trgm_testing_plans_receive_time_nodash", "testing_plans", "replace(receive_time, '-', '')"),
+    ("ix_trgm_testing_plans_ticket_seq_text", "testing_plans", "CAST(ticket_seq AS VARCHAR)"),
+    ("ix_trgm_testing_plans_auto_ticket", "testing_plans",
+     "replace(receive_time, '-', '') || '-' || CAST(ticket_seq AS VARCHAR)"),
+    ("ix_trgm_nonpen_plans_department", "nonpen_plans", "department"),
+    ("ix_trgm_nonpen_plans_ticket_id_manual", "nonpen_plans", "ticket_id_manual"),
+    ("ix_trgm_nonpen_plans_receive_time", "nonpen_plans", "receive_time"),
+    ("ix_trgm_nonpen_plans_receive_time_nodash", "nonpen_plans", "replace(receive_time, '-', '')"),
+    ("ix_trgm_nonpen_plans_ticket_seq_text", "nonpen_plans", "CAST(ticket_seq AS VARCHAR)"),
+    ("ix_trgm_nonpen_plans_auto_ticket", "nonpen_plans",
+     "replace(receive_time, '-', '') || '-' || CAST(ticket_seq AS VARCHAR)"),
+    # ---- E-1.5：assets.py 的 JSON 数组转文本后模糊匹配 ----
+    ("ix_trgm_assets_public_urls_text", "assets", "CAST(public_urls AS VARCHAR)"),
+    ("ix_trgm_assets_internal_urls_text", "assets", "CAST(internal_urls AS VARCHAR)"),
 )
 
 
@@ -93,7 +137,9 @@ async def _create_indexes(dry_run: bool) -> int:
                 print(f"RESULT index={name} status=would-create on {table}({column})")
                 continue
             await session.execute(text(
-                f"CREATE INDEX IF NOT EXISTS {name} ON {table} USING gin ({column} gin_trgm_ops)"
+                # 目标统一加一层括号：纯列名合法，复合表达式（如 `a || '-' || b`）也才不会被
+                # 解析成 `... || (b gin_trgm_ops)`。
+                f"CREATE INDEX IF NOT EXISTS {name} ON {table} USING gin (({column}) gin_trgm_ops)"
             ))
             print(f"RESULT index={name} status=created on {table}({column})")
             created += 1

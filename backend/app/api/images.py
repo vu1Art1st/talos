@@ -35,28 +35,22 @@ router = APIRouter(tags=["图片"])
 _IMAGE_NAME_RE = re.compile(r"^[0-9a-f]{32}\.(?:png|jpe?g|gif|webp|bmp)$")
 
 
+# 富文本中可能引用 `/storage/uploads/images/<name>` 的列，是图片鉴权的唯一查询依据。
+# 这些列必须与 `scripts/enable_trgm_indexes.py` 的 TRGM_INDEXES 保持一致：图片文件名是
+# 32 位十六进制串，`%name%` 前导通配只有 trgm GIN 索引可用，否则每次图片请求都会退化成
+# 全表扫描（批次 E-1.1）。漂移守卫见 `tests/test_image_reference_indexes.py`。
+IMAGE_REFERENCE_COLUMNS: dict[type, tuple[str, ...]] = {
+    ReportSection: ("content_html",),
+    Vul: ("description_html", "reproduce_html", "solution_html", "retest_html"),
+    ImportRecord: ("description_html", "reproduce_html", "solution_html", "retest_html"),
+    KnowledgeEntry: ("description_html", "harm_html", "solution_html"),
+}
+
+
 def _reference_stmt(model, name: str):
-    if model is ReportSection:
-        return select(model.id).where(model.content_html.contains(name)).limit(1)
-    if model is Vul:
-        return select(model.id).where(or_(
-            model.description_html.contains(name),
-            model.reproduce_html.contains(name),
-            model.solution_html.contains(name),
-            model.retest_html.contains(name),
-        )).limit(1)
-    if model is ImportRecord:
-        return select(model.id).where(or_(
-            model.description_html.contains(name),
-            model.reproduce_html.contains(name),
-            model.solution_html.contains(name),
-            model.retest_html.contains(name),
-        )).limit(1)
-    return select(model.id).where(or_(
-        model.description_html.contains(name),
-        model.harm_html.contains(name),
-        model.solution_html.contains(name),
-    )).limit(1)
+    columns = IMAGE_REFERENCE_COLUMNS[model]
+    conditions = [getattr(model, column).contains(name) for column in columns]
+    return select(model.id).where(or_(*conditions)).limit(1)
 
 
 async def _has_visible_reference(session: AsyncSession, name: str) -> bool:

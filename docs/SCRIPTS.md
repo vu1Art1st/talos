@@ -44,7 +44,7 @@
 | `clean.sh` | 104 | 活跃·开发辅助（2026-09-22 新增） | 本地垃圾清理（默认预演，`--apply` 执行）；详见 §2.14 |
 | `clean.ps1` | 115 | 活跃·开发辅助（2026-09-22 新增） | Windows 侧同上（`-Apply`）；详见 §2.14 |
 
-### 1.2 后端脚本 `backend/scripts/`（22 个，含 P0-4 / P1-5 两个性能基准脚本）
+### 1.2 后端脚本 `backend/scripts/`（23 个，含 P0-4 / P1-5 两个性能基准脚本与批次 E 的差分工具）
 
 > 2026-09-17 审计修复后：删除 `migrate_from_insight2.py`（已失效，见 §4.1）与 `seed_knowledge.py`（已并入 `knowledge_data.py`，见 §4.2 M-1）；新增 `_common.py`（一次性脚本公共助手，见 §4.2 M-2）。2026-09-19 新增 `backfill_retest_src_report.py`（结论优化配套回填，已写入升级流程）。
 
@@ -71,6 +71,7 @@
 | `check_api_contract.py` | 216 | 活跃·开发辅助（2026-09-22 新增） | 前后端契约检查（OpenAPI ↔ `src/types/index.ts`）；`.githooks/pre-push` 与 AGENTS.md「常用命令」；详见 §3.13 |
 | `benchmark_lists.py` | — | 活跃·开发辅助（2026-09-26 补登） | 列表查询性能基准（独立 schema 造数 + P50/P95 + `EXPLAIN`），P0-4 配套；详见 §3.15 |
 | `bench_import.py` | 157 | 活跃·开发辅助（2026-09-26 新增） | 导入解析性能基准（20 份上限口径的耗时 / 内存 / 磁盘峰值），P1-5 配套；详见 §3.16 |
+| `diff_docx_reader.py` | — | 活跃·开发辅助（2026-10-01 新增） | DOCX 解析差分对照（legacy vs 候选 reader 的 kind/meta/records/图片 sha256 逐项比对），批次 E-2 配套；详见 §3.18 |
 
 ### 1.3 依赖矩阵
 
@@ -500,13 +501,33 @@ bash scripts/restore-drill.sh backups/anchors/2026/09/<时间戳>
 
 ### 3.17 `enable_trgm_indexes.py` — 前后通配符检索索引（活跃·常规运维·可选）
 
-- **用途**：为列表页的 `%keyword%` 检索列（漏洞标题 / 资产名 / 两表测试系统名）建立 pg_trgm
-  GIN 三元组索引，替代高成本顺序扫描。评估与实测数据见 `docs/DEPLOY.md` §10.4 与 `docs/RELEASE.md`。
+- **用途**：为四类 `%keyword%` 前导通配建立 pg_trgm GIN 三元组索引，替代高成本顺序扫描：
+  1. 列表页 / 全局搜索列（漏洞标题 / 资产名 / 两表测试系统名等）；
+  2. 图片鉴权引用列（`api/images.py` 的 `IMAGE_REFERENCE_COLUMNS`，批次 E-1.1）——漏洞 / 导入记录 /
+     知识库条目的富文本 HTML 列：图片名是 32 位十六进制串，缺索引即每次图片请求全表扫描。
+  3. 审计检索列（批次 E-1.4）——`operation_logs` 的用户名 / IP / 详情。
+  4. 函数 / 类型转换后再匹配的列（批次 E-1.5）——工单的「日期去横线」「序号转文本」「二者拼接」
+     与资产的 JSON 转文本。**目标字段可以是表达式**（脚本会原样写进 `gin ((...) opclass)`），
+     但必须与 `plan_query` / `assets.py` 生成的表达式逐字一致，否则 PostgreSQL 不会命中。
+  评估与实测数据见 `docs/DEPLOY.md` §10.4 与 `docs/RELEASE.md`。
 - **调用**：`python -m scripts.enable_trgm_indexes --dry-run`（只报告动作）/ 不带参数执行（幂等，可重复运行）。
 - **实现要点**：先探 `pg_available_extensions`，不可用或无 `CREATE EXTENSION` 权限时给出结论并**不报错退出**；
   建索引后 `ANALYZE` 并打印一条代表性 `EXPLAIN` 自证索引可用。**刻意不写成 Alembic 迁移**：
   权限不足会让 `upgrade head` 失败，而全新库走 `create_all` 会漏建，两条路径无法一致。
 - **依赖**：完整 app 配置 + `app.db`。
+
+### 3.18 `diff_docx_reader.py` — DOCX 解析差分对照（活跃·开发辅助）
+
+- **用途**：对同一批 `.docx` 比对「legacy（python-docx，`app.services.docx_parser`）」与候选实现的
+  解析结果，作为批次 E-2「lxml reader」的等价性验收工具。比对项：`doc_kind` / `meta` / `records`
+  完全相等，外加图片**数量与内容 sha256 集合**（uuid 文件名先归一化为占位符）。
+- **调用**：`python -m scripts.diff_docx_reader --source <文件或目录>`；比对自写 reader 时加
+  `--candidate lxml`（内部按 `VP_DOCX_READER` 口径在同一进程切换 `settings`）。默认候选即 legacy
+  （自比，用于验证 harness 自身与基线确定性）。
+- **输出**：`RESULT file=... status=equal|DIFF`、首个差异定位 `first_diff=...` 与 `summary`；有差异时退出码 1。
+- **已知局限**：同一段落内两张图互换位置不会被检出（uuid 随机，无法还原写出顺序）；单图顺序由
+  `tests/test_docx_contract.py` 覆盖。
+- **依赖**：完整 app 配置 + `app.db`（图片落盘需 storage 配置）。
 
 ---
 

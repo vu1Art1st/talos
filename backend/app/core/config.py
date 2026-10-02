@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     ARCHIVE_MAX_UNCOMPRESSED_MB: int = 200
     ARCHIVE_MAX_RATIO: int = 100
 
+    # docx 解析实现（批次 E-2）：lxml = 自写 iterparse reader（默认，2026-10-01 切换）；
+    # legacy = python-docx（回退路径，行为基线）。
+    # 切换依据：140 份生产导出报告 diff 全等（848 记录 / 4262 图），解析耗时约 2×；
+    # 如需回退，设 VP_DOCX_READER=legacy 即可，无需改代码。
+    DOCX_READER: str = "lxml"
+
     # 内置 admin 初始口令：留空则首次启动随机生成并打印到日志（仅显示一次）
     INITIAL_ADMIN_PASSWORD: str = ""
     # 登录防爆破：同一用户名+IP 在窗口期内允许的最大失败次数与锁定窗口（秒）

@@ -375,3 +375,52 @@ def test_report_level_medium_fallback_without_any_source(tmp_path: Path):
     assert [r["level"] for r in records] == [30, 30]
     assert all(r["level_source"] == "default" for r in records)
     assert all(r["errors"] for r in records)
+
+
+def test_parse_any_docx_template_parses_document_once(tmp_path: Path, monkeypatch):
+    """批次 E-1.0：模板分支的格式识别与内容解析共用同一个已解析文档。"""
+    import app.services.docx_parser as parser_mod
+
+    docx_file = tmp_path / "template_once.docx"
+    _make_docx(docx_file, with_image=False)
+
+    real_open = parser_mod._open_document
+    opened: list[str] = []
+
+    def counting_open(*args, **kwargs):
+        opened.append("open")
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(parser_mod, "_open_document", counting_open)
+    kind, meta, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")
+
+    assert kind == "template"
+    assert meta is None
+    assert len(records) == 1
+    assert opened == ["open"]
+
+
+def test_parse_any_docx_report_parses_document_once(tmp_path: Path, monkeypatch):
+    """批次 E-1.0：报告分支同样只解析一次（此前为识别 + 内容各解析一次）。"""
+    import app.services.docx_parser as parser_mod
+
+    docx_file = tmp_path / "report_once.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[("高危", "SQL注入漏洞", "后台登录接口存在SQL注入", "未修复")],
+        sections=[("后台登录接口存在SQL注入", ["漏洞等级：高危"])],
+    )
+
+    real_open = parser_mod._open_document
+    opened: list[str] = []
+
+    def counting_open(*args, **kwargs):
+        opened.append("open")
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(parser_mod, "_open_document", counting_open)
+    kind, _meta, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")
+
+    assert kind == "report"
+    assert len(records) == 1
+    assert opened == ["open"]

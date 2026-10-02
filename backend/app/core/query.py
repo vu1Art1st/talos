@@ -8,6 +8,11 @@ async def paginate(session: AsyncSession, stmt, page: int, size: int):
     """对已构造好过滤/排序的 select 语句执行分页，返回 (total, items)。
 
     count 由传入语句去除排序后派生，避免调用方重复维护 count 条件。
+
+    **刻意保留精确 count（批次 E-1.2，2026-10-01 实测决策）**：10 万行基准上
+    `count(*)` 61ms、页查询 0.02ms，而 `count(*) OVER ()` 合并写法 114ms——合并更慢；
+    估算 count 会改变 `total` 语义（前端分页与开放 API 契约），属功能变更，故不采用。
+    依据见 `docs/ROADMAP.md` 批次 E 的 E-1.2。
     """
     count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
     total = (await session.execute(count_stmt)).scalar_one()
@@ -29,6 +34,8 @@ async def paginate_cursor(
 
     注意：游标模式强制按 id 降序，与默认业务排序（如接收日期倒序）可能不同——
     这是稳定性优先的取舍，调用方在文档中说明即可。
+
+    精确 count 的取舍同 `paginate`（批次 E-1.2）。
     """
     count_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
     total = (await session.execute(count_stmt)).scalar_one()

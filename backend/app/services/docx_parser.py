@@ -18,14 +18,28 @@ from pathlib import Path
 # 不解析外部/内部实体，故 .docx 导入不存在 XXE 风险；xlsx 侧 openpyxl 同样
 # 使用 resolve_entities=False，且安装 defusedxml 后自动启用其安全解析器。
 from docx import Document
+from docx.document import Document as DocxDocument
 from docx.oxml.ns import qn
 from docx.table import _Cell
 
 from app.constants import IMPORT_LABEL_MAP, VUL_LEVEL_EXPORT, VUL_LEVEL_REVERSE, VUL_TYPE_REVERSE
 from app.core.archive import assert_archive_quota
+from app.core.config import settings
 
 _A_BLIP = qn("a:blip")
 _R_EMBED = qn("r:embed")
+
+
+def _open_document(file_path: str):
+    """解析入口：`VP_DOCX_READER=lxml` 时切到自写 reader，默认仍是 python-docx（行为基线）。
+
+    批次 E-2：切换前必须让 `scripts/diff_docx_reader.py` 在真实报告与契约用例上全部 equal。
+    """
+    if settings.DOCX_READER == "lxml":
+        from app.services.docx_reader import Document as LxmlDocument
+
+        return LxmlDocument(file_path)
+    return Document(file_path)
 
 
 def _norm_label(text: str) -> str:
@@ -120,14 +134,18 @@ def _map_type(text: str) -> int | None:
     return _map_code(text, VUL_TYPE_REVERSE)
 
 
-def parse_docx(file_path: str, image_dir: str, image_url_prefix: str) -> list[dict]:
+def parse_docx(file_path: str, image_dir: str, image_url_prefix: str,
+               *, doc: DocxDocument | None = None) -> list[dict]:
     """解析文档，返回记录列表。单条记录解析失败不影响整批。
 
     每条记录: {title, level, vul_type, affected_url,
               description_html, reproduce_html, solution_html, errors: [str]}
+
+    `doc` 仅供 `parse_any_docx` 复用已解析文档，避免同一文件被重复解析；其余调用方不传。
     """
     assert_archive_quota(file_path)  # 解压配额（批次 E-5），坏包交由下方的 docx 解析错误处理
-    doc = Document(file_path)
+    if doc is None:
+        doc = _open_document(file_path)
     part = doc.part
     img_dir = Path(image_dir)
     results: list[dict] = []
@@ -505,14 +523,17 @@ def _match_summary(summary: list[dict], title: str) -> dict | None:
 
 
 def parse_report_docx(file_path: str, image_dir: str, image_url_prefix: str,
-                      filename: str = "") -> tuple[dict, list[dict]]:
+                      filename: str = "", *, doc: DocxDocument | None = None) -> tuple[dict, list[dict]]:
     """解析平台报告格式文档，返回 (meta, records)。
 
     meta: {system_name, report_date, is_retest, target_url, target_ip}
     records 字段与 parse_docx 一致，另含 retest_html / fixed。
+
+    `doc` 仅供 `parse_any_docx` 复用已解析文档，避免同一文件被重复解析；其余调用方不传。
     """
     assert_archive_quota(file_path)  # 解压配额（批次 E-5），坏包交由下方的 docx 解析错误处理
-    doc = Document(file_path)
+    if doc is None:
+        doc = _open_document(file_path)
     part = doc.part
     img_dir = Path(image_dir)
 
@@ -663,12 +684,14 @@ def parse_any_docx(file_path: str, image_dir: str, image_url_prefix: str,
 
     返回 (doc_kind, meta, records)：报告格式为 ("report", meta, records)，
     否则按固定模板解析为 ("template", None, records)。
+
+    识别与内容解析共用同一个已解析文档，保证同一文件只解析一次（批次 E-1.0）。
     """
-    doc = Document(file_path)
+    doc = _open_document(file_path)
     if is_report_docx(doc):
-        meta, records = parse_report_docx(file_path, image_dir, image_url_prefix, filename)
+        meta, records = parse_report_docx(file_path, image_dir, image_url_prefix, filename, doc=doc)
         return "report", meta, records
-    return "template", None, parse_docx(file_path, image_dir, image_url_prefix)
+    return "template", None, parse_docx(file_path, image_dir, image_url_prefix, doc=doc)
 
 
 def build_import_template() -> Document:
