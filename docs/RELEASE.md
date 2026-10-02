@@ -25,6 +25,23 @@
 
 ---
 
+## [2.23.2] - 2026-10-02
+
+ROADMAP「批次 E：性能与数据访问底座」落地。本版本为**向下兼容的性能优化与内部底座升级**（无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。
+
+### 变更
+
+- **E-1 解析与检索性能**：
+  - E-1.0 `parse_any_docx` 复用同一已解析文档，去掉重复解析；
+  - E-1.1 / E-1.4 / E-1.5 扩展 trigram 索引覆盖：图片鉴权引用列、审计检索列，以及函数 / 类型转换表达式（运维脚本新增表达式目标支持，复合表达式改写为 `gin ((expr) opclass)`）；
+  - E-1.2 实测否决 `count(*) OVER ()` 合并写法（114ms vs 61ms），保留精确 count 并在 `query.py` 留决策注释。
+- **E-2 docx 解析器替换**：改用自写 `lxml.iterparse` reader（`docx_reader.py`），140 份生产导出差分 100% 相等、解析耗时约 2×；默认已切 `lxml`，`VP_DOCX_READER=legacy` 可一键回退；新增 `tests/test_docx_contract.py`（行为契约）与 `scripts/diff_docx_reader.py`（legacy/lxml 差分工具）。
+- **E-3 运行时底座**：确认 `uvloop` 在 Linux 容器自动生效；`htmldocx` 评估结论为暂不替换；开放 API 已具备游标分页（站内列表维持 offset）。
+- **E-4 反代压缩**：`frontend/nginx.conf` 启用 gzip。
+- 新增 `tests/test_image_reference_indexes.py`（索引漂移守卫）；文档同步：`ROADMAP.md`（批次 E + 待决策清单）、`SCRIPTS.md`（§3.18 与新覆盖范围）。
+
+---
+
 ## [2.23.1] - 2026-09-30
 
 前端构建与依赖现代化（向下兼容的构建/依赖调整，无后端 schema 变更、无对外 API 破坏），按项目版本规则定为 `PATCH`。
