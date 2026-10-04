@@ -4,7 +4,7 @@
 - `assert_public_url` 对内网/回环/链路本地/共享地址/非 http(s)/无主机的拒绝，公网 IP 与白名单放行；
 - 通知渠道写入侧（schema）拒绝内网 webhook；
 - 通知任务发送前兜底校验：目标被拒时**不发起任何出站请求**；放行时禁用重定向跟随；
-- 报告导出侧：远程图片不再进入 htmldocx 抓取路径（回归见 test_report_builder.py）。
+- 报告导出侧：远程图片与外链 CSS 不再进入 HTML 转换器抓取路径（回归见 test_report_builder.py）。
 """
 import httpx
 import pytest

@@ -19,7 +19,7 @@ from docx.oxml.ns import qn
 from docx.shared import Cm, Length, Pt, RGBColor
 from docx.table import Table, _Row
 from docx.text.paragraph import Paragraph
-from htmldocx import HtmlToDocx
+from html4docx import HtmlToDocx
 from pygments import lex
 from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.lexers.special import TextLexer
@@ -49,6 +49,10 @@ _ESC_CODE_BLOCK = re.compile(r"&lt;code[^&]*&gt;(.*?)&lt;/code&gt;", re.DOTALL |
 # 超链接标签剥离：仅保留链接文字（需求13：URL 以普通文本展示）
 _LINK_OPEN = re.compile(r"<a\s+[^>]*>", re.IGNORECASE)
 _LINK_CLOSE = re.compile(r"</a>", re.IGNORECASE)
+# html4docx 会抓取 <link rel="stylesheet"> / <style> 中的外部 CSS；Talos 只接受
+# 已筛选的富文本，导出边界再次剥离，防止历史脏数据或绕过 schema 的调用触发出站请求。
+_STYLE_BLOCK = re.compile(r"<style\b[^>]*>.*?</style\s*>", re.DOTALL | re.IGNORECASE)
+_LINK_TAG = re.compile(r"<link\b[^>]*>", re.IGNORECASE)
 
 # 汇总表「问题等级」字体颜色，与模板统计段落（超危/高危/中危/低危漏洞N个）保持一致
 _LEVEL_COLORS = {
@@ -68,7 +72,7 @@ _TPL_COMPANY = "中移系统集成有限公司"
 
 
 def _localize_images(html: str) -> str:
-    """把 /storage/xx 图片 URL 替换为本地文件路径，供 htmldocx 内嵌图片。
+    """把 /storage/xx 图片 URL 替换为本地文件路径，供 HTML 转换器内嵌图片。
 
     兼容多种 src 形态：单双引号、属性实体转义（&quot;/&amp;）、URL 编码字符（%20 等）、
     绝对 URL 与协议相对（//）前缀。仅接受解析后仍位于 storage 根目录内的路径，
@@ -186,11 +190,11 @@ def _drop_unresolvable_images(html: str) -> str:
     """只保留指向本地已存在文件的 img 标签，其余（含远程 http(s) URL）一律移除。
 
     两个目的：
-    1. 安全（审计 TALOS-2026-004）：htmldocx 对 http(s) 图片会直接 `urllib.request.urlopen`
+    1. 安全（审计 TALOS-2026-004）：HTML 转换器对 http(s) 图片会直接 `urllib.request.urlopen`
        抓取（无超时、无目标限制），可被用作 SSRF 与「把内网响应嵌入 docx 回带」。本函数在
-       把 HTML 交给 htmldocx **之前**移除全部远程图片，使导出只内嵌 storage 内已本地化的文件；
+       把 HTML 交给转换器 **之前**移除全部远程图片，使导出只内嵌 storage 内已本地化的文件；
        `_localize_images` 仍是唯一的本地化入口（同时负责把 /storage 与指向本平台的绝对 URL 转为本地路径）。
-    2. 版式：htmldocx 对无法读取的本地图片会输出 `<image: 文件名>` 占位段落（链接式导出），
+    2. 版式：HTML 转换器对无法读取的本地图片会输出 `<image: 文件名>` 占位段落（链接式导出），
        本地化/压缩后仍解析失败的 img 在此一并移除，由 build_report_docx 末尾的安全网兜底。"""
 
     def repl(m: re.Match) -> str:
@@ -205,6 +209,11 @@ def _demote_headings(html: str) -> str:
     （一级：二、测试结果综述 / 二级：2.1、风险问题汇总 / 三级：2.2.1、漏洞标题）。"""
     html = _HEADING_OPEN.sub("<p><strong>", html or "")
     return _HEADING_CLOSE.sub("</strong></p>", html)
+
+
+def _strip_external_css(html: str) -> str:
+    """移除外链/内嵌 CSS，避免 html4docx 把不可控目标带入出站请求。"""
+    return _LINK_TAG.sub("", _STYLE_BLOCK.sub("", html or ""))
 
 
 # ---------- 代码块：pygments 语法高亮 + 等宽样式（导出到 Word 保持格式） ----------
@@ -383,7 +392,7 @@ def _strip_code_wrap(inner: str) -> str:
 def _split_inline_codes(fragment: str) -> list[tuple[str, str, str]]:
     """把 <pre> 之外的片段按多行 <code> 再分割（提升为代码块）。
 
-    单行行内 <code> 不分割、保留在 html 片段中（htmldocx 以等宽字体渲染），
+    单行行内 <code> 不分割、保留在 html 片段中（html4docx 以等宽字体渲染），
     避免 tiptap/Word 常见 `<pre><code>...</code></pre>` 结构被二次处理。"""
     parts: list[tuple[str, str, str]] = []
     last = 0
@@ -407,7 +416,7 @@ def _split_blocks(html: str) -> list[tuple[str, str, str]]:
 
     返回 [(kind, content, lang)]，kind ∈ {"html", "code"}：
     - 真标签 <pre>、多行 <code> 以及转义实体 &lt;pre&gt;/&lt;code&gt;（多行）识别为代码块；
-    - 单行行内 <code> 保留在 html 片段中，由 htmldocx 以等宽字体渲染。
+    - 单行行内 <code> 保留在 html 片段中，由 html4docx 以等宽字体渲染。
     """
     html = html or ""
     # 1) 转义实体还原（富文本粘贴 / Word 导入会把标签存成 &lt;...&gt;）
@@ -438,7 +447,7 @@ def _strip_links(html: str) -> str:
 def _color_vuln_levels(html: str) -> str:
     """漏洞章节中的「漏洞等级：」文字着色，颜色与风险汇总一致（需求14）。
 
-    使用 htmldocx 支持的 <span style="color: #rrggbb"> 内联样式（其 color 处理
+    使用 html4docx 支持的 <span style="color: #rrggbb"> 内联样式（其 color 处理
     支持 #hex 形式），将「漏洞等级：高危」等文字染上与风险汇总一致的颜色。"""
     for label, color in _LEVEL_COLORS.items():
         # 仅处理「漏洞等级：」后紧跟该等级文字的片段，避免误伤正文
@@ -474,10 +483,11 @@ def _number_vuln_urls(html: str) -> str:
 
 
 def _add_html(doc: Document, html: str) -> None:
-    # 图片统一宽度在 docx 层面由 _normalize_image_width 处理（htmldocx 忽略 HTML width）；
+    # 图片统一宽度在 docx 层面由 _normalize_image_width 处理（html4docx 忽略 HTML width）；
     # 先本地化 /storage 路径 → 压缩图像数据（重采样+JPEG）→ 过滤仍无法解析的 img，
-    # 避免 htmldocx 对缺失图片输出 <image: 文件名> 链接占位
-    html = _localize_images(_demote_headings(html or ""))
+    # 避免 html4docx 对缺失图片输出 <image: 文件名> 链接占位
+    html = _strip_external_css(_demote_headings(html or ""))
+    html = _localize_images(html)
     html = _drop_unresolvable_images(_compress_images(html))
     for kind, content, lang in _split_blocks(html):
         if kind == "code":
@@ -928,7 +938,7 @@ def _center_body_images(doc: Document) -> None:
 
 
 def _remove_image_placeholders(doc: Document) -> None:
-    """清理 htmldocx 对缺失/下载失败图片输出的 `<image: xxx>` 占位段落（链接式图片导出）。
+    """清理 HTML 转换器对缺失/下载失败图片输出的 `<image: xxx>` 占位段落（链接式图片导出）。
 
     作为图片导出修复的最终安全网：无论前端过滤是否遗漏（如远程图片下载失败），
     凡正文段落以 `<image:` 开头的占位一律删除，保证导出文档不含链接式图片。"""

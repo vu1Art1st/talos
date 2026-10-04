@@ -10,11 +10,15 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Response
-from passlib.context import CryptContext
+from pwdlib import PasswordHash
+from pwdlib.exceptions import UnknownHashError
+from pwdlib.hashers.argon2 import Argon2Hasher
+from pwdlib.hashers.bcrypt import BcryptHasher
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 新密码使用 Argon2id；同时保留 bcrypt hasher 以验证存量哈希。
+password_hasher = PasswordHash((Argon2Hasher(), BcryptHasher()))
 
 ALGORITHM = "HS256"
 
@@ -26,14 +30,22 @@ IMAGE_COOKIE_PATH = "/storage/uploads/images"
 
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return password_hasher.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return pwd_context.verify(plain, hashed)
-    except ValueError:
+        return password_hasher.verify(plain, hashed)
+    except (UnknownHashError, ValueError):
         return False
+
+
+def verify_password_and_update(plain: str, hashed: str) -> tuple[bool, str | None]:
+    """验证密码，并在存量 bcrypt 哈希上返回新的 Argon2id 哈希。"""
+    try:
+        return password_hasher.verify_and_update(plain, hashed)
+    except (UnknownHashError, ValueError):
+        return False, None
 
 
 def _create_token(

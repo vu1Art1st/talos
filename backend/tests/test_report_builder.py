@@ -629,7 +629,7 @@ def test_export_retest_detail_appended_when_absent(tmp_path):
     assert "复测已修复" in blob
 
 
-# ---------- SSRF 修复：远程图片不再交由 htmldocx 抓取（审计 TALOS-2026-004） ----------
+# ---------- SSRF 修复：远程图片/CSS 不再交由 HTML 转换器抓取 ----------
 def test_drop_unresolvable_images_removes_remote_urls(tmp_path, monkeypatch):
     """_drop_unresolvable_images 只保留本地已存在文件：远程 http(s) 一律移除。"""
     monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
@@ -644,7 +644,7 @@ def test_drop_unresolvable_images_removes_remote_urls(tmp_path, monkeypatch):
 
 
 def test_remote_image_dropped_from_export(tmp_path, monkeypatch):
-    """回归：远程图片不得进入导出文档（此前会由 htmldocx 出站抓取）。"""
+    """回归：远程图片不得进入导出文档（此前会由 HTML 转换器出站抓取）。"""
     monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
     sections = [{
         "title": "远程图片章节", "vul_id": None,
@@ -655,6 +655,29 @@ def test_remote_image_dropped_from_export(tmp_path, monkeypatch):
     body = [p.text for p in doc.paragraphs]
     assert not any(t.strip().startswith("<image:") for t in body), body
     assert any("正文" in t for t in body), body
+
+
+def test_external_css_is_dropped_before_export(tmp_path, monkeypatch):
+    """回归：新库支持外部 CSS，但 Talos 导出边界必须剥离 link/style，禁止出站。"""
+    calls: list[str] = []
+
+    def fake_urlopen(url, *args, **kwargs):
+        calls.append(str(url))
+        raise RuntimeError("external CSS must not be fetched")
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    sections = [{
+        "title": "CSS 安全章节",
+        "vul_id": None,
+        "content_html": (
+            '<link rel="stylesheet" href="http://169.254.169.254/meta.css">'
+            "<style>p { color: red; }</style><p>CSS 正文</p>"
+        ),
+    }]
+    doc = _build(tmp_path, sections=sections)
+
+    assert calls == []
+    assert any(p.text.strip() == "CSS 正文" for p in doc.paragraphs)
 
 
 def test_absolute_self_url_image_still_embedded(tmp_path, monkeypatch):

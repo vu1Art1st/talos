@@ -54,7 +54,7 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | 数据层 | PostgreSQL 16 单栈；SQLAlchemy 2.0 async；Alembic 是唯一 schema 演进路径 |
 | 异步层 | arq + Redis；Redis 不可用时 API 可降级为进程内任务；2.20.3 起补齐租约 / 心跳 / 重试退避 / 死信与启动回收（`services/task_lifecycle.py`） |
 | 前端 | Vue 3 + TS + Pinia；`views` 负责页面，`components` 负责交互，`composables` 负责通用行为 |
-| 文档处理 | python-docx 解析、docxtpl/htmldocx 生成 DOCX、File Viewer 浏览器预览与打印；导入与导出共用 `report_meta` |
+| 文档处理 | python-docx 解析、docxtpl/html4docx 生成 DOCX、File Viewer 浏览器预览与打印；导入与导出共用 `report_meta` |
 | 部署 | Docker Compose：api / worker / frontend / postgres / redis；备份、恢复、升级均有脚本 |
 
 **组织评价**：分层边界清晰，跨模块共享实现已经大量下沉到 services、core 和 composables。当前主要
@@ -242,7 +242,8 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 > （回退本批次改动同样复现、单跑该用例通过），按既有风险登记另行处置。
 > E-1.2 经实测**决定不做**（`count(*) OVER ()` 合并写法更慢，估算 count 属功能变更）；E-1.4 已补齐
 > 审计检索列。E-2 Phase 0 已交付行为契约套件 `tests/test_docx_contract.py`（6 例）；E-3.3 已确认
-> `uvloop` 在 Linux 容器自动生效，E-3.6 评估结论为「暂不替换 htmldocx」。E-2 reader 实现与 E-3 的
+> `uvloop` 在 Linux 容器自动生效；E-3.6 当时结论为「暂不替换 htmldocx」，后续已由
+> `html-for-docx 1.2.0` 替换专项取代。E-2 reader 实现与 E-3 的
 > 依赖 / 契约类项统一进入 6.9 待决策清单。
 > **E-2 语料与工具（2026-10-01 补充）**：真实报告已入库外语料（gitignore 的 `/*.docx`），基线为
 > 13 记录 / 18 图 / 0.127 s；`scripts/diff_docx_reader.py` 就绪并 legacy 自比 `equal`；并用该报告
@@ -386,10 +387,10 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | E-3.3 ✅ | 确认启用 `uvloop` | 容器 / Linux（`uvicorn[standard]` 已含） | 已确认：`uvicorn[standard]` 在非 Windows 平台声明 `uvloop`，且 `uvicorn.loops.auto` 有则优先使用 | 中 | 低 | 无需改动 |
 | E-3.4 | 响应压缩 | API 中间件 | 按内容类型启用 gzip / br | 中 | 低 | ⏸ 待统一决策（改变响应头/字节） |
 | E-3.5 | 统计缓存 TTL | `stats_cache` | 按实测命中率调整 | 低-中 | 低 | ⏸ 待统一决策（TTL 取值） |
-| E-3.6 ✅（评估完成） | 导出侧 `htmldocx` 评估 | `report_builder._add_html` | 微基准：30 块 HTML→90 段落 **52.1ms**，同量原生 python-docx **39.3ms**（≈1.3×） | — | — | **结论：暂不替换**；真实验证需含图片的导出任务 profile（列入待决策） |
+| E-3.6 ✅（已实施） | 导出侧 HTML→DOCX 转换器替换 | `report_builder._add_html` | 已切 `html-for-docx 1.2.0`；完整报告端到端约 +16%，PDF 正文集合一致 | — | — | 已补外链 CSS 剥离；旧 `htmldocx` 已移除 |
 
-> E-3.6 收益最大也最需回归护栏（导出文档逐页比对），本批次内只做「评估 + 立项结论」，
-> 不直接替换；替换另立专项。
+> E-3.6 已按独立专项完成替换：保留图片本地化、远程图片过滤与逐页渲染回归，
+> 新增 `<link>/<style>` 导出侧剥离，避免新库外部 CSS 抓取路径进入出站请求。
 
 ### 6.6 E-4 性能杠杆总表（按 ROI 排序）
 
@@ -400,7 +401,7 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | 深分页 keyset | E-1.3 | 大（深页） | 中 | 中 |
 | lxml iterparse reader | E-2 | 大（内存 / 延迟） | 高 | 中 |
 | 批量导入并行解析 | E-2 | 大（墙钟） | 中 | 中 |
-| 导出侧 htmldocx 评估 | E-3.6（待立项） | 大（导出） | 高 | 高 |
+| 导出侧 HTML→DOCX 转换器替换 | E-3.6 ✅ 已实施 | — | — | 低 |
 | trgm 补列 | E-1.4 ✅ | 中-大 | 低 | 低 |
 | 解析结果按 hash 缓存 | E-2 | 中 | 低 | 低 |
 | LCS → `rapidfuzz` | E-3 | 中 | 低 | 低 |
@@ -432,8 +433,8 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 
 - [ ] `asyncpg` 是否已发布含 CPython 3.14 wheel 的版本（首要阻塞项，C 扩展）
 - [ ] `pydantic-core` / `lxml` / `Pillow` / `uvloop` / `httptools` 均有 3.14 wheel
-- [ ] `passlib 1.7.4` 迁移：3.13 起移除 `crypt` 模块且 passlib 已停维，先迁 `pwdlib` 或直接用 `bcrypt`（独立专项）
-- [ ] `bcrypt<4.1` 钉死版本重新评估
+- [x] `passlib 1.7.4` 迁移：已切 `pwdlib 0.3.1`，新密码使用 Argon2id，存量 bcrypt 在成功登录时自动重哈希
+- [x] `bcrypt<4.1` 钉死版本已移除，当前使用 `bcrypt>=5.0.0`
 
 **升级范围（改动点）**：`backend/Dockerfile`、`backend/ruff.toml`（`target-version`）、
 `dev.ps1` / `dev.sh`（`--python 3.12`）、`AGENTS.md`、`README.md` / `README_EN.md`、
@@ -485,7 +486,7 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | D-4 | 是否启用响应压缩 | E-3.4 | ① 不启用 ② gzip ③ br | 响应头 / 字节变化（对客户端透明，但影响 ETag、长度与调试） |
 | D-5 | 统计缓存 TTL 取值 | E-3.5 | 维持现值并按命中率调 | 数据新鲜度 vs 聚合查询次数 |
 | D-6 | docx reader 的语料来源与投入节奏 | E-2 | 方案已定（`lxml.iterparse` 自写 reader，用户已拍板）；待定：① 真实脱敏报告语料来源 ② 是否先只交付影子实现 + 开关，再决定切换 | 成本最高；收益为解析耗时与内存；无真实语料时差分只能覆盖现造用例 |
-| D-7 | 是否替换 `htmldocx` | E-3.6 | ① 不替换（当前微基准支持） ② 先做含图片的真实导出 profile 再定 | 导出链路重写成本高 |
+| D-7 ✅ 已执行 | 是否替换 `htmldocx` | E-3.6 | 已替换为 `html-for-docx 1.2.0`；完整后端回归、PDF 内容对比与外链 CSS 守卫通过 | 导出链路替换与回滚成本 |
 | D-8 ✅ 已执行 | docx 解析默认切到 lxml reader | E-2 | 已切默认 `lxml`（2026-10-01），`legacy` 保留为一键回退 | 等价性：140 份生产导出 **140/140 equal** + 6 例契约语料；容器内真实导入复验通过（13 记录与 legacy 基线一致） |
 
 ### 6.10 关闭条件
@@ -544,7 +545,7 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | 任务降级到 API 进程后重启丢失 | 中高→低（2.20.3 收敛） | Redis 故障期间提交任务，重启后任务消失 | **已闭环**：任务状态与租约持久化在库，API 启动与每 5 分钟兜底扫描会重新投递 | dispatch / worker / `task_lifecycle` |
 | 图片鉴权引用查询随数据量放大 | 中 | 报告页图片多时接口延迟明显上升 | 批次 E-1.1：`image_refs` 反向索引或 trgm 补列；改前先留 EXPLAIN 基线 | `api/images.py` |
 | 文档解析器替换造成导入行为偏差 | 高（仅当实施时） | 差分用例出现字段 / 图片不一致，或报告被误判为模板 | 批次 E-2：影子实现 + python-docx oracle 差分 + `VP_DOCX_READER` 开关；差分未全绿不得切换 | `docx_parser`、导入链路 |
-| Python 3.14 升级缺少关键 wheel 或依赖失效 | 中（仅当实施时） | 容器构建失败、认证异常或解析依赖不可用 | 批次 E-5：升级前核查 `asyncpg` 等 C 扩展 wheel；`passlib` 迁移独立专项；全量门禁 + E2E | `backend/Dockerfile`、`core/security.py` |
+| Python 3.14 升级缺少关键 wheel 或依赖失效 | 中（仅当实施时） | 容器构建失败、认证异常或解析依赖不可用 | 批次 E-5：升级前核查 `asyncpg` 等 C 扩展 wheel；`passlib` 迁移已完成；全量门禁 + E2E | `backend/Dockerfile`、`core/security.py` |
 | `test_api_p1.py` 用例顺序相关偶发失败 | 低 | 模块单跑稳定失败、全量并行通过（`test_message_center_and_todos`） | 已用回退验证排除与批次 E 相关；需单独定位是测试假设过强还是 `/todos` 分组真实缺陷 | 测试与待办模块 |
 
 ---

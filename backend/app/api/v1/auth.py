@@ -18,6 +18,7 @@ from app.core.security import (
     refresh_ttl_seconds,
     set_image_cookie,
     verify_password,
+    verify_password_and_update,
 )
 from app.core.timeutil import now
 from app.db import get_session
@@ -72,7 +73,12 @@ async def login(
     user = (
         await session.execute(select(User).where(User.username == form.username))
     ).scalar_one_or_none()
-    if user is None or not verify_password(form.password, user.password_hash):
+    password_ok, updated_hash = (
+        verify_password_and_update(form.password, user.password_hash)
+        if user is not None
+        else (False, None)
+    )
+    if user is None or not password_ok:
         await incr_failure(fail_key, window)
         await audit(session, request, "login_failure", form.username, {"ip": client_ip})
         raise HTTPException(401, "用户名或密码错误")
@@ -81,6 +87,8 @@ async def login(
         raise HTTPException(403, "账号已禁用")
     await clear_failures(fail_key)
     user.last_login = now()
+    if updated_hash:
+        user.password_hash = updated_hash
     await session.commit()
     await audit(session, request, "login_success", user, {"ip": client_ip})
     return await _issue_tokens(response, user)

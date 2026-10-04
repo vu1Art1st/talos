@@ -28,6 +28,50 @@ async def test_login_and_me(client: AsyncClient, auth: dict):
     )
     assert bad.status_code == 401
 
+
+async def test_login_upgrades_legacy_bcrypt_hash(client: AsyncClient):
+    """存量 bcrypt 密码仍可登录，并在登录成功后替换为 Argon2id。"""
+    import bcrypt
+    from sqlalchemy import select
+
+    from app.db import async_session_maker
+    from app.models import Role, User
+
+    username = "legacy_bcrypt_user"
+    password = "Legacy@123456"
+    legacy = bcrypt.hashpw(
+        password.encode(),
+        bcrypt.gensalt(rounds=12, prefix=b"2b"),
+    ).decode()
+    async with async_session_maker() as session:
+        role = (
+            await session.execute(select(Role).where(Role.name == "超级管理员"))
+        ).scalar_one()
+        user = User(
+            username=username,
+            password_hash=legacy,
+            realname="存量哈希用户",
+            role_id=role.id,
+            is_active=True,
+            must_change_password=False,
+        )
+        session.add(user)
+        await session.commit()
+        user_id = user.id
+
+    resp = await client.post(
+        "/api/v1/auth/login",
+        data={"username": username, "password": password},
+    )
+    assert resp.status_code == 200, resp.text
+
+    async with async_session_maker() as session:
+        user = await session.get(User, user_id)
+        assert user is not None
+        assert user.password_hash.startswith("$argon2id$")
+        await session.delete(user)
+        await session.commit()
+
 async def test_meta(client: AsyncClient, auth: dict):
     resp = await client.get("/api/v1/meta", headers=auth)
     assert resp.status_code == 200

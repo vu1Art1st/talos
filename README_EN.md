@@ -41,8 +41,8 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 |---|---|
 | Backend | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
 | Database / Queue | PostgreSQL 16 (unified across dev / test / production; hosted locally by DBngin) · Redis · arq async task queue |
-| Frontend | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 2 |
-| Document Processing | python-docx (parsing) · htmldocx + pygments (Word export) · File Viewer (browser preview and print) |
+| Frontend | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 3 |
+| Document Processing | python-docx (parsing) · html4docx + pygments (Word export) · File Viewer (browser preview and print) |
 | Deployment | Docker Compose (api / worker / frontend / postgres / redis) |
 
 ## Quick Start (Docker Compose)

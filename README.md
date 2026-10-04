@@ -42,7 +42,7 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 | 后端 | Python 3.12 · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · Alembic |
 | 数据库/队列 | PostgreSQL 16（开发 / 测试 / 生产统一，本地由 DBngin 托管）· Redis · arq 异步任务队列 |
 | 前端 | Vue 3 · TypeScript · Vite · Pinia · Element Plus · TailwindCSS · ECharts · TipTap 3 |
-| 文档处理 | python-docx（解析）· htmldocx + pygments（Word 导出）· File Viewer（浏览器预览与打印） |
+| 文档处理 | python-docx（解析）· html4docx + pygments（Word 导出）· File Viewer（浏览器预览与打印） |
 | 部署 | Docker Compose（api / worker / frontend / postgres / redis） |
 
 ## 快速部署（Docker Compose）
