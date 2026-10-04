@@ -157,15 +157,23 @@ async def _my_vuln_todos(
     count = (await session.execute(select(func.count(Vul.id)).where(*cond))).scalar_one()
     rows = (
         await session.execute(
-            select(Vul).where(*cond).order_by(Vul.id.desc()).offset(offset).limit(limit)
+            select(Vul, TestingPlan)
+            .outerjoin(TestingPlan, TestingPlan.id == Vul.testing_plan_id)
+            .where(*cond)
+            .order_by(Vul.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
-    ).scalars().all()
+    ).all()
     items = [
         {
             "id": v.id, "title": v.title, "level": v.level, "level_name": VUL_LEVEL.get(v.level, ""),
+            # 归属提示：漏洞名称后展示「工单ID-系统名称」，未关联工单时留空由前端省略
+            "ticket_id": plan.ticket_id if plan else "",
+            "system_name": plan.system_name if plan else "",
             "link": f"/vulns/{v.id}",
         }
-        for v in rows
+        for v, plan in rows
     ]
     return TodoItemOut(category="my_vulns", name="我提交的漏洞", count=count, items=items)
 

@@ -115,6 +115,31 @@ export interface BatchExportResult {
   title?: string
 }
 
+/** 报告手动导出前完整性提醒的字段代码（与后端 ExportCheckOut 一致） */
+export type ExportMissingField = 'author' | 'test_period' | 'target_ip' | 'test_account'
+
+/** 单个报告导出前检查结果（重复导出 + 空字段提醒） */
+export interface ExportCheckResult {
+  duplicate: boolean
+  missing_fields: ExportMissingField[]
+  report_id?: number | null
+  report_title?: string
+  fmt?: string
+  last_job_id?: number | null
+  last_time?: string | null
+  last_status?: string
+  last_version?: number | null
+  last_file_name?: string
+  last_file_size?: number | null
+}
+
+/** 批量导出前完整性检查结果 */
+export interface BatchExportCheckResult {
+  report_id: number
+  title: string
+  missing_fields: ExportMissingField[]
+}
+
 /** 组织（资产表单的部门下拉、资产负责人按组织过滤、组织管理列表） */
 export interface Group {
   id: number
@@ -631,6 +656,11 @@ export interface VulnDraft {
   level: number
   vul_type: number
   source: number
+  /** 漏洞详情：与漏洞库录入同一口径，随草稿一并创建落库 */
+  affected_url?: string
+  description_html?: string
+  reproduce_html?: string
+  solution_html?: string
 }
 
 /** 知识库条目（列表行与新增/编辑表单共用字段） */
@@ -698,6 +728,8 @@ export interface Vuln {
   solution_html?: string | null
   /** 提交人（详情页编辑权限判定：未关联计划时由提交人或漏洞管理员编辑） */
   submitter_id?: number | null
+  /** 当前用户是否可直接编辑（服务端按工单认领关系派生） */
+  can_edit: boolean
   cvss_vector?: string | null
   score?: number
   fix_time?: string | null

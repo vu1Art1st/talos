@@ -22,8 +22,10 @@ import VulnRetestPanel from '../VulnRetestPanel.vue'
 describe('VulnRetestPanel 复测记录面板', () => {
   beforeEach(() => {
     getMock.mockReset()
-    // 初始无复测记录：GET /vulns/{id}/retests 返回空数组；回退请求 /vulns/{id} 同样给空数据
-    getMock.mockResolvedValue({ data: [] })
+    getMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/retests')) return { data: [] }
+      return { data: { can_edit: true, retest_html: '' } }
+    })
     document.body.innerHTML = ''
   })
 
@@ -49,6 +51,22 @@ describe('VulnRetestPanel 复测记录面板', () => {
     expect(wrapper.element.contains(overlay!)).toBe(false)
     expect(document.body.contains(overlay!)).toBe(true)
 
+    wrapper.unmount()
+  })
+
+  it('漏洞 can_edit=false 时只读展示，不提供增删改入口', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url.endsWith('/retests')) return { data: [] }
+      return { data: { can_edit: false, retest_html: '' } }
+    })
+    const wrapper = mount(VulnRetestPanel, {
+      props: { vulId: 2 },
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('仅已认领该渗透测试工单的账号可维护复测记录')
+    expect(wrapper.findAll('button').some((b) => b.text().includes('新增复测记录'))).toBe(false)
     wrapper.unmount()
   })
 })

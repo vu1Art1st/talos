@@ -269,6 +269,19 @@ async def test_retry_due_deliveries_redelivers(client, monkeypatch):
         row = await session.get(NotifyDelivery, delivery_id)
         row.status = "failed"
         row.next_retry_at = now() - timedelta(seconds=1)
+        # 隔离本用例：扫描函数覆盖整个 schema，先把其它用例遗留的到期记录移出本次窗口
+        other_due = (
+            await session.execute(
+                select(NotifyDelivery).where(
+                    NotifyDelivery.id != delivery_id,
+                    NotifyDelivery.status == "failed",
+                    NotifyDelivery.next_retry_at.is_not(None),
+                    NotifyDelivery.next_retry_at <= now(),
+                )
+            )
+        ).scalars().all()
+        for other in other_due:
+            other.next_retry_at = now() + timedelta(days=1)
         await session.commit()
 
     async with async_session_maker() as session:

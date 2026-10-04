@@ -6,12 +6,11 @@
 """
 import copy
 import html as _html_mod
-import ipaddress
 import logging
 import re
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote
 
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -30,6 +29,7 @@ from app.constants import VUL_LEVEL_EXPORT, VUL_STATUS, VUL_TYPE, VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow  # 系统本地时间（UTC+8）；别名避免遮蔽模块内局部变量 now
 from app.services.report_html import RETEST_LABEL_HTML, strip_embedded_retest
+from app.services.report_targets import build_target_info
 
 logger = logging.getLogger(__name__)
 
@@ -613,15 +613,6 @@ def _version_records(meta: dict, now: datetime, vulns: list[dict]) -> list[dict]
     return records
 
 
-def _is_ip_literal(host: str) -> bool:
-    """判断 hostname 是否为纯 IP（IPv4/IPv6）；纯 IP 不计入被测系统域名。"""
-    try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        return False
-
-
 def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datetime) -> None:
     table = doc.tables[1]
     records = _version_records(meta, now, vulns)
@@ -637,30 +628,22 @@ def _fill_version_table(doc: Document, meta: dict, vulns: list[dict], now: datet
 
 
 def _fill_target_table(
-    doc: Document, meta: dict, assets: list[dict], plan_urls: list[str] | None = None,
+    doc: Document,
+    meta: dict,
+    assets: list[dict],
+    vulns: list[dict],
+    plan_urls: list[str] | None = None,
 ) -> None:
     table = doc.tables[4]
-    urls: list[str] = []
-    for a in assets:
-        urls.extend(u.get("url", "") for u in a.get("public_urls", []) if isinstance(u, dict))
-        urls.extend(a.get("internal_urls", []))
-    urls = [u for u in dict.fromkeys(urls) if u]
-    # 工单「被测系统URL」非空时为权威来源（可手动增删，不受资产URL变化影响）；
-    # 为空时回退沿「漏洞→资产」聚合的URL，兼容无计划/未维护工单的报告
-    if plan_urls:
-        urls = [u for u in dict.fromkeys(plan_urls) if u]
-    # 被测系统域名：仅保留真实域名，纯 IP（IPv4/IPv6）的 hostname 不展示
-    domains = list(dict.fromkeys(
-        h for u in urls
-        if (h := urlparse(u if "://" in u else f"http://{u}").hostname)
-        and not _is_ip_literal(h)
-    ))
+    targets = build_target_info(
+        meta=meta, assets=assets, plan_urls=plan_urls, vulns=vulns,
+    )
     system_names = list(dict.fromkeys(a.get("name", "") for a in assets if a.get("name")))
 
     _set_cell_text(table.rows[0].cells[1], meta.get("project_name") or "、".join(system_names) or meta.get("title", ""))
-    _set_cell_text(table.rows[1].cells[1], "\n".join(urls))
-    _set_cell_text(table.rows[2].cells[1], "\n".join(domains))
-    _set_cell_text(table.rows[3].cells[1], meta.get("target_ip", ""))
+    _set_cell_text(table.rows[1].cells[1], "\n".join(targets.urls))
+    _set_cell_text(table.rows[2].cells[1], "\n".join(targets.domains))
+    _set_cell_text(table.rows[3].cells[1], "\n".join(targets.ips))
     _set_cell_text(table.rows[4].cells[1], meta.get("test_account", ""))
 
 
@@ -981,7 +964,7 @@ def build_report_docx(
     _fill_cover(doc, meta, now)
     _fill_applicability(doc, meta)
     _fill_version_table(doc, meta, vulns, now)
-    _fill_target_table(doc, meta, assets or [], plan_urls)
+    _fill_target_table(doc, meta, assets or [], vulns, plan_urls)
     _fill_schedule_table(doc, meta)
     _fill_summary(doc, meta, vulns)
     _remove_sample_details(doc)

@@ -11,7 +11,8 @@
       <div class="text-sm prose max-w-none" v-html="safeHtml(fallbackHtml)" />
     </el-card>
 
-    <el-empty v-if="!records.length && !fallbackHtml" description="暂无复测记录，点击下方按钮新增" :image-size="80" />
+    <el-empty v-if="!records.length && !fallbackHtml"
+              :description="canEdit ? '暂无复测记录，点击下方按钮新增' : '暂无复测记录'" :image-size="80" />
 
     <el-card v-for="(rec, i) in records" :key="rec.id" shadow="never" class="mb-4">
       <template #header>
@@ -26,16 +27,17 @@
             @keyup.enter="confirmEditTitle(rec)"
             @blur="cancelEditTitle"
           />
-          <div v-else class="flex items-center gap-2 cursor-pointer group" @click="startEditTitle(rec)">
+          <div v-else class="flex items-center gap-2" :class="{ 'cursor-pointer group': canEdit }"
+               @click="canEdit && startEditTitle(rec)">
             <span class="font-medium">{{ titles[i] }}</span>
-            <el-icon class="text-gray-300 group-hover:text-primary" :size="13"><EditPen /></el-icon>
+            <el-icon v-if="canEdit" class="text-gray-300 group-hover:text-primary" :size="13"><EditPen /></el-icon>
           </div>
           <span class="text-xs text-gray-400">{{ rec.username }} · {{ fmtDateTime(rec.create_time) }}</span>
           <div class="flex-1" />
-          <el-button size="small" type="primary" :loading="savingId === rec.id" @click="saveRecord(rec)">
+          <el-button v-if="canEdit" size="small" type="primary" :loading="savingId === rec.id" @click="saveRecord(rec)">
             保存
           </el-button>
-          <el-popconfirm title="确认删除该复测记录？" @confirm="removeRecord(rec)">
+          <el-popconfirm v-if="canEdit" title="确认删除该复测记录？" @confirm="removeRecord(rec)">
             <template #reference>
               <el-button size="small" type="danger" plain>删除</el-button>
             </template>
@@ -43,14 +45,16 @@
         </div>
       </template>
       <div class="text-sm font-medium text-gray-600 mb-2">漏洞修复</div>
-      <RichEditor v-model="rec.content_html"
+      <div v-if="!canEdit" class="rich-content text-sm" v-html="safeHtml(rec.content_html)" />
+      <RichEditor v-else v-model="rec.content_html"
                   @update:json="(j: unknown) => (rec.content_json = j)" />
     </el-card>
 
     <div class="flex items-center gap-2">
-      <el-button type="primary" plain @click="addVisible = true">
+      <el-button v-if="canEdit" type="primary" plain @click="addVisible = true">
         <el-icon class="mr-1"><Plus /></el-icon>新增复测记录
       </el-button>
+      <span v-else class="text-xs text-gray-400">仅已认领该渗透测试工单的账号可维护复测记录</span>
       <slot name="actions" />
     </div>
 
@@ -97,12 +101,16 @@ import { fmtDateTime } from '../utils/format'
 import { safeHtml } from '../utils/html'
 import type { RetestRecord, Vuln } from '../types'
 
-// 复测记录增删改面板：供独立复测页（VulnRetest）与测试计划流程抽屉复用。
+// 复测记录增删改面板：供漏洞编辑页、报告编辑器与测试计划流程抽屉复用。
 // 新增复测记录时可一并选择复测结论（复测未修复/已修复），保存时同步调整漏洞状态。
 const props = defineProps<{ vulId: number }>()
-const emit = defineEmits<{ (e: 'changed', count: number): void }>()
+const emit = defineEmits<{
+  (e: 'changed', count: number): void
+  (e: 'status-changed', status: number): void
+}>()
 
 const records = ref<RetestRecord[]>([])
+const canEdit = ref(false)
 const adding = ref(false)
 const savingId = ref<number | null>(null)
 const addVisible = ref(false)
@@ -145,19 +153,14 @@ const titles = computed(() => {
 })
 
 async function load() {
-  const { data } = await client.get<RetestRecord[]>(`/vulns/${props.vulId}/retests`)
-  records.value = data
-  // 记录为空时回退读取漏洞 retest_html，保证报告「复测处理」填写的复测内容可见
-  if (!data.length) {
-    try {
-      const vul = await client.get<Vuln>(`/vulns/${props.vulId}`)
-      fallbackHtml.value = vul.data?.retest_html || ''
-    } catch {
-      fallbackHtml.value = ''
-    }
-  } else {
-    fallbackHtml.value = ''
-  }
+  const [recordResp, vulResp] = await Promise.all([
+    client.get<RetestRecord[]>(`/vulns/${props.vulId}/retests`),
+    client.get<Vuln>(`/vulns/${props.vulId}`),
+  ])
+  records.value = recordResp.data
+  canEdit.value = vulResp.data?.can_edit === true
+  // 记录为空时回退展示漏洞 retest_html，保证报告「复测处理」填写的复测内容可见
+  fallbackHtml.value = recordResp.data.length ? '' : (vulResp.data?.retest_html || '')
 }
 
 // 组件实例可能被 el-table 展开行复用（切换漏洞行），监听 vulId 变化时重新加载
@@ -168,6 +171,7 @@ async function submitAdd() {
   const valid = await addFormRef.value?.validate().catch(() => false)
   if (!valid) return
   adding.value = true
+  const nextStatus = addForm.status
   try {
     const { data } = await client.post<RetestRecord>(`/vulns/${props.vulId}/retests`, {
       title: addForm.title.trim() || null,
@@ -183,6 +187,7 @@ async function submitAdd() {
     addForm.status = null
     ElMessage.success('复测记录已新增')
     emit('changed', records.value.length)
+    if (nextStatus !== null) emit('status-changed', nextStatus)
   } finally {
     adding.value = false
   }
@@ -190,6 +195,7 @@ async function submitAdd() {
 
 // ---------- 标题行内编辑 ----------
 function startEditTitle(rec: RetestRecord) {
+  if (!canEdit.value) return
   editingTitleId.value = rec.id
   titleDraft.value = rec.title || ''
 }

@@ -6,7 +6,7 @@ from zipfile import ZipFile
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import DOCX_MIME, VulStatus
@@ -16,10 +16,13 @@ from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
 from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
+    BatchExportCheckIn,
+    BatchExportIn,
     ExportCheckIn,
     ExportCheckOut,
     ExportJobOut,
     Page,
+    ReportExportCheckOut,
     ReportListOut,
     ReportOut,
     ReportSaveIn,
@@ -30,6 +33,7 @@ from app.schemas import (
 from app.services import plan_service, template_service, vul_service
 from app.services.audit_service import audit
 from app.services.notify_service import notify
+from app.services.report_export import missing_export_fields, resolve_test_period
 from app.services.report_html import vuln_section_html as _vuln_section_html
 from app.services.report_retest import create_retest_report, snapshot_vul_edits
 from app.workers.dispatch import dispatch
@@ -320,11 +324,6 @@ async def check_report_similarity(
     return ReportSimilarityOut(similar=bool(matched), matched_reports=matched)
 
 
-class BatchExportIn(BaseModel):
-    report_ids: list[int]
-    fmt: str = "docx"
-
-
 @router.post("/batch-export")
 async def batch_export(
     body: BatchExportIn,
@@ -372,6 +371,30 @@ async def batch_export(
     for job in pending:
         await dispatch(request.app, "export_report_task", job.id, job_id=f"export:{job.id}")
     return jobs
+
+
+@router.post("/batch-export-check", response_model=list[ReportExportCheckOut])
+async def batch_export_check(
+    body: BatchExportCheckIn,
+    _: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """批量导出前汇总各报告的空字段，供一次确认后继续导出。"""
+    results: list[ReportExportCheckOut] = []
+    seen: set[int] = set()
+    for report_id in body.report_ids:
+        if report_id in seen:
+            continue
+        seen.add(report_id)
+        report = await session.get(Report, report_id)
+        if report is None:
+            continue
+        results.append(ReportExportCheckOut(
+            report_id=report.id,
+            title=report.title,
+            missing_fields=await missing_export_fields(session, report),
+        ))
+    return results
 
 
 @router.get("/export-jobs/status")
@@ -625,6 +648,7 @@ async def check_export_duplicate(
         raise HTTPException(400, "仅支持导出 DOCX")
     fmt = body.fmt
     report = await _get_report(session, report_id)
+    missing_fields = await missing_export_fields(session, report)
     last = (
         await session.execute(
             select(ExportJob)
@@ -632,7 +656,12 @@ async def check_export_duplicate(
             .order_by(ExportJob.id.desc()).limit(1)
         )
     ).scalar_one_or_none()
-    base = ExportCheckOut(report_id=report_id, report_title=report.title, fmt=fmt)
+    base = ExportCheckOut(
+        report_id=report_id,
+        report_title=report.title,
+        fmt=fmt,
+        missing_fields=missing_fields,
+    )
     if last is None or last.report_snapshot is None:
         return base
     if last.report_snapshot == report.fingerprint():
@@ -647,6 +676,7 @@ async def check_export_duplicate(
                 file_size = None
         return ExportCheckOut(
             duplicate=True,
+            missing_fields=missing_fields,
             report_id=report_id,
             report_title=report.title,
             fmt=last.fmt,
@@ -673,18 +703,7 @@ async def export_report(
     report = await _get_report(session, report_id)
     # 测试周期自动预填（仅当字段为空，不覆盖用户已填写值）：
     # 开始日期 = 关联漏洞最早提交日期，结束日期 = 当天
-    if not report.test_start or not report.test_end:
-        vul_ids = [s.vul_id for s in report.sections if s.vul_id]
-        if not report.test_start and vul_ids:
-            earliest = (
-                await session.execute(
-                    select(func.min(Vul.submit_time)).where(Vul.id.in_(vul_ids))
-                )
-            ).scalar_one_or_none()
-            if earliest is not None:
-                report.test_start = earliest.date().isoformat()
-        if not report.test_end:
-            report.test_end = now().date().isoformat()
+    report.test_start, report.test_end = await resolve_test_period(session, report)
     # 实际人天自动计算：测试结束日期 - 开始日期 + 1（导出时预填周期同样会刷新该值）
     report.actual_mandays = mandays_between(report.test_start, report.test_end)
     # 同步刷新关联测试计划的实际人天（仅纳入初测报告，复测报告不计入）

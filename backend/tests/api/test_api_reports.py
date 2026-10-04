@@ -412,6 +412,87 @@ async def test_report_export_duplicate_check(client: AsyncClient, auth: dict):
     assert resp.status_code == 200, resp.text
     assert (await check_export())["duplicate"] is False
 
+
+async def test_report_export_missing_fields_and_affected_url_fallback(
+    client: AsyncClient, auth: dict,
+):
+    """导出预检返回空字段；无工单/资产 URL 时用影响 URL 生成测试目标。"""
+    blank = (await client.post(
+        "/api/v1/reports",
+        headers=auth,
+        json={"title": "待补充信息报告", "sections": []},
+    )).json()
+    blank_check = await client.post(
+        f"/api/v1/reports/{blank['id']}/export-check",
+        headers=auth,
+        json={"fmt": "docx"},
+    )
+    assert blank_check.status_code == 200, blank_check.text
+    assert blank_check.json()["missing_fields"] == [
+        "author", "test_period", "target_ip", "test_account",
+    ]
+
+    asset = (await client.post(
+        "/api/v1/assets", headers=auth, json={"name": "影响URL回退系统"},
+    )).json()
+    vuln = (await client.post(
+        "/api/v1/vulns",
+        headers=auth,
+        json={
+            "title": "影响URL回退漏洞",
+            "level": 30,
+            "asset_ids": [asset["id"]],
+            "affected_url": "http://10.20.1.10:8080/admin/login?next=/home",
+        },
+    )).json()
+    report = (await client.post(
+        "/api/v1/reports/from-vulns",
+        headers=auth,
+        json={"title": "影响URL回退报告", "vul_ids": [vuln["id"]]},
+    )).json()
+
+    check = await client.post(
+        f"/api/v1/reports/{report['id']}/export-check",
+        headers=auth,
+        json={"fmt": "docx"},
+    )
+    assert check.status_code == 200, check.text
+    assert check.json()["missing_fields"] == ["test_account"]
+
+    batch_check = await client.post(
+        "/api/v1/reports/batch-export-check",
+        headers=auth,
+        json={"report_ids": [blank["id"], report["id"], 99999999]},
+    )
+    assert batch_check.status_code == 200, batch_check.text
+    assert [(item["report_id"], item["missing_fields"]) for item in batch_check.json()] == [
+        (blank["id"], ["author", "test_period", "target_ip", "test_account"]),
+        (report["id"], ["test_account"]),
+    ]
+
+    export = await client.post(
+        f"/api/v1/reports/{report['id']}/export",
+        headers=auth,
+        json={"fmt": "docx"},
+    )
+    assert export.status_code == 200, export.text
+    job = await _wait_job(client, auth, report["id"], export.json()["id"])
+    assert job["status"] == "done", job
+    download = await client.get(
+        f"/api/v1/reports/exports/{job['id']}/download", headers=auth,
+    )
+    assert download.status_code == 200
+
+    from io import BytesIO
+
+    from docx import Document
+
+    doc = Document(BytesIO(download.content))
+    target = doc.tables[4]
+    assert target.rows[1].cells[1].text.strip() == "http://10.20.1.10:8080/"
+    assert target.rows[2].cells[1].text.strip() == ""
+    assert target.rows[3].cells[1].text.strip() == "10.20.1.10"
+
 async def test_report_vuln_state_automation(client: AsyncClient, auth: dict):
     """报告联动状态机：生成报告→修复中，发起复测→复测中，全部已修复/已忽略→报告已完成。"""
     resp = await client.post("/api/v1/assets", headers=auth, json={"name": "联动测试系统"})

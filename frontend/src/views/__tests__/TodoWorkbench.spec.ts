@@ -179,4 +179,35 @@ describe('TodoWorkbench 个人待办', () => {
     expect(wrapper.text()).toContain('复测完成')
     wrapper.unmount()
   })
+
+  it('我提交的漏洞在名称后附「（工单ID-系统名称）」归属提示', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/todos') {
+        return {
+          data: {
+            total: 2,
+            groups: [{
+              category: 'my_vulns', name: '我提交的漏洞', count: 2,
+              items: [
+                {
+                  id: 1, title: '归属漏洞', level: 20, level_name: '高危',
+                  ticket_id: 'T-20261002-001', system_name: '归属系统', link: '/vulns/1',
+                },
+                { id: 2, title: '无归属漏洞', level: 30, level_name: '中危', link: '/vulns/2' },
+              ],
+            }],
+          },
+        }
+      }
+      return { data: [] }
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('归属漏洞（T-20261002-001-归属系统）')
+    // 未关联工单的漏洞只显示名称，不追加空归属后缀
+    expect(wrapper.text()).toContain('无归属漏洞')
+    expect(wrapper.text()).not.toContain('无归属漏洞（')
+    wrapper.unmount()
+  })
 })

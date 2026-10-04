@@ -170,7 +170,13 @@ const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
 const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Report>('/reports')
-const { downloadJob, downloadZip, fetchJobs, removeExportJob: deleteExportJob } = useExportJobs()
+const {
+  confirmBatchExportWarnings,
+  downloadJob,
+  downloadZip,
+  fetchJobs,
+  removeExportJob: deleteExportJob,
+} = useExportJobs()
 const fromVulnsVisible = ref(false)
 const genTitle = ref('')
 const genVulIds = ref<number[]>([])
@@ -227,6 +233,7 @@ async function batchDownload() {
   if (!ids.length) return
   batchDownloading.value = true
   try {
+    if (!(await confirmBatchExportWarnings(ids))) return
     const { data } = await client.post<BatchExportResult[]>('/reports/batch-export', { report_ids: ids, fmt: 'docx' })
     if (!data.length) {
       ElMessage.warning('未找到可导出的报告')

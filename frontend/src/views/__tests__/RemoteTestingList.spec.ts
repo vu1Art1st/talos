@@ -7,6 +7,15 @@ import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
+// RichEditor 依赖 TipTap（jsdom 下重且与本测试无关），用轻量 stub 替代
+vi.mock('../../components/RichEditor.vue', () => ({
+  default: {
+    name: 'RichEditor',
+    props: ['modelValue'],
+    template: '<div class="rich-stub" />',
+  },
+}))
+
 // 屏蔽 auth store（其导入链会拉起 router/pinia）：仅需 fetchMeta 返回可用字典结构
 vi.mock('../../stores/auth', () => ({
   useAuthStore: () => ({
@@ -62,6 +71,33 @@ describe('RemoteTestingList 视图', () => {
     const dialogText = wrapper.text() + (document.body.textContent ?? '')
     expect(dialogText).toContain('关联资产')
     expect(dialogText).toContain('新增漏洞')
+    wrapper.unmount()
+  })
+
+  // 功能补全：新增漏洞支持录入影响URL / 描述 / 复现步骤 / 修复建议，随草稿创建落库
+  it('新增漏洞表单提供完整漏洞详情录入', async () => {
+    const wrapper = mount(RemoteTestingList, {
+      global: { plugins: [ElementPlus] },
+    })
+    await flushPromises()
+
+    const addBtn = wrapper.findAll('button').find((b) => b.text().includes('新增远程检测'))
+    expect(addBtn).toBeTruthy()
+    await addBtn!.trigger('click')
+    await flushPromises()
+
+    const quickBtn = wrapper.findAll('button').find((b) => b.text().includes('新增漏洞'))
+    expect(quickBtn).toBeTruthy()
+    await quickBtn!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.quick-vul-form').exists()).toBe(true)
+    const dialogText = wrapper.text() + (document.body.textContent ?? '')
+    expect(dialogText).toContain('漏洞详情（可选）')
+    expect(dialogText).toContain('影响URL')
+    expect(dialogText).toContain('漏洞描述')
+    expect(dialogText).toContain('复现步骤')
+    expect(dialogText).toContain('修复建议')
     wrapper.unmount()
   })
 })

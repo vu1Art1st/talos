@@ -11,6 +11,7 @@
 """
 from pathlib import Path
 
+import pytest
 from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
@@ -29,6 +30,22 @@ from app.services.report_builder import (
     FIXED_STATUS_COLOR,
     build_report_docx,
 )
+from app.services import report_targets
+
+
+@pytest.fixture(autouse=True)
+def _stub_target_dns(monkeypatch):
+    """测试目标域名解析固定为本地桩，避免单测依赖外部 DNS。"""
+    monkeypatch.setattr(
+        report_targets,
+        "resolve_host_ips",
+        lambda host: {
+            "asset.example.com": ["203.0.113.20"],
+            "plan.example.com": ["203.0.113.21"],
+            "www.example.com": ["203.0.113.22"],
+            "oa.example.com": ["203.0.113.23"],
+        }.get(host, []),
+    )
 
 
 def _build(tmp_path, meta=None, vulns=None, sections=None, assets=None, plan_urls=None):
@@ -165,6 +182,62 @@ def test_target_table_plan_urls_priority(tmp_path):
         ["https://asset.example.com", "http://10.20.1.10:8080"])
     # 域名格由全部URL推导 hostname；纯 IP（10.20.1.10）不计入域名
     assert table2.rows[2].cells[1].text.strip() == "asset.example.com"
+
+
+def test_target_table_affected_url_fallback_root_and_ip_split(tmp_path):
+    """无工单/资产 URL 时回退影响 URL，并拆成根 URL、域名与 IP。"""
+    vulns = [{
+        "affected_url": (
+            "https://app.example.net/login?next=/home\n"
+            "http://10.20.1.10:8080/admin"
+        ),
+    }]
+    doc = _build(tmp_path, meta={"target_ip": ""}, vulns=vulns)
+    table = doc.tables[4]
+    assert table.rows[1].cells[1].text.strip() == (
+        "https://app.example.net/\nhttp://10.20.1.10:8080/"
+    )
+    assert table.rows[2].cells[1].text.strip() == "app.example.net"
+    assert table.rows[3].cells[1].text.strip() == "10.20.1.10"
+
+
+def test_target_table_pure_ip_and_ipv6_domains_are_empty(tmp_path):
+    """纯 IPv4/IPv6 站点的域名格为空，IP 格取 URL 主机。"""
+    vulns = [{
+        "affected_url": "http://10.20.1.10/a\nhttp://[2001:db8::1]:8443/b",
+    }]
+    doc = _build(tmp_path, vulns=vulns)
+    table = doc.tables[4]
+    assert table.rows[1].cells[1].text.strip() == (
+        "http://10.20.1.10/\nhttp://[2001:db8::1]:8443/"
+    )
+    assert table.rows[2].cells[1].text.strip() == ""
+    assert table.rows[3].cells[1].text.strip() == "10.20.1.10\n2001:db8::1"
+
+
+def test_target_table_resolves_domain_ips_and_explicit_ip_wins(tmp_path, monkeypatch):
+    """IP 为空时解析域名；显式填写 IP 时不覆盖。"""
+    monkeypatch.setattr(
+        report_targets,
+        "resolve_host_ips",
+        lambda host: ["203.0.113.8", "203.0.113.9"] if host == "dns.example.net" else [],
+    )
+    vulns = [{"affected_url": "https://dns.example.net/path"}]
+    doc = _build(tmp_path, vulns=vulns)
+    assert doc.tables[4].rows[3].cells[1].text.strip() == "203.0.113.8\n203.0.113.9"
+
+    doc2 = _build(tmp_path, meta={"target_ip": "198.51.100.10"}, vulns=vulns)
+    assert doc2.tables[4].rows[3].cells[1].text.strip() == "198.51.100.10"
+
+
+def test_target_table_dns_failure_and_scheme_less_root(tmp_path):
+    """解析失败不抛错；无协议影响 URL 按 http 根路径生成。"""
+    vulns = [{"affected_url": "unresolved.example.net/a/b?x=1"}]
+    doc = _build(tmp_path, vulns=vulns)
+    table = doc.tables[4]
+    assert table.rows[1].cells[1].text.strip() == "http://unresolved.example.net/"
+    assert table.rows[2].cells[1].text.strip() == "unresolved.example.net"
+    assert table.rows[3].cells[1].text.strip() == ""
 
 
 def test_cover_second_line_is_project_name(tmp_path):

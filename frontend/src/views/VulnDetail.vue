@@ -80,7 +80,7 @@
     </div>
 
     <div class="space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto xl:w-[320px] xl:shrink-0">
-      <el-card v-if="auth.hasPerm('vuln:audit')" shadow="never">
+      <el-card v-if="canEdit && auth.hasPerm('vuln:audit')" shadow="never">
         <template #header>状态流转</template>
         <el-empty v-if="!transitions.length" description="当前状态没有可执行的流转" :image-size="80" />
         <div v-else class="space-y-2">
@@ -166,7 +166,7 @@ import {
 } from '../utils/colors'
 import { fmtDateTime, fmtSlaRemaining } from '../utils/format'
 import { safeHtml } from '../utils/html'
-import type { SlaExtension, TestingPlan, UserBrief, Vuln, VulnLog, VulnTransition } from '../types'
+import type { SlaExtension, Vuln, VulnLog, VulnTransition } from '../types'
 
 const auth = useAuthStore()
 const route = useRoute()
@@ -226,17 +226,8 @@ function transitionLabel(t: { status: number; name: string }) {
   return t.name
 }
 
-// 编辑权限：已关联测试计划的漏洞仅已认领该计划的账号可编辑；未关联计划由提交人或漏洞管理员编辑
-const planTesters = ref<UserBrief[]>([])
-const canEdit = computed(() => {
-  const v = vul.value
-  if (!v) return false
-  if (v.testing_plan_id) {
-    return planTesters.value.some((u) => u.id === auth.user?.id)
-  }
-  const me = auth.user
-  return auth.hasPerm('vuln:manage') || v.submitter_id === me?.id
-})
+// 编辑权限由服务端按工单认领关系统一派生，与列表/编辑页保持同一口径
+const canEdit = computed(() => vul.value?.can_edit === true)
 
 const richSections = computed(() =>
   [
@@ -257,18 +248,6 @@ async function load() {
   vul.value = v.data
   logs.value = l.data
   transitions.value = t.data
-  // 已关联计划时加载计划认领者，用于判定编辑权限
-  if (vul.value?.testing_plan_id) {
-    try {
-      const planResp = await client.get<TestingPlan>(`/testing-plans/${vul.value.testing_plan_id}`)
-      planTesters.value = planResp.data?.testers ?? []
-    } catch {
-      // 计划不存在/无权限时降级为空认领者，不阻断详情加载（错误提示由拦截器统一处理）
-      planTesters.value = []
-    }
-  } else {
-    planTesters.value = []
-  }
 }
 
 async function doTransition(status: number) {

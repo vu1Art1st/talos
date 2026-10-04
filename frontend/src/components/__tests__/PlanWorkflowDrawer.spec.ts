@@ -169,4 +169,40 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
     }
     wrapper.unmount()
   })
+
+  it('录入漏洞面板以 embedded 模式嵌入抽屉，避免卡片套卡片', async () => {
+    // 已认领（当前用户即测试人员）才会显示「录入漏洞」入口
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/testing-plans/1') {
+        return { data: { ...planFixture(), testers: [{ id: 1, username: 'admin' }] } }
+      }
+      if (url === '/testing-plans/1/vuln-order') return { data: {} }
+      return { data: { items: [], total: 0 } }
+    })
+    const wrapper = mount(PlanWorkflowDrawer, {
+      props: { planId: 1, visible: true },
+      global: {
+        plugins: [ElementPlus],
+        stubs: {
+          FilePreviewDialog: { template: '<div class="file-preview-stub" />' },
+          VulnFormPanel: {
+            name: 'VulnFormPanel',
+            props: { planId: Number, embedded: Boolean },
+            template: '<div class="vuln-form-stub" />',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    const entry = wrapper.findAll('button').find((b) => b.text().includes('录入漏洞'))
+    expect(entry, '已认领账号应看到录入漏洞入口').toBeTruthy()
+    await entry!.trigger('click')
+    await flushPromises()
+
+    const panel = wrapper.findComponent({ name: 'VulnFormPanel' })
+    expect(panel.exists()).toBe(true)
+    expect(panel.props('embedded')).toBe(true)
+    wrapper.unmount()
+  })
 })

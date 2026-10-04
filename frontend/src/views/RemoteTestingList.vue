@@ -90,7 +90,8 @@
   </div>
 
   <el-dialog
-         :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'" width="640px">
+         :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑远程检测' : '新增远程检测'"
+         width="800px" top="4vh">
     <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
       <el-form-item label="关联资产">
         <div class="w-full flex gap-2">
@@ -146,9 +147,7 @@
         <div class="w-full">
           <div v-if="linkedVuln" class="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2">
             <span class="tl-tag" :style="levelSoftStyle(linkedVuln.level)">{{ levelName(linkedVuln.level) }}</span>
-            <el-button v-if="linkedVuln.id" type="primary" link class="!p-0"
-                       @click="openVulnDetail(linkedVuln.id)">{{ linkedVuln.title }}</el-button>
-            <span v-else class="text-sm">{{ linkedVuln.title }}</span>
+            <span class="text-sm">{{ linkedVuln.title }}</span>
             <span class="tl-tag" :style="vulTypeSoftStyle(linkedVuln.vul_type)">
               {{ meta?.vul_type?.[linkedVuln.vul_type ?? 0] ?? linkedVuln.vul_type }}
             </span>
@@ -156,7 +155,8 @@
             <el-button size="small" type="danger" link @click="clearLinkedVuln">移除</el-button>
           </div>
           <el-card v-else-if="quickAddVisible" shadow="never" class="!rounded-md">
-            <el-form ref="quickFormRef" :model="quickForm" :rules="quickRules" label-width="80px">
+            <el-form ref="quickFormRef" :model="quickForm" :rules="quickRules"
+                     label-width="90px" class="quick-vul-form">
               <el-form-item label="漏洞名称" prop="title">
                 <el-input v-model="quickForm.title" placeholder="例如：后台登录接口存在SQL注入" />
               </el-form-item>
@@ -174,8 +174,24 @@
               </div>
               <el-form-item label="漏洞来源">
                 <el-select v-model="quickForm.source" clearable placeholder="未选择" class="w-full">
+                  <el-option label="未选择" :value="0" />
                   <el-option v-for="(name, code) in meta?.vul_source" :key="code" :label="name" :value="Number(code)" />
                 </el-select>
+              </el-form-item>
+              <el-divider content-position="left" class="quick-vul-divider">
+                <span class="text-xs text-gray-400">漏洞详情（可选）</span>
+              </el-divider>
+              <el-form-item label="影响URL" prop="affected_url" :show-message="false">
+                <AffectedUrlEditor v-model="quickForm.affected_url" />
+              </el-form-item>
+              <el-form-item label="漏洞描述">
+                <RichEditor v-model="quickForm.description_html" class="w-full" />
+              </el-form-item>
+              <el-form-item label="复现步骤">
+                <RichEditor v-model="quickForm.reproduce_html" class="w-full" />
+              </el-form-item>
+              <el-form-item label="修复建议">
+                <RichEditor v-model="quickForm.solution_html" class="w-full" />
               </el-form-item>
               <el-form-item label=" ">
                 <div class="w-full flex justify-end">
@@ -186,7 +202,7 @@
             </el-form>
           </el-card>
           <div v-else>
-            <el-button size="small" plain @click="toggleQuickAdd">
+            <el-button size="small" plain @click="openQuickAdd">
               <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
             </el-button>
             <span class="text-xs text-gray-400 ml-2">录入的漏洞将随保存创建并关联到历史漏洞库</span>
@@ -204,7 +220,7 @@
           </div>
           <el-upload :http-request="uploadAppeal" :show-file-list="false"
                      accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar,.jpg,.jpeg,.png">
-            <el-button size="small" plain>
+            <el-button size="small" plain :loading="uploading">
               <el-icon class="mr-1"><Upload /></el-icon>上传申诉报告
             </el-button>
           </el-upload>
@@ -221,7 +237,7 @@
   <!-- 资产新增：与工单流程同一入口，保存后自动选中并带出系统名称/部门 -->
   <AssetFormDialog v-model:visible="assetDialogVisible" :asset="null" @saved="onAssetSaved" />
 
-  <!-- 漏洞详情：录入/关联的漏洞名称可点击查看，交互与渗透测试工单一致 -->
+  <!-- 漏洞详情：列表行中的漏洞名称可点击查看（表单内不叠加第二层弹窗） -->
   <VulnDetailDialog v-model:visible="vulnDetailVisible" :vuln-id="vulnDetailId" />
 </template>
 
@@ -231,8 +247,10 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules, UploadRequestOptions } from 'element-plus'
 import { Document, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import AffectedUrlEditor from '../components/AffectedUrlEditor.vue'
 import AssetFormDialog from '../components/AssetFormDialog.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
+import RichEditor from '../components/RichEditor.vue'
 import TlPagination from '../components/TlPagination.vue'
 import VulnDetailDialog from '../components/VulnDetailDialog.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
@@ -241,6 +259,7 @@ import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
 import { dotStyle, levelName, levelSoftStyle, STAT_CARD_COLORS, vulTypeSoftStyle } from '../utils/colors'
+import { parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
 import type { Asset, RemoteTesting, RemoteTestingForm, Vuln, VulnDraft } from '../types'
 
 const auth = useAuthStore()
@@ -337,16 +356,35 @@ function onAssetSaved(asset: Asset) {
 // ---------- 新增漏洞：表单内录入，随保存创建并关联 ----------
 const quickAddVisible = ref(false)
 const quickFormRef = ref<FormInstance>()
-const quickForm = ref({ title: '', level: 30, vul_type: 75, source: 0 })
+/** 快速录入表单：详情字段在表单内始终有值（草稿类型中为可选，故此处收敛为必填） */
+type QuickVulForm = VulnDraft & {
+  affected_url: string
+  description_html: string
+  reproduce_html: string
+  solution_html: string
+}
+const emptyQuickVul = (): QuickVulForm => ({
+  title: '', level: 30, vul_type: 75, source: 0,
+  affected_url: '', description_html: '', reproduce_html: '', solution_html: '',
+})
+const quickForm = ref<QuickVulForm>(emptyQuickVul())
 const quickRules: FormRules = {
   title: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
+  // 与后端 normalize_affected_url 同一口径，错误文案由 AffectedUrlEditor 行内展示
+  affected_url: [{
+    validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+      const result = validateAffectedUrls(parseAffectedUrl(value))
+      result.ok ? callback() : callback(new Error(result.message))
+    },
+    trigger: 'change',
+  }],
 }
 
 function resetQuickForm() {
-  quickForm.value = { title: '', level: 30, vul_type: 75, source: 0 }
+  quickForm.value = emptyQuickVul()
 }
 
-function toggleQuickAdd() {
+function openQuickAdd() {
   resetQuickForm()
   quickAddVisible.value = true
 }
@@ -388,16 +426,23 @@ const appealStatusColor = (s: string) =>
   s === 'success' ? STAT_CARD_COLORS.green
     : s === 'fail' ? STAT_CARD_COLORS.red : STAT_CARD_COLORS.gray
 
+const uploading = ref(false)
+
 async function uploadAppeal(options: UploadRequestOptions) {
-  const fd = new FormData()
-  fd.append('file', options.file)
-  const { data } = await client.post<{ name: string; path: string; size: number }>(
-    '/remote-testings/upload-appeal', fd,
-  )
-  form.value.appeal_file_name = data.name
-  form.value.appeal_file_path = data.path
-  form.value.appeal_file_size = data.size
-  ElMessage.success('附件上传成功')
+  uploading.value = true
+  try {
+    const fd = new FormData()
+    fd.append('file', options.file)
+    const { data } = await client.post<{ name: string; path: string; size: number }>(
+      '/remote-testings/upload-appeal', fd,
+    )
+    form.value.appeal_file_name = data.name
+    form.value.appeal_file_path = data.path
+    form.value.appeal_file_size = data.size
+    ElMessage.success('附件上传成功')
+  } finally {
+    uploading.value = false
+  }
 }
 
 function clearAppeal() {

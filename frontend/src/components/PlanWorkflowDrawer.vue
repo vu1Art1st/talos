@@ -74,13 +74,15 @@
             </el-button>
             <el-button v-if="canManageVulns" size="small" type="warning" plain
                        @click="vulnFormVisible = !vulnFormVisible">
-              <el-icon class="mr-1"><Plus /></el-icon>{{ vulnFormVisible ? '收起录入' : '录入漏洞' }}
+              <el-icon class="mr-1">
+                <component :is="vulnFormVisible ? ArrowUp : Plus" />
+              </el-icon>{{ vulnFormVisible ? '收起录入' : '录入漏洞' }}
             </el-button>
           </div>
         </template>
 
-        <div v-if="vulnFormVisible" class="mb-4 rounded-lg border border-dashed border-gray-300 p-3 bg-gray-50/50">
-          <VulnFormPanel :plan-id="planId" @saved="onVulnSaved">
+        <div v-if="vulnFormVisible" class="mb-4 border-b border-gray-200 pb-4">
+          <VulnFormPanel :plan-id="planId" :embedded="true" @saved="onVulnSaved">
             <template #actions-right>
               <el-button @click="vulnFormVisible = false">收起</el-button>
             </template>
@@ -357,7 +359,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, ArrowDown, ArrowRight, Document, FolderOpened, WarningFilled, CircleCheck } from '@element-plus/icons-vue'
+import {
+  Plus, ArrowDown, ArrowRight, ArrowUp, Document, FolderOpened, WarningFilled, CircleCheck,
+} from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {

@@ -226,7 +226,12 @@
         </el-table-column>
         <el-table-column label="操作" width="120" fixed="right" class-name="op-col">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click.stop="router.push(`/vulns/${row.id}/edit`)">
+            <el-tooltip v-if="!row.can_edit" content="仅已认领该渗透测试工单的账号可编辑该漏洞" placement="top">
+              <span>
+                <el-button size="small" type="primary" link disabled>编辑</el-button>
+              </span>
+            </el-tooltip>
+            <el-button v-else size="small" type="primary" link @click.stop="router.push(`/vulns/${row.id}/edit`)">
               编辑
             </el-button>
             <el-popconfirm v-if="canDeleteVuln(row)" title="确认删除该漏洞？删除后不可恢复" width="220"

@@ -24,7 +24,16 @@ const router = createRouter({
         { path: 'vulns/new', name: 'vuln-new', component: () => import('../views/VulnEdit.vue'), meta: { title: '提交漏洞' } },
         { path: 'vulns/:id', name: 'vuln-detail', component: () => import('../views/VulnDetail.vue'), meta: { title: '漏洞详情' } },
         { path: 'vulns/:id/edit', name: 'vuln-edit', component: () => import('../views/VulnEdit.vue'), meta: { title: '编辑漏洞' } },
-        { path: 'vulns/:id/retest', name: 'vuln-retest', component: () => import('../views/VulnRetest.vue'), meta: { title: '复测处理' } },
+        {
+          path: 'vulns/:id/retest',
+          name: 'vuln-retest',
+          redirect: (to) => ({
+            name: 'vuln-edit',
+            params: { id: to.params.id },
+            query: to.query,
+            hash: '#retests',
+          }),
+        },
         { path: 'knowledge', name: 'knowledge', component: () => import('../views/KnowledgeList.vue'), meta: { title: '漏洞模板库' } },
         { path: 'reports', name: 'reports', component: () => import('../views/ReportList.vue'), meta: { title: '报告中心' } },
         { path: 'reports/imports', name: 'imports', component: () => import('../views/ImportList.vue'), meta: { title: 'Word 导入' } },

@@ -124,9 +124,10 @@
   </div>
 
   <el-dialog
-             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'" width="640px">
-    <el-form :model="form" label-width="90px">
-      <el-form-item label="报告编号" required>
+             :close-on-click-modal="false" v-model="dialogVisible" :title="form.id ? '编辑春耕行动' : '新增春耕行动'"
+             width="800px" top="4vh">
+    <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
+      <el-form-item label="报告编号" prop="report_no">
         <el-input v-model="form.report_no" placeholder="原始报告编号" />
       </el-form-item>
       <el-form-item label="原始报告">
@@ -151,7 +152,7 @@
               报告解析到 {{ parsedVuls.length }} 个漏洞，勾选后将随保存导入并关联：
             </div>
             <el-checkbox v-model="importAll" :indeterminate="importIndeterminate" class="mb-1">全选</el-checkbox>
-            <el-checkbox-group v-model="importIdx">
+            <el-checkbox-group v-model="importIdx" class="max-h-48 overflow-y-auto">
               <div v-for="(v, i) in parsedVuls" :key="i" class="flex items-center">
                 <el-checkbox :value="i">
                   <span class="tl-tag" :style="levelSoftStyle(v.level)">{{ levelName(v.level) }}</span>
@@ -176,15 +177,16 @@
       <el-form-item label="涉及漏洞">
         <div class="w-full">
           <el-select v-model="form.vul_ids" multiple filterable class="w-full"
-                     placeholder="可多选，或直接新增漏洞">
+                     placeholder="可多选，或新增漏洞">
             <el-option v-for="v in vulns" :key="v.id" :label="v.title" :value="v.id" />
           </el-select>
           <div class="mt-2">
-            <el-button size="small" plain @click="toggleQuickAdd">
-              <el-icon class="mr-1"><Plus /></el-icon>直接新增漏洞
+            <el-button v-if="!quickAddVisible" size="small" plain @click="openQuickAdd">
+              <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
             </el-button>
             <el-card v-if="quickAddVisible" shadow="never" class="!rounded-md mt-2">
-              <el-form ref="quickFormRef" :model="quickForm" :rules="quickRules" label-width="80px">
+              <el-form ref="quickFormRef" :model="quickForm" :rules="quickRules"
+                       label-width="90px" class="quick-vul-form">
                 <el-form-item label="漏洞名称" prop="title">
                   <el-input v-model="quickForm.title" placeholder="例如：后台登录接口存在SQL注入" />
                 </el-form-item>
@@ -202,6 +204,21 @@
                     </el-select>
                   </el-form-item>
                 </div>
+                <el-divider content-position="left" class="quick-vul-divider">
+                  <span class="text-xs text-gray-400">漏洞详情（可选）</span>
+                </el-divider>
+                <el-form-item label="影响URL" prop="affected_url" :show-message="false">
+                  <AffectedUrlEditor v-model="quickForm.affected_url" />
+                </el-form-item>
+                <el-form-item label="漏洞描述">
+                  <RichEditor v-model="quickForm.description_html" class="w-full" />
+                </el-form-item>
+                <el-form-item label="复现步骤">
+                  <RichEditor v-model="quickForm.reproduce_html" class="w-full" />
+                </el-form-item>
+                <el-form-item label="修复建议">
+                  <RichEditor v-model="quickForm.solution_html" class="w-full" />
+                </el-form-item>
                 <el-form-item label=" ">
                   <div class="w-full flex justify-end">
                     <el-button size="small" @click="quickAddVisible = false">取消</el-button>
@@ -235,7 +252,7 @@
     </el-form>
     <template #footer>
       <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="!form.report_no" @click="save">保存</el-button>
+      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
     </template>
   </el-dialog>
 </template>
@@ -247,20 +264,23 @@ import type { FormInstance, FormRules, UploadRequestOptions } from 'element-plus
 import { useRouter } from 'vue-router'
 import client from '../api/client'
 import type { Items, SpringAction, SpringActionForm, Vuln, VulnDraft } from '../types'
+import AffectedUrlEditor from '../components/AffectedUrlEditor.vue'
 import FilterToolbar from '../components/FilterToolbar.vue'
+import RichEditor from '../components/RichEditor.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useCrudDialog } from '../composables/useCrudDialog'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
 import { levelName, levelSoftStyle, levelDotStyle, dotStyle, STAT_CARD_COLORS } from '../utils/colors'
+import { parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
 
 const router = useRouter()
 const auth = useAuthStore()
 const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage<SpringAction>('/spring-actions')
 const vulns = ref<Vuln[]>([])
 
-const { dialogVisible, saving, form, openFormDialog: openCrud, submit: save } = useCrudDialog<SpringActionForm>({
+const { dialogVisible, saving, form, openFormDialog: openCrud, submit: submitForm } = useCrudDialog<SpringActionForm>({
   empty: () => ({
     id: null,
     report_no: '',
@@ -294,6 +314,17 @@ const { dialogVisible, saving, form, openFormDialog: openCrud, submit: save } = 
   },
   afterSave: () => load(),
 })
+
+const formRef = ref<FormInstance>()
+const formRules: FormRules = {
+  report_no: [{ required: true, whitespace: true, message: '请填写报告编号', trigger: 'blur' }],
+}
+
+async function save() {
+  const valid = await formRef.value?.validate().catch(() => false)
+  if (!valid) return
+  await submitForm()
+}
 
 async function openFormDialog(row?: SpringAction) {
   openCrud(row ? { ...row, vul_ids: row.vuls?.map((v) => v.id) ?? [] } : null)
@@ -361,14 +392,38 @@ const quickAddVisible = ref(false)
 const quickSaving = ref(false)
 const quickFormRef = ref<FormInstance>()
 const quickMeta = ref<Record<string, Record<string, string>>>({})
-const quickForm = reactive({ title: '', level: 30, vul_type: 75 })
+/** 快速录入表单：详情字段在表单内始终有值（草稿类型中为可选，故此处收敛为必填） */
+type QuickVulForm = Omit<VulnDraft, 'source'> & {
+  affected_url: string
+  description_html: string
+  reproduce_html: string
+  solution_html: string
+}
+const emptyQuickVul = (): QuickVulForm => ({
+  title: '', level: 30, vul_type: 75,
+  affected_url: '', description_html: '', reproduce_html: '', solution_html: '',
+})
+const quickForm = reactive<QuickVulForm>(emptyQuickVul())
 const quickRules: FormRules = {
   title: [{ required: true, whitespace: true, message: '请填写漏洞名称', trigger: 'blur' }],
+  // 与后端 normalize_affected_url 同一口径，错误文案由 AffectedUrlEditor 行内展示
+  affected_url: [{
+    validator: (_rule: unknown, value: string, callback: (error?: Error) => void) => {
+      const result = validateAffectedUrls(parseAffectedUrl(value))
+      result.ok ? callback() : callback(new Error(result.message))
+    },
+    trigger: 'change',
+  }],
 }
 
-async function toggleQuickAdd() {
-  quickAddVisible.value = !quickAddVisible.value
-  if (quickAddVisible.value && !Object.keys(quickMeta.value).length) {
+function resetQuickForm() {
+  Object.assign(quickForm, emptyQuickVul())
+}
+
+async function openQuickAdd() {
+  resetQuickForm()
+  quickAddVisible.value = true
+  if (!Object.keys(quickMeta.value).length) {
     quickMeta.value = await auth.fetchMeta()
   }
 }
@@ -383,7 +438,7 @@ async function createVul() {
     vulns.value = [data, ...vulns.value]
     form.value.vul_ids = [...(form.value.vul_ids ?? []), data.id]
     ElMessage.success('漏洞已新增并关联')
-    quickForm.title = ''
+    resetQuickForm()
     quickAddVisible.value = false
   } finally {
     quickSaving.value = false

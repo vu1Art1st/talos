@@ -256,6 +256,13 @@ body,
 /* ============ 浮层统一 12px 圆角（弹窗/确认框），气泡 10px ============ */
 .el-dialog,
 .el-message-box { border-radius: 12px; }
+/* L 档弹窗在窄视口下保留 16px 安全边距，避免横向裁切与页面级横向滚动 */
+.el-dialog { max-width: calc(100vw - 32px); }
+/* 快速录入漏洞表单嵌套在外层 el-form-item 内时，Element Plus 会把子项 margin-bottom 清零；
+   显式恢复行距，避免输入框/下拉框相互贴住，也让详情分割线不再压住上一行。 */
+.quick-vul-form .el-form-item { margin-bottom: 18px; }
+/* 详情分割线上方已有前一行 18px 行距，下方单独留足空间，避免被下一个输入框的边框视觉压线 */
+.quick-vul-form .quick-vul-divider.el-divider--horizontal { margin: 4px 0 14px; }
 .el-popper { border-radius: 10px; }
 
 /* ============ 表格：紧凑表头 + 行 hover 用次表面色 ============ */

@@ -1,6 +1,14 @@
 <template>
   <!-- 独立编辑页（asideActions）：左侧内容滚动 + 右侧固定操作栏；弹窗/抽屉：保持底部操作栏 -->
-  <div :class="asideActions ? 'flex h-full min-h-0 flex-col xl:flex-row gap-4' : ''">
+  <div :class="[asideActions ? 'flex h-full min-h-0 flex-col xl:flex-row gap-4' : '',
+                embedded ? 'vuln-form-embedded' : '']">
+    <div v-if="!accessKnown" v-loading="true" class="h-64 w-full" element-loading-text="正在校验编辑权限..." />
+    <el-card v-else-if="!editAllowed" shadow="never" class="w-full">
+      <el-empty description="仅已认领该渗透测试工单的账号可编辑该漏洞">
+        <el-button type="primary" @click="router.push(`/vulns/${editId}`)">返回漏洞详情</el-button>
+      </el-empty>
+    </el-card>
+    <template v-else>
     <div :class="asideActions ? 'flex-1 min-h-0 overflow-y-auto space-y-4 pr-1' : ''">
       <slot name="notice" />
 
@@ -109,6 +117,7 @@
               <!-- 关联渗透测试工单：来源固定为「渗透测试工单」不可修改；单独提交时可选远程检测来源 -->
               <el-input v-if="selectedPlanId" :model-value="'渗透测试工单'" disabled class="w-full" />
               <el-select v-else v-model="vul.source" class="w-full" clearable placeholder="未选择（可选）">
+                <el-option label="未选择" :value="0" />
                 <el-option v-for="(name, code) in meta?.vul_source" :key="code" :label="name" :value="Number(code)" />
               </el-select>
             </el-form-item>
@@ -141,6 +150,14 @@
           </el-form-item>
         </el-form>
       </el-card>
+
+      <div v-if="editId && vulns[0]?.id" id="retests" class="scroll-mt-4">
+        <div class="mb-3 flex items-center gap-2">
+          <span class="font-medium">复测记录</span>
+          <span class="text-xs text-gray-400">可直接新增、编辑和删除本条漏洞的复测记录</span>
+        </div>
+        <VulnRetestPanel :vul-id="vulns[0].id" @status-changed="onRetestStatusChanged" />
+      </div>
     </div>
 
     <!-- 操作栏：独立编辑页渲染为右侧固定卡片（与报告编辑页一致），弹窗/抽屉保持底部横排 -->
@@ -160,10 +177,11 @@
         </div>
       </el-card>
     </div>
+    </template>
   </div>
 
   <!-- 底部操作栏：弹窗/抽屉（非 asideActions）场景保留横排 -->
-  <div v-if="!asideActions" class="flex items-center gap-2 mb-2">
+  <div v-if="!asideActions && editAllowed" class="flex items-center gap-2 mb-2">
     <el-button v-if="!editId" @click="addVuln">
       <el-icon class="mr-1"><Plus /></el-icon>新增漏洞
     </el-button>
@@ -183,6 +201,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
@@ -194,6 +213,7 @@ import type { Asset, Items, KnowledgeTemplate, TestingPlan, Vuln, VulnForm } fro
 import { joinAffectedUrl, parseAffectedUrl, validateAffectedUrls } from '../utils/urls'
 import CvssCalculator from './CvssCalculator.vue'
 import TemplatePickerDialog from './TemplatePickerDialog.vue'
+import VulnRetestPanel from './VulnRetestPanel.vue'
 import { useAuthStore } from '../stores/auth'
 
 // 漏洞录入/编辑表单面板：供独立页（VulnEdit）与测试计划流程抽屉复用。
@@ -202,15 +222,19 @@ const props = defineProps<{
   planId?: number | null   // 新建时预关联的测试计划
   editId?: number | null   // 编辑态漏洞 ID
   asideActions?: boolean   // 独立编辑页：操作按钮渲染为右侧固定栏（与报告编辑页一致）
+  embedded?: boolean       // 抽屉内嵌：外层漏洞区已是卡片，内部表单改为无边框分区
 }>()
 const emit = defineEmits<{ (e: 'saved', vulns: VulnForm[]): void }>()
 
 const auth = useAuthStore()
+const router = useRouter()
 /** `/meta` 下发的字典映射（码 → 名称）；本组件只按键取值，故按二级 Record 声明 */
 const meta = ref<Record<string, Record<number, string>> | null>(null)
 const saving = ref(false)
 const editId = props.editId ?? null
 const planId = props.planId ?? null
+const accessKnown = ref(!editId)
+const editAllowed = ref(!editId)
 
 // ---------- 关联测试计划 ----------
 const selectedPlanId = ref<number | null>(planId)
@@ -428,6 +452,11 @@ async function save() {
   }
 }
 
+function onRetestStatusChanged(status: number) {
+  const current = vulns.value[0]
+  if (current) current.status = status
+}
+
 // 按资产ID加载并回显资产（供计划关联资产预填与编辑回显复用）
 async function loadAssetsByIds(ids: number[]) {
   if (!ids.length) return
@@ -447,6 +476,9 @@ onMounted(async () => {
   await loadPlans()
   if (editId) {
     const { data: vul } = await client.get<Vuln>(`/vulns/${editId}`)
+    editAllowed.value = vul.can_edit === true
+    accessKnown.value = true
+    if (!editAllowed.value) return
     // 边界归一：`VulnForm` 要求这些字段是具体值（富文本为 string、vul_type/layer 为 number），
     // 而服务端空内容返回 null、可选字段可能缺省 —— 此前依赖 `any` 让它们直入表单，
     // 现按 `emptyVul()` 的默认值兜底（缺省时与新建态一致，语义不变）
@@ -479,3 +511,23 @@ onMounted(async () => {
   }
 })
 </script>
+
+<style scoped>
+/* 抽屉内嵌：外层漏洞区已是卡片，内部表单改用分隔线分区，避免卡片套卡片 */
+.vuln-form-embedded :deep(.el-card) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.vuln-form-embedded :deep(.el-card__header) {
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--tl-border);
+}
+.vuln-form-embedded :deep(.el-card__body) {
+  padding: 12px 0 0;
+}
+.vuln-form-embedded :deep(.el-card:last-child) {
+  margin-bottom: 0;
+}
+</style>

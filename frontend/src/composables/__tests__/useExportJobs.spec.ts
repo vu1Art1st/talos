@@ -66,6 +66,57 @@ describe('useExportJobs', () => {
     expect(ok).toBe(true)
   })
 
+  it('submitExport 缺项提醒可继续，返回补充时中止', async () => {
+    postMock.mockResolvedValueOnce({
+      data: { duplicate: false, missing_fields: ['author', 'target_ip'] },
+    })
+    confirmMock.mockResolvedValueOnce(undefined)
+    postMock.mockResolvedValueOnce({ data: {} })
+    expect(await useExportJobs().submitExport(9, 'docx', '标题')).toBe(true)
+    expect(String(confirmMock.mock.calls[0][0])).toContain('报告作者、被测系统IP')
+    expect(String(confirmMock.mock.calls[0][0])).toContain('margin-top: 12px')
+    expect(postMock).toHaveBeenLastCalledWith('/reports/9/export', { fmt: 'docx' })
+
+    vi.clearAllMocks()
+    postMock.mockResolvedValueOnce({
+      data: { duplicate: false, missing_fields: ['test_account'] },
+    })
+    confirmMock.mockRejectedValueOnce(new Error('cancel'))
+    expect(await useExportJobs().submitExport(9, 'docx', '标题')).toBe(false)
+    expect(postMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('submitExport 缺项与重复导出同时命中时依次确认，任一步取消均不提交', async () => {
+    postMock.mockResolvedValueOnce({
+      data: { duplicate: true, missing_fields: ['test_period'], last_status: 'done' },
+    })
+    confirmMock.mockResolvedValueOnce(undefined)
+    confirmMock.mockRejectedValueOnce(new Error('cancel'))
+    expect(await useExportJobs().submitExport(9, 'docx', '标题')).toBe(false)
+    expect(confirmMock).toHaveBeenCalledTimes(2)
+    expect(postMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('confirmBatchExportWarnings 汇总报告缺项并在确认后放行', async () => {
+    postMock.mockResolvedValueOnce({
+      data: [
+        { report_id: 1, title: '报告一', missing_fields: ['author'] },
+        { report_id: 2, title: '报告二', missing_fields: ['test_account'] },
+      ],
+    })
+    confirmMock.mockResolvedValueOnce(undefined)
+    expect(await useExportJobs().confirmBatchExportWarnings([1, 2])).toBe(true)
+    const message = String(confirmMock.mock.calls[0][0])
+    expect(message).toContain('《报告一》：报告作者')
+    expect(message).toContain('《报告二》：被测测试账号')
+
+    postMock.mockResolvedValueOnce({
+      data: [{ report_id: 1, title: '报告一', missing_fields: ['target_ip'] }],
+    })
+    confirmMock.mockRejectedValueOnce(new Error('cancel'))
+    expect(await useExportJobs().confirmBatchExportWarnings([1])).toBe(false)
+  })
+
   it('submitExport 取消时不提交任务；确认后提交并提示', async () => {
     postMock.mockResolvedValueOnce({ data: { duplicate: true } })
     confirmMock.mockRejectedValueOnce(new Error('cancel'))

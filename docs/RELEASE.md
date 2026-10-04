@@ -25,6 +25,23 @@
 
 ---
 
+## [2.24.0] - 2026-10-04
+
+报告导出增强与专项三域 UI 收口——新增后端导出预检能力（向下兼容的功能新增），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **报告导出完整性预检**：新增 `POST /reports/batch-export-check`，返回每本报告缺失字段（`author` / `test_period` / `target_ip` / `test_account`）与是否可编辑（`ReportExportCheckOut`）；新增 `app/services/report_export.py`（周期解析与预检）与 `app/services/report_targets.py`（测试目标 URL 优先级、根路径规范化、域名 / IP 拆分）。
+- **专项三域列表增强**：`RemoteTestingList.vue` / `SpringActionList.vue` 扩展（新增 `SpringActionList.spec.ts`）；复测面板重构 `VulnRetestPanel.vue` / `VulnFormPanel.vue`，原独立 `VulnRetest.vue` 路由复用 `VulnEdit.vue`（`vuln-retest` 路由名保留）。
+- **导出任务 composable 扩展**：`useExportJobs.ts`（+158）接入导出前检查与状态展示；`types/index.ts` / `style.css` 同步。
+
+### 变更
+
+- `vulns.py`(+111) / `reports.py`(+57) / `schemas/report.py`(+23) / `schemas/vuln.py`(+2) / `open_api.py`(+6) 接入导出预检与测试目标字段；`report_builder.py` 复用 `report_targets` / `report_export`；`PlanWorkflowDrawer.vue`、`VulnDetail.vue`、`VulnEdit.vue`、`VulnList.vue`、`ReportList.vue`、`TodoWorkbench.vue` 适配。
+- 测试守护：新增 / 更新 `test_api_reports.py`(+81) / `test_api_assets_vulns.py`(+69) / `test_api_p1.py`(+25) / `test_api_special.py` / `test_report_builder.py`(+73) / `test_task_lifecycle.py`(+13) 及前端 `RemoteTestingList.spec.ts`(+36) / `VulnList.spec.ts`(+29) / `TodoWorkbench.spec.ts`(+31) / `PlanWorkflowDrawer.spec.ts`(+36) / `VulnRetestPanel.spec.ts`(+22) / `useExportJobs.spec.ts`(+51)。
+
+---
+
 ## [2.23.2] - 2026-10-02
 
 ROADMAP「批次 E：性能与数据访问底座」落地。本版本为**向下兼容的性能优化与内部底座升级**（无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。

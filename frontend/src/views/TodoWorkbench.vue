@@ -25,7 +25,7 @@
         <template v-else>
           <ul class="todo-list" :class="{ 'todo-list-scroll': expanded[g.category] }">
             <li v-for="(it, idx) in displayItems(g)" :key="String(it.id ?? idx)" @click="goItem(g, it)">
-              <span class="truncate">{{ itemTitle(g.category, it) }}</span>
+              <span class="truncate" :title="itemTitle(g.category, it)">{{ itemTitle(g.category, it) }}</span>
               <span class="text-2xs text-gray-400 flex-none">{{ itemExtra(g.category, it) }}</span>
             </li>
           </ul>
@@ -83,6 +83,14 @@ function itemTitle(category: string, it: Record<string, unknown>): string {
     || category === 'plan_completed'
   ) {
     return `${it.system_name ?? ''}（${it.ticket_id ?? '-'}）`
+  }
+  if (category === 'my_vulns') {
+    const title = String(it.title ?? '')
+    const ticket = String(it.ticket_id ?? '')
+    const system = String(it.system_name ?? '')
+    // 归属提示：关联工单时补「（工单ID-系统名称）」，未关联工单的漏洞只显示名称
+    if (!ticket && !system) return title
+    return `${title}（${ticket || '-'}-${system || '-'}）`
   }
   if (category === 'import_pending') return String(it.filename ?? '')
   return String(it.title ?? '')

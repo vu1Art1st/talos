@@ -214,6 +214,31 @@ async def test_message_center_and_todos(client: AsyncClient, auth: dict):
     assert "my_vulns" in submitter_groups and submitter_groups["my_vulns"]["count"] >= 1
     assert any(item.get("id") == vul_id for item in submitter_groups["my_vulns"]["items"])
 
+    # 关联工单的漏洞待办带归属信息（前端据此在名称后提示「工单ID-系统名称」）
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "P1待办-归属系统", "status": 20},
+    )
+    assert resp.status_code == 200, resp.text
+    owned_plan = resp.json()
+    assert (await client.post(
+        f"/api/v1/testing-plans/{owned_plan['id']}/claim", headers=auth,
+    )).status_code == 200
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={
+            "title": "P1待办-归属漏洞", "level": 20,
+            "testing_plan_id": owned_plan["id"],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    owned_vul_id = resp.json()["id"]
+    todos = (await client.get("/api/v1/todos", headers=auth)).json()
+    my_vulns = next(g for g in todos["groups"] if g["category"] == "my_vulns")
+    owned = next(i for i in my_vulns["items"] if i["id"] == owned_vul_id)
+    assert owned["ticket_id"] == owned_plan["ticket_id"]
+    assert owned["system_name"] == "P1待办-归属系统"
+
     # 原有待认领工单仍存在；深链必须直达该工单的流程抽屉
     resp = await client.post(
         "/api/v1/testing-plans", headers=auth,

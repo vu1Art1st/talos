@@ -131,6 +131,8 @@ class ExportCheckOut(BaseModel):
     """
 
     duplicate: bool = False
+    # 手动导出完整性提醒字段代码：author / test_period / target_ip / test_account
+    missing_fields: list[str] = []
     report_id: int | None = None
     report_title: str = ""
     fmt: str = ""
@@ -140,6 +142,27 @@ class ExportCheckOut(BaseModel):
     last_version: int | None = None
     last_file_name: str = ""
     last_file_size: int | None = None
+
+
+class BatchExportIn(BaseModel):
+    """批量导出请求。"""
+
+    report_ids: list[int]
+    fmt: str = "docx"
+
+
+class BatchExportCheckIn(BaseModel):
+    """批量导出前完整性检查请求。"""
+
+    report_ids: list[int]
+
+
+class ReportExportCheckOut(BaseModel):
+    """单份报告的批量导出前检查结果。"""
+
+    report_id: int
+    title: str = ""
+    missing_fields: list[str] = []
 
 
 class ReportVulnStateOut(BaseModel):

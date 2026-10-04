@@ -99,10 +99,13 @@ from .import_ import (
     ImportRetryOut,
 )
 from .report import (
+    BatchExportCheckIn,
+    BatchExportIn,
     ExportCheckIn,
     ExportCheckOut,
     ExportJobOut,
     PlanReportBrief,
+    ReportExportCheckOut,
     ReportListOut,
     ReportMetaIn,
     ReportOut,

@@ -313,6 +313,75 @@ async def test_vuln_delete_permissions(client: AsyncClient, auth: dict):
     resp = await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
     assert resp.status_code == 200, resp.text
 
+
+async def test_plan_vuln_edit_permissions_follow_claimant(client: AsyncClient, auth: dict):
+    """工单漏洞直接编辑严格跟随认领关系：admin/* 未认领也不可保存、流转或维护复测。"""
+    claimer = await _user_with_perms(
+        client, auth, "edit_claimer", ["vuln:submit", "vuln:audit", "special:manage"],
+    )
+    manager = await _user_with_perms(
+        client, auth, "edit_manager", ["vuln:submit", "vuln:audit", "vuln:manage"],
+    )
+
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "漏洞编辑认领权限工单", "test_type": "渗透测试"},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    resp = await client.post(f"/api/v1/testing-plans/{plan_id}/claim", headers=claimer)
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/vulns", headers=claimer,
+        json={"title": "认领权限漏洞", "level": 20, "testing_plan_id": plan_id},
+    )
+    assert resp.status_code == 200, resp.text
+    vul_id = resp.json()["id"]
+
+    # 列表 / 详情统一返回 can_edit：认领者为 true，管理员未认领为 false
+    items = (await client.get("/api/v1/vulns", headers=auth, params={"testing_plan_id": plan_id})).json()["items"]
+    row = next(v for v in items if v["id"] == vul_id)
+    assert row["can_edit"] is False
+    assert (await client.get(f"/api/v1/vulns/{vul_id}", headers=auth)).json()["can_edit"] is False
+    assert (await client.get(f"/api/v1/vulns/{vul_id}", headers=claimer)).json()["can_edit"] is True
+
+    payload = {"title": "无权限修改", "level": 20, "testing_plan_id": plan_id}
+    for headers in (auth, manager):
+        resp = await client.put(f"/api/v1/vulns/{vul_id}", headers=headers, json=payload)
+        assert resp.status_code == 403, resp.text
+        resp = await client.post(
+            f"/api/v1/vulns/{vul_id}/transition", headers=headers, json={"status": 55},
+        )
+        assert resp.status_code == 403, resp.text
+        resp = await client.post(
+            f"/api/v1/vulns/{vul_id}/retests", headers=headers,
+            json={"content_html": "<p>无权限复测</p>"},
+        )
+        assert resp.status_code == 403, resp.text
+
+    # 认领者可正常编辑、流转并维护复测记录
+    resp = await client.put(
+        f"/api/v1/vulns/{vul_id}", headers=claimer,
+        json={**payload, "title": "认领者修改"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["can_edit"] is True
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/transition", headers=claimer, json={"status": 55},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/vulns/{vul_id}/retests", headers=claimer,
+        json={"content_html": "<p>认领者复测</p>"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.delete(f"/api/v1/vulns/{vul_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+    resp = await client.delete(f"/api/v1/testing-plans/{plan_id}", headers=auth)
+    assert resp.status_code == 200, resp.text
+
+
 async def test_vuln_delete_cleans_remote_testing(client: AsyncClient, auth: dict):
     """删除被远程检测关联的漏洞后关联字段置空（生产 PG 强制外键，不清理会 500）。"""
     resp = await client.post(

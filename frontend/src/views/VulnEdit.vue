@@ -9,11 +9,6 @@
           </span>
         </div>
       </template>
-      <template #actions-left>
-        <el-button v-if="editId" type="warning" plain class="w-full !ml-0" @click="openRetest">
-          复测
-        </el-button>
-      </template>
       <template #actions-right>
         <el-button class="w-full !ml-0" @click="onCancel">取消</el-button>
       </template>
@@ -26,7 +21,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import client from '../api/client'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
-import { goBack, withRedirect } from '../composables/useNavBack'
+import { goBack } from '../composables/useNavBack'
 import { normalizeRedirect } from '../utils/errorPage'
 import type { VulnForm } from '../types'
 
@@ -49,10 +44,6 @@ function onCancel() {
   void goBack(router, route, '/vulns')
 }
 
-function openRetest() {
-  void router.push(withRedirect(`/vulns/${editId}/retest`, route.fullPath))
-}
-
 function onSaved(vulns: VulnForm[]) {
   // replace：避免浏览器后退又回到刚保存的表单页
   if (redirectTarget.value) {
@@ -69,5 +60,20 @@ onMounted(async () => {
     const { data } = await client.get(`/testing-plans/${planId}`).catch(() => ({ data: null }))
     planName.value = data?.system_name ?? ''
   }
+  if (route.hash === '#retests') scrollToRetests()
 })
+
+/** 旧复测路由或带 hash 的直达链接：等待编辑页复测区渲染后滚动定位。 */
+function scrollToRetests() {
+  const started = Date.now()
+  const tryScroll = () => {
+    const el = document.getElementById('retests')
+    if (el) {
+      el.scrollIntoView({ block: 'start' })
+      return
+    }
+    if (Date.now() - started < 1200) requestAnimationFrame(tryScroll)
+  }
+  requestAnimationFrame(tryScroll)
+}
 </script>

@@ -69,4 +69,33 @@ describe('VulnList 视图', () => {
     expect(wrapper.text()).toContain('漏洞')
     wrapper.unmount()
   })
+
+  it('can_edit=false 时禁用行内编辑入口', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/meta') return { data: metaFixture() }
+      if (url === '/vulns/stats') return { data: {} }
+      if (url === '/vulns') {
+        return {
+          data: {
+            items: [{
+              id: 1, title: '待认领漏洞', level: 20, vul_type: 75, status: 10,
+              source: 0, assets: [], department: '', submit_time: null, can_edit: false,
+            }],
+            total: 1,
+          },
+        }
+      }
+      if (url === '/assets') return { data: { items: [], total: 0 } }
+      return { data: [] }
+    })
+    const wrapper = mount(VulnList, {
+      global: { plugins: [ElementPlus, createPinia()] },
+    })
+    await flushPromises()
+
+    const editButton = wrapper.findAll('button').find((b) => b.text().includes('编辑'))
+    expect(editButton).toBeTruthy()
+    expect(editButton!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
 })

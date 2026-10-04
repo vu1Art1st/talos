@@ -66,7 +66,11 @@ async def open_list_vulns(
     total, vulns, meta = await paginate_cursor(
         session, stmt, page=page, size=size, cursor=cursor, id_col=Vul.id,
     )
-    return Page(total=total, items=[await build_vul_out(session, v) for v in vulns], **meta)
+    return Page(
+        total=total,
+        items=[await build_vul_out(session, v, user, can_edit=False) for v in vulns],
+        **meta,
+    )
 
 
 @router.get("/stats")

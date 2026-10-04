@@ -27,7 +27,13 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
         json={"system_name": "门户系统", "notice_time": "2026-01", "department": "信息部",
               "asset_belong": "省公司", "asset_id": rt_asset_id,
               "notified_unit": "省公司", "is_external": False,
-              "new_vul": {"title": "SQL注入", "level": 20, "vul_type": 30, "source": 10},
+              "new_vul": {
+                  "title": "SQL注入", "level": 20, "vul_type": 30, "source": 10,
+                  "affected_url": "https://portal.example.com/login\nhttps://portal.example.com/admin",
+                  "description_html": "<p>登录接口未使用参数化查询</p>",
+                  "reproduce_html": "<p>构造恶意参数即可触发</p>",
+                  "solution_html": "<p>使用参数化查询修复</p>",
+              },
               "appeal_status": "", "appeal_method": "",
               "appeal_file_name": "", "appeal_file_path": "", "appeal_file_size": 0},
     )
@@ -43,6 +49,14 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     assert rt["vuln_name"] == "SQL注入"
     assert rt["vuln_type"] == "30"
     rt_vul_id = rt["vuln"]["id"]
+    # 「新增漏洞」支持完整详情录入：草稿字段随创建一并落库
+    vul_detail = (await client.get(f"/api/v1/vulns/{rt_vul_id}", headers=auth)).json()
+    assert vul_detail["affected_url"] == (
+        "https://portal.example.com/login\nhttps://portal.example.com/admin"
+    )
+    assert "未使用参数化查询" in vul_detail["description_html"]
+    assert "构造恶意参数" in vul_detail["reproduce_html"]
+    assert "参数化查询修复" in vul_detail["solution_html"]
 
     # 申诉报告附件上传（返回文件元信息供表单绑定）
     resp = await client.post(

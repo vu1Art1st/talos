@@ -47,6 +47,8 @@ class VulOut(VulIn):
     delay_days: int = 0
     delay_reason: str = ""
     submitter_id: int | None = None
+    # 当前请求用户是否可直接编辑本漏洞（有关联工单时仅认领者，不因管理员角色放行）
+    can_edit: bool = False
     assets: list[AssetBrief] = []
     submit_time: datetime | None = None
     audit_time: datetime | None = None
