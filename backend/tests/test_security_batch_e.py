@@ -174,9 +174,13 @@ async def test_password_change_invalidates_other_sessions(client, auth):
         json={"old_password": "Init@12345", "new_password": "Rotated@12345"},
     )
     assert resp.status_code == 200, resp.text
+    assert "access_token" not in resp.json()
     # 另一设备的 refresh token 随之失效
     assert (await client.post(
         "/api/v1/auth/refresh", json={"refresh_token": other["refresh_token"]},
+    )).status_code == 401
+    assert (await client.post(
+        "/api/v1/auth/refresh", json={"refresh_token": current["refresh_token"]},
     )).status_code == 401
 
 
@@ -247,7 +251,8 @@ async def test_must_change_password_blocks_business_endpoints(client, auth):
         json={"old_password": "Init@12345", "new_password": "Changed@12345"},
     )
     assert resp.status_code == 200, resp.text
-    new_headers = {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    tokens = await _login(client, "must_pwd_user", "Changed@12345")
+    new_headers = {"Authorization": f"Bearer {tokens['access_token']}"}
     assert (await client.get("/api/v1/vulns", headers=new_headers)).status_code == 200
 
 
@@ -288,7 +293,8 @@ async def _login_and_change(client, username: str, password: str) -> dict:
         json={"old_password": password, "new_password": f"{password}x"},
     )
     assert resp.status_code == 200, resp.text
-    return {"Authorization": f"Bearer {resp.json()['access_token']}"}
+    tokens = await _login(client, username, f"{password}x")
+    return {"Authorization": f"Bearer {tokens['access_token']}"}
 
 
 async def test_refresh_session_state_cleared_on_login_limit():

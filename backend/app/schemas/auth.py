@@ -2,7 +2,9 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.core.identity import is_valid_email, normalize_email
 
 
 class TokenOut(BaseModel):
@@ -20,6 +22,68 @@ class PasswordIn(BaseModel):
     new_password: str = Field(min_length=8)
 
 
+class ProfileIn(BaseModel):
+    realname: str = Field(default="", max_length=64)
+    phone: str = Field(default="", max_length=32)
+
+    @field_validator("realname", "phone")
+    @classmethod
+    def _strip(_cls, value: str) -> str:
+        return value.strip()
+
+
+class AvatarPresetIn(BaseModel):
+    preset_id: str = Field(min_length=2, max_length=2)
+
+
+class MessagePrefsIn(BaseModel):
+    disabled_types: list[str] = []
+
+
+class EmailChangeIn(BaseModel):
+    current_password: str
+    new_email: str
+
+    @field_validator("new_email")
+    @classmethod
+    def _email(_cls, value: str) -> str:
+        email = normalize_email(value)
+        if not is_valid_email(email):
+            raise ValueError("邮箱格式不正确")
+        return email
+
+
+class ActionTokenIn(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class PasswordResetRequestIn(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def _email(_cls, value: str) -> str:
+        return normalize_email(value)
+
+
+class PasswordResetConfirmIn(ActionTokenIn):
+    new_password: str = Field(min_length=8)
+
+
+class PasswordResetStatusOut(BaseModel):
+    enabled: bool
+
+
+class SessionOut(BaseModel):
+    id: str
+    create_time: datetime
+    last_seen_at: datetime
+    expires_at: datetime
+    ip: str = ""
+    user_agent: str = ""
+    is_current: bool = False
+
+
 class UserOption(BaseModel):
     """用户下拉选项（供报告作者等选择器使用，普通登录用户可见）。"""
 
@@ -35,12 +99,16 @@ class UserOut(BaseModel):
     realname: str = ""
     email: str = ""
     phone: str = ""
+    avatar: str = ""
+    avatar_url: str = ""
     is_active: bool = True
     must_change_password: bool = False
     role_id: int | None = None
     role_name: str = ""
     permissions: list[str] = []
     group_ids: list[int] = []
+    group_names: list[str] = []
+    message_prefs: dict = {}
     create_time: datetime | None = None
     last_login: datetime | None = None
 
@@ -54,6 +122,16 @@ class UserIn(BaseModel):
     is_active: bool = True
     role_id: int | None = None
     group_ids: list[int] = []
+
+    @field_validator("username", "realname", "email", "phone")
+    @classmethod
+    def _strip(_cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("email")
+    @classmethod
+    def _email(_cls, value: str) -> str:
+        return normalize_email(value)
 
 
 class RoleOut(BaseModel):

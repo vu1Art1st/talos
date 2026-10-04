@@ -98,6 +98,7 @@ const jumpItems = computed<CmdItem[]>(() => {
   const p = (path: string) => () => { router.push(path); close() }
   const list: CmdItem[] = [
     { key: 'nav-dashboard', label: '安全态势', icon: DataLine, hint: '↵', run: p('/dashboard') },
+    { key: 'nav-profile', label: '个人中心', icon: User, run: p('/profile') },
   ]
   if (auth.hasPerm('special:manage')) {
     list.push({ key: 'nav-testing', label: '渗透测试工单', icon: Tickets, run: p('/testing-plans') })

@@ -10,6 +10,7 @@ from app.constants import (
     ASSET_STATUS,
     ASSET_STATUS_COLOR,
     AUDIT_ACTIONS,
+    AVATAR_PRESETS,
     DASHBOARD_VIEW_SCOPES,
     DATA_SCOPES,
     EXPORT_JOB_STATUS_COLOR,
@@ -50,24 +51,12 @@ from app.constants import (
 )
 from app.core.config import settings
 from app.core.deps import get_current_user, require_perm
+from app.core.images import ALLOWED_IMAGE_EXT, is_allowed_image
 from app.db import get_session
 from app.models import DictOption, User, VulnType
 from app.schemas import DictOptionIn, DictOptionOut, VulnTypeIn, VulnTypeOut
 
 router = APIRouter(tags=["通用"])
-
-ALLOWED_IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-
-
-def _is_allowed_image(data: bytes) -> bool:
-    """校验图片文件头魔术字节，防止伪造扩展名的非图片文件入库。"""
-    return (
-        data.startswith(b"\x89PNG\r\n\x1a\n")            # png
-        or data.startswith(b"\xff\xd8\xff")               # jpg/jpeg
-        or data[:6] in (b"GIF87a", b"GIF89a")             # gif
-        or (data[:4] == b"RIFF" and data[8:12] == b"WEBP")  # webp
-    )
-
 
 async def _name_dicts(session: AsyncSession) -> dict:
     """名称类字典（含 DB 来源的漏洞类型与系统类型，支持运行时动态新增）。"""
@@ -158,6 +147,7 @@ async def meta(
         **await _name_dicts(session),
         "colors": _color_dicts(),
         "nonpen": _nonpen_dict(),
+        "avatar_presets": AVATAR_PRESETS,
     }
 
 
@@ -265,7 +255,7 @@ async def upload_image(file: UploadFile, _: User = Depends(get_current_user)):
     data = await file.read()
     if len(data) > 10 * 1024 * 1024:
         raise HTTPException(400, "图片大小不能超过 10MB")
-    if not _is_allowed_image(data):
+    if not is_allowed_image(data):
         raise HTTPException(400, "文件内容不是有效的图片")
     name = f"{uuid.uuid4().hex}{ext}"
     (settings.storage_sub("uploads", "images") / name).write_bytes(data)

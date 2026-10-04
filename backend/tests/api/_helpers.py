@@ -152,6 +152,10 @@ async def _login_ready(client: AsyncClient, username: str, password: str) -> dic
         json={"old_password": password, "new_password": f"{password}x"},
     )
     assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        "/api/v1/auth/login", data={"username": username, "password": f"{password}x"},
+    )
+    assert resp.status_code == 200, resp.text
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 async def _user_with_perms(client: AsyncClient, auth: dict, username: str, perms: list[str]) -> dict:

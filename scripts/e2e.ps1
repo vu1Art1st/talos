@@ -29,13 +29,14 @@ $PlaywrightArgs = @($PlaywrightArgs | ForEach-Object { $_ -split ',' } | Where-O
 
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $root
+. (Join-Path $root 'scripts\port-utils.ps1')
 
 function Log($msg) { Write-Host "[e2e] $msg" }
 function Die($msg) { Write-Host "[e2e] ✗ $msg" -ForegroundColor Red; exit 1 }
 
 # ---------- 依赖预检 ----------
 foreach ($spec in @(@(5432, 'PostgreSQL'), @(6379, 'Redis'))) {
-    $listening = [bool](Get-NetTCPConnection -State Listen -LocalPort $spec[0] -ErrorAction SilentlyContinue)
+    $listening = Test-PortListening -Port $spec[0]
     if (-not $listening) {
         Die "$($spec[1]) 未监听 127.0.0.1:$($spec[0]) —— 请先在 DBngin 启动（见 docs/LOCAL_DEV_SETUP.md）"
     }
@@ -46,7 +47,7 @@ if (-not (Test-Path $py)) { Die '未找到 backend\.venv 解释器（见 AGENTS.
 
 # 端口必须空闲：否则会「静默复用」上次未收摊的栈（旧前端代理指向旧 api），得到似是而非的结果
 foreach ($port in @($ApiPort, $WebPort)) {
-    $busy = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
+    $busy = @(Get-PortListeners -Port $port) | Select-Object -First 1
     if ($busy) {
         Die "$port 已被 PID $($busy.OwningProcess) 占用 —— 多为上次 E2E 未收摊；请先结束该进程或改端口（-ApiPort / -WebPort）"
     }
@@ -103,7 +104,7 @@ function Stop-E2EStack {
         if ($p -and -not $p.HasExited) { & taskkill /PID $($p.Id) /T /F 2>&1 | Out-Null }
     }
     foreach ($port in @($ApiPort, $WebPort)) {
-        $owner = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
+        $owner = @(Get-PortListeners -Port $port) | Select-Object -First 1
         if ($owner) {
             Log "⚠ $port 仍被 PID $($owner.OwningProcess) 占用，强制结束"
             Stop-Process -Id $owner.OwningProcess -Force -ErrorAction SilentlyContinue

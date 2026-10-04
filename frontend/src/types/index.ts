@@ -169,16 +169,36 @@ export interface User {
   username: string
   realname: string
   email?: string | null
+  phone?: string | null
+  avatar?: string
+  avatar_url?: string
   role_id?: number | null
+  role_name?: string
   /** 用户所属组织 ID 列表（P2-1 数据范围） */
   group_ids?: number[]
+  group_names?: string[]
   is_active: boolean
+  must_change_password?: boolean
   /** 权限码列表（权限查看弹窗按分组渲染） */
   permissions?: string[]
+  message_prefs?: { disabled_types?: string[] }
+  create_time?: string | null
+  last_login?: string | null
 }
 
 /** 用户新增/编辑表单模型：password 仅新增时必填，编辑留空表示不改 */
 export type UserForm = Omit<User, 'id' | 'permissions'> & { id: number | null; password: string }
+
+/** 活跃登录会话（个人中心） */
+export interface UserSession {
+  id: string
+  create_time: string
+  last_seen_at: string
+  expires_at: string
+  ip?: string
+  user_agent?: string
+  is_current: boolean
+}
 
 /** API 令牌（令牌列表） */
 export interface ApiToken {

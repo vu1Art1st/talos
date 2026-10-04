@@ -48,21 +48,43 @@ def verify_password_and_update(plain: str, hashed: str) -> tuple[bool, str | Non
         return False, None
 
 
+def ensure_password_changed(new_password: str, current_hash: str) -> None:
+    """设置新密码前的统一规则：至少 8 位且不得与当前密码相同。"""
+    if len(new_password) < 8:
+        raise ValueError("新密码至少 8 位")
+    if verify_password(new_password, current_hash):
+        raise ValueError("新密码不能与原密码相同")
+
+
 def _create_token(
-    sub: str, token_type: str, expires_delta: timedelta, ver: int, jti: str = "",
+    sub: str,
+    token_type: str,
+    expires_delta: timedelta,
+    ver: int,
+    *,
+    sid: str = "",
+    jti: str = "",
 ) -> str:
     now = datetime.now(timezone.utc)
     payload = {"sub": sub, "type": token_type, "ver": ver, "iat": now, "exp": now + expires_delta}
+    if sid:
+        payload["sid"] = sid
     if jti:
         payload["jti"] = jti
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_access_token(user_id: int, ver: int = 0) -> str:
-    return _create_token(str(user_id), "access", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES), ver)
+def create_access_token(user_id: int, ver: int = 0, sid: str = "") -> str:
+    return _create_token(
+        str(user_id),
+        "access",
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        ver,
+        sid=sid,
+    )
 
 
-def create_refresh_token(user_id: int, ver: int = 0) -> tuple[str, str]:
+def create_refresh_token(user_id: int, ver: int = 0, sid: str = "") -> tuple[str, str]:
     """签发 refresh token，返回 `(token, jti)`。
 
     jti 用于轮换状态存储（core/token_store.py）：每次刷新旧 jti 立即失效（宽限期内除外），
@@ -70,13 +92,18 @@ def create_refresh_token(user_id: int, ver: int = 0) -> tuple[str, str]:
     """
     jti = uuid.uuid4().hex
     token = _create_token(
-        str(user_id), "refresh", timedelta(hours=settings.REFRESH_TOKEN_EXPIRE_HOURS), ver, jti,
+        str(user_id),
+        "refresh",
+        timedelta(hours=settings.REFRESH_TOKEN_EXPIRE_HOURS),
+        ver,
+        sid=sid,
+        jti=jti,
     )
     return token, jti
 
 
-def decode_token(token: str, expected_type: str = "access") -> tuple[int, int] | None:
-    """校验并返回 (用户 id, 令牌版本号)，失败返回 None。"""
+def decode_token(token: str, expected_type: str = "access") -> tuple[int, int, str] | None:
+    """校验并返回 (用户 id, 令牌版本号, 会话 id)，失败返回 None。"""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.PyJWTError:
@@ -84,13 +111,13 @@ def decode_token(token: str, expected_type: str = "access") -> tuple[int, int] |
     if payload.get("type") != expected_type:
         return None
     try:
-        return int(payload["sub"]), int(payload.get("ver", 0))
+        return int(payload["sub"]), int(payload.get("ver", 0)), str(payload.get("sid") or "")
     except (KeyError, ValueError):
         return None
 
 
-def decode_refresh_token(token: str) -> tuple[int, int, str] | None:
-    """校验 refresh token，返回 (用户 id, 令牌版本号, jti)；jti 缺失（升级前签发的老令牌）返回空串。"""
+def decode_refresh_token(token: str) -> tuple[int, int, str, str] | None:
+    """校验 refresh token，返回 (用户 id, 令牌版本号, jti, 会话 id)。"""
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
     except jwt.PyJWTError:
@@ -98,7 +125,12 @@ def decode_refresh_token(token: str) -> tuple[int, int, str] | None:
     if payload.get("type") != "refresh":
         return None
     try:
-        return int(payload["sub"]), int(payload.get("ver", 0)), str(payload.get("jti") or "")
+        return (
+            int(payload["sub"]),
+            int(payload.get("ver", 0)),
+            str(payload.get("jti") or ""),
+            str(payload.get("sid") or ""),
+        )
     except (KeyError, ValueError):
         return None
 

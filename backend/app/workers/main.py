@@ -8,13 +8,14 @@ from dataclasses import replace
 
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.core.config import settings
 from app.core.data_scope import install_data_scope
 from app.core.timeutil import now
 from app.db import async_session_maker
 from app.models import (
+    AccountActionToken,
     ExportJob,
     ImportBatch,
     ImportRecord,
@@ -22,9 +23,11 @@ from app.models import (
     Report,
     ReportTemplate,
     User,
+    UserSession,
 )
 from app.services import (
     idempotency,
+    mail_service,
     message_service,
     notify_service,
     report_meta,
@@ -230,6 +233,14 @@ async def retry_deliveries_task(ctx) -> None:
         logger.info("已重投到期通知 %s 条", n)
 
 
+async def send_account_email_task(ctx, to: str, subject: str, body_html: str) -> None:
+    """账户安全邮件发送：失败只告警，不向找回接口泄露邮箱是否存在。"""
+    try:
+        await mail_service.send_mail([to], subject, body_html)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("账户邮件发送失败 to_domain=%s: %s", to.rsplit("@", 1)[-1], exc)
+
+
 async def sla_scan_task(ctx) -> None:
     """SLA 到期前提醒与逾期升级（P1-1）。
 
@@ -276,11 +287,23 @@ async def cleanup_task(ctx) -> None:
         messages = await message_service.cleanup_messages(session)
         deliveries = await notify_service.cleanup_deliveries(session)
         api_keys = await idempotency.cleanup(session)
+        stale_account_tokens = (
+            await session.execute(
+                delete(AccountActionToken).where(AccountActionToken.expires_at < now())
+            )
+        ).rowcount or 0
+        stale_sessions = (
+            await session.execute(
+                delete(UserSession).where(
+                    (UserSession.expires_at < now()) | (UserSession.revoked_at.is_not(None))
+                )
+            )
+        ).rowcount or 0
         await session.commit()
-    if removed or messages or deliveries or api_keys:
+    if removed or messages or deliveries or api_keys or stale_account_tokens or stale_sessions:
         logger.info(
-            "清理完成：幂等键=%s 消息=%s 投递记录=%s 接口幂等键=%s",
-            removed, messages, deliveries, api_keys,
+            "清理完成：幂等键=%s 消息=%s 投递记录=%s 接口幂等键=%s 账户令牌=%s 会话=%s",
+            removed, messages, deliveries, api_keys, stale_account_tokens, stale_sessions,
         )
 
 
@@ -288,6 +311,7 @@ TASK_FUNCS = {
     "parse_import_task": parse_import_task,
     "export_report_task": export_report_task,
     "send_notify_task": send_notify_task,
+    "send_account_email_task": send_account_email_task,
 }
 
 

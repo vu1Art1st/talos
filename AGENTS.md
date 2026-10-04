@@ -108,6 +108,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - **非富文本字段拼进 HTML 前必须 `html.escape()`（2026-09-19）**：`HtmlStr` 仅覆盖富文本字段；纯文本字段（如 `VulRetestRecord.title`）拼接到 HTML 字符串时须显式转义（TALOS-2026-005）。
 - **图片必须经鉴权端点下发（2026-09-19 批次 E，新代码强制）**：`/storage/uploads/images/<name>` 由 `app/api/images.py` 处理，依赖 `core.deps.get_image_viewer`（Cookie `vp_img` 或 Bearer）；**禁止回退为 `StaticFiles` 挂载**（守卫：`tests/test_source_guard.py`）。路径保持不变是刻意为之：报告导出的图片本地化依赖 `/storage/` 前缀，富文本内的 src 也无法逐张改造。浏览器侧凭证在登录/刷新/改密/`GET /auth/me` 时下发（`core/security.set_image_cookie`），退出登录走 `POST /auth/logout`。
 - **用户可控出站目标 / 压缩包解析 / 未改密拦截的口径**：出站见 `core/outbound.py`；上传的 docx/xlsx 解析前必须过 `core/archive.py::assert_archive_quota`（zip 炸弹）；`must_change_password` 账号由 `core/deps._enforce_password_change` 在依赖层拦截（仅放行 `/auth/*` 与 `/meta`，403 带 `X-Must-Change-Password: 1`）。refresh 令牌轮换状态统一走 `core/token_store.py`（`jti` 一次性 + 宽限期，勿在路由里另存状态）。
+- **账户会话 / 邮箱与安全邮件（2026-10-04，新代码强制）**：JWT 的稳定 `sid` 对应 `user_sessions`，单会话吊销必须校验数据库会话状态；密码修改/管理员重置/邮件找回必须递增 `token_version` 并吊销全部会话。邮箱写入统一经 `core/identity.py::normalize_email()`，非空邮箱由数据库 `lower(email)` 部分唯一索引兜底；升级前先跑 `scripts/check_duplicate_user_emails.py`。邮件改绑与密码找回的单次令牌统一走 `services/account_service.py`（只存 SHA-256），邮件发送只走 `services/mail_service.py`；链接令牌必须放 fragment，不得进入服务端日志。
 - **图片凭证自愈不要删（2026-09-19 生产踩坑）**：`vp_img` Cookie 只在登录/刷新/改密/`GET /auth/me` 时下发，凭 `utils/imageAuth.ts` 在图片加载失败时补发凭证并重试一次——这是「升级后旧标签页整页裂图」以及 Cookie 过期场景的唯一自愈手段，移除会让用户必须手动刷新（该文件有单测 `utils/__tests__/imageAuth.spec.ts`）。
 - Excel 响应统一 `app/core/xlsx.py` 的 `xlsx_response()`。
 - 不留 print 调试语句；本地排查脚本命名 `_*.py` / `tmp_*.py`（已被 .gitignore 通配覆盖，不入库）。
@@ -176,8 +177,8 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 **验收口径（改动涉及运行时必做）**：
 
-- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **293 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
-- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **38 files / 221 passed**）+ `pnpm run build`。
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **399 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
+- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **40 files / 234 passed**）+ `pnpm run build`。
 - **端到端（E2E）**（涉及前端交互或前后端联调时）：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`（或 `bash scripts/e2e.sh`）—— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + api 27016 + 前端 27017 + 独立 storage），跑 3 条黄金链路（登录 / 新建漏洞含影响URL 批量粘贴 / 报告编辑器渲染），每条都断言**控制台 0 error**。只有 3 条是**刻意**的：广度仍由分级浏览器冒烟负责，E2E 的维护成本与抖动风险不允许铺页面（取舍见 `playwright.config.ts`）。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
 - **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器账号以实际种子库为准（本机容器实测 `admin1/admin123`），用 `--username/--password` 覆盖。

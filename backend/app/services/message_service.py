@@ -13,12 +13,12 @@
 import logging
 from datetime import timedelta
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import MESSAGE_TYPES
 from app.core.timeutil import now
-from app.models import Message
+from app.models import Message, User
 from app.services import task_dedup
 
 logger = logging.getLogger(__name__)
@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 # 消息保留期（P1-2）：已读 90 天、未读 180 天；避免无界增长
 RETENTION_READ_DAYS = 90
 RETENTION_UNREAD_DAYS = 180
+
+
+async def _message_disabled(session: AsyncSession, user_id: int, msg_type: str) -> bool:
+    if msg_type == "system":
+        return False
+    prefs = (
+        await session.execute(select(User.message_prefs).where(User.id == user_id))
+    ).scalar_one_or_none()
+    disabled = (prefs or {}).get("disabled_types") or []
+    return msg_type in disabled
 
 
 async def create_message(
@@ -48,6 +58,8 @@ async def create_message(
         return None
     if msg_type not in MESSAGE_TYPES:
         msg_type = "system"
+    if await _message_disabled(session, int(user_id), msg_type):
+        return None
     try:
         async with session.begin_nested():
             if dedup_key and not await task_dedup.claim_dedup_key(session, dedup_key):

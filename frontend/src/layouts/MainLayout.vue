@@ -125,10 +125,12 @@
           </button>
           <el-dropdown @command="onCommand">
             <span class="flex items-center cursor-pointer" :title="auth.user?.realname || auth.user?.username">
-              <div class="avatar-box topbar-avatar">{{ avatarText }}</div>
+              <UserAvatar :avatar="auth.user?.avatar" :avatar-url="auth.user?.avatar_url"
+                          :name="auth.user?.realname || auth.user?.username" :size="28" />
             </span>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item command="profile">个人中心</el-dropdown-item>
                 <el-dropdown-item command="tokens">访问令牌</el-dropdown-item>
                 <el-dropdown-item command="password">修改密码</el-dropdown-item>
                 <el-dropdown-item command="logout" divided>退出登录</el-dropdown-item>
@@ -168,6 +170,9 @@
       <el-form-item label="新密码" prop="new_password">
         <el-input v-model="pwdForm.new_password" type="password" show-password placeholder="至少 8 位" />
       </el-form-item>
+      <el-form-item label="确认新密码" prop="confirm_password">
+        <el-input v-model="pwdForm.confirm_password" type="password" show-password />
+      </el-form-item>
     </el-form>
     <template #footer>
       <el-button v-if="!forcedChange" @click="pwdVisible = false">取消</el-button>
@@ -189,6 +194,7 @@ import {
 import client from '../api/client'
 import BrandMark from '../components/BrandMark.vue'
 import NotificationBell from '../components/NotificationBell.vue'
+import UserAvatar from '../components/UserAvatar.vue'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import { useUiStore } from '../stores/ui'
@@ -201,8 +207,6 @@ const route = useRoute()
 const router = useRouter()
 
 const isMac = /mac/i.test(navigator.platform || navigator.userAgent)
-const avatarText = computed(() => (auth.user?.realname || auth.user?.username || '?').slice(0, 1))
-
 // 侧边栏折叠状态（持久化；兼容旧 snake_case 键）
 const collapsed = ref(
   (localStorage.getItem('sidebarCollapsed') ?? localStorage.getItem('sidebar_collapsed')) === '1',
@@ -315,13 +319,30 @@ onBeforeUnmount(() => {
 })
 
 const pwdVisible = ref(false)
-const pwdForm = reactive({ old_password: '', new_password: '' })
+const pwdForm = reactive({ old_password: '', new_password: '', confirm_password: '' })
 const pwdFormRef = ref<FormInstance>()
 const pwdRules: FormRules = {
   old_password: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
   new_password: [
     { required: true, message: '请输入新密码', trigger: 'blur' },
     { min: 8, message: '新密码至少 8 位', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        if (value && value === pwdForm.old_password) callback(new Error('新密码不能与原密码相同'))
+        else callback()
+      },
+      trigger: 'blur',
+    },
+  ],
+  confirm_password: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    {
+      validator: (_rule, value: string, callback) => {
+        if (value !== pwdForm.new_password) callback(new Error('两次输入的密码不一致'))
+        else callback()
+      },
+      trigger: 'blur',
+    },
   ],
 }
 // 强制改密（首登或被重置）：弹框不可关闭，必须修改后才能继续
@@ -338,6 +359,8 @@ onMounted(async () => {
 function onCommand(cmd: string) {
   if (cmd === 'logout') {
     auth.logout()
+  } else if (cmd === 'profile') {
+    router.push('/profile')
   } else if (cmd === 'password') {
     pwdVisible.value = true
   } else if (cmd === 'tokens') {
@@ -348,10 +371,13 @@ function onCommand(cmd: string) {
 async function changePassword() {
   const valid = await pwdFormRef.value?.validate().catch(() => false)
   if (!valid) return
-  await client.post('/auth/password', pwdForm)
+  await client.post('/auth/password', {
+    old_password: pwdForm.old_password,
+    new_password: pwdForm.new_password,
+  })
   ElMessage.success('密码修改成功，请重新登录')
   pwdVisible.value = false
-  auth.logout()
+  auth.logout(true)
 }
 </script>
 

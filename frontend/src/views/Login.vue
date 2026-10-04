@@ -30,6 +30,9 @@
 
         <div class="aux-row">
           <el-checkbox v-model="remember">记住我</el-checkbox>
+          <el-button link type="primary" size="small" @click="router.push('/forgot-password')">
+            忘记密码？
+          </el-button>
         </div>
 
         <el-button class="login-btn w-full" data-test="login-submit" size="large" :loading="loading" @click="onLogin">

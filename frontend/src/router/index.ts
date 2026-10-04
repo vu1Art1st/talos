@@ -4,6 +4,24 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: () => import('../views/Login.vue') },
+    {
+      path: '/forgot-password',
+      name: 'forgot-password',
+      component: () => import('../views/ForgotPassword.vue'),
+      meta: { title: '找回密码', public: true },
+    },
+    {
+      path: '/reset-password',
+      name: 'reset-password',
+      component: () => import('../views/ResetPassword.vue'),
+      meta: { title: '重置密码', public: true },
+    },
+    {
+      path: '/profile/email-confirm',
+      name: 'email-confirm',
+      component: () => import('../views/EmailConfirm.vue'),
+      meta: { title: '确认邮箱', public: true },
+    },
     // 自定义错误页：顶层路由（不继承主布局）；public 使其在未登录时也可访问
     // ——401 / 404 / 502 常发生在登录之前，若被守卫拦到 /login 则错误页形同虚设。
     {
@@ -19,6 +37,7 @@ const router = createRouter({
       children: [
         { path: 'dashboard', name: 'dashboard', component: () => import('../views/Dashboard.vue'), meta: { title: '安全态势' } },
         { path: 'todos', name: 'todos', component: () => import('../views/TodoWorkbench.vue'), meta: { title: '个人待办' } },
+        { path: 'profile', name: 'profile', component: () => import('../views/ProfileCenter.vue'), meta: { title: '个人中心' } },
         { path: 'messages', name: 'messages', component: () => import('../views/MessageCenter.vue'), meta: { title: '消息中心' } },
         { path: 'vulns', name: 'vulns', component: () => import('../views/VulnList.vue'), meta: { title: '历史漏洞库' } },
         { path: 'vulns/new', name: 'vuln-new', component: () => import('../views/VulnEdit.vue'), meta: { title: '提交漏洞' } },

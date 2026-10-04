@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now as _now
@@ -24,6 +24,14 @@ class Role(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index(
+            "uq_users_email_lower",
+            text("lower(email)"),
+            unique=True,
+            postgresql_where=text("email <> ''"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
@@ -38,6 +46,11 @@ class User(Base):
     token_version: Mapped[int] = mapped_column(default=0)
     role_id: Mapped[int | None] = mapped_column(ForeignKey("roles.id"), nullable=True)
     remark: Mapped[str] = mapped_column(Text, default="")
+    # 站内消息偏好：{"disabled_types": ["sla"]}。空对象表示全部接收，
+    # 新消息类型默认开启，避免每次新增字典都要迁移存量用户。
+    message_prefs: Mapped[dict] = mapped_column(
+        JSON, default=dict, server_default=text("'{}'::json"),
+    )
     create_time: Mapped[datetime] = mapped_column(DateTime, default=_now)
     last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
@@ -47,6 +60,45 @@ class User(Base):
         secondary="group_users",
         lazy="selectin",
     )
+
+
+class UserSession(Base):
+    """可管理的登录会话：JWT access / refresh 均携带稳定 `sid`。
+
+    会话记录落 PostgreSQL，Redis 只继续承担 refresh jti 的一次性轮换状态；
+    这样单会话吊销、全部会话吊销与服务重启后的会话可见性都不依赖 Redis 持久性。
+    """
+
+    __tablename__ = "user_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True,
+    )
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    user_agent: Mapped[str] = mapped_column(String(256), default="")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+
+
+class AccountActionToken(Base):
+    """邮件改绑 / 密码找回的单次令牌；数据库只保存 SHA-256 摘要。"""
+
+    __tablename__ = "account_action_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True,
+    )
+    purpose: Mapped[str] = mapped_column(String(32), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    new_email: Mapped[str] = mapped_column(String(128), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    create_time: Mapped[datetime] = mapped_column(DateTime, default=_now, index=True)
+    request_ip: Mapped[str] = mapped_column(String(64), default="")
 
 
 class PersonalAccessToken(Base):

@@ -11,12 +11,9 @@ P1-3 改造要点：
 3. **结果回执**：测试发送同步执行并返回实际结果（不再只返回「已入队」）。
 4. 出站前再次做 SSRF 校验、禁用重定向、错误信息脱敏（不泄露密钥与内网地址）。
 """
-import asyncio
 import logging
 import smtplib
 from datetime import timedelta
-from email.header import Header
-from email.mime.text import MIMEText
 from urllib.parse import urlparse
 
 import httpx
@@ -29,7 +26,7 @@ from app.core.config import settings
 from app.core.outbound import assert_public_url
 from app.core.timeutil import now
 from app.models import NotificationChannel, NotifyDelivery
-from app.services import task_lifecycle
+from app.services import mail_service, task_lifecycle
 from app.workers.dispatch import dispatch
 
 logger = logging.getLogger(__name__)
@@ -120,7 +117,7 @@ def _classify(channel_type: str, status_code: int, exc: BaseException | None) ->
         if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout,
                             httpx.WriteTimeout, httpx.PoolTimeout, httpx.RemoteProtocolError)):
             return True, f"网络连接失败：{exc}"
-        if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
+        if isinstance(exc, TimeoutError):
             return True, f"请求超时：{exc}"
         if isinstance(exc, smtplib.SMTPException):
             return True, f"SMTP 发送失败：{exc}"
@@ -132,19 +129,6 @@ def _classify(channel_type: str, status_code: int, exc: BaseException | None) ->
     if status_code >= 400:
         return False, f"对端返回 {status_code}（请检查渠道配置：地址、鉴权或收件人）"
     return False, ""
-
-
-def _send_mail_sync(to: list[str], subject: str, body: str) -> None:
-    if not settings.SMTP_HOST or not to:
-        raise smtplib.SMTPException("未配置 SMTP 服务或收件人为空")
-    msg = MIMEText(body, "html", "utf-8")
-    msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
-    msg["To"] = ",".join(to)
-    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15) as server:
-        if settings.SMTP_USER:
-            server.login(settings.SMTP_USER, settings.SMTP_PASS)
-        server.sendmail(msg["From"], to, msg.as_string())
 
 
 async def perform_send(channel_type: str, config: dict, title: str, body: str) -> tuple[int, str]:
@@ -186,7 +170,7 @@ async def perform_send(channel_type: str, config: dict, title: str, body: str) -
             f"<p>{line}</p>" for line in body.splitlines() if line.strip()
         )
         try:
-            await asyncio.to_thread(_send_mail_sync, recipients, title, html)
+            await mail_service.send_mail(recipients, title, html)
         except Exception as exc:  # noqa: BLE001
             retryable, reason = _classify(channel_type, 0, exc)
             return 0, ("[可重试] " if retryable else "") + _sanitize_error(Exception(reason), config)

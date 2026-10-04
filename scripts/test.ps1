@@ -32,19 +32,11 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $backend = Join-Path $root 'backend'
 $venvPython = Join-Path $backend '.venv\Scripts\python.exe'
+. (Join-Path $root 'scripts\port-utils.ps1')
 
 if (-not (Test-Path $venvPython)) {
     Write-Host '[test] 未找到 backend\.venv，请先按 AGENTS.md「常用命令」用 uv 创建并安装依赖' -ForegroundColor Red
     exit 1
-}
-
-function Test-PortListening {
-    param([int]$Port)
-    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
-        return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
-    }
-    $line = netstat -ano | Select-String ":$Port\s+.*LISTENING" | Select-Object -First 1
-    return [bool]$line
 }
 
 # ---------- 清理模式 ----------

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -8,9 +8,10 @@ from app.constants import PERMISSION_CATALOG, PERMISSIONS
 from app.core.data_scope import unscoped_statement
 from app.core.deps import get_current_user, require_any_perm, require_perm
 from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_sort
-from app.core.security import hash_password
+from app.core.security import ensure_password_changed, hash_password
+from app.core.timeutil import now
 from app.db import get_session
-from app.models import Group, GroupMember, GroupUser, Role, User
+from app.models import Group, GroupMember, GroupUser, Role, User, UserSession
 from app.schemas import (
     GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut,
     PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut,
@@ -88,6 +89,14 @@ async def create_user(
         raise HTTPException(400, "用户名已存在")
     if not body.password:
         raise HTTPException(400, "初始密码不能为空")
+    if body.email:
+        email_exists = (
+            await session.execute(
+                unscoped_statement(select(User.id).where(func.lower(User.email) == body.email))
+            )
+        ).scalar_one_or_none()
+        if email_exists is not None:
+            raise HTTPException(400, "该邮箱已被使用")
     user = User(
         username=body.username,
         password_hash=hash_password(body.password),
@@ -117,20 +126,46 @@ async def update_user(
     session: AsyncSession = Depends(get_session),
 ):
     user = await get_or_404(session, User, user_id, "用户不存在")
+    if body.email and body.email != user.email:
+        email_exists = (
+            await session.execute(
+                unscoped_statement(
+                    select(User.id).where(
+                        func.lower(User.email) == body.email,
+                        User.id != user.id,
+                    )
+                )
+            )
+        ).scalar_one_or_none()
+        if email_exists is not None:
+            raise HTTPException(400, "该邮箱已被使用")
     user.realname = body.realname
     user.email = body.email
     user.phone = body.phone
+    revoke_sessions = False
     # 由启用转为禁用：递增令牌版本，强制已登录会话失效
     if user.is_active and not body.is_active:
         user.token_version += 1
+        revoke_sessions = True
     user.is_active = body.is_active
     user.role_id = body.role_id
     await _sync_user_groups(session, user, body.group_ids)
     if body.password:
+        try:
+            ensure_password_changed(body.password, user.password_hash)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
         user.password_hash = hash_password(body.password)
         user.must_change_password = True
         # 重置密码同样失效存量令牌
         user.token_version += 1
+        revoke_sessions = True
+    if revoke_sessions:
+        await session.execute(
+            update(UserSession)
+            .where(UserSession.user_id == user.id, UserSession.revoked_at.is_(None))
+            .values(revoked_at=now())
+        )
     await session.commit()
     await session.refresh(user)
     await session.refresh(user, attribute_names=["groups"])

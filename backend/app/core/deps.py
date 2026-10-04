@@ -15,7 +15,7 @@ from app.core.ratelimit import get_failures, incr_failure
 from app.core.security import IMAGE_COOKIE, decode_token
 from app.core.timeutil import now
 from app.db import get_session
-from app.models import PersonalAccessToken, User
+from app.models import PersonalAccessToken, User, UserSession
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -45,12 +45,12 @@ def _enforce_password_change(user: User, path: str) -> None:
         )
 
 
-async def _load_user_by_access_token(session: AsyncSession, token: str) -> User:
+async def _load_user_by_access_token(session: AsyncSession, token: str) -> tuple[User, str]:
     """按 access token 校验并加载用户（站内依赖与图片端点共用同一口径）。"""
     decoded = decode_token(token, "access")
     if decoded is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录已过期，请重新登录")
-    user_id, ver = decoded
+    user_id, ver, sid = decoded
     user = (
         await session.execute(
             select(User)
@@ -63,7 +63,16 @@ async def _load_user_by_access_token(session: AsyncSession, token: str) -> User:
     # 令牌版本不一致（已改密/禁用）：拒绝存量令牌
     if ver != user.token_version:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效，请重新登录")
-    return user
+    if sid:
+        row = await session.get(UserSession, sid)
+        if (
+            row is None
+            or row.user_id != user.id
+            or row.revoked_at is not None
+            or row.expires_at <= now()
+        ):
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效，请重新登录")
+    return user, sid
 
 
 async def get_current_user(
@@ -71,7 +80,8 @@ async def get_current_user(
     token: str = Depends(oauth2_scheme),
     session: AsyncSession = Depends(get_session),
 ) -> User:
-    user = await _load_user_by_access_token(session, token)
+    user, sid = await _load_user_by_access_token(session, token)
+    request.state.session_id = sid
     _enforce_password_change(user, request.url.path)
     await install_data_scope(session, user)
     return user
@@ -97,7 +107,7 @@ async def get_image_viewer(
         token = request.cookies.get(IMAGE_COOKIE, "")
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "未登录或登录已过期")
-    user = await _load_user_by_access_token(session, token)
+    user, _sid = await _load_user_by_access_token(session, token)
     await install_data_scope(session, user)
     return user
 

@@ -36,6 +36,7 @@ if (-not $PSBoundParameters.ContainsKey('HealthTimeout')) {
 $backend = Join-Path $root 'backend'
 $frontend = Join-Path $root 'frontend'
 $venvPython = Join-Path $backend '.venv\Scripts\python.exe'
+. (Join-Path $root 'scripts\port-utils.ps1')
 
 foreach ($cmd in 'node', 'pnpm') {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
@@ -50,35 +51,6 @@ $hasUv = [bool](Get-Command uv -ErrorAction SilentlyContinue)
 if (-not $hasUv -and -not (Get-Command python -ErrorAction SilentlyContinue)) {
     Write-Host '[dev] 需要 uv（推荐，https://docs.astral.sh/uv/）或 python 之一' -ForegroundColor Red
     exit 1
-}
-
-# ---------- 端口检测工具 ----------
-
-# 端口是否处于 LISTEN 状态（Get-NetTCPConnection 优先，旧系统回退 netstat）
-function Test-PortInUse {
-    param([int]$Port)
-    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
-        return [bool](Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue)
-    }
-    $line = netstat -ano | Select-String ":$Port\s+.*LISTENING" | Select-Object -First 1
-    return [bool]$line
-}
-
-# 获取监听指定端口的进程 PID（尽力而为，无权限/无工具时返回 $null）
-function Get-PortPid {
-    param([int]$Port)
-    if (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue) {
-        $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($conn) { return [int]$conn.OwningProcess }
-        return $null
-    }
-    $line = netstat -ano | Select-String ":$Port\s+.*LISTENING" | Select-Object -First 1
-    if ($line) {
-        $parts = ($line.ToString().Trim() -split '\s+')
-        return [int]$parts[$parts.Count - 1]
-    }
-    return $null
 }
 
 # 按 PID 取进程名

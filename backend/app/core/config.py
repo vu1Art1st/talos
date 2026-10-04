@@ -1,5 +1,6 @@
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,7 +15,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.24.1"
+    APP_VERSION: str = "2.25.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -62,6 +63,9 @@ class Settings(BaseSettings):
 
     # 允许携带凭证的跨域来源白名单（前端部署地址），生产环境务必按实际域名收窄
     CORS_ORIGINS: list[str] = ["http://localhost", "http://localhost:27014"]
+    # 账户邮件中的公开前端地址（如 https://talos.example.com）。
+    # 留空时关闭自助找回与邮箱改绑；必须为 http(s) 绝对地址，不拼接请求 Host，避免 Host 头注入。
+    PUBLIC_BASE_URL: str = ""
 
     DATABASE_URL: str = "postgresql+asyncpg://vuln:vulnpass@localhost:5432/vulnplatform"
     # 可选：把「业务连接」与「Alembic 迁移」的 search_path 固定到该 schema（留空＝默认 public）。
@@ -117,6 +121,12 @@ class Settings(BaseSettings):
                 "VP_SECRET_KEY 必须为 >=32 字符的随机值且非默认占位符（可用 `openssl rand -hex 32` 生成）"
             )
         return self
+
+    @property
+    def account_email_enabled(self) -> bool:
+        base = self.PUBLIC_BASE_URL.strip()
+        parsed = urlparse(base)
+        return bool(self.SMTP_HOST and parsed.scheme in ("http", "https") and parsed.netloc)
 
     @property
     def storage_path(self) -> Path:

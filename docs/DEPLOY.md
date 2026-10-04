@@ -29,6 +29,8 @@
    #     且每层都必须用 $proxy_add_x_forwarded_for 追加真实对端。0 = 完全不信任转发头。
    #   VP_COOKIE_SECURE          —— HTTPS 部署时设为 true（图片 Cookie 加 Secure）。
    #     HTTP 部署下开启会被浏览器拒收，表现为富文本图片不显示。
+   #   VP_PUBLIC_BASE_URL        —— 前端公网地址（如 https://talos.example.com）。
+   #     与 VP_SMTP_HOST 同时配置后启用「忘记密码」与邮箱改绑；不读取请求 Host，避免 Host 头注入。
    #   VP_ARCHIVE_MAX_*          —— docx/xlsx 解压配额（条目数/解压总量 MB/压缩比），防 zip 炸弹。
    ```
 

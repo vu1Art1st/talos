@@ -1,4 +1,13 @@
-from app.models.user import Group, GroupMember, GroupUser, PersonalAccessToken, Role, User
+from app.models.user import (
+    AccountActionToken,
+    Group,
+    GroupMember,
+    GroupUser,
+    PersonalAccessToken,
+    Role,
+    User,
+    UserSession,
+)
 from app.models.business import Asset, Message, Vul, VulLog, VulRetestRecord, vuln_assets
 from app.models.report import ExportJob, Report, ReportSection
 from app.models.template import ReportTemplate
@@ -26,7 +35,8 @@ from app.models.sla import SlaConfig, SlaExtension, SlaPolicy
 from app.models.dashboard import DashboardView
 
 __all__ = [
-    "Role", "User", "Group", "GroupUser", "GroupMember", "PersonalAccessToken",
+    "Role", "User", "UserSession", "AccountActionToken",
+    "Group", "GroupUser", "GroupMember", "PersonalAccessToken",
     "Asset", "Vul", "VulLog", "VulRetestRecord", "Message", "vuln_assets",
     "Report", "ReportSection", "ExportJob", "ReportTemplate",
     "ImportBatch", "ImportRecord", "ImportRecordChange",

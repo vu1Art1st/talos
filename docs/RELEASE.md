@@ -25,6 +25,29 @@
 
 ---
 
+## [2.25.0] - 2026-10-05
+
+账户中心（账号自助管理）落地——新增邮箱确认、密码找回 / 重置、个人资料与头像、会话管理与站内消息偏好；含一项**向后兼容的附加型迁移**（新增 `message_prefs` 列、邮箱部分唯一约束与 `user_sessions` / `account_action_tokens` 表，无破坏性 schema 变更），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **账户中心后端**：`app/core/identity.py`（身份 / 会话边界）、`app/services/account_service.py`、`app/services/mail_service.py`（邮件发送，含 SMTP 配置）；新增 Alembic 迁移 `b1c2d3e4f5a6_account_center`：`users.message_prefs`（JSON，默认 `{}`）、`uq_users_email_lower` 部分唯一索引（跳过空邮箱）、`user_sessions` 与 `account_action_tokens` 表（升级前会校验并规范化邮箱，重复邮箱需先用 `scripts/check_duplicate_user_emails.py` 处理）。
+- **认证端点扩展**：`GET/PUT /profile`、`POST/PUT/DELETE /avatar`（含预设头像）、`GET/PUT /preferences`（站内消息偏好）、`GET /sessions` / `DELETE /sessions/{id}` / `POST /sessions/revoke-others`（单 / 全会话吊销）、`POST /email-change` + `POST /email-change/confirm`（邮箱变更双向确认）、`GET /password-reset/status` / `POST /password-reset/request` / `POST /password-reset/confirm`（邮件驱动找回 / 重置）；JWT access / refresh 现携带稳定 `sid`，会话吊销不依赖 Redis 持久性。
+- **前端账户中心**：`ProfileCenter.vue` / `EmailConfirm.vue` / `ForgotPassword.vue` / `ResetPassword.vue`、`UserAvatar.vue` / `PresetAvatar.vue`，`MainLayout` 头像菜单、`stores/auth.ts` 与 `router/index.ts` 接入，`CmdPalette` 同步。
+
+### 变更
+
+- `auth.py`(+561) / `users.py`(+41) / `schemas/auth.py`(+80) / `models/user.py`(+54) / `security.py`(+54，新增携带 `sid` 的令牌与会话吊销校验) / `deps.py`(+22) / `constants.py`(+24) / `config.py`(+10，邮件与会话配置)；`message_service` / `notify_service` / `workers/main` 接入消息偏好与会话事件；`misc.py`、`docker-compose.yml`、`dev.ps1`、`scripts/e2e.ps1` / `test.ps1` / `port-utils.ps1` 同步。
+- `POST /auth/password` 改为返回 `200`（不再回发 token）。
+- 文档：`DEPLOY.md`（邮件 / 会话配置与迁移前置校验）、`USER_GUIDE.md`（账户中心使用）、`AGENTS.md`（会话 / 令牌边界）。
+- 测试：新增 `tests/api/test_api_account_center.py`、更新 `tests/test_security_batch_e.py` 与 `tests/api/_helpers.py`；前端 `UserAvatar.spec.ts`。
+
+### 安全
+
+- 密码重置 / 邮箱变更均经邮箱确认的一次性 token（`account_action_tokens`，含 `token_hash` 唯一索引与过期），`ensure_password_changed` 阻止复用旧密码；登录失败计数与审计保持。
+
+---
+
 ## [2.24.1] - 2026-10-04
 
 依赖维护专项：停机依赖替换、认证哈希现代化与前端容器镜像更新。本版本为**向下兼容的依赖维护与安全防护**（密码哈希现代化、导出转换器替换与 SSRF 防护、容器镜像更新，无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。

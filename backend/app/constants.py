@@ -159,6 +159,14 @@ AUDIT_ACTIONS = {
     "login_locked": "登录锁定",
     "logout": "退出登录",
     "password_change": "修改密码",
+    "profile_update": "修改个人资料",
+    "avatar_change": "更换头像",
+    "message_prefs_update": "修改消息偏好",
+    "email_change_request": "申请更换邮箱",
+    "email_change_complete": "完成更换邮箱",
+    "session_revoke": "吊销登录会话",
+    "password_reset_request": "申请重置密码",
+    "password_reset_complete": "完成重置密码",
     "user_create": "创建用户",
     "user_update": "编辑用户",
     "user_delete": "删除用户",
@@ -195,6 +203,22 @@ AUDIT_ACTIONS = {
     # P1-7 运营看板视图
     "dashboard_view_save": "保存看板视图",
     "dashboard_view_delete": "删除看板视图",
+}
+
+# 个人中心预置头像：ID 由前后端共享，图形与配色由前端包内 SVG 组件渲染。
+AVATAR_PRESETS = {
+    "01": "薄荷",
+    "02": "湖蓝",
+    "03": "晴空",
+    "04": "靛青",
+    "05": "紫藤",
+    "06": "玫瑰",
+    "07": "珊瑚",
+    "08": "琥珀",
+    "09": "青柠",
+    "10": "松柏",
+    "11": "石墨",
+    "12": "月光",
 }
 
 # 通知渠道类型（F3）：webhook 走 httpx 出站 POST，邮件复用 SMTP 任务

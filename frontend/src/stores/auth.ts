@@ -10,9 +10,17 @@ export interface UserInfo {
   username: string
   realname: string
   email: string
+  phone?: string
+  avatar?: string
+  avatar_url?: string
   role_name?: string
+  group_ids?: number[]
+  group_names?: string[]
   permissions: string[]
   must_change_password?: boolean
+  message_prefs?: { disabled_types?: string[] }
+  create_time?: string | null
+  last_login?: string | null
 }
 
 export const useAuthStore = defineStore('auth', {
@@ -55,10 +63,10 @@ export const useAuthStore = defineStore('auth', {
       const perms = this.user?.permissions ?? []
       return perms.includes('*') || perms.includes(perm)
     },
-    async logout() {
+    async logout(skipGuard = false) {
       // 未保存内容守卫（P0-5）：退出登录 / 切换账号与路由离开走同一套判定，
       // 守卫返回 false（例如用户选择「留在当前页」）时中止登出。
-      if (!(await confirmLeaveAll())) return
+      if (!skipGuard && !(await confirmLeaveAll())) return
       // 服务端注销：作废当前会话的 refresh token 并清除 HttpOnly 图片 Cookie
       // （Cookie 由服务端下发，前端 JS 读不到也删不掉，必须走接口）。
       // 令牌可能已过期，失败不阻塞本地登出；用裸 axios 避免触发拦截器的刷新/错误页逻辑。

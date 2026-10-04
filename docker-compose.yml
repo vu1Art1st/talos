@@ -46,6 +46,7 @@ services:
       VP_SMTP_USER: ${VP_SMTP_USER:-}
       VP_SMTP_PASS: ${VP_SMTP_PASS:-}
       VP_SMTP_FROM: ${VP_SMTP_FROM:-}
+      VP_PUBLIC_BASE_URL: ${VP_PUBLIC_BASE_URL:-}
       # 安全整改（批次 E）：可信反向代理层数（默认 1＝浏览器 → 前端 Nginx → API）；
       # 外层还有宿主 Nginx/CDN 时调大，且每一层都必须用 $proxy_add_x_forwarded_for 追加真实对端
       VP_TRUSTED_PROXY_HOPS: ${VP_TRUSTED_PROXY_HOPS:-1}
