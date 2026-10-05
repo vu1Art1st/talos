@@ -82,7 +82,7 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | 文档 | 当前作用 | 状态 / 待处理 |
 |---|---|---|
 | `docs/RELEASE.md` | 版本、变更、事故修复的唯一历史真相源 | 已更新至 2.21.0（P0 / P1 批次） |
-| `docs/ROADMAP.md` | 下一阶段规划唯一真相源 | 2026-09-30 追加批次 E（性能与数据访问底座）规划；P2-1 / P2-4 / P2-5 仍为当前批次，未排期项集中归档 |
+| `docs/ROADMAP.md` | 下一阶段规划唯一真相源 | 2026-09-30 追加批次 E（性能与数据访问底座）规划；2026-10-05 追加公网 IPv4 HTTPS + SafeLine WAF 暂缓方案（当前维持白名单访问，不启动实施）；P2-1 / P2-4 / P2-5 仍为当前批次，未排期项集中归档 |
 | `docs/USER_GUIDE.md` | 最终用户功能说明 | 已按 2.21.0 校订（SLA、待办、模板中心、开放 API 等） |
 | `docs/DEPLOY.md` | 部署、升级、备份、恢复、排障 | 已补健康探针、任务恢复与现有备份 / 恢复脚本说明；RPO / RTO 与恢复演练归入 P2-5 |
 | `docs/LOCAL_DEV_SETUP.md` | 本机 DBngin、测试、E2E 环境 | 与当前测试隔离方案一致 |
@@ -589,6 +589,34 @@ Python 3.14 迁移准备）。该批次已于 2026-09-30 立项规划但**未启
 | 引入 GitHub Actions / 通用 CI | 不采用 | 满足 `docs/LOCAL_DEV_SETUP.md` §五 的任一重估条件 |
 | 恢复 SQLite 本地开发或测试 | 禁止 | 不设重启条件；PostgreSQL 单栈是既定架构决策 |
 | 微服务化 / Kubernetes | 不排期 | 出现明确的独立扩缩容、团队边界或部署隔离需求，并完成收益成本评估 |
+| 公网 IPv4 HTTPS + SafeLine WAF | 暂缓，后续择机实施 | 当前白名单方案安全可控；出现无域名公网访问、移动 / 外部用户、TLS / WAF 合规要求，且公网 IPv4 固定、80 / 443 可达时重新评估 |
+
+### 10.3 公网 IPv4 HTTPS + SafeLine WAF（暂缓）
+
+> **状态（2026-10-05）**：已形成可实施方案但暂缓启动，不承诺版本和日期，不加入批次 C / D / E。
+> 当前系统继续采用白名单访问方案，安全边界和访问控制满足现状；仅在 10.2 的重启条件出现时重新评估。
+
+**目标链路**：`Internet -> Caddy -> SafeLine -> Talos frontend -> API`。
+
+**已固化结论**
+
+- Caddy 固定 `2.11.7-alpine`，独占公网 80 / 443，使用 Let's Encrypt `shortlived` IP 证书。
+- 443 需要访问白名单时，Caddy 必须强制使用 HTTP-01（`disable_tlsalpn_challenge`）；80 保持公网可达，仅承担 ACME challenge 和 HTTPS 跳转。
+- 443 可按固定办公网、VPN 或可信出口 CIDR 设置网络层白名单；若不满足固定出口条件，则保留公网可达并在 SafeLine 使用应用层白名单。
+- SafeLine 固定 `9.4.2`，只做 HTTP WAF，不负责 IP 证书申请或 TLS 终止；站点监听 `127.0.0.1:8081`，上游为 `http://127.0.0.1:27012`，源 IP 从 `X-Forwarded-For` 获取。
+- SafeLine 管理控制台 9443 仅允许运维网段访问；8081 和 Talos 前端 27012 不向公网开放。
+- Talos 仅在 edge / 生产环境启用 `VP_TRUSTED_PROXY_HOPS=3`、`VP_COOKIE_SECURE=true`、`VP_PUBLIC_BASE_URL=https://<IPv4>`；本地开发继续使用 `TRUSTED_PROXY_HOPS=1`，避免本地路径和来源 IP 失真。
+- Caddy、SafeLine 作为独立 edge 栈，不成为 Talos 基础 Compose、pytest、Vitest 或 E2E 的硬依赖。
+
+**验证边界**
+
+- 本地可完成基础镜像构建、后端 / 前端门禁、E2E、Caddy 配置校验和 SafeLine 基础冒烟。
+- 公网 IP 证书、运营商 / 防火墙白名单、真实客户端 IP 和 6 天证书续期必须到公网 staging 或生产环境验证，不能由本地私网环境替代。
+
+**实施前前置**
+
+- 完成安全评审，确认固定公网 IPv4 和 80 / 443 可达性。
+- 确认 443 白名单 CIDR、运维管理网段、回滚路径和 edge 证书过期告警设计。
 
 ---
 

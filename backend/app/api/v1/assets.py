@@ -8,8 +8,14 @@ from app.core.query import get_or_404, paginate, apply_sort
 from app.core.sanitize import excel_safe
 from app.core.xlsx import load_xlsx, xlsx_response
 from app.db import get_session
-from app.models import Asset, Group, GroupMember, User, vuln_assets
+from app.models import Asset, Group, User, vuln_assets
 from app.schemas import AssetImportResultOut, AssetIn, AssetOut, Page
+from app.services.org_service import (
+    ensure_group,
+    find_group_by_name,
+    resolve_asset_group,
+    sync_owners_to_group_members,
+)
 
 router = APIRouter(prefix="/assets", tags=["资产"])
 
@@ -67,14 +73,39 @@ async def create_asset(
     _: User = Depends(require_perm("asset:manage")),
     session: AsyncSession = Depends(get_session),
 ):
-    asset = Asset(**body.model_dump())
-    session.add(asset)
-    await _sync_owners_to_group_members(
-        session, body.department, [o.model_dump() for o in body.owners],
+    group = await resolve_asset_group(
+        session, group_id=body.group_id, department=body.department, create_group=body.create_group,
     )
+    _validate_asset_department(body, group)
+    data = body.model_dump(exclude={"create_group"})
+    _apply_group(data, group)
+    asset = Asset(**data)
+    session.add(asset)
+    if group is not None:
+        await sync_owners_to_group_members(session, group.id, [o.model_dump() for o in body.owners])
     await session.commit()
     await session.refresh(asset)
     return asset
+
+
+def _apply_group(data: dict, group: Group | None) -> None:
+    """资产落库前把组织关联与部门展示名统一到组织口径。"""
+    if group is None:
+        return
+    data["group_id"] = group.id
+    data["department"] = group.name
+
+
+def _validate_asset_department(body: AssetIn, group: Group | None) -> None:
+    """负责人的组织归属必须可解析，禁止静默丢弃同步。"""
+    if body.group_id is not None and group is None:
+        raise HTTPException(400, "所属组织不存在，请刷新后重试")
+    if not body.owners or group is not None:
+        return
+    department = (body.department or "").strip()
+    if not department:
+        raise HTTPException(400, "填写系统负责人前请先选择部门")
+    raise HTTPException(400, f"部门「{department}」不存在，请先创建组织或修正部门名称")
 
 # ---------- Excel 导入导出（需在 /{asset_id} 之前注册，避免路径冲突） ----------
 def _dump_owners(owners: list | None) -> str:
@@ -98,32 +129,6 @@ def _parse_owners(text: str) -> list[dict]:
             "email": fields[2].strip() if len(fields) > 2 else "",
         })
     return owners
-
-async def _sync_owners_to_group_members(
-    session: AsyncSession, department: str, owners: list[dict],
-) -> None:
-    """录入的系统负责人自动同步到组织管理（GroupMember）。
-
-    以资产部门作为归属组织；同名负责人已存在时跳过，保证幂等。
-    """
-    if not department or not owners:
-        return
-    group = (
-        await session.execute(select(Group).where(Group.name == department))
-    ).scalar_one_or_none()
-    if group is None:
-        return
-    existing = set((await session.execute(select(GroupMember.name))).scalars().all())
-    for o in owners:
-        name = (o.get("name") or "").strip()
-        if name and name not in existing:
-            session.add(GroupMember(
-                group_id=group.id,
-                name=name,
-                phone=(o.get("phone") or "").strip(),
-                email=(o.get("email") or "").strip(),
-            ))
-            existing.add(name)
 
 def _parse_public_urls(text: str) -> list[dict]:
     urls = []
@@ -229,6 +234,8 @@ async def import_assets(
     wb = load_xlsx(data)
     ws = wb.active
     result = AssetImportResultOut()
+    group_cache: dict[str, Group] = {}
+    created_groups: set[str] = set()
     for idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
         cells = [str(c).strip() if c is not None else "" for c in row]
         cells += [""] * (len(EXCEL_HEADERS) - len(cells))
@@ -241,10 +248,25 @@ async def import_assets(
             result.errors.append(f"第{idx}行：系统命名为必填项")
             continue
         owners = _parse_owners(cells[9])
-        session.add(Asset(
+        department = cells[2]
+        if owners and not department:
+            result.failed += 1
+            result.errors.append(f"第{idx}行：填写系统负责人前请先填写部门")
+            continue
+        group = None
+        if department:
+            group = group_cache.get(department)
+            if group is None:
+                group = await find_group_by_name(session, department)
+                if group is None:
+                    group, created = await ensure_group(session, department)
+                    if created:
+                        created_groups.add(group.name)
+                group_cache[department] = group
+        data = dict(
             name=name,
             sub_system=cells[1],
-            department=cells[2],
+            department=department,
             system_type=cells[3],
             public_urls=_parse_public_urls(cells[4]),
             internal_urls=_parse_list(cells[5]),
@@ -254,9 +276,13 @@ async def import_assets(
             owners=owners,
             status=STATUS_REVERSE.get(cells[10], 10),
             remark=cells[11],
-        ))
-        await _sync_owners_to_group_members(session, cells[2], owners)
+        )
+        _apply_group(data, group)
+        session.add(Asset(**data))
+        if group is not None:
+            await sync_owners_to_group_members(session, group.id, owners)
         result.success += 1
+    result.created_groups = sorted(created_groups)
     await session.commit()
     return result
 
@@ -277,11 +303,16 @@ async def update_asset(
     session: AsyncSession = Depends(get_session),
 ):
     asset = await get_or_404(session, Asset, asset_id, "资产不存在")
-    for k, v in body.model_dump().items():
-        setattr(asset, k, v)
-    await _sync_owners_to_group_members(
-        session, body.department, [o.model_dump() for o in body.owners],
+    group = await resolve_asset_group(
+        session, group_id=body.group_id, department=body.department, create_group=body.create_group,
     )
+    _validate_asset_department(body, group)
+    data = body.model_dump(exclude={"create_group"})
+    _apply_group(data, group)
+    for k, v in data.items():
+        setattr(asset, k, v)
+    if group is not None:
+        await sync_owners_to_group_members(session, group.id, [o.model_dump() for o in body.owners])
     await session.commit()
     await session.refresh(asset)
     return asset

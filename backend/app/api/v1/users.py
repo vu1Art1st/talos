@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,7 +12,7 @@ from app.core.query import delete_by_id_if_exists, get_or_404, paginate, apply_s
 from app.core.security import ensure_password_changed, hash_password
 from app.core.timeutil import now
 from app.db import get_session
-from app.models import Group, GroupMember, GroupUser, Role, User, UserSession
+from app.models import Asset, Group, GroupMember, GroupUser, Role, User, UserSession
 from app.schemas import (
     GroupIn, GroupOut, GroupMemberIn, GroupMemberOut, Page, PermissionGroupOut,
     PermissionItemOut, RoleIn, RoleOut, UserIn, UserOption, UserOut,
@@ -299,7 +300,11 @@ async def create_group(
         raise HTTPException(400, "同名组织已存在")
     group = Group(name=name, remark=body.remark)
     session.add(group)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(400, "同名组织已存在") from None
     await session.refresh(group)
     return group
 
@@ -312,9 +317,19 @@ async def update_group(
     session: AsyncSession = Depends(get_session),
 ):
     group = await get_or_404(session, Group, group_id, "组不存在")
-    group.name = body.name
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "组织名称不能为空")
+    group.name = name
     group.remark = body.remark
-    await session.commit()
+    await session.execute(
+        update(Asset).where(Asset.group_id == group_id).values(department=name)
+    )
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(400, "同名组织已存在") from None
     await session.refresh(group)
     return group
 
@@ -325,6 +340,15 @@ async def delete_group(
     _: User = Depends(require_perm("user:manage")),
     session: AsyncSession = Depends(get_session),
 ):
+    used = (
+        await session.execute(
+            select(func.count()).select_from(Asset).where(Asset.group_id == group_id)
+        )
+    ).scalar_one()
+    if used:
+        raise HTTPException(400, f"该组织已被 {used} 个资产引用，无法删除")
+    await session.execute(delete(GroupMember).where(GroupMember.group_id == group_id))
+    await session.execute(delete(GroupUser).where(GroupUser.group_id == group_id))
     await delete_by_id_if_exists(session, Group, group_id)
     await session.commit()
     return {"msg": "删除成功"}
@@ -363,7 +387,11 @@ async def create_group_member(
         phone=body.phone.strip(), email=body.email.strip(),
     )
     session.add(member)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(400, "该组织已存在同名成员") from None
     await session.refresh(member)
     return member
 
@@ -380,10 +408,17 @@ async def update_group_member(
     member = await get_or_404(session, GroupMember, member_id, "成员不存在")
     if member.group_id != group_id:
         raise HTTPException(400, "成员不属于该组织")
-    member.name = body.name.strip()
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "姓名不能为空")
+    member.name = name
     member.phone = body.phone.strip()
     member.email = body.email.strip()
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(400, "该组织已存在同名成员") from None
     await session.refresh(member)
     return member
 

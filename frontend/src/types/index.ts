@@ -79,6 +79,7 @@ export interface Asset {
   id: number
   name: string
   department?: string | null
+  group_id?: number | null
   system_type?: string | null
   sub_system?: string | null
   public_urls?: AssetPublicUrl[]
@@ -97,6 +98,9 @@ export interface AssetForm {
   name: string
   sub_system: string
   department: string
+  group_id: number | null
+  /** 仅请求期使用：部门不存在时由后端自动创建组织 */
+  create_group?: boolean
   system_type: string
   public_urls: AssetPublicUrl[]
   internal_urls: string[]
@@ -106,6 +110,15 @@ export interface AssetForm {
   owners: AssetOwner[]
   status: number
   remark: string
+}
+
+/** 资产 Excel 导入结果（`POST /assets/import`） */
+export interface AssetImportResult {
+  total: number
+  success: number
+  failed: number
+  errors: string[]
+  created_groups?: string[]
 }
 
 /** 批量导出受理结果（`POST /reports/batch-export` 每份报告一项） */

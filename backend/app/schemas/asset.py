@@ -29,7 +29,9 @@ class NameVersionItem(BaseModel):
     version: str = ""
 
 
-class AssetIn(BaseModel):
+class AssetFields(BaseModel):
+    """资产公共字段（写入与输出共用），保证 Out 不暴露请求专用字段。"""
+
     name: str = Field(min_length=1, max_length=128)
     sub_system: str = ""
     department: str = ""
@@ -45,7 +47,13 @@ class AssetIn(BaseModel):
     remark: str = ""
 
 
-class AssetOut(AssetIn):
+class AssetIn(AssetFields):
+    """资产写入模型；create_group 仅表示“部门不存在时自动创建组织”。"""
+
+    create_group: bool = False
+
+
+class AssetOut(AssetFields):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -67,3 +75,4 @@ class AssetImportResultOut(BaseModel):
     success: int = 0
     failed: int = 0
     errors: list[str] = []
+    created_groups: list[str] = []

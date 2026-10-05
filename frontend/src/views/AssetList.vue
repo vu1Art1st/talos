@@ -104,7 +104,7 @@ import { useAuthStore } from '../stores/auth'
 import { saveBlob } from '../utils/download'
 import { assetStatusMeta, dotStyle, urlTagMeta } from '../utils/colors'
 import type { UploadRequestOptions } from 'element-plus'
-import type { Asset } from '../types'
+import type { Asset, AssetImportResult } from '../types'
 
 const auth = useAuthStore()
 const { items, total, page, size, search, loading, load, onSizeChange, onSortChange } = useListPage<Asset>('/assets')
@@ -140,14 +140,17 @@ async function importExcel(options: UploadRequestOptions) {
   try {
     const fd = new FormData()
     fd.append('file', options.file)
-    const { data } = await client.post('/assets/import', fd)
+    const { data } = await client.post<AssetImportResult>('/assets/import', fd)
+    const created = data.created_groups?.length
+      ? `<br/>自动创建组织：${data.created_groups.join('、')}`
+      : ''
     if (data.failed > 0) {
       await ElMessageBox.alert(
-        `共 ${data.total} 行，成功 ${data.success} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}`,
+        `共 ${data.total} 行，成功 ${data.success} 行，失败 ${data.failed} 行：<br/>${data.errors.join('<br/>')}${created}`,
         '导入结果', { dangerouslyUseHTMLString: true },
       )
     } else {
-      ElMessage.success(`成功导入 ${data.success} 条资产`)
+      ElMessage.success(`成功导入 ${data.success} 条资产${data.created_groups?.length ? `，自动创建 ${data.created_groups.length} 个组织` : ''}`)
     }
     await load(1)
   } finally {

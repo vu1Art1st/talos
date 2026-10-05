@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.timeutil import now as _now
@@ -156,6 +156,9 @@ class GroupMember(Base):
     """
 
     __tablename__ = "group_members"
+    __table_args__ = (
+        UniqueConstraint("group_id", "name", name="uq_group_member_group_name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)

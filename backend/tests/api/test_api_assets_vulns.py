@@ -23,6 +23,7 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
             "name": "测试商城",
             "sub_system": "订单中心",
             "department": "电商事业部",
+            "create_group": True,
             "public_urls": [{"url": "https://shop.example.com", "tag": 10}],
             "internal_urls": ["http://10.0.0.8:8080"],
             "port_services": [
@@ -37,6 +38,7 @@ async def test_asset_and_vuln_lifecycle(client: AsyncClient, auth: dict):
     assert resp.status_code == 200, resp.text
     asset = resp.json()
     asset_id = asset["id"]
+    assert asset["group_id"] is not None
     assert asset["owners"][0]["name"] == "张三"
     assert asset["public_urls"][0]["tag"] == 10
     assert asset["port_services"][1] == {"port": "443", "service": "HTTPS"}
@@ -175,6 +177,7 @@ async def test_asset_excel_import_export(client: AsyncClient, auth: dict):
     assert result["total"] == 2
     assert result["success"] == 1
     assert result["failed"] == 1
+    assert result["created_groups"] == ["金融部"]
     assert "系统命名为必填项" in result["errors"][0]
 
     # 非 xlsx 拒绝
@@ -485,3 +488,125 @@ async def test_global_search(client: AsyncClient, auth: dict):
     )
     assert resp.status_code == 200
     assert resp.json()["assets"][0]["snippet"]
+
+
+async def test_asset_owner_sync_creates_and_links_group(client: AsyncClient, auth: dict):
+    """部门不存在时 create_group=True 自动建组织，并同步负责人到该组织。"""
+    resp = await client.post(
+        "/api/v1/assets", headers=auth,
+        json={
+            "name": "自动建组织资产",
+            "department": "自动建组织部",
+            "create_group": True,
+            "owners": [{
+                "name": "自动同步负责人", "phone": "13800001111", "email": "auto@example.com",
+            }],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    asset = resp.json()
+    assert asset["group_id"] is not None
+    assert asset["department"] == "自动建组织部"
+
+    groups = (await client.get("/api/v1/groups", headers=auth)).json()
+    group = next(g for g in groups if g["name"] == "自动建组织部")
+    assert group["id"] == asset["group_id"]
+    members = (
+        await client.get(f"/api/v1/groups/{group['id']}/members", headers=auth)
+    ).json()
+    assert [(m["name"], m["phone"], m["email"]) for m in members] == [
+        ("自动同步负责人", "13800001111", "auto@example.com"),
+    ]
+
+
+async def test_asset_owner_sync_allows_same_name_across_groups(client: AsyncClient, auth: dict):
+    """同一个负责人在其它组织已存在时，仍应同步到资产所属组织。"""
+    group_ids: dict[str, int] = {}
+    for name in ("跨组织同步甲部", "跨组织同步乙部"):
+        resp = await client.post(
+            "/api/v1/groups", headers=auth, json={"name": name, "remark": ""},
+        )
+        assert resp.status_code == 200, resp.text
+        group_ids[name] = resp.json()["id"]
+
+    body = {"name": "跨组织同名负责人", "phone": "", "email": ""}
+    resp = await client.post(
+        f"/api/v1/groups/{group_ids['跨组织同步甲部']}/members", headers=auth, json=body,
+    )
+    assert resp.status_code == 200, resp.text
+    # 同组织重复录入由唯一约束拦截
+    resp = await client.post(
+        f"/api/v1/groups/{group_ids['跨组织同步甲部']}/members", headers=auth, json=body,
+    )
+    assert resp.status_code == 400
+
+    resp = await client.post(
+        "/api/v1/assets", headers=auth,
+        json={
+            "name": "跨组织同步资产",
+            "department": "跨组织同步乙部",
+            "owners": [{
+                "name": "跨组织同名负责人", "phone": "13900002222", "email": "same@example.com",
+            }],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["group_id"] == group_ids["跨组织同步乙部"]
+    members_b = (
+        await client.get(
+            f"/api/v1/groups/{group_ids['跨组织同步乙部']}/members", headers=auth,
+        )
+    ).json()
+    assert [(m["name"], m["phone"]) for m in members_b] == [("跨组织同名负责人", "13900002222")]
+
+
+async def test_asset_owners_require_resolvable_department(client: AsyncClient, auth: dict):
+    """负责人必须能解析出组织，禁止静默写入后不同步。"""
+    resp = await client.post(
+        "/api/v1/assets", headers=auth,
+        json={"name": "缺部门资产", "owners": [{"name": "缺部门负责人"}]},
+    )
+    assert resp.status_code == 400
+    assert "先选择部门" in resp.json()["detail"]
+
+    resp = await client.post(
+        "/api/v1/assets", headers=auth,
+        json={
+            "name": "缺组织资产",
+            "department": "未确认创建部",
+            "owners": [{"name": "缺组织负责人"}],
+        },
+    )
+    assert resp.status_code == 400
+    assert "不存在" in resp.json()["detail"]
+
+
+async def test_group_rename_cascades_and_delete_is_guarded(client: AsyncClient, auth: dict):
+    """组织改名同步资产部门；被资产引用时禁止删除，避免外键 500。"""
+    resp = await client.post(
+        "/api/v1/groups", headers=auth, json={"name": "组织改名甲", "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    group = resp.json()
+    resp = await client.post(
+        "/api/v1/assets", headers=auth,
+        json={
+            "name": "组织改名关联资产",
+            "department": "组织改名甲",
+            "owners": [{"name": "组织改名负责人"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    asset = resp.json()
+    assert asset["group_id"] == group["id"]
+
+    resp = await client.delete(f"/api/v1/groups/{group['id']}", headers=auth)
+    assert resp.status_code == 400
+
+    resp = await client.put(
+        f"/api/v1/groups/{group['id']}", headers=auth,
+        json={"name": "组织改名乙", "remark": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.get(f"/api/v1/assets/{asset['id']}", headers=auth)
+    assert resp.json()["department"] == "组织改名乙"

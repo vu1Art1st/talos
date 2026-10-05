@@ -26,6 +26,7 @@
 import asyncio
 import json
 import logging
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,43 @@ def bootstrap() -> None:
     root = str(BACKEND_ROOT)
     if root not in sys.path:
         sys.path.insert(0, root)
+
+
+def _load_env_file(path: Path) -> None:
+    """把 .env 中尚未存在的键写入 os.environ（不覆盖显式设置的环境变量）。"""
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def ensure_local_env(env_file: Path | None = None) -> None:
+    """本地直接运行维护脚本时补齐运行环境（容器/已导出环境变量不受影响）。
+
+    背景：`Settings` 在导入 `app.db` 时即实例化；若脚本独立运行于 backend/ 目录，
+    仓库根 `.env` 不会被默认读取，且 `VP_DATABASE_URL` 缺省值指向开发占位账号。
+    本函数先加载根 `.env`，再用本机 PostgreSQL 凭据派生开发库 DSN。
+    """
+    _load_env_file(env_file or (BACKEND_ROOT.parent / ".env"))
+    if os.environ.get("VP_DATABASE_URL"):
+        return
+    user = os.environ.get("POSTGRES_USER", "")
+    password = os.environ.get("POSTGRES_PASSWORD", "")
+    database = os.environ.get("POSTGRES_DB", "")
+    if user and password and database:
+        from urllib.parse import quote
+
+        os.environ["VP_DATABASE_URL"] = (
+            f"postgresql+asyncpg://{quote(user, safe='')}:{quote(password, safe='')}"
+            f"@127.0.0.1:5432/{quote(database, safe='')}"
+        )
 
 
 def dry_run_flag() -> bool:

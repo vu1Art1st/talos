@@ -12,7 +12,7 @@
         </el-form-item>
         <el-form-item label="部门">
           <el-select v-model="form.department" filterable allow-create default-first-option clearable
-                     placeholder="选择部门，或输入后回车新增" class="w-full">
+                     placeholder="选择部门，或输入后回车（保存时确认新增）" class="w-full">
             <el-option v-for="g in groups" :key="g.id" :label="g.name" :value="g.name" />
           </el-select>
         </el-form-item>
@@ -137,6 +137,7 @@ import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
+import { useDepartmentResolve } from '../composables/useDepartmentResolve'
 import { useAuthStore } from '../stores/auth'
 import type { Asset, AssetForm, Group, GroupMember } from '../types'
 
@@ -181,6 +182,7 @@ const memberOptions = computed(() => {
 
 const emptyForm = (): AssetForm => ({
   id: null, name: '', sub_system: '', department: '', system_type: '',
+  group_id: null, create_group: false,
   public_urls: [], internal_urls: [],
   port_services: [], middlewares: [], databases: [],
   owners: [], status: 10, remark: '',
@@ -191,7 +193,19 @@ const formRef = ref<FormInstance>()
 // 系统命名必填（whitespace 拦截纯空格），错误内联展示在字段下方
 const rules: FormRules = {
   name: [{ required: true, whitespace: true, message: '请填写系统命名', trigger: 'blur' }],
+  department: [{
+    validator: (_rule, value, callback) => {
+      if (form.owners.some((o) => o.name.trim()) && !String(value ?? '').trim()) {
+        callback(new Error('填写系统负责人前请先选择部门'))
+      } else {
+        callback()
+      }
+    },
+    trigger: 'change',
+  }],
 }
+
+const { resolveDepartment } = useDepartmentResolve()
 
 function onOpen() {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(props.asset ?? {})))
@@ -253,6 +267,11 @@ async function save() {
   form.middlewares = form.middlewares.filter((m) => (m.name ?? '').trim())
   form.databases = form.databases.filter((d) => (d.name ?? '').trim())
   form.owners = form.owners.filter((o) => o.name.trim())
+  const resolution = await resolveDepartment(form.department, groups.value)
+  if (!resolution) return
+  form.department = resolution.department
+  form.group_id = resolution.groupId
+  form.create_group = resolution.createGroup
   await persistSystemType()
   saving.value = true
   try {

@@ -48,7 +48,7 @@ class Asset(Base):
     owners: Mapped[list | None] = mapped_column(JSON, default=list)
     sec_level: Mapped[int] = mapped_column(Integer, default=40)
     status: Mapped[int] = mapped_column(Integer, default=10)
-    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), nullable=True, index=True)
     remark: Mapped[str] = mapped_column(Text, default="")
     create_time: Mapped[datetime] = mapped_column(DateTime, default=now)
     update_time: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)

@@ -25,6 +25,25 @@
 
 ---
 
+## [2.26.0] - 2026-10-05
+
+资产组织分组（部门归属 / 资产组关联）落地——资产按 `group_id` 关联组织，负责人自动同步到组织成员；含一项**向后兼容的附加型迁移**（对 `group_members` 去重后加唯一约束与索引，无删列 / 删表 / 改类型），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **组织解析与同步服务**：`app/services/org_service.py`（组织 / 部门解析与资产负责人同步的唯一入口）；`find_group_by_name` 按名精确查询、`ensure_group` 取或建组织（唯一约束 + savepoint 兜底，并发同名幂等）；成员去重口径固定为「同组织同名」，跨组织允许同名。
+- **存量回填脚本**：`scripts/backfill_asset_groups.py` 补齐 `assets.group_id` 并同步负责人到组织成员，支持 `--dry-run`（默认仅统计）/ `--apply`（回填已存在组织）/ `--apply --create-missing`（同时创建缺失组织）。
+- **迁移 `c2d3e4f5a6b7_asset_group_link`**：升级时先对 `group_members` 去重（同 `group_id + name` 保留 `id` 最小一条并删除其余），再建 `uq_group_member_group_name` 唯一约束与 `ix_assets_group_id` 索引。
+- **前端相似部门提示**：`utils/deptMatch.ts`（归一化 + 相似度，仅作录入提示，不改变后端精确匹配口径）、`composables/useDepartmentResolve.ts`，`AssetFormDialog` / `AssetList` / `types` 接入。
+
+### 变更
+
+- `assets.py`(+109)：资产创建 / 更新接受 `group_id` / `department` / `create_group`，新增 `_apply_group` / `_validate_asset_department`，部门变更驱动负责人同步；`users.py`(+49) 接入组织成员同步。
+- `models/user.py`：`users.group_id` 新增外键（可空、含索引）；`models/business.py`：`group_members` 新增 `UniqueConstraint("group_id", "name")`；`schemas/asset.py`(+13) 新增 `group_id` 字段。
+- 测试：新增 `tests/test_backfill_asset_groups.py` / `tests/test_scripts_common_env.py`、前端 `useDepartmentResolve.spec.ts` / `deptMatch.spec.ts`，`test_api_assets_vulns.py`(+125) 覆盖分组关联；`ROADMAP.md` 追加公网 IPv4 HTTPS + SafeLine WAF 暂缓方案（仅文档，不在本版范围）。
+
+---
+
 ## [2.25.0] - 2026-10-05
 
 账户中心（账号自助管理）落地——新增邮箱确认、密码找回 / 重置、个人资料与头像、会话管理与站内消息偏好；含一项**向后兼容的附加型迁移**（新增 `message_prefs` 列、邮箱部分唯一约束与 `user_sessions` / `account_action_tokens` 表，无破坏性 schema 变更），按项目版本规则定为 `MINOR`。
