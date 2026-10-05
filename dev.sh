@@ -169,6 +169,22 @@ fi
 PG_DB="${PG_DB:-vulnplatform}"
 echo "[dev] 数据库凭据已加载：用户 $PG_USER，库 $PG_DB（来自 .env）"
 
+# 邮件发送配置从仓库根 .env 透传（后端 CWD 是 backend/，Pydantic 不会读仓库根 .env）
+for key in VP_SMTP_HOST VP_SMTP_PORT VP_SMTP_USER VP_SMTP_PASS VP_SMTP_FROM; do
+  value=$(sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$ROOT/.env" | head -1 \
+    | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'$/\1/")
+  if [ -n "$value" ]; then export "$key=$value"; fi
+done
+# 找回链接基址默认指向本地开发前端（token 在本地库，指向容器前端会校验失败）。
+# 需要外部地址时在运行 dev.sh 前显式 export VP_PUBLIC_BASE_URL 覆盖。
+: "${VP_PUBLIC_BASE_URL:=http://localhost:$FRONTEND_PORT}"
+export VP_PUBLIC_BASE_URL
+if [ -n "${VP_SMTP_HOST:-}" ]; then
+  echo "[dev] 账户邮件已启用：SMTP ${VP_SMTP_HOST}:${VP_SMTP_PORT:-25}，找回链接基址 $VP_PUBLIC_BASE_URL"
+else
+  echo "[dev] 未配置 SMTP_HOST：自助找回/邮箱改绑保持关闭（请在仓库根 .env 配置 VP_SMTP_*）"
+fi
+
 if [ ! -x "$BACKEND/.venv/bin/python" ]; then
   echo "[dev] 初始化后端虚拟环境（Python 3.12）并安装依赖..."
   if command -v uv >/dev/null 2>&1; then

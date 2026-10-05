@@ -25,6 +25,19 @@
 
 ---
 
+## [2.26.2] - 2026-10-05
+
+邮件发送修正与开发环境可用性修复（缺陷修复 / 开发脚本增强，无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。
+
+### 变更
+
+- **SMTP 传输按端口选择**（修复）：`app/services/mail_service.py` 新增 `_new_smtp_client()`——465 走隐式 TLS（`SMTP_SSL`）、587 走 `STARTTLS`、其余（如 25）保持明文；修正此前一律用明文 `smtplib.SMTP` 导致 465 端口（常见邮箱服务 / 阿里云等）发送失败的问题。
+- **查重脚本可独立运行**：`scripts/check_duplicate_user_emails.py` 接入 `bootstrap()` / `ensure_local_env()`（只读库，未显式配置时提供占位 `VP_SECRET_KEY`），并设置 UTF-8 输出，可直接 `python -m scripts.check_duplicate_user_emails` 运行。
+- **开发脚本邮件透传**：`dev.ps1` / `dev.sh` 从仓库根 `.env` 透传 `VP_SMTP_*` 给后端（uvicorn 的 CWD 是 `backend/`，Pydantic 不会读仓库根 `.env`），默认 `VP_PUBLIC_BASE_URL` 指向本地前端，使账户中心的邮箱确认 / 密码找回在开发环境可用；未配 `SMTP_HOST` 时自助找回 / 邮箱改绑保持关闭。
+- **测试**：新增 `tests/test_mail_service.py` 覆盖邮件服务。
+
+---
+
 ## [2.26.1] - 2026-10-05
 
 前端计划工作流组件重构（内部组件整合与自动保存复用，无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。

@@ -155,6 +155,9 @@ Write-Host '[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(6379) 均在监�
 # ---------- 解析根 .env 的 PostgreSQL 凭据（与 docker-compose 共用一份） ----------
 $envFile = Join-Path $root '.env'
 $pgUser = $null; $pgPassword = $null; $pgDb = $null
+# 邮件相关配置需显式透传给后端：uvicorn 的 CWD 是 backend/，Pydantic 只读进程 CWD 下的 .env，
+# 不会自动读取仓库根 .env（本脚本此前只为 DB/Redis/队列显式设值）。
+$mailEnv = @{}
 if (Test-Path $envFile) {
     foreach ($line in Get-Content $envFile) {
         if ($line -match '^\s*(POSTGRES_USER|POSTGRES_PASSWORD|POSTGRES_DB)\s*=\s*(.+?)\s*$') {
@@ -163,6 +166,10 @@ if (Test-Path $envFile) {
                 'POSTGRES_PASSWORD' { $pgPassword = $Matches[2] }
                 'POSTGRES_DB' { $pgDb = $Matches[2] }
             }
+        }
+        if ($line -match '^\s*(VP_SMTP_HOST|VP_SMTP_PORT|VP_SMTP_USER|VP_SMTP_PASS|VP_SMTP_FROM)\s*=\s*(.+?)\s*$') {
+            $val = $Matches[2].Trim().Trim('"').Trim("'")
+            if ($val) { $mailEnv[$Matches[1]] = $val }
         }
     }
 }
@@ -208,6 +215,17 @@ try {
     $env:VP_DISABLE_QUEUE = '1'
     $env:VP_DEBUG = '1'
     $env:VP_INITIAL_ADMIN_PASSWORD = 'admin123'
+
+    # 邮件发送配置从仓库根 .env 透传；未配置 SMTP_HOST 时自助找回/邮箱改绑保持关闭。
+    foreach ($k in $mailEnv.Keys) { Set-Item -Path "Env:$k" -Value $mailEnv[$k] }
+    # 找回链接基址默认指向本地开发前端（token 在本地库，指向容器前端会校验失败）。
+    # 需要外部地址时在运行 dev.ps1 前显式设置 $env:VP_PUBLIC_BASE_URL 覆盖。
+    if (-not $env:VP_PUBLIC_BASE_URL) { $env:VP_PUBLIC_BASE_URL = "http://localhost:$FrontendPort" }
+    if ($env:VP_SMTP_HOST) {
+        Write-Host "[dev] 账户邮件已启用：SMTP $($env:VP_SMTP_HOST):$($env:VP_SMTP_PORT)，找回链接基址 $($env:VP_PUBLIC_BASE_URL)" -ForegroundColor Green
+    } else {
+        Write-Host '[dev] 未配置 SMTP_HOST：自助找回/邮箱改绑保持关闭（请在仓库根 .env 配置 VP_SMTP_*）' -ForegroundColor Yellow
+    }
 
     # ---------- 启动后端（后台）并等待就绪 ----------
     Write-Host "[dev] 启动后端 http://0.0.0.0:$BackendPort （PostgreSQL[DBngin] + Redis + 免队列）" -ForegroundColor Cyan

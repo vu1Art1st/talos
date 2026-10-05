@@ -1,5 +1,19 @@
 """升级前检查用户邮箱重复：有重复时退出码 1，并输出用户名清单。"""
 import asyncio
+import os
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from scripts._common import bootstrap, ensure_local_env  # noqa: E402
+
+bootstrap()
+ensure_local_env()
+# 本脚本只读数据库，不签发令牌；Settings 仍要求生产密钥格式，故仅在未显式配置时提供占位值。
+os.environ.setdefault("VP_SECRET_KEY", "duplicate-email-check-0123456789abcdef")
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from sqlalchemy import func, select
 
