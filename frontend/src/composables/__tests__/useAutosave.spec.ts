@@ -46,6 +46,19 @@ describe('useAutosave 状态机', () => {
     autosave.dispose()
   })
 
+  it('autoSave=false 时不排自动保存，需显式 saveNow（仍可被 confirmLeave 兜底）', async () => {
+    const { save, autosave } = setup({ autoSave: false })
+
+    autosave.markDirty()
+    expect(autosave.state.value).toBe('dirty')
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(save).not.toHaveBeenCalled()
+
+    expect(await autosave.saveNow()).toBe(true)
+    expect(autosave.state.value).toBe('saved')
+    autosave.dispose()
+  })
+
   it('保存失败 → failed，保留输入并可重试成功', async () => {
     const onError = vi.fn()
     const save = vi.fn()

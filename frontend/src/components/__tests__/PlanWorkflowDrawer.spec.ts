@@ -35,6 +35,7 @@ vi.mock('../../stores/auth', () => ({
 }))
 
 import PlanWorkflowDrawer from '../PlanWorkflowDrawer.vue'
+import PlanInfoPanel from '../PlanInfoPanel.vue'
 
 /** 工单详情最小夹具（未认领、初测中、无报告，便于验证「认领」入口） */
 function planFixture() {
@@ -72,9 +73,9 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
     })
   })
 
-  function mountDrawer() {
+  function mountDrawer(props: Record<string, unknown> = {}) {
     return mount(PlanWorkflowDrawer, {
-      props: { planId: 1, visible: true },
+      props: { planId: 1, visible: true, ...props },
       global: {
         plugins: [ElementPlus],
         stubs: {
@@ -167,6 +168,48 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
       const value = (titleInput.element as HTMLInputElement).value
       expect(value).toContain('商城系统渗透测试报告')
     }
+    wrapper.unmount()
+  })
+
+  it('默认落在「测试流程」标签，信息面板不抢先挂载', async () => {
+    const wrapper = mountDrawer()
+    await flushPromises()
+
+    expect(wrapper.findComponent(PlanInfoPanel).exists()).toBe(false)
+    expect(wrapper.text()).toContain('录入漏洞')
+    wrapper.unmount()
+  })
+
+  it('tab=info 时渲染只读信息面板，点击「编辑」切换为表单态', async () => {
+    const wrapper = mountDrawer({ tab: 'info' })
+    await flushPromises()
+
+    const panel = wrapper.findComponent(PlanInfoPanel)
+    expect(panel.exists()).toBe(true)
+    expect(panel.props('mode')).toBe('view')
+    expect(wrapper.text()).toContain('工单信息')
+
+    const editBtn = wrapper.find('[data-test="plan-info-edit"]')
+    expect(editBtn.exists(), '管理员应看到编辑入口').toBe(true)
+    await editBtn.trigger('click')
+    await flushPromises()
+    expect(panel.props('mode')).toBe('edit')
+    wrapper.unmount()
+  })
+
+  it('切换标签只更新 tab，不重复拉取工单详情', async () => {
+    const wrapper = mountDrawer()
+    await flushPromises()
+    const before = getMock.mock.calls.filter((c) => c[0] === '/testing-plans/1').length
+
+    const infoTab = wrapper.findAll('.el-tabs__item').find((n) => n.text() === '工单信息')
+    expect(infoTab, '工单信息标签应可见').toBeTruthy()
+    await infoTab!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('update:tab')?.at(-1)).toEqual(['info'])
+    const after = getMock.mock.calls.filter((c) => c[0] === '/testing-plans/1').length
+    expect(after).toBe(before)
     wrapper.unmount()
   })
 

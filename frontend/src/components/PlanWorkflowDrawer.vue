@@ -1,16 +1,25 @@
 <template>
   <el-drawer :model-value="visible" size="75%" direction="rtl" :destroy-on-close="true"
-             @update:model-value="onVisibleChange" @closed="onClosed">
+             :before-close="onBeforeClose" @update:model-value="onVisibleChange" @closed="onClosed">
     <template #header>
       <div class="flex items-center gap-3">
-        <span class="text-base font-semibold">测试流程 · {{ plan?.system_name || '' }}</span>
+        <span class="text-base font-semibold">渗透测试工单 · {{ plan?.system_name || '' }}</span>
         <span v-if="plan" class="tl-tag" :style="planStatusSoftStyle(plan.status)">
           {{ statusMap[plan.status] ?? plan.status }}
         </span>
       </div>
     </template>
 
-    <div v-if="plan" v-loading="loading" class="flex flex-col gap-4">
+    <div v-if="plan" v-loading="loading">
+      <el-tabs v-model="activeTab" :before-leave="onTabBeforeLeave">
+        <el-tab-pane label="工单信息" name="info" lazy>
+          <PlanInfoPanel ref="infoPanelRef" :mode="infoMode" :plan="plan" :status-map="statusMap"
+                         @request-edit="infoMode = 'edit'"
+                         @saved="onInfoSaved" @cancel="infoMode = 'view'" />
+        </el-tab-pane>
+
+        <el-tab-pane label="测试流程" name="flow">
+          <div class="flex flex-col gap-4">
       <!-- 步骤条：按计划状态与数据推导当前阶段 -->
       <el-card shadow="never">
         <el-steps :active="stepActive" align-center finish-status="success" process-status="process">
@@ -323,8 +332,10 @@
             </div>
           </div>
         </div>
-      </el-card>
-    </div>
+          </el-card>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
 
       <!-- 无漏洞闭环完结：测试完成且未发现漏洞时确认「测试通过」，可选同步生成无漏洞报告 -->
       <el-dialog
@@ -351,13 +362,15 @@
         </template>
       </el-dialog>
 
+    </div>
+
     <FilePreviewDialog ref="previewRef" />
   </el-drawer>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   Plus, ArrowDown, ArrowRight, ArrowUp, Document, FolderOpened, WarningFilled, CircleCheck,
@@ -381,7 +394,7 @@ import {
   statusLabel,
 } from '../utils/colors'
 import { fmtDateTime, fmtSlaRemaining } from '../utils/format'
-import type { Report, Vuln } from '../types'
+import type { PlanDrawerTab, Report, Vuln } from '../types'
 import { usePlanDetail } from '../composables/usePlanDetail'
 import { usePlanReports } from '../composables/usePlanReports'
 import { usePlanVulnFlow } from '../composables/usePlanVulnFlow'
@@ -392,23 +405,38 @@ import VulnFormPanel from './VulnFormPanel.vue'
 import VulnRetestPanel from './VulnRetestPanel.vue'
 import FilePreviewDialog from './FilePreviewDialog.vue'
 import VulnDetailDialog from './VulnDetailDialog.vue'
+import PlanInfoPanel from './PlanInfoPanel.vue'
 
 // 测试计划统一流程抽屉：认领 → 录入漏洞 → 生成报告 → 发起复测 → 复测处理 → 复测完成，
 // 全部流程动作在抽屉内完成（仅报告章节深度编辑跳转报告编辑页）。
 const props = defineProps<{
   planId: number | null
   visible: boolean
+  /** 当前标签（由列表页 URL ?tab= 驱动）：info 工单信息 / flow 测试流程 */
+  tab?: PlanDrawerTab
   /** 从漏洞编辑页原路返回时要展开并定位的漏洞行（来源页写在 ?vuln= 查询参数里） */
   focusVulnId?: number | null
 }>()
 const emit = defineEmits<{
   (e: 'update:visible', v: boolean): void
+  (e: 'update:tab', v: PlanDrawerTab): void
   (e: 'changed'): void
 }>()
+
+// 路由离开（含跳漏洞/报告编辑页）统一走信息面板的离开判定
+onBeforeRouteLeave(() => infoPanelRef.value?.confirmLeave?.() ?? true)
 
 const auth = useAuthStore()
 const route = useRoute()
 const router = useRouter()
+
+const infoPanelRef = ref<InstanceType<typeof PlanInfoPanel>>()
+const infoMode = ref<'view' | 'edit'>('view')
+// URL（列表页 query）是标签唯一真源；组件内只做受控转发
+const activeTab = computed<PlanDrawerTab>({
+  get: () => props.tab ?? 'flow',
+  set: (v) => emit('update:tab', v),
+})
 
 // ---------- 数据与动作（审计 E-1：按职责下沉为 5 个 composable，此处仅组合） ----------
 const {
@@ -511,6 +539,7 @@ watch(
     if (!visible || !props.planId) return
     // 打开时重置临时态并加载数据
     dirty.value = false
+    infoMode.value = 'view'
     vulnFormVisible.value = false
     genFormVisible.value = false
     noVulnVisible.value = false
@@ -524,6 +553,28 @@ watch(
 
 function onVisibleChange(v: boolean) {
   emit('update:visible', v)
+}
+
+/** 关闭抽屉前统一走信息面板的离开判定（无修改直接放行） */
+async function onBeforeClose(done: () => void) {
+  const ok = await (infoPanelRef.value?.confirmLeave?.() ?? true)
+  if (!ok) return
+  infoMode.value = 'view'
+  done()
+}
+
+/** 标签切换前统一走离开判定，编辑态有改动时先补存/确认放弃 */
+async function onTabBeforeLeave() {
+  if (activeTab.value !== 'info') return true
+  const ok = await (infoPanelRef.value?.confirmLeave?.() ?? true)
+  if (!ok) return false
+  infoMode.value = 'view'
+  return true
+}
+
+async function onInfoSaved() {
+  infoMode.value = 'view'
+  await reloadAfterChange()
 }
 
 function onClosed() {
@@ -578,9 +629,9 @@ async function focusVulnRow(id: number) {
 
 // 漏洞数据异步加载完成后才可能定位：同时观察 focusVulnId 与列表本身
 watch(
-  [() => props.focusVulnId, () => vulns.value],
+  [() => props.focusVulnId, () => vulns.value, () => activeTab.value],
   ([id]) => {
-    if (!props.visible || !id) return
+    if (!props.visible || !id || activeTab.value !== 'flow') return
     if (!vulns.value.some((v) => v.id === id)) return
     void focusVulnRow(id)
   },
@@ -595,6 +646,7 @@ function hostFullPath(vulnId?: number): string {
   const params = new URLSearchParams(search)
   params.delete('redirect') // 避免来源参数层层嵌套
   if (props.planId) params.set('plan', String(props.planId))
+  params.set('tab', 'flow') // 从漏洞/报告编辑页返回后落回流程标签并定位
   if (vulnId) params.set('vuln', String(vulnId))
   else params.delete('vuln')
   const qs = params.toString()

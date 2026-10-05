@@ -25,6 +25,20 @@
 
 ---
 
+## [2.26.1] - 2026-10-05
+
+前端计划工作流组件重构（内部组件整合与自动保存复用，无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。
+
+### 变更
+
+- **工单信息面板抽离**：新增 `PlanInfoPanel.vue` / `NonpenPlanInfoPanel.vue`，将测试 / 非渗透工单抽屉内的「工单信息」编辑从 `PlanWorkflowDrawer` / `NonpenPlanWorkflowDrawer` 抽出为可复用组件（含 `doSave()`，取代原 `usePlanCrud.save()`）。
+- **自动保存增强**：`composables/useAutosave.ts` 新增 `autoSave` 选项（默认 `true`）；设为 `false` 时 `markDirty` 仅进入 dirty、不排定时器，仍复用 `saved/dirty/saving/failed/conflict` 状态机与统一 `confirmLeave` 离页守卫，供抽屉内「显式保存」的工单信息编辑复用。
+- **列表视图精简**：`TestingPlanList.vue`（−439）/ `NonpenPlanList.vue`（−277）移除内联信息编辑，统一委托工单抽屉与信息面板；删除 `composables/usePlanCrud.ts`（-92，逻辑并入 `PlanInfoPanel`）。
+- **抽屉整合**：`PlanWorkflowDrawer` / `NonpenPlanWorkflowDrawer` 引用 `PlanInfoPanel`，并改用 `onBeforeRouteLeave` 路由离页守卫。
+- **类型**：`types/index.ts` 新增 `PlanDrawerTab = 'info' | 'flow'`；同步更新 `PlanInfoPanel.spec` / `NonpenPlanInfoPanel.spec` / `NonpenPlanWorkflowDrawer.spec` / `NonpenPlanList.spec` / `useAutosave.spec` / `PlanWorkflowDrawer.spec` / `TestingPlanList.spec` 单测。
+
+---
+
 ## [2.26.0] - 2026-10-05
 
 资产组织分组（部门归属 / 资产组关联）落地——资产按 `group_id` 关联组织，负责人自动同步到组织成员；含一项**向后兼容的附加型迁移**（对 `group_members` 去重后加唯一约束与索引，无删列 / 删表 / 改类型），按项目版本规则定为 `MINOR`。

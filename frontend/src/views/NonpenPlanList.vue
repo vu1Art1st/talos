@@ -12,7 +12,7 @@
         <el-option label="仅可进行" :value="true" />
       </el-select>
       <template #actions>
-        <el-button type="primary" class="btn-min" @click="openFormDialog()">
+        <el-button type="primary" class="btn-min" @click="openCreateDialog">
           <el-icon class="mr-1"><Plus /></el-icon>新增漏扫基线工单
         </el-button>
       </template>
@@ -70,8 +70,8 @@
       </el-table-column>
       <el-table-column label="操作" width="150" fixed="right" class-name="op-col">
         <template #default="{ row }">
-          <el-button size="small" type="primary" link @click="openWorkflow(row)">流程</el-button>
-          <el-button size="small" type="primary" link @click="openFormDialog(row)">编辑</el-button>
+          <el-button size="small" type="primary" link @click="openPlanDrawer(row, 'info')">工单信息</el-button>
+          <el-button size="small" type="primary" link @click="openPlanDrawer(row, 'flow')">流程</el-button>
           <el-popconfirm :title="row.linked ? '确认删除？将同步删除其来源渗透测试工单' : '确认删除该漏扫基线工单？'"
                          @confirm="remove(row)">
             <template #reference>
@@ -89,94 +89,34 @@
   </el-card>
   </div>
 
-  <!-- 新增 / 编辑弹窗 -->
-  <el-dialog v-model="dialogVisible" :title="form.id ? '编辑漏扫基线工单' : '新增漏扫基线工单'" width="800px"
-             :close-on-click-modal="false">
-    <el-form ref="formRef" :model="form" :rules="formRules" label-width="90px">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6">
-        <el-form-item label="计划名称">
-          <el-input v-model="form.plan_name" placeholder="与测试系统区分的漏扫基线工单名称" />
-        </el-form-item>
-        <el-form-item label="关联资产">
-          <div class="w-full flex gap-2">
-            <el-select v-model="form.asset_ids" multiple filterable remote clearable
-                       :remote-method="searchAssets" :loading="assetLoading"
-                       placeholder="输入资产名称搜索并选择，选择后自动带出测试系统与所属部门" class="flex-1"
-                       @change="onAssetsChange">
-              <el-option v-for="a in assetOptions" :key="a.id" :label="a.label" :value="a.id" />
-            </el-select>
-          </div>
-        </el-form-item>
-        <el-form-item label="测试系统" prop="system_name">
-          <el-input v-model="form.system_name" placeholder="被测系统名称" />
-        </el-form-item>
-        <el-form-item label="测试类型">
-          <el-select v-model="form.test_type" filterable clearable placeholder="请选择测试类型" class="w-full">
-            <el-option v-for="t in testTypeOptions" :key="t" :label="t" :value="t" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="所属部门">
-          <el-select v-model="form.department" filterable clearable placeholder="请选择部门" class="w-full">
-            <el-option v-for="d in departmentOptions" :key="d" :label="d" :value="d" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="工单ID">
-          <div class="w-full">
-            <el-input v-model="form.ticket_id_manual" placeholder="留空则按需求接收日期自动生成（如 20260810-1）"
-                      clearable />
-            <div v-if="form.id && !form.ticket_id_manual && autoTicketId"
-                 class="text-xs mt-1" style="color: var(--tl-text-3)">当前自动生成：{{ autoTicketId }}，留空保存即保持该值</div>
-          </div>
-        </el-form-item>
-        <el-form-item label="工单提起">
-          <el-date-picker v-model="form.ticket_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
-        </el-form-item>
-        <el-form-item label="需求接收" prop="receive_time">
-          <el-date-picker v-model="form.receive_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
-        </el-form-item>
-      </div>
-      <el-form-item label="测试项">
-        <div class="w-full grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div v-for="t in nonpenItems()" :key="t.key" class="test-item-check" :class="{ checked: form.test_items.includes(t.key) }"
-               @click="toggleTestItem(t.key)">
-            <div class="tick"><el-icon v-if="form.test_items.includes(t.key)" :size="13"><Check /></el-icon></div>
-            <div>
-              <div class="ti-name">{{ t.name }}</div>
-              <div class="ti-desc">{{ t.desc }}</div>
-            </div>
-          </div>
-        </div>
-        <div class="text-xs mt-1" style="color: var(--tl-text-3)">未勾选的测试项将标记为「忽略」，不参与统计</div>
-      </el-form-item>
-      <el-form-item label="详细描述">
-        <el-input v-model="form.detail" type="textarea" :rows="4" placeholder="扫描范围、数据来源等详细信息" />
-      </el-form-item>
-    </el-form>
-    <template #footer>
-      <el-button @click="dialogVisible = false">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="save">保存</el-button>
-    </template>
+  <!-- 新增工单：编辑查看统一在抽屉「工单信息」标签内完成 -->
+  <el-dialog v-model="createVisible" title="新增漏扫基线工单" width="800px" :close-on-click-modal="false">
+    <NonpenPlanInfoPanel v-if="createVisible" mode="create"
+                         @saved="onCreated" @cancel="createVisible = false" />
   </el-dialog>
 
-  <NonpenPlanWorkflowDrawer v-model:visible="workflowVisible" :plan-id="workflowPlanId" @changed="reload" />
+  <NonpenPlanWorkflowDrawer v-model:visible="drawerVisible" v-model:tab="drawerTab"
+                            :plan-id="drawerPlanId" @changed="reload" />
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
-import { Check, Plus, Search } from '@element-plus/icons-vue'
+import { Plus, Search } from '@element-plus/icons-vue'
 import client from '../api/client'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
-import { useAssetSelect } from '../composables/useAssetSelect'
-import { useDictOptions } from '../composables/useDictOptions'
+import NonpenPlanInfoPanel from '../components/NonpenPlanInfoPanel.vue'
+import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
+import StatCard from '../components/StatCard.vue'
 import { useListPage } from '../composables/useListPage'
 import { dotStyle, nonpenItemMeta, nonpenItems, STAT_CARD_COLORS } from '../utils/colors'
 import { fmtDate } from '../utils/format'
-import NonpenPlanWorkflowDrawer from '../components/NonpenPlanWorkflowDrawer.vue'
-import StatCard from '../components/StatCard.vue'
-import type { NonpenPlan, NonpenPlanForm } from '../types'
+import type { NonpenPlan, PlanDrawerTab } from '../types'
+
+const route = useRoute()
+const router = useRouter()
 
 const actionable = ref(false)
 const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } = useListPage<NonpenPlan>('/nonpen-plans', {
@@ -184,51 +124,7 @@ const { items, total, page, size, search, sort, loading, load, onSortChange, onS
   extraParams: () => (actionable.value ? { actionable: true } : {}),
 })
 const stats = ref<Record<string, number>>({})
-const dialogVisible = ref(false)
-const { testTypes, departments, loadTestTypes, loadDepartments } = useDictOptions()
-
-const emptyForm = () => ({
-  id: null as number | null,
-  plan_name: '',
-  system_name: '',
-  test_type: '',
-  department: '',
-  receive_time: '',
-  ticket_time: '',
-  ticket_id_manual: '',
-  asset_ids: [] as number[],
-  test_items: [] as string[],
-  detail: '',
-})
-// 显式声明表单模型类型：编辑回显是「emptyForm() + 行数据」的合并，需允许服务端返回的可空字段
-const form = ref<NonpenPlanForm>(emptyForm())
-const formRef = ref<FormInstance>()
-
-// 工单ID：服务端按需求接收日期派生，仅用于编辑态回显，不属于表单模型（保存时不回写）
-const autoTicketId = computed(() => (form.value as { ticket_id?: string }).ticket_id ?? '')
-
-// 工单表单校验：测试系统必填；工单ID必须有来源——需求接收日期（自动生成）或手动工单ID二者至少其一（与后端校验一致）
-const requireTicketSource: FormItemRule['validator'] = (_rule, _value, callback) => {
-  if (!form.value.ticket_id_manual && !form.value.receive_time) {
-    callback(new Error('请填写「需求接收日期」（用于自动生成工单ID），或手动指定工单ID'))
-  } else {
-    callback()
-  }
-}
-const formRules: FormRules = {
-  system_name: [{ required: true, whitespace: true, message: '请填写测试系统', trigger: 'blur' }],
-  receive_time: [{ validator: requireTicketSource }],
-}
-
-// 旧数据的值可能不在字典/组织列表中，临时追加以正常回显
-const testTypeOptions = computed(() =>
-  form.value.test_type && !testTypes.value.includes(form.value.test_type)
-    ? [...testTypes.value, form.value.test_type]
-    : testTypes.value)
-const departmentOptions = computed(() =>
-  form.value.department && !departments.value.includes(form.value.department)
-    ? [...departments.value, form.value.department]
-    : departments.value)
+const createVisible = ref(false)
 
 async function loadStats() {
   const { data } = await client.get('/nonpen-plans/stats')
@@ -239,59 +135,13 @@ async function reload() {
   await Promise.all([load(1), loadStats()])
 }
 
-function toggleTestItem(key: string) {
-  const i = form.value.test_items.indexOf(key)
-  if (i >= 0) form.value.test_items.splice(i, 1)
-  else form.value.test_items.push(key)
+function openCreateDialog() {
+  createVisible.value = true
 }
 
-function openFormDialog(row?: NonpenPlan) {
-  form.value = row
-    ? { ...emptyForm(), ...row, test_items: selectedItems(row) }
-    : emptyForm()
-  form.value.asset_ids = Array.isArray(form.value.asset_ids) ? form.value.asset_ids : []
-  assetOptions.value = []
-  if (form.value.asset_ids.length) loadAssetLabels()
-  resetBaseline([...form.value.asset_ids])
-  dialogVisible.value = true
-}
-
-// 编辑回显：非忽略（有效）测试项即为已勾选项
-function selectedItems(row: NonpenPlan): string[] {
-  const itemsMap = row.items ?? {}
-  return nonpenItems()
-    .filter((t) => itemsMap[t.key] && itemsMap[t.key].status !== 'ignored')
-    .map((t) => t.key)
-}
-
-const saving = ref(false)
-
-async function save() {
-  const valid = await formRef.value?.validate().catch(() => false)
-  if (!valid) return
-  saving.value = true
-  try {
-    const body: Partial<NonpenPlanForm> = { ...form.value }
-    delete body.id
-    delete body.ticket_id
-    delete body.ticket_seq
-    delete body.items
-    delete body.linked
-    delete body.actionable
-    delete body.testing_plan_id
-    delete body.create_time
-    delete body.update_time
-    if (form.value.id) {
-      await client.put(`/nonpen-plans/${form.value.id}`, body)
-    } else {
-      await client.post('/nonpen-plans', body)
-    }
-    ElMessage.success('保存成功')
-    dialogVisible.value = false
-    await reload()
-  } finally {
-    saving.value = false
-  }
+async function onCreated() {
+  createVisible.value = false
+  await reload()
 }
 
 async function remove(row: NonpenPlan) {
@@ -306,41 +156,64 @@ async function remove(row: NonpenPlan) {
   await reload()
 }
 
-// ---------- 关联资产（composable） ----------
-const { assetOptions, assetLoading, assetCache, searchAssets, loadAssetLabels: loadAssetLabelsUncached, diffIds, resetBaseline } = useAssetSelect()
+// ---------- 工单抽屉：工单信息 / 测试流程 两个标签共用 ----------
+const drawerVisible = ref(false)
+const drawerPlanId = ref<number | null>(null)
+const drawerTab = ref<PlanDrawerTab>('flow')
 
-function loadAssetLabels() {
-  // 显式绕过缓存加载标签：保证编辑态拿到的资产名称与后端一致
-  return loadAssetLabelsUncached([...(form.value.asset_ids ?? [])])
+function openPlanDrawer(row: NonpenPlan, tab: PlanDrawerTab) {
+  drawerPlanId.value = row.id
+  drawerTab.value = tab
+  drawerVisible.value = true
 }
 
-// 点选关联资产后自动带出测试系统/所属部门（仅新增模式），仅带出纯系统名称（不含系统类型/子系统），仍可手动修改
-function onAssetsChange(ids: number[]) {
-  if (form.value.id) return
-  const added = diffIds(ids)
-  if (!added.length) return
-  const asset = assetCache.value[added[added.length - 1]]
-  if (!asset) return
-  if (asset.name) form.value.system_name = asset.name
-  if (asset.department) form.value.department = asset.department
+function routeTab(value: unknown): PlanDrawerTab {
+  return value === 'info' ? 'info' : 'flow'
 }
 
-// ---------- 流程抽屉 ----------
-const workflowVisible = ref(false)
-const workflowPlanId = ref<number | null>(null)
+// 抽屉显隐 ↔ URL：打开写 plan + tab，关闭清除；replace 避免污染历史栈
+watch(drawerVisible, (v) => {
+  const query = { ...route.query }
+  if (v && drawerPlanId.value) {
+    query.plan = String(drawerPlanId.value)
+    query.tab = drawerTab.value
+  } else {
+    delete query.plan
+    delete query.tab
+  }
+  void router.replace({ query }).catch(() => {})
+})
 
-function openWorkflow(row: NonpenPlan) {
-  workflowPlanId.value = row.id
-  workflowVisible.value = true
-}
+// 标签变化同样写 URL，保证刷新/分享后落在同一标签
+watch(drawerTab, (tab) => {
+  if (!drawerVisible.value || !drawerPlanId.value) return
+  const query = { ...route.query, plan: String(drawerPlanId.value), tab }
+  void router.replace({ query }).catch(() => {})
+})
 
-async function loadDicts() {
-  await Promise.all([loadTestTypes(), loadDepartments()])
-}
+// 首次进入（含站内深链 ?plan=<id>&tab=<info|flow>）按 URL 恢复抽屉
+onMounted(() => {
+  const planQ = Number(route.query.plan)
+  if (Number.isInteger(planQ) && planQ > 0) {
+    drawerPlanId.value = planQ
+    drawerTab.value = routeTab(route.query.tab)
+    drawerVisible.value = true
+  }
+})
 
-onMounted(async () => {
-  await loadDicts()
-  await reload()
+// 路由参数变化（组件复用、onMounted 不再触发）时同步打开
+watch(() => [route.query.plan, route.query.tab] as const, ([q, tab]) => {
+  const id = Number(q)
+  if (!Number.isInteger(id) || id <= 0) return
+  const nextTab = routeTab(tab)
+  if (drawerVisible.value && drawerPlanId.value === id && drawerTab.value === nextTab) return
+  drawerPlanId.value = id
+  drawerTab.value = nextTab
+  drawerVisible.value = true
+})
+
+onMounted(() => {
+  void reload()
 })
 </script>
 

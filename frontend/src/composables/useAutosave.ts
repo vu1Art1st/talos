@@ -34,6 +34,13 @@ export interface UseAutosaveOptions {
   save: () => Promise<void>
   /** 防抖间隔（毫秒），默认 3000（既有报告编辑器口径） */
   interval?: number
+  /**
+   * 是否启用自动保存，默认 true。
+   * 设为 false 时 `markDirty` 只进入 dirty、不排自动保存定时器，
+   * 仍保留 `saved/dirty/saving/failed/conflict` 状态机与统一 `confirmLeave` 离页守卫，
+   * 供「显式保存」的表单（抽屉内工单信息编辑）复用。
+   */
+  autoSave?: boolean
   /** 判定响应是否为版本冲突（409） */
   isConflict?: (err: unknown) => boolean
   /** 冲突处置：由调用方弹窗决定「加载最新 / 继续编辑」 */
@@ -67,6 +74,7 @@ async function defaultAskOnLeave(): Promise<LeaveChoice> {
 
 export function useAutosave(options: UseAutosaveOptions) {
   const interval = options.interval ?? 3000
+  const autoSave = options.autoSave ?? true
   const state = ref<AutosaveState>('saved')
   let timer: ReturnType<typeof setTimeout> | undefined
   let dirtyWhileSaving = false
@@ -104,7 +112,7 @@ export function useAutosave(options: UseAutosaveOptions) {
       return
     }
     state.value = 'dirty'
-    schedule()
+    if (autoSave) schedule()
   }
 
   /** 立即保存；返回是否保存成功（失败/冲突均返回 false，状态已同步更新）。 */
@@ -128,7 +136,7 @@ export function useAutosave(options: UseAutosaveOptions) {
     }
     if (dirtyWhileSaving) {
       state.value = 'dirty'
-      schedule()
+      if (autoSave) schedule()
       return true
     }
     state.value = 'saved'

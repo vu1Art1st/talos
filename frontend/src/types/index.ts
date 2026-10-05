@@ -299,6 +299,9 @@ export interface NonpenPlan {
 /** 漏扫基线工单表单模型 */
 export type NonpenPlanForm = NonpenPlan & { id: number | null }
 
+/** 工单抽屉标签：`info` 工单信息（只读/编辑） · `flow` 测试流程 */
+export type PlanDrawerTab = 'info' | 'flow'
+
 /** 组织成员（`GET /group-members/all`，资产负责人下拉数据源 / 组织成员管理） */
 export interface GroupMember {
   id?: number
@@ -906,7 +909,7 @@ export type ExportFormat = 'docx'
  * 测试工单。
  *
  * 前半部分与表单（`emptyForm()`）字段一一对应，可直接回写；
- * 后半部分为**服务端派生 / 列表摘要（只读）**，保存时须剔除（见 `usePlanCrud.save()`）。
+ * 后半部分为**服务端派生 / 列表摘要（只读）**，保存时须剔除（见 `PlanInfoPanel.vue` 的 `doSave()`）。
  */
 export interface TestingPlan {
   id: number | null

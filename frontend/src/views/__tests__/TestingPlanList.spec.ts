@@ -48,6 +48,7 @@ vi.mock('echarts', () => ({
 }))
 
 import TestingPlanList from '../TestingPlanList.vue'
+import PlanInfoPanel from '../../components/PlanInfoPanel.vue'
 import PlanWorkflowDrawer from '../../components/PlanWorkflowDrawer.vue'
 
 describe('TestingPlanList 工单列表页', () => {
@@ -121,7 +122,7 @@ describe('TestingPlanList 工单列表页', () => {
     wrapper.unmount()
   })
 
-  it('新建表单自动填充为未测试状态', async () => {
+  it('新增入口打开创建面板，默认状态为未测试', async () => {
     const wrapper = mountPage()
     await flushPromises()
 
@@ -130,37 +131,34 @@ describe('TestingPlanList 工单列表页', () => {
     await addBtn!.trigger('click')
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { form: { status: number } }
-    expect(vm.form.status).toBe(10)
+    const panel = wrapper.findComponent(PlanInfoPanel)
+    expect(panel.exists(), '创建面板应挂载').toBe(true)
+    expect(panel.props('mode')).toBe('create')
+    const panelVm = panel.vm as unknown as { form: { status: number } }
+    expect(panelVm.form.status).toBe(10)
     wrapper.unmount()
   })
 
-  it('存在业务进展时禁用「未测试」回退选项', async () => {
+  it('行内「工单信息」入口打开同一抽屉并落到 info 标签', async () => {
     const base = getMock.getMockImplementation()
     getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
-      if (url === '/testing-plans') {
-        return {
-          data: {
-            items: [{
-              id: 7, system_name: '已有进展系统', status: 20, testers: [],
-              vuls: [{ id: 11, title: '已录入漏洞' }], reports: [], retest_rounds: [],
-            }],
-            total: 1,
-          },
-        }
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: '商城系统', status: 20, testers: [], reports: [], vulns: [] } }
       }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
       return base?.(url, ...rest)
     })
 
     const wrapper = mountPage()
     await flushPromises()
-    const editBtn = wrapper.findAll('button').find((b) => b.text() === '编辑')
-    expect(editBtn, '编辑入口应可见').toBeTruthy()
-    await editBtn!.trigger('click')
+    const infoBtn = wrapper.findAll('button').find((b) => b.text() === '工单信息')
+    expect(infoBtn, '工单信息入口应可见').toBeTruthy()
+    await infoBtn!.trigger('click')
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { statusOptionDisabled: (code: number) => boolean }
-    expect(vm.statusOptionDisabled(10)).toBe(true)
+    const drawer = wrapper.findComponent(PlanWorkflowDrawer)
+    expect(drawer.props('visible')).toBe(true)
+    expect(drawer.props('tab')).toBe('info')
     wrapper.unmount()
   })
 
@@ -200,6 +198,35 @@ describe('TestingPlanList 工单列表页', () => {
     // 抽屉按工单 ID 拉取详情 = 已直达该工单（而非停在列表页）
     expect(getMock.mock.calls.map((c) => c[0])).toContain('/testing-plans/7')
     expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('深链 ?vuln=<id> 强制落到流程标签并传入定位目标', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: '定位工单', status: 20, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') {
+        return {
+          data: {
+            items: [{ id: 11, title: '待定位漏洞', level: 20, status: 20, is_retest: false }],
+            total: 1,
+          },
+        }
+      }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '7', vuln: '11' }
+    routeState.fullPath = '/testing-plans?plan=7&vuln=11'
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const drawer = wrapper.findComponent(PlanWorkflowDrawer)
+    expect(drawer.props('visible')).toBe(true)
+    expect(drawer.props('tab')).toBe('flow')
+    expect(drawer.props('focusVulnId')).toBe(11)
     wrapper.unmount()
   })
 

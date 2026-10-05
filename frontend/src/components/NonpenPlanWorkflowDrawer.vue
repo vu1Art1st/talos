@@ -1,9 +1,9 @@
 <template>
   <el-drawer :model-value="visible" size="75%" direction="rtl" :destroy-on-close="true"
-             @update:model-value="onVisibleChange">
+             :before-close="onBeforeClose" @update:model-value="onVisibleChange">
     <template #header>
       <div class="flex items-center gap-3">
-        <span class="text-base font-semibold">漏扫基线流程 · {{ plan?.system_name || '' }}</span>
+        <span class="text-base font-semibold">漏扫基线工单 · {{ plan?.system_name || '' }}</span>
         <span v-if="plan" class="font-mono text-sm" style="color: var(--el-color-primary)">
           {{ plan.ticket_id || '-' }}
         </span>
@@ -11,104 +11,93 @@
       </div>
     </template>
 
-    <div v-if="plan" v-loading="loading" class="flex flex-col gap-4">
-      <!-- 基本信息区 -->
-      <el-card shadow="never">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-2 text-sm">
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">计划名称</div>
-            <div>{{ plan.plan_name || '-' }}</div>
-          </div>
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">测试系统</div>
-            <div>{{ plan.system_name || '-' }}</div>
-          </div>
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">测试类型</div>
-            <div>{{ plan.test_type || '-' }}</div>
-          </div>
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">所属部门</div>
-            <div>{{ plan.department || '-' }}</div>
-          </div>
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">工单提起</div>
-            <div>{{ plan.ticket_time || '-' }}</div>
-          </div>
-          <div>
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">需求接收</div>
-            <div>{{ plan.receive_time || '-' }}</div>
-          </div>
-          <div v-if="plan.asset_names?.length" class="col-span-3">
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">关联资产</div>
-            <div>{{ plan.asset_names.join('、') }}</div>
-          </div>
-          <div v-if="plan.detail" class="col-span-3">
-            <div class="text-xs mb-1" style="color: var(--tl-text-3)">详细描述</div>
-            <div>{{ plan.detail }}</div>
-          </div>
-        </div>
-      </el-card>
+    <div v-if="plan" v-loading="loading">
+      <el-tabs v-model="activeTab" :before-leave="onTabBeforeLeave">
+        <el-tab-pane label="工单信息" name="info" lazy>
+          <NonpenPlanInfoPanel ref="infoPanelRef" :mode="infoMode" :plan="plan"
+                               @request-edit="infoMode = 'edit'"
+                               @saved="onInfoSaved" @cancel="infoMode = 'view'" />
+        </el-tab-pane>
 
-      <!-- 测试项流转 -->
-      <el-card v-for="t in nonpenItems()" :key="t.key" shadow="never"
-               :class="{ 'item-flow-ignored': isIgnored(t.key) }">
-        <div class="flex items-center gap-2 mb-3">
-          <el-icon :size="16" style="color: var(--el-color-primary)"><component :is="itemIcon(t.key)" /></el-icon>
-          <span class="font-medium">{{ t.name }}</span>
-          <span class="tl-tag" :style="softStyle(nonpenItemMeta(statusOf(t.key)).color)">
-            {{ nonpenItemMeta(statusOf(t.key)).label }}
-          </span>
-          <div class="flex-1" />
-          <span v-if="!isIgnored(t.key)" class="text-xs" style="color: var(--tl-text-3)">
-            初测 <b>{{ itemOf(t.key).first_times ?? 0 }}</b> 次 · 复测 <b>{{ itemOf(t.key).retest_times ?? 0 }}</b> 次
-          </span>
-          <span v-else class="text-xs" style="color: var(--tl-text-3)">不参与统计</span>
-        </div>
-
-        <!-- 步骤条：忽略项灰度占位，不显示进度 -->
-        <div v-if="isIgnored(t.key)" class="steps mb-3">
-          <div class="step-placeholder">已忽略 · 不参与统计</div>
-        </div>
-        <div v-else class="steps mb-3">
-          <template v-for="(s, i) in FLOW_STATES" :key="s.key">
-            <div v-if="i > 0" class="step-line" :class="stepClass(t.key, s.key)" />
-            <div class="step" :class="stepClass(t.key, s.key)">
-              <div class="dot">
-                <el-icon v-if="stepClass(t.key, s.key) === 'done'" :size="12"><Check /></el-icon>
-                <template v-else>{{ i + 1 }}</template>
+        <el-tab-pane label="测试流程" name="flow">
+          <div class="flex flex-col gap-4">
+            <!-- 测试项流转 -->
+            <el-card v-for="t in nonpenItems()" :key="t.key" shadow="never"
+                     :class="{ 'item-flow-ignored': isIgnored(t.key) }">
+              <div class="flex items-center gap-2 mb-3">
+                <el-icon :size="16" style="color: var(--el-color-primary)"><component :is="itemIcon(t.key)" /></el-icon>
+                <span class="font-medium">{{ t.name }}</span>
+                <span class="tl-tag" :style="softStyle(nonpenItemMeta(statusOf(t.key)).color)">
+                  {{ nonpenItemMeta(statusOf(t.key)).label }}
+                </span>
+                <div class="flex-1" />
+                <span v-if="!isIgnored(t.key)" class="text-xs" style="color: var(--tl-text-3)">
+                  初测 <b>{{ itemOf(t.key).first_times ?? 0 }}</b> 次 · 复测 <b>{{ itemOf(t.key).retest_times ?? 0 }}</b> 次
+                </span>
+                <span v-else class="text-xs" style="color: var(--tl-text-3)">不参与统计</span>
               </div>
-              <div class="step-label">{{ s.label }}</div>
-            </div>
-          </template>
-        </div>
 
-        <div class="flex gap-2 flex-wrap">
-          <el-button v-for="action in actionsOf(t.key)" :key="action" size="small"
-                     :type="buttonType(action)"
-                     :plain="action !== 'ignore' && action !== 'unignore' && action !== 'direct_done' && action !== 'fail'"
-                     :disabled="acting === action"
-                     @click="doAction(t.key, action)">
-            {{ nonpenActionLabel(action) }}
-          </el-button>
-        </div>
-      </el-card>
+              <!-- 步骤条：忽略项灰度占位，不显示进度 -->
+              <div v-if="isIgnored(t.key)" class="steps mb-3">
+                <div class="step-placeholder">已忽略 · 不参与统计</div>
+              </div>
+              <div v-else class="steps mb-3">
+                <template v-for="(s, i) in FLOW_STATES" :key="s.key">
+                  <div v-if="i > 0" class="step-line" :class="stepClass(t.key, s.key)" />
+                  <div class="step" :class="stepClass(t.key, s.key)">
+                    <div class="dot">
+                      <el-icon v-if="stepClass(t.key, s.key) === 'done'" :size="12"><Check /></el-icon>
+                      <template v-else>{{ i + 1 }}</template>
+                    </div>
+                    <div class="step-label">{{ s.label }}</div>
+                  </div>
+                </template>
+              </div>
+
+              <div class="flex gap-2 flex-wrap">
+                <el-button v-for="action in actionsOf(t.key)" :key="action" size="small"
+                           :type="buttonType(action)"
+                           :plain="action !== 'ignore' && action !== 'unignore' && action !== 'direct_done' && action !== 'fail'"
+                           :disabled="acting === action"
+                           @click="doAction(t.key, action)">
+                  {{ nonpenActionLabel(action) }}
+                </el-button>
+              </div>
+            </el-card>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </div>
   </el-drawer>
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Check, Connection, Key, Monitor } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { nonpenActionLabel, nonpenActions, nonpenItemMeta, nonpenItems, softStyle } from '../utils/colors'
-import type { NonpenPlan } from '../types'
+import type { NonpenPlan, PlanDrawerTab } from '../types'
+import NonpenPlanInfoPanel from './NonpenPlanInfoPanel.vue'
 
-const props = defineProps<{ visible: boolean; planId: number | null }>()
-const emit = defineEmits<{ (e: 'update:visible', v: boolean): void; (e: 'changed'): void }>()
+const props = defineProps<{ visible: boolean; planId: number | null; tab?: PlanDrawerTab }>()
+const emit = defineEmits<{
+  (e: 'update:visible', v: boolean): void
+  (e: 'update:tab', v: PlanDrawerTab): void
+  (e: 'changed'): void
+}>()
 
 const plan = ref<NonpenPlan | null>(null)
+const infoPanelRef = ref<InstanceType<typeof NonpenPlanInfoPanel>>()
+const infoMode = ref<'view' | 'edit'>('view')
+// 路由离开统一走信息面板的离开判定
+onBeforeRouteLeave(() => infoPanelRef.value?.confirmLeave?.() ?? true)
+// URL（列表页 query）是标签唯一真源；组件内只做受控转发
+const activeTab = computed<PlanDrawerTab>({
+  get: () => props.tab ?? 'flow',
+  set: (v) => emit('update:tab', v),
+})
 
 const loading = ref(false)
 const acting = ref('')
@@ -123,6 +112,29 @@ const FLOW_STATES = [
 
 function onVisibleChange(v: boolean) {
   emit('update:visible', v)
+}
+
+/** 关闭抽屉前统一走信息面板的离开判定（无修改直接放行） */
+async function onBeforeClose(done: () => void) {
+  const ok = await (infoPanelRef.value?.confirmLeave?.() ?? true)
+  if (!ok) return
+  infoMode.value = 'view'
+  done()
+}
+
+/** 标签切换前统一走离开判定，编辑态有改动时先补存/确认放弃 */
+async function onTabBeforeLeave() {
+  if (activeTab.value !== 'info') return true
+  const ok = await (infoPanelRef.value?.confirmLeave?.() ?? true)
+  if (!ok) return false
+  infoMode.value = 'view'
+  return true
+}
+
+async function onInfoSaved() {
+  infoMode.value = 'view'
+  await load()
+  emit('changed')
 }
 
 const itemOf = (key: string) => plan.value?.items?.[key] ?? { status: 'not_started', first_times: 0, retest_times: 0 }
@@ -194,6 +206,7 @@ watch(
   () => [props.visible, props.planId] as const,
   async ([visible]) => {
     if (!visible || !props.planId) return
+    infoMode.value = 'view'
     plan.value = null
     await load()
   },
