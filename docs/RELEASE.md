@@ -25,6 +25,14 @@
 
 ---
 
+## [2.27.1] - 2026-10-06
+
+Docker / VPS 环境下预设头像全部破图（nginx 未转发 `/storage/avatars/`），已修复。缺陷修复，无 API 契约变更、无 schema 迁移，按项目版本规则定为 `PATCH`。
+
+### 修复
+
+- **Docker / VPS 下头像全部破图**：`frontend/nginx.conf` 原先只转发 `/storage/uploads/images/`，2.27.0 新增的 `/storage/avatars/` 未被任何 `location` 匹配，请求落到 `try_files ... /index.html` 返回 `200 + text/html`，`<img>` 解不出图只显示 alt 文字；现改为整体转发 `location /storage/`（上传图与预置头像同走一条透传）。本地 `dev.ps1` 走 Vite 代理（整段 `/storage` 转发）不经过 nginx，故表现为「本地正常、Docker/VPS 异常」。新增守卫 `tests/test_source_guard.py::test_nginx_forwards_all_storage_paths` 防止再次漏配。
+
 ## [2.27.0] - 2026-10-06
 
 默认头像整体替换为《绝区零》官方 x.x 版本角色头像（静态资源 + 鉴权下发），移除原有 12 款内置 SVG 预设，并为存量用户随机分配。本版本为**向下兼容的功能新增**（新预设头像系统、鉴权下发路由、存量随机分配脚本），无 schema 迁移（旧 `preset:01..12` 由回填脚本重新分配，非结构破坏性），按项目版本规则定为 `MINOR`。

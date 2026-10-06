@@ -109,6 +109,20 @@ def test_nginx_security_headers_present():
     assert "Content-Security-Policy-Report-Only" in conf
 
 
+def test_nginx_forwards_all_storage_paths():
+    """nginx 必须整体转发 `/storage/`：漏掉的子路径会落到 SPA 首页返回 HTML，图片直接破图。
+
+    2026-10-06 事故：预置头像挂在 `/storage/avatars/<id>.webp`，而 nginx 只转发了
+    `/storage/uploads/images/`，于是未匹配的请求被 `try_files ... /index.html` 兜住、
+    返回 `200 + text/html`——`<img>` 解不出图，只显示 alt 文字。本地 dev.ps1 走 Vite
+    代理（整段 `/storage` 转发）不经过 nginx，所以「本地正常、Docker/VPS 异常」。
+    """
+    conf = (_REPO_ROOT / "frontend" / "nginx.conf").read_text(encoding="utf-8")
+    assert "location /storage/ {" in conf, (
+        "nginx 未整体转发 /storage/：新增的 /storage/<子路径> 会静默变成 HTML 首页"
+    )
+
+
 def test_must_change_password_enforced_server_side():
     """未改密拦截必须留在依赖层（批次 E-6），不得只在前端弹框。"""
     src = (APP_DIR / "core" / "deps.py").read_text(encoding="utf-8")
