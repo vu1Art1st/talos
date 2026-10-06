@@ -409,11 +409,20 @@ function renderCharts() {
 
   // 部门安全概况：圆角柱状（提测/漏洞/已修复）+ 折线（修复率，右轴）
   if (deptData.value.length) {
+    // ECharts 的 auto 标签间隔按「最长标签」统一计算：部门名长短悬殊时（如「中移海算科技（雄安）有限公司」）
+    // 会整体退化为隔列显示，半数部门横轴标签直接为空。改为全量显示 + 按列宽截断，
+    // 完整名称由 tooltip 与下方表格提供；列宽不足时仍交由 hideOverlap 收敛，避免文字互相重叠。
+    const slotWidth = Math.floor(((deptRef.value?.clientWidth ?? 0) - 96) / deptData.value.length)
+    const labelWidth = Math.max(56, Math.min(120, slotWidth - 12))
     mk(deptRef.value, {
       tooltip: { trigger: 'axis' },
       legend: { data: ['提测次数', '发现漏洞', '已修复', '修复率(%)'], top: 0 },
       grid: { left: 48, right: 48, top: 40, bottom: 30 },
-      xAxis: { type: 'category', data: deptData.value.map((d) => d.department) },
+      xAxis: {
+        type: 'category',
+        data: deptData.value.map((d) => d.department),
+        axisLabel: { interval: 0, width: labelWidth, overflow: 'truncate', hideOverlap: true },
+      },
       yAxis: [
         { type: 'value', minInterval: 1 },
         { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' }, splitLine: { show: false } },

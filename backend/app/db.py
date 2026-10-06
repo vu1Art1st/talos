@@ -104,14 +104,14 @@ async def init_db() -> None:
             for i, name in enumerate(["自有系统（正式）", "自有系统（测试）", "DICT系统"]):
                 session.add(DictOption(category="system_type", name=name, sort=i))
 
-        # 漏洞类型字典预置（表为空时从 VUL_TYPE 常量一次性写入内置类型）
+        # 漏洞类型字典预置：补齐 VUL_TYPE 中缺失的内置码（只增不改，不覆盖既有名称与排序）
         from app.models import VulnType
-        has_vuln_type = (
-            await session.execute(select(VulnType.id).limit(1))
-        ).scalar_one_or_none()
-        if has_vuln_type is None:
-            from app.constants import VUL_TYPE
-            for i, (code, name) in enumerate(sorted(VUL_TYPE.items())):
+        existing_type_codes = set(
+            (await session.execute(select(VulnType.code))).scalars().all()
+        )
+        from app.constants import VUL_TYPE
+        for i, (code, name) in enumerate(sorted(VUL_TYPE.items())):
+            if code not in existing_type_codes:
                 session.add(VulnType(code=code, name=name, sort=i, is_builtin=True))
 
         # SLA 配置与等级策略预置（P1-1）：配置行与各等级策略各写一次，之后由界面维护

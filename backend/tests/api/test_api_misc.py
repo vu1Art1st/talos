@@ -78,6 +78,10 @@ async def test_meta_audit_and_notify_dicts(client: AsyncClient, auth: dict):
     assert meta["audit_actions"]["login_success"] == "登录成功"
     assert set(meta["notify_channel_types"]) == {"wecom", "dingtalk", "email"}
     assert "retest_completed" in meta["notify_events"]
+    # 2026-10-06 OWASP 对齐新增的内置类型须随 /meta 下发（名称 + 色值）
+    assert meta["vul_type"]["85"] == "服务端请求伪造"
+    assert meta["vul_type"]["100"] == "组件已知漏洞"
+    assert meta["colors"]["vul_type"]["85"] == "#0891B2"
 
 # ---------- F3 通知渠道 ----------
 async def test_notify_channel_crud_and_validation(client: AsyncClient, auth: dict):

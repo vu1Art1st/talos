@@ -262,6 +262,8 @@ Talos 是一个漏洞全生命周期管理平台，覆盖「漏洞发现 → 提
 平台内置一份经过整理的官方模板数据集 `backend/knowledge-import-vulnerabilities.json`，条目按「漏洞名称」维护，
 有明确编号的漏洞在名称后附带 CVE（如 `Spring Cloud Gateway命令执行（CVE-2022-22947）`），多漏洞组件
 （Nacos / Shiro / Fastjson 等）按单个漏洞拆分，修复建议多条时按 `1、2、3` 编号换行。
+漏洞类型按 OWASP Top 10:2021 审校归类（见 `docs/VULN_TYPE_TAXONOMY.md`），组件 CVE 依漏洞本质归类，
+不再使用「威胁情报」作为漏洞类型。
 
 同步命令在 `backend` 目录下（容器内在 `/app`）执行：
 

@@ -2,7 +2,7 @@
 
 模板库以该 JSON 为唯一权威数据源（scripts.knowledge_data 与
 scripts.sync_knowledge_templates 均消费它），本测试固化「命名规范 / 内容质量 /
-组件漏洞拆分 / 参考链接来源」四类要求，防止后续改动回退。
+组件漏洞拆分 / 参考链接来源 / OWASP 类型归类」五类要求，防止后续改动回退。
 """
 import json
 import re
@@ -14,6 +14,33 @@ import pytest
 from app.constants import VUL_LEVEL, VUL_TYPE
 
 DATA_FILE = Path(__file__).resolve().parents[1] / "knowledge-import-vulnerabilities.json"
+
+# OWASP Top 10:2021 对齐新增的内置类型码（见 app/constants.py::VUL_TYPE）
+_OWASP_TYPE_CODES = {
+    "其他注入": 80,        # A03：LDAP / NoSQL / XPath 注入、CRLF / Host 头注入、XXE
+    "服务端请求伪造": 85,  # A10：SSRF
+    "拒绝服务": 90,        # API4：资源耗尽
+    "加密缺陷": 95,        # A02：明文传输、弱 TLS
+    "组件已知漏洞": 100,   # A06：使用含已知漏洞的组件
+}
+
+# 易错条目 → 期望类型码：用户反馈（Text4shell 被标为「威胁情报」）与同类错误的全量校正
+_EXPECTED_TYPES = {
+    "Text4shell远程代码漏洞（CVE-2022-42889）": 25,
+    "Nacos权限绕过（CVE-2021-29441）": 40,
+    "Nacos默认密钥权限绕过（QVD-2023-6271）": 40,
+    "SSRF服务器端请求伪造": 85,
+    "Dify未授权SSRF（CVE-2025-29720）": 85,
+    "拒绝服务DoS": 90,
+    "LDAP注入": 80,
+    "NoSQL注入": 80,
+    "XPath注入": 80,
+    "XXE外部实体注入": 80,
+    "CRLF注入": 80,
+    "Host头注入": 80,
+    "部分接口明文传输": 95,
+    "组件已知漏洞": 100,
+}
 
 # 安全社区 / 厂商威胁情报 / 官方漏洞库，作为有 CVE 条目的参考来源白名单
 _COMMUNITY_DOMAINS = (
@@ -104,3 +131,26 @@ def test_cve_entries_cite_security_community(entries: list[dict]) -> None:
         assert any(
             domain in url for url in e["references"] for domain in _COMMUNITY_DOMAINS
         ), f"{e['vulnerability_name']} 参考链接缺少安全社区/厂商来源"
+
+
+def test_vul_type_follows_owasp_mapping(entries: list[dict]) -> None:
+    """按漏洞本质归类：威胁情报 / 逻辑漏洞 / 其他不得再兜底承载 SSRF、DoS、非 SQL 注入等明确类型。"""
+    for code in _OWASP_TYPE_CODES.values():
+        assert code in VUL_TYPE, f"OWASP 对齐类型码 {code} 未在 constants.VUL_TYPE 中定义"
+
+    by_name = {e["vulnerability_name"]: e for e in entries}
+    leftover = [n for n, e in by_name.items() if e["vul_type"] == 70]
+    assert not leftover, f"「威胁情报」不应作为漏洞类型使用，仍存在：{leftover}"
+
+    for name, expected in _EXPECTED_TYPES.items():
+        assert name in by_name, f"缺少条目：{name}"
+        assert by_name[name]["vul_type"] == expected, (
+            f"{name} 漏洞类型应为 {VUL_TYPE[expected]}（{expected}）"
+        )
+
+    for e in entries:
+        name, code = e["vulnerability_name"], e["vul_type"]
+        if "拒绝服务" in name:
+            assert code == 90, f"{name} 应归入「拒绝服务」"
+        if "SSRF" in name or "服务端请求伪造" in name:
+            assert code == 85, f"{name} 应归入「服务端请求伪造」"

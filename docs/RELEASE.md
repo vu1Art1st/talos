@@ -25,6 +25,25 @@
 
 ---
 
+## [2.28.0] - 2026-10-06
+
+漏洞模板库分类按 OWASP Top 10:2021 全面复核，并补全字典缺口（向下兼容：新增内置类型、不改既有类型码，`init_db()` 幂等补齐），并按该分类校正知识库模板；另含仪表盘部门柱状图标签修复。按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **OWASP 对齐的内置漏洞类型**：`constants.VUL_TYPE` 新增 `80 其他注入`（A03：LDAP/NoSQL/XPath 注入、CRLF/Host 头注入、XXE）、
+  `85 服务端请求伪造`（A10：SSRF）、`90 拒绝服务`（API4）、`95 加密缺陷`（A02）、`100 组件已知漏洞`（A06），
+  同步 `/meta` 色值；`init_db()` 改为幂等补齐 `VUL_TYPE` 中缺失的内置码（只增不改，兼容既有库）。
+
+### 变更
+
+- **模板库分类全量校正**（`backend/knowledge-import-vulnerabilities.json`，30 条调整）：不再使用「威胁情报」作为漏洞类型；
+  `Text4shell远程代码漏洞（CVE-2022-42889）`、`Apache Tomcat部分PUT远程代码执行（CVE-2025-24813）`、
+  `NGINX rewrite模块堆缓冲区溢出`、`Redis Lua沙箱逃逸远程代码执行` 等代码级执行漏洞归入「代码执行漏洞」；
+  Nacos / IP 限制绕过归入「权限绕过」；SSRF、DoS、非 SQL 注入、明文传输/弱 TLS 分别归入新增专用类型；
+  `组件已知漏洞` 归入 A06。映射规则与字典见 `docs/VULN_TYPE_TAXONOMY.md`。
+- **仪表盘部门柱状图横轴标签修复**：`Dashboard.vue` 的 `xAxis.axisLabel` 由默认间隔（按最长标签整体退化、半数部门标签为空）改为 `interval: 0` 全量显示 + 按列宽截断（tooltip 与下方表格提供完整名称），列宽不足时仍由 `hideOverlap` 收敛避免文字重叠。
+
 ## [2.27.1] - 2026-10-06
 
 Docker / VPS 环境下预设头像全部破图（nginx 未转发 `/storage/avatars/`），已修复。缺陷修复，无 API 契约变更、无 schema 迁移，按项目版本规则定为 `PATCH`。
