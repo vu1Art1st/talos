@@ -11,6 +11,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import AVATAR_PRESETS, MESSAGE_TYPES
+from app.core import avatars as avatar_assets
 from app.core import token_store
 from app.core.client_info import get_client_ip, get_user_agent
 from app.core.config import settings
@@ -62,7 +63,7 @@ PASSWORD_RESET_WINDOW_SECONDS = 15 * 60
 
 
 def _avatar_url(avatar: str) -> str:
-    return f"/storage/{avatar}" if avatar.startswith("uploads/") else ""
+    return avatar_assets.avatar_url(avatar)
 
 
 def build_user_out(user: User) -> UserOut:

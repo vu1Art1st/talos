@@ -22,11 +22,11 @@ password_hasher = PasswordHash((Argon2Hasher(), BcryptHasher()))
 
 ALGORITHM = "HS256"
 
-# 图片访问凭证：<img src> 无法携带 Authorization 头，只能由浏览器自动带 Cookie。
-# 作用域限定到图片路径（Path=/storage/uploads/images），不会随其它请求发送；
-# HttpOnly（JS 读不到）+ SameSite=Lax（跨站子资源不带）；Secure 由部署环境决定（HTTPS 才开）。
+# 图片凭证 `<img src>` 无法携带 Authorization 头，只能靠浏览器自动带 Cookie：
+# 值限定到 storage 路径（Path=/storage，覆盖 /storage/uploads/images 与 /storage/avatars）、
+# HttpOnly（JS 不可读）+ SameSite=Lax（站内图片可带）；Secure 由部署环境决定，HTTPS 才开启。
 IMAGE_COOKIE = "vp_img"
-IMAGE_COOKIE_PATH = "/storage/uploads/images"
+IMAGE_COOKIE_PATH = "/storage"
 
 
 def hash_password(password: str) -> str:

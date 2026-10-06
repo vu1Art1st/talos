@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.avatars import preset_file
 from app.core.data_scope import bound_scope_statement
 from app.core.deps import get_image_viewer
 from app.core.storage import resolve_storage_path
@@ -84,3 +85,26 @@ async def download_image(
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
     # private：凭证相关资源不得进共享缓存；max-age 让浏览器复用，避免同页多图重复请求
     return FileResponse(path, media_type=media_type, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/storage/avatars/zzz/{version}/{name}")
+async def download_preset_avatar(
+    version: str,
+    name: str,
+    _: User = Depends(get_image_viewer),
+):
+    """预置头像：随镜像分发的静态资源，经鉴权端点下发（不挂 StaticFiles）。
+
+    两段路径都来自 URL，但不会参与自由拼接：先与 app.constants.AVATAR_PRESETS
+    白名单比对，命中后只读取白名单 id 对应的固定文件，未命中一律 404。
+    """
+    if not name.endswith(".webp"):
+        raise HTTPException(404, "头像不存在")
+    path = preset_file(f"zzz/{version}/{name[:-5]}")
+    if path is None:
+        raise HTTPException(404, "头像不存在")
+    return FileResponse(
+        path,
+        media_type="image/webp",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )

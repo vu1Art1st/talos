@@ -11,7 +11,8 @@
  */
 import client from '../api/client'
 
-const IMAGE_PATH = '/storage/uploads/images/'
+/** 需要 `vp_img` 凭证的图片路径前缀：用户上传图 + 预置头像（同走后端鉴权端点） */
+const GATED_PATHS = ['/storage/uploads/images/', '/storage/avatars/']
 const RETRY_DATASET_KEY = 'vpImgRetried'
 /** 凭证补发节流窗口：整页裂图时只打一次 /auth/me */
 const HEAL_THROTTLE_MS = 5000
@@ -45,7 +46,8 @@ function isGatedImageSrc(src: string): boolean {
   if (!src) return false
   try {
     const url = new URL(src, window.location.href)
-    return url.origin === window.location.origin && url.pathname.startsWith(IMAGE_PATH)
+    return url.origin === window.location.origin
+      && GATED_PATHS.some((prefix) => url.pathname.startsWith(prefix))
   } catch {
     return false
   }

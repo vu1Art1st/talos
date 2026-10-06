@@ -1,12 +1,10 @@
 <template>
   <img v-if="avatarUrl" class="user-avatar" :src="avatarUrl" :width="size" :height="size" alt="" />
-  <PresetAvatar v-else-if="presetId" :preset-id="presetId" :size="size" />
   <span v-else class="user-avatar fallback" :style="fallbackStyle" :title="name">{{ initial }}</span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import PresetAvatar from './PresetAvatar.vue'
 
 const props = withDefaults(defineProps<{
   avatar?: string
@@ -21,7 +19,6 @@ const props = withDefaults(defineProps<{
 })
 
 const palette = ['#047857', '#0E7490', '#4338CA', '#7E22CE', '#BE185D', '#B45309', '#166534', '#334155']
-const presetId = computed(() => props.avatar.startsWith('preset:') ? props.avatar.slice(7) : '')
 const initial = computed(() => (props.name.trim()[0] || '?').toUpperCase())
 const fallbackStyle = computed(() => {
   const hash = [...props.name].reduce((sum, char) => sum + char.charCodeAt(0), 0)

@@ -33,7 +33,9 @@ class ProfileIn(BaseModel):
 
 
 class AvatarPresetIn(BaseModel):
-    preset_id: str = Field(min_length=2, max_length=2)
+    # id 形如 `zzz/3.2/01`（与 app.core.avatars 的预置白名单一一对应）；
+    # 真正的合法性由路由侧 AVATAR_PRESETS 白名单判定，这里只挡住明显畸形的输入。
+    preset_id: str = Field(min_length=3, max_length=32)
 
 
 class MessagePrefsIn(BaseModel):

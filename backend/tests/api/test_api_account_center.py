@@ -145,9 +145,24 @@ async def test_profile_avatar_preferences_and_message_filter(client: AsyncClient
     assert resp.status_code == 200, resp.text
     assert resp.json()["avatar_url"].startswith("/storage/uploads/images/")
 
-    resp = await client.put("/api/v1/auth/avatar", headers=user_auth, json={"preset_id": "07"})
-    assert resp.status_code == 200
-    assert resp.json()["avatar"] == "preset:07"
+    resp = await client.put(
+        "/api/v1/auth/avatar", headers=user_auth, json={"preset_id": "zzz/1.3/01"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["avatar"] == "preset:zzz/1.3/01"
+    preset_url = resp.json()["avatar_url"]
+    assert preset_url == "/storage/avatars/zzz/1.3/01.webp"
+
+    image_resp = await client.get(preset_url, headers=user_auth)
+    assert image_resp.status_code == 200, image_resp.text
+    assert image_resp.headers["content-type"] == "image/webp"
+    assert image_resp.content[:4] == b"RIFF" and image_resp.content[8:12] == b"WEBP"
+
+    # 未在白名单内的 id 不参与任何路径拼接，设置与读取都拒绝
+    assert (
+        await client.put("/api/v1/auth/avatar", headers=user_auth, json={"preset_id": "zzz/1.3/99"})
+    ).status_code == 400
+    assert (await client.get("/storage/avatars/zzz/1.3/99.webp", headers=user_auth)).status_code == 404
     assert (await client.delete("/api/v1/auth/avatar", headers=user_auth)).json()["avatar"] == ""
 
     resp = await client.put(

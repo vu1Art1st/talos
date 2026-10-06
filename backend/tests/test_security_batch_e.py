@@ -68,6 +68,16 @@ async def test_image_anonymous_denied_and_authenticated_allowed(client, tmp_path
         assert (await anon.get("/storage/uploads/images/%2e%2e%2fpasswd")).status_code == 404
         assert (await anon.get(f"/storage/uploads/images/{'b' * 32}.png")).status_code == 404
 
+        # 预置头像走同一鉴权端点：静态资源同样不裸奔，且路径只按白名单命中
+        preset_url = "/storage/avatars/zzz/1.3/01.webp"
+        anon.cookies.clear()
+        assert (await anon.get(preset_url)).status_code == 401
+        assert (await anon.get(
+            preset_url, headers={"Authorization": f"Bearer {access}"},
+        )).status_code == 200
+        anon.cookies.set(IMAGE_COOKIE, access)
+        assert (await anon.get("/storage/avatars/zzz/1.3/99.webp")).status_code == 404
+
 
 async def test_login_sets_scoped_image_cookie(client):
     resp = await client.post("/api/v1/auth/login", data=ADMIN)
@@ -75,7 +85,7 @@ async def test_login_sets_scoped_image_cookie(client):
     cookie = resp.headers.get("set-cookie", "")
     assert IMAGE_COOKIE in cookie
     assert "HttpOnly" in cookie
-    assert "Path=/storage/uploads/images" in cookie  # 作用域限定，不随其它请求发送
+    assert "Path=/storage" in cookie  # 作用域限定，不随其它请求发送
     assert "SameSite=lax" in cookie.replace("samesite", "SameSite")
 
 
@@ -87,7 +97,7 @@ async def test_logout_clears_image_cookie(client):
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
     )
     assert resp.status_code == 200, resp.text
-    assert "Path=/storage/uploads/images" in resp.headers.get("set-cookie", "")
+    assert "Path=/storage" in resp.headers.get("set-cookie", "")
 
 
 # ---------- E-3：refresh 轮换 ----------

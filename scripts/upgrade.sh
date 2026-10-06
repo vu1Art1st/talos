@@ -146,6 +146,14 @@ if ! $DOCKER compose run --rm api python -m scripts.backfill_report_mandays; the
     "$DOCKER compose run --rm api python -m scripts.backfill_report_mandays"
 fi
 
+# [4.8/5] 存量用户随机分配预置头像（旧 12 款 SVG 预设已下线；只补空值/旧预设，幂等）
+echo "[4.8/5] 存量用户随机分配预置头像"
+if ! $DOCKER compose run --rm api python -m scripts.assign_random_avatars; then
+  echo "   先诊断（只统计不落库）：$DOCKER compose run --rm api python -m scripts.assign_random_avatars --dry-run"
+  record_warning "存量用户预置头像分配" "空头像与已下线的旧预设仍未分配，头像位置回落为首字母色块" \
+    "$DOCKER compose run --rm api python -m scripts.assign_random_avatars"
+fi
+
 # [5/5] 拉起 / 刷新全部服务
 echo "[5/5] 启动全部服务 docker compose up -d --remove-orphans"
 $DOCKER compose up -d --remove-orphans

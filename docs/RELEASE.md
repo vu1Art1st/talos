@@ -25,6 +25,30 @@
 
 ---
 
+## [2.27.0] - 2026-10-06
+
+默认头像整体替换为《绝区零》官方 x.x 版本角色头像（静态资源 + 鉴权下发），移除原有 12 款内置 SVG 预设，并为存量用户随机分配。本版本为**向下兼容的功能新增**（新预设头像系统、鉴权下发路由、存量随机分配脚本），无 schema 迁移（旧 `preset:01..12` 由回填脚本重新分配，非结构破坏性），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **预置头像目录**：`app/constants.py::AVATAR_PRESETS` 换成 17 个版本共 76 款官方头像，id 形如 `zzz/3.2/01`；对应静态资源随镜像分发在 `app/assets/avatars/<id>.webp`（256×256 WebP，保留透明通道，约 1.2MB）。
+- **鉴权下发路由**：`GET /storage/avatars/zzz/{version}/{name}`（`app/api/images.py`），依赖 `get_image_viewer`，只按 `AVATAR_PRESETS` 白名单命中文件，未命中一律 404；不使用 `StaticFiles`。
+- **头像定位统一出口**：`app/core/avatars.py` 收敛 `avatar` 字段的三种形态（空 / `uploads/images/<name>` / `preset:<id>`）到 `avatar_url`。
+- **存量分配脚本**：`scripts/assign_random_avatars.py`（默认只补空头像与已下线的旧预设，`--all` 才覆盖用户上传的图；支持 `--dry-run` / `--seed`），已接入 `scripts/upgrade.sh` 步骤 `[4.8/5]`（fail-open 记 warning）。
+
+### 变更
+
+- **`normalize_avatar` 不再压掉透明底**：透明源图按预乘 alpha 缩放并保留 RGBA（WebP 支持 alpha），修掉「透明像素 RGB 白/黑混杂 → 边缘杂色」；确需平面底色时显式传 `background=(255, 255, 255)` 合成白底，不透明源图仍输出 RGB。
+- **图片凭证 Cookie 作用域**：`vp_img` 的 `Path` 由 `/storage/uploads/images` 放宽到 `/storage`，覆盖新增的 `/storage/avatars`；前端 `utils/imageAuth.ts` 的自愈逻辑同步覆盖两条前缀。
+
+### 移除
+
+- `frontend/src/components/PresetAvatar.vue` 与 12 款内置 SVG 预设；`ProfileCenter.vue` 改为渲染后端下发的头像图片，`UserAvatar.vue` 不再识别预设 id。
+
+### 安全
+
+- 预置头像与上传头像同样经鉴权端点下发（匿名 401），`main.py` 仍不挂 `StaticFiles`（`tests/test_source_guard.py` 守卫通过）。
+
 ## [2.26.2] - 2026-10-05
 
 邮件发送修正与开发环境可用性修复（缺陷修复 / 开发脚本增强，无新增对外功能、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。

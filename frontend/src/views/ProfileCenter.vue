@@ -28,7 +28,8 @@
               <button v-for="preset in presetIds" :key="preset" class="preset-btn"
                       :class="{ active: auth.user?.avatar === `preset:${preset}` }"
                       type="button" :title="presetName(preset)" @click="setPreset(preset)">
-                <PresetAvatar :preset-id="preset" :size="34" />
+                <img class="preset-img" :src="presetUrl(preset)" :alt="presetName(preset)"
+                     width="34" height="34" />
               </button>
             </div>
             <div class="flex gap-2 mt-4">
@@ -165,7 +166,6 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Key, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
-import PresetAvatar from '../components/PresetAvatar.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import { AUTOSAVE_STATE_LABEL, useAutosave } from '../composables/useAutosave'
 import { useAuthStore } from '../stores/auth'
@@ -271,6 +271,11 @@ watch(() => [form.realname, form.phone, disabledTypes.value.join(',')], () => {
 
 function presetName(id: string) {
   return (auth.meta?.avatar_presets as Record<string, string> | undefined)?.[id] || `预置头像 ${id}`
+}
+
+/** 预置头像资源 URL：/meta 下发的 id 即资源相对路径（zzz/<版本>/<序号>） */
+function presetUrl(id: string) {
+  return `/storage/avatars/${id}.webp`
 }
 
 async function setPreset(id: string) {
@@ -393,7 +398,11 @@ onBeforeRouteLeave(() => confirmLeave())
 .setting-block.wide { width: 100%; }
 .block-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--tl-text-1); }
 .avatar-stage { display: flex; justify-content: center; margin-bottom: 16px; }
-.preset-grid { display: grid; grid-template-columns: repeat(6, 38px); gap: 8px; justify-content: center; }
+.preset-grid {
+  display: grid; grid-template-columns: repeat(8, 38px); gap: 8px; justify-content: center;
+  max-height: 236px; overflow-y: auto; padding: 4px;
+}
+.preset-img { display: block; width: 34px; height: 34px; border-radius: 8px; }
 .preset-btn {
   width: 38px; height: 38px; padding: 2px; border: 1px solid transparent; border-radius: 8px;
   background: transparent; cursor: pointer; transition: border-color .15s, background .15s;
