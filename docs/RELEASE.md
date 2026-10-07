@@ -25,6 +25,23 @@
 
 ---
 
+## [2.29.0] - 2026-10-07
+
+测试计划列表新增「定位 / 聚焦」与排序能力（向下兼容的功能新增：新增定位端点与 `sort` 参数、前端可排序列与 `query.focus` 深链，无 API 契约破坏、无 schema 迁移），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **计划定位端点**：`GET /testing-plans/{plan_id}/locate`（`response_model=TestingPlanLocateOut`），在「当前筛选 + 排序」下计算目标工单所在页，返回 `{ found, page }`；用于从通知 / 深链跨页聚焦某条计划。
+- **稳定排序**：`app/services/plan_query.py` 新增 `plan_order_by(sort, order)` 与 `PLAN_SORT_FIELDS`（支持 `id` / `system_name` / `plan_name` / `test_type` / `department` / `status` / `est_mandays` / `actual_mandays` / `receive_time` / `ticket_seq` / `first_test_done_time` / `retest_done_time` / `create_time`，主键 `id` 作 tiebreak）；`list_testing_plans` 改用该排序，取代通用 `apply_sort`。
+- **前端聚焦与排序**：`TestingPlanList.vue` 支持 `query.focus=<id>`——高亮目标工单并自动经 locate 跳转到其所在页（用户主动排序时清除聚焦）；新增可排序列与 `onUserSortChange`；`usePlanFilters.resetForFocus()` 仅清聚焦态、不动 localStorage。
+
+### 变更
+
+- **契约同步**：`schemas/special.py` 新增 `TestingPlanLocateOut`、`schemas/__init__.py` 导出、`frontend/src/types/index.ts` 新增 `TestingPlanLocate`，`scripts/check_api_contract.py` 补充 `TestingPlanLocate` 映射。
+- **测试**：`test_api_plans.py`(+98) 覆盖 locate 与排序、`TestingPlanList.spec.ts`(+205) 覆盖聚焦 / 排序交互。
+
+---
+
 ## [2.28.0] - 2026-10-06
 
 漏洞模板库分类按 OWASP Top 10:2021 全面复核，并补全字典缺口（向下兼容：新增内置类型、不改既有类型码，`init_db()` 幂等补齐），并按该分类校正知识库模板；另含仪表盘部门柱状图标签修复。按项目版本规则定为 `MINOR`。

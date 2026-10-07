@@ -143,6 +143,7 @@ from .special import (
     SpringReportParseOut,
     TestingPlanFilterOptionsOut,
     TestingPlanIn,
+    TestingPlanLocateOut,
     TestingPlanOut,
     TestingPlanTesterOption,
 )

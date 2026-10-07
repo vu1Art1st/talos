@@ -3,7 +3,7 @@
     <FilterToolbar>
       <div class="tl-search-field">
         <el-input v-model="search" placeholder="搜索系统 / 类型 / 部门 / 工单ID" clearable
-                  @keyup.enter="reload" @clear="reload">
+                  @keyup.enter="onUserReload" @clear="onUserReload">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
@@ -140,7 +140,8 @@
     </el-collapse>
 
     <el-card shadow="never" body-style="padding: 0 0 12px">
-    <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange"
+    <el-table ref="tableRef" v-loading="loading" :data="items" stripe row-key="id"
+              :row-class-name="planRowClassName" @sort-change="onUserSortChange"
               :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
         <el-empty :image-size="80"
@@ -286,7 +287,7 @@
 
     <div class="px-4">
       <TlPagination v-model:page="page" v-model:size="size" :total="total"
-                    @page-change="load" @size-change="onSizeChange" />
+                    @page-change="onUserPageChange" @size-change="onUserSizeChange" />
     </div>
   </el-card>
   </div>
@@ -302,9 +303,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type TableInstance } from 'element-plus'
 import { Download, Filter, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -328,7 +329,14 @@ import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useClickOutside } from '../composables/useClickOutside'
 import { useListPage } from '../composables/useListPage'
-import type { FilterFieldDef, PlanDrawerTab, QueryParams, TestingPlan, TestingPlanFilterOptions } from '../types'
+import type {
+  FilterFieldDef,
+  PlanDrawerTab,
+  QueryParams,
+  TestingPlan,
+  TestingPlanFilterOptions,
+  TestingPlanLocate,
+} from '../types'
 import { usePlanConclusion } from '../composables/usePlanConclusion'
 import { usePlanFilters } from '../composables/usePlanFilters'
 import { usePlanImportExport } from '../composables/usePlanImportExport'
@@ -339,14 +347,14 @@ const router = useRouter()
 const route = useRoute()
 // 函数声明提升：筛选条件变化 → 列表回到首页并同步刷新统计（reload 定义见下方）
 function triggerReload() {
-  reload()
+  void reload()
 }
 
 // ---------- 筛选状态（审计 E-2：已下沉至 composables/usePlanFilters.ts） ----------
 const {
   rangeKind, customRange, onRangeChange,
   filterVisible, filterTree, filterCount, hasPreset, applyPreset, onFiltersChange,
-  periodLabel, buildParams, disposeFilters,
+  periodLabel, buildParams, disposeFilters, resetForFocus,
 } = usePlanFilters(triggerReload, { getCurrentUserId: () => auth.user?.id })
 
 // 聚合筛选面板：manual 模式下 el-popover 不监听外部点击，点空白处不会收回 —— 由本函数补回。
@@ -366,6 +374,8 @@ const { items, total, page, size, search, sort, loading, load, onSortChange, onS
   defaultSort: { prop: 'receive_time', order: 'desc' },
   extraParams: filterParams,
 })
+const tableRef = ref<TableInstance>()
+const focusPlanId = ref<number | null>(null)
 // 状态字典（筛选与信息面板共用）；新增弹窗仅有显隐状态，表单逻辑在 PlanInfoPanel 内
 const statusMap = ref<Record<number, string>>({})
 const createVisible = ref(false)
@@ -468,7 +478,27 @@ function reportTitleById(row: TestingPlan, reportId?: number | null): string {
 
 // 筛选变化：列表回到首页并同步刷新统计
 async function reload() {
+  clearFocus()
   await Promise.all([load(1), loadStats(), loadConclusion()])
+}
+
+async function onUserReload() {
+  await reload()
+}
+
+function onUserSortChange(payload: { prop: string; order: string | null }) {
+  clearFocus()
+  onSortChange(payload)
+}
+
+function onUserPageChange(p: number) {
+  clearFocus()
+  void load(p)
+}
+
+function onUserSizeChange(n: number) {
+  clearFocus()
+  onSizeChange(n)
 }
 
 // ---------- 导入导出（审计 E-2：已下沉至 composables/usePlanImportExport.ts） ----------
@@ -482,19 +512,23 @@ const {
 
 // 函数声明提升：导入完成后回到首页并刷新列表与统计
 function reloadAfterImport() {
+  clearFocus()
   return Promise.all([load(1), loadStats()])
 }
 
 function openCreateDialog() {
+  clearFocus()
   createVisible.value = true
 }
 
 async function onCreated() {
+  clearFocus()
   createVisible.value = false
   await Promise.all([load(), loadStats()])
 }
 
 async function removePlan(id: number) {
+  clearFocus()
   await client.delete(`/testing-plans/${id}`)
   ElMessage.success('删除成功')
   await Promise.all([load(), loadStats()])
@@ -506,12 +540,14 @@ async function removePlan(id: number) {
 const workflowVisible = ref(false)
 const workflowPlanId = ref<number | null>(null)
 const workflowTab = ref<PlanDrawerTab>('flow')
+let initialResolving = true
 const focusVulnId = computed(() => {
   const n = Number(route.query.vuln)
   return Number.isInteger(n) && n > 0 ? n : null
 })
 
 function openPlanDrawer(row: TestingPlan, tab: PlanDrawerTab) {
+  if (typeof row.id === 'number') focusPlanId.value = row.id
   workflowPlanId.value = row.id
   workflowTab.value = tab
   workflowVisible.value = true
@@ -530,9 +566,9 @@ function routeTab(value: unknown): PlanDrawerTab {
 
 // 抽屉显隐 ↔ URL 查询参数双向同步：打开写入 plan + tab，关闭清除 plan/tab/vuln；
 // replace 避免污染历史栈（浏览器后退直接回到无抽屉的列表）。
-watch(workflowVisible, (v) => {
+watch([workflowVisible, workflowTab, focusPlanId], () => {
   const query = { ...route.query }
-  if (v && workflowPlanId.value) {
+  if (workflowVisible.value && workflowPlanId.value) {
     query.plan = String(workflowPlanId.value)
     query.tab = workflowTab.value
   } else {
@@ -540,41 +576,110 @@ watch(workflowVisible, (v) => {
     delete query.tab
     delete query.vuln
   }
+  if (focusPlanId.value) query.focus = String(focusPlanId.value)
+  else delete query.focus
   void router.replace({ query }).catch(() => {})
 })
 
 // 标签切换同样写 URL，保证刷新/分享后落在同一标签
-watch(workflowTab, (tab) => {
-  if (!workflowVisible.value || !workflowPlanId.value) return
-  const query = { ...route.query, plan: String(workflowPlanId.value), tab }
-  void router.replace({ query }).catch(() => {})
-})
-
 // 首次进入（含编辑页 redirect 回跳）：按 URL 参数恢复抽屉
-onMounted(() => {
-  const planQ = Number(route.query.plan)
-  if (Number.isInteger(planQ) && planQ > 0) {
-    workflowPlanId.value = planQ
-    workflowTab.value = routeTab(route.query.tab)
-    workflowVisible.value = true
-  }
-})
-
 // 路由参数变化（个人待办 / 站内信深链 ?plan=<id>）：组件复用、onMounted 不再触发时也要打开抽屉，
 // 保证「点工单条目 → 直达该工单的流程抽屉」而不是停留在列表页。
-watch(() => [route.query.plan, route.query.tab, route.query.vuln] as const, ([q, tab]) => {
-  const id = Number(q)
-  if (!Number.isInteger(id) || id <= 0) return
-  const nextTab = routeTab(tab)
-  if (workflowVisible.value && workflowPlanId.value === id && workflowTab.value === nextTab) return
-  workflowPlanId.value = id
-  workflowTab.value = nextTab
-  workflowVisible.value = true
-})
+function positiveId(value: unknown): number | null {
+  const id = Number(value)
+  return Number.isInteger(id) && id > 0 ? id : null
+}
+
+function clearFocus() {
+  if (focusPlanId.value !== null) focusPlanId.value = null
+}
+
+function resetListContextForFocus() {
+  search.value = ''
+  resetForFocus()
+  sort.prop = 'receive_time'
+  sort.order = 'desc'
+}
+
+function locateRequestParams(): QueryParams {
+  return { ...filterParams(), size: size.value }
+}
+
+async function locatePlanPage(id: number, resetOnMissing = true): Promise<number | null> {
+  async function request(): Promise<{ ok: boolean; data: TestingPlanLocate | null }> {
+    const resp = await client.get<TestingPlanLocate>(`/testing-plans/${id}/locate`, {
+      params: locateRequestParams(),
+      meta: { skipErrorPage: true },
+    }).catch(() => null)
+    return { ok: resp !== null, data: resp?.data ?? null }
+  }
+
+  let result = await request()
+  if (!result.ok) return null
+  if (result.data?.found) return result.data.page
+  if (!resetOnMissing) return null
+  resetListContextForFocus()
+  result = await request()
+  return result.data?.found ? result.data.page : null
+}
+
+async function ensurePlanVisible(id: number, resetOnMissing = true) {
+  if (items.value.some((row) => row.id === id)) return
+  const targetPage = await locatePlanPage(id, resetOnMissing)
+  if (targetPage === null) return
+  await load(targetPage)
+}
+
+function planRowClassName({ row }: { row: TestingPlan }): string {
+  return row.id === focusPlanId.value ? 'plan-row-focus' : ''
+}
+
+async function scrollToFocusedRow() {
+  await nextTick()
+  const root = tableRef.value?.$el as HTMLElement | undefined
+  const row = root?.querySelector('tr.plan-row-focus')
+  if (row && typeof row.scrollIntoView === 'function') {
+    row.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }
+}
+
+watch(
+  () => [route.query.plan, route.query.tab, route.query.vuln, route.query.focus] as const,
+  ([planValue, tab]) => {
+    const id = positiveId(planValue)
+    if (id) {
+      const nextTab = routeTab(tab)
+      const focusChanged = focusPlanId.value !== id
+      focusPlanId.value = id
+      workflowPlanId.value = id
+      workflowTab.value = nextTab
+      workflowVisible.value = true
+      if (!initialResolving && (focusChanged || !items.value.some((row) => row.id === id))) {
+        void ensurePlanVisible(id)
+      }
+      return
+    }
+    const focusId = positiveId(route.query.focus)
+    if (focusId && focusId !== focusPlanId.value) {
+      focusPlanId.value = focusId
+      void ensurePlanVisible(focusId)
+    }
+  },
+)
+
+watch(
+  [workflowVisible, items, focusPlanId],
+  ([visible, rows, id]) => {
+    if (!visible && id && rows.some((row) => row.id === id)) void scrollToFocusedRow()
+  },
+  { flush: 'post' },
+)
 
 // 抽屉内发生认领/漏洞/报告/复测等变更后刷新列表与统计
 async function onWorkflowChanged() {
+  const id = workflowPlanId.value
   await Promise.all([load(), loadStats()])
+  if (id) await ensurePlanVisible(id, false)
 }
 
 function onResize() {
@@ -585,9 +690,21 @@ onMounted(async () => {
   const meta = await auth.fetchMeta()
   statusMap.value = meta?.testing_plan_status ?? {}
   window.addEventListener('resize', onResize)
+  const routePlanId = positiveId(route.query.plan)
+  const initialFocusId = routePlanId ?? positiveId(route.query.focus)
+  if (routePlanId) {
+    focusPlanId.value = routePlanId
+    workflowPlanId.value = routePlanId
+    workflowTab.value = routeTab(route.query.tab)
+    workflowVisible.value = true
+  } else if (initialFocusId) {
+    focusPlanId.value = initialFocusId
+  }
+  const initialPage = initialFocusId ? ((await locatePlanPage(initialFocusId)) ?? 1) : 1
   await Promise.all([
-    load(1), loadStats(), loadConclusion(), loadFilterOptions(),
+    load(initialPage), loadStats(), loadConclusion(), loadFilterOptions(),
   ])
+  initialResolving = false
 })
 
 onBeforeUnmount(() => {
@@ -611,6 +728,12 @@ onBeforeUnmount(() => {
 /* 表头统一单行：文案+排序箭头不换行，保持各列表头整洁对齐 */
 :deep(.el-table th .cell) {
   white-space: nowrap;
+}
+:deep(.el-table__body tr.plan-row-focus > td.el-table__cell) {
+  background: color-mix(in srgb, var(--tl-primary) 12%, var(--tl-surface)) !important;
+}
+:deep(.el-table__body tr.plan-row-focus > td:first-child) {
+  box-shadow: inset 3px 0 0 var(--tl-primary);
 }
 /* 筛选按钮上的条件数徽标 */
 /* 快捷预设：直接写入下方条件树 */

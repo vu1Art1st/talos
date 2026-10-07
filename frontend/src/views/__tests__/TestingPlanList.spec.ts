@@ -18,16 +18,18 @@ const routeState = reactive<{
   query: Record<string, unknown>
 }>({ path: '/testing-plans', fullPath: '/testing-plans', params: {}, query: {} })
 
+const routerMock = vi.hoisted(() => ({
+  push: vi.fn().mockResolvedValue(undefined),
+  replace: vi.fn().mockResolvedValue(undefined),
+  back: vi.fn(),
+}))
+
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-router')>()
   return {
     ...actual,
     useRoute: () => routeState,
-    useRouter: () => ({
-      push: vi.fn().mockResolvedValue(undefined),
-      replace: vi.fn().mockResolvedValue(undefined),
-      back: vi.fn(),
-    }),
+    useRouter: () => routerMock,
   }
 })
 
@@ -50,12 +52,17 @@ vi.mock('echarts', () => ({
 import TestingPlanList from '../TestingPlanList.vue'
 import PlanInfoPanel from '../../components/PlanInfoPanel.vue'
 import PlanWorkflowDrawer from '../../components/PlanWorkflowDrawer.vue'
+import TlPagination from '../../components/TlPagination.vue'
 
 describe('TestingPlanList 工单列表页', () => {
   beforeEach(() => {
     routeState.query = {}
     routeState.path = '/testing-plans'
     routeState.fullPath = '/testing-plans'
+    localStorage.clear()
+    routerMock.push.mockClear()
+    routerMock.replace.mockClear()
+    routerMock.back.mockClear()
     getMock.mockReset()
     getMock.mockImplementation(async (url: string) => {
       if (url === '/testing-plans') {
@@ -248,6 +255,194 @@ describe('TestingPlanList 工单列表页', () => {
 
     expect(getMock.mock.calls.map((c) => c[0])).toContain('/testing-plans/9')
     expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('深链先按 locate 返回页加载，并给目标行标记高亮 class', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7/locate') return { data: { found: true, page: 3 } }
+      if (url === '/testing-plans') {
+        return {
+          data: {
+            items: [{
+              id: 7, ticket_id: 'T-7', system_name: 'located', status: 20,
+              testers: [], asset_ids: [], target_urls: [], vulns: [], reports: [],
+            }],
+            total: 41,
+          },
+        }
+      }
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: 'located', status: 20, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '7' }
+    routeState.fullPath = '/testing-plans?plan=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const locateCall = getMock.mock.calls.find((call) => call[0] === '/testing-plans/7/locate')
+    expect(locateCall?.[1]?.params).toMatchObject({
+      size: 20, sort: 'receive_time', order: 'desc',
+    })
+    const listCall = getMock.mock.calls.find((call) => call[0] === '/testing-plans')
+    expect(listCall?.[1]?.params?.page).toBe(3)
+
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    const rowClassName = table.props('rowClassName') as (arg: { row: { id: number } }) => string
+    expect(rowClassName({ row: { id: 7 } })).toBe('plan-row-focus')
+    expect(rowClassName({ row: { id: 8 } })).toBe('')
+    wrapper.unmount()
+  })
+
+  it('当前筛选排除目标工单时，仅本次清空筛选后重新定位', async () => {
+    localStorage.setItem('testing_plan_filters', JSON.stringify({
+      kind: 'group',
+      logic: 'and',
+      not: false,
+      children: [{
+        kind: 'rule', field: 'system_name', op: 'eq', value: 'excluded', not: false,
+      }],
+    }))
+    let locateCount = 0
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7/locate') {
+        locateCount += 1
+        return { data: { found: locateCount > 1, page: locateCount > 1 ? 2 : 1 } }
+      }
+      if (url === '/testing-plans') {
+        return {
+          data: {
+            items: [{
+              id: 7, ticket_id: 'T-7', system_name: 'located', status: 20,
+              testers: [], asset_ids: [], target_urls: [], vulns: [], reports: [],
+            }],
+            total: 21,
+          },
+        }
+      }
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: 'located', status: 20, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '7' }
+    routeState.fullPath = '/testing-plans?plan=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const locateCalls = getMock.mock.calls.filter((call) => call[0] === '/testing-plans/7/locate')
+    expect(locateCalls).toHaveLength(2)
+    expect(locateCalls[0]?.[1]?.params?.filters).toBeTruthy()
+    expect(locateCalls[1]?.[1]?.params).toMatchObject({
+      search: '', sort: 'receive_time', order: 'desc',
+    })
+    expect(locateCalls[1]?.[1]?.params).not.toHaveProperty('filters')
+    expect(getMock.mock.calls.find((call) => call[0] === '/testing-plans')?.[1]?.params?.page).toBe(2)
+    expect(localStorage.getItem('testing_plan_filters')).toContain('excluded')
+    wrapper.unmount()
+  })
+
+  it('关闭抽屉移除 plan 参数但保留 focus，高亮继续存在', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7/locate') return { data: { found: true, page: 1 } }
+      if (url === '/testing-plans/7') {
+        return { data: { id: 7, system_name: 'located', status: 20, testers: [], reports: [], vulns: [] } }
+      }
+      if (url === '/vulns') return { data: { items: [], total: 0 } }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { plan: '7' }
+    routeState.fullPath = '/testing-plans?plan=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const drawer = wrapper.findComponent(PlanWorkflowDrawer)
+    drawer.vm.$emit('update:visible', false)
+    await flushPromises()
+
+    const query = routerMock.replace.mock.calls.at(-1)?.[0]?.query as Record<string, unknown>
+    expect(query.focus).toBe('7')
+    expect(query.plan).toBeUndefined()
+    expect(query.tab).toBeUndefined()
+
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    const rowClassName = table.props('rowClassName') as (arg: { row: { id: number } }) => string
+    expect(rowClassName({ row: { id: 7 } })).toBe('plan-row-focus')
+    wrapper.unmount()
+  })
+
+  it('仅 focus 深链恢复目标页与高亮，但不自动打开抽屉', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7/locate') return { data: { found: true, page: 2 } }
+      if (url === '/testing-plans') {
+        return {
+          data: {
+            items: [{
+              id: 7, ticket_id: 'T-7', system_name: 'located', status: 20,
+              testers: [], asset_ids: [], target_urls: [], vulns: [], reports: [],
+            }],
+            total: 21,
+          },
+        }
+      }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { focus: '7' }
+    routeState.fullPath = '/testing-plans?focus=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.findComponent(PlanWorkflowDrawer).props('visible')).toBe(false)
+    expect(getMock.mock.calls.find((call) => call[0] === '/testing-plans')?.[1]?.params?.page).toBe(2)
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    const rowClassName = table.props('rowClassName') as (arg: { row: { id: number } }) => string
+    expect(rowClassName({ row: { id: 7 } })).toBe('plan-row-focus')
+    wrapper.unmount()
+  })
+
+  it('用户手动翻页会清除 focus 与高亮', async () => {
+    const base = getMock.getMockImplementation()
+    getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
+      if (url === '/testing-plans/7/locate') return { data: { found: true, page: 2 } }
+      if (url === '/testing-plans') {
+        return {
+          data: {
+            items: [{
+              id: 7, ticket_id: 'T-7', system_name: 'located', status: 20,
+              testers: [], asset_ids: [], target_urls: [], vulns: [], reports: [],
+            }],
+            total: 21,
+          },
+        }
+      }
+      return base?.(url, ...rest)
+    })
+    routeState.query = { focus: '7' }
+    routeState.fullPath = '/testing-plans?focus=7'
+
+    const wrapper = mountPage()
+    await flushPromises()
+    const table = wrapper.findComponent({ name: 'ElTable' })
+    const rowClassName = table.props('rowClassName') as (arg: { row: { id: number } }) => string
+    expect(rowClassName({ row: { id: 7 } })).toBe('plan-row-focus')
+
+    wrapper.findComponent(TlPagination).vm.$emit('page-change', 3)
+    await flushPromises()
+
+    const query = routerMock.replace.mock.calls.at(-1)?.[0]?.query as Record<string, unknown>
+    expect(query.focus).toBeUndefined()
+    expect(rowClassName({ row: { id: 7 } })).toBe('')
     wrapper.unmount()
   })
 })

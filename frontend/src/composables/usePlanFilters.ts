@@ -119,6 +119,18 @@ export function usePlanFilters(onChange: () => void, options: PlanFilterOptions)
     persistFilters()
   }
 
+  /** Clear filter state only for the current focus navigation; localStorage stays untouched. */
+  function resetForFocus() {
+    rangeKind.value = ''
+    customRange.value = null
+    filterTree.value = createFilterGroup()
+    filterVisible.value = false
+    if (filterTimer) {
+      clearTimeout(filterTimer)
+      filterTimer = null
+    }
+  }
+
   /** 组件卸载时清理防抖计时器 */
   function disposeFilters() {
     if (filterTimer) clearTimeout(filterTimer)
@@ -155,6 +167,7 @@ export function usePlanFilters(onChange: () => void, options: PlanFilterOptions)
     filterCount,
     hasPreset,
     applyPreset,
+    resetForFocus,
     onFiltersChange,
     disposeFilters,
     buildParams,

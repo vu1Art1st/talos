@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import PlanStatus, TESTING_PLAN_STATUS
 from app.core.deps import require_any_perm, require_perm
-from app.core.query import get_or_404, paginate, apply_sort
+from app.core.query import get_or_404, paginate
 from app.core.timeutil import mandays_between
 from app.core.timeutil import now as tznow
 from app.core.xlsx import load_xlsx, xlsx_response
@@ -28,6 +28,7 @@ from app.schemas import (
     Page,
     TestingPlanFilterOptionsOut,
     TestingPlanIn,
+    TestingPlanLocateOut,
     TestingPlanOut,
     TestingPlanTesterOption,
 )
@@ -36,6 +37,34 @@ from app.services.audit_service import audit
 from app.services.notify_service import notify
 
 router = APIRouter(tags=["专项管理"])
+
+
+def _plan_list_conditions(
+    *,
+    search: str,
+    status: int | None,
+    test_type: str,
+    department: str,
+    receive_from: str,
+    receive_to: str,
+    first_test_from: str,
+    first_test_to: str,
+    filters: str,
+    my_tests: bool,
+    unclaimed: bool,
+    pending: bool,
+    user: User,
+):
+    """条件组装由列表与定位接口共用，避免两处筛选口径漂移。"""
+    cond = plan_query.plan_conditions(
+        search, status, test_type, department, receive_from, receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to,
+        tester_id=user.id if my_tests else None,
+        unclaimed=unclaimed,
+        pending=pending,
+    )
+    cond += plan_query.plan_filters_condition(filters)
+    return cond
 
 
 @router.get("/testing-plans", response_model=Page[TestingPlanOut])
@@ -63,27 +92,65 @@ async def list_testing_plans(
 
     filters 为聚合筛选 JSON（详见 plan_query.plan_filters_condition），与上述固定参数按 AND 组合。
     """
-    cond = plan_query.plan_conditions(
-        search, status, test_type, department, receive_from, receive_to,
-        first_test_from=first_test_from, first_test_to=first_test_to,
-        tester_id=user.id if my_tests else None,
-        unclaimed=unclaimed,
-        pending=pending,
+    cond = _plan_list_conditions(
+        search=search, status=status, test_type=test_type, department=department,
+        receive_from=receive_from, receive_to=receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, filters=filters,
+        my_tests=my_tests, unclaimed=unclaimed, pending=pending, user=user,
     )
-    cond += plan_query.plan_filters_condition(filters)
     stmt = select(TestingPlan).where(*cond)
-    stmt = apply_sort(
-        stmt, TestingPlan, sort, order,
-        {"id", "system_name", "plan_name", "test_type", "department", "status", "est_mandays",
-         "actual_mandays", "receive_time", "ticket_seq", "first_test_done_time", "retest_done_time",
-         "create_time"},
-        (TestingPlan.receive_time.desc(), TestingPlan.ticket_seq.desc(), TestingPlan.id.desc()),
-    )
+    stmt = stmt.order_by(*plan_query.plan_order_by(sort, order))
     total, items = await paginate(session, stmt, page, size)
     outs = [TestingPlanOut.model_validate(p) for p in items]
     # 报告漏洞闭环进度（派生字段）：供流程抽屉标注「本报告漏洞已全部完成」
     await plan_service.fill_report_closure(session, outs)
     return Page(total=total, items=outs)
+
+
+@router.get("/testing-plans/{plan_id}/locate", response_model=TestingPlanLocateOut)
+async def locate_testing_plan(
+    plan_id: int,
+    search: str = "",
+    status: int | None = None,
+    test_type: str = "",
+    department: str = "",
+    receive_from: str = "",
+    receive_to: str = "",
+    first_test_from: str = "",
+    first_test_to: str = "",
+    filters: str = "",
+    my_tests: bool = False,
+    unclaimed: bool = False,
+    pending: bool = False,
+    sort: str = "",
+    order: str = "desc",
+    size: int = Query(20, ge=1, le=100),
+    user: User = Depends(require_any_perm("special:manage", "vuln:submit")),
+    session: AsyncSession = Depends(get_session),
+):
+    """返回目标工单在当前列表条件下的页码；不在结果集中时 found=false。"""
+    cond = _plan_list_conditions(
+        search=search, status=status, test_type=test_type, department=department,
+        receive_from=receive_from, receive_to=receive_to,
+        first_test_from=first_test_from, first_test_to=first_test_to, filters=filters,
+        my_tests=my_tests, unclaimed=unclaimed, pending=pending, user=user,
+    )
+    ranked = (
+        select(
+            TestingPlan.id.label("id"),
+            func.row_number().over(
+                order_by=list(plan_query.plan_order_by(sort, order))
+            ).label("row_no"),
+        )
+        .where(*cond)
+        .subquery()
+    )
+    row_no = (
+        await session.execute(select(ranked.c.row_no).where(ranked.c.id == plan_id))
+    ).scalar_one_or_none()
+    if row_no is None:
+        return TestingPlanLocateOut(found=False, page=1)
+    return TestingPlanLocateOut(found=True, page=(row_no - 1) // size + 1)
 
 
 @router.get("/testing-plans/stats")

@@ -119,6 +119,13 @@ class TestingPlanOut(TestingPlanIn):
         return v or []
 
 
+class TestingPlanLocateOut(BaseModel):
+    """Testing-plan page location within the current filtered result."""
+
+    found: bool
+    page: int
+
+
 class CompleteNoVulnOut(TestingPlanOut):
     """无漏洞结项结果：原工单字段 + 非阻断数据质量告警。"""
 

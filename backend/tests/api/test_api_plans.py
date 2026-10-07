@@ -113,6 +113,104 @@ async def test_testing_plan_filters(client: AsyncClient, auth: dict):
         for p in plans:
             await client.delete(f"/api/v1/testing-plans/{p['id']}", headers=auth)
 
+async def test_testing_plan_locate_page(client: AsyncClient, auth: dict):
+    dept = "locate-page-dept"
+    created: list[dict] = []
+    try:
+        for i in range(5):
+            resp = await client.post(
+                "/api/v1/testing-plans",
+                headers=auth,
+                json={
+                    "system_name": f"locate-page-system-{i}",
+                    "department": dept,
+                    "receive_time": f"2026-05-{i + 1:02d}",
+                    "status": 10,
+                },
+            )
+            assert resp.status_code == 200, resp.text
+            created.append(resp.json())
+
+        params = {"department": dept, "sort": "receive_time", "order": "asc", "size": 2}
+        for idx, plan in enumerate(created):
+            expected_page = idx // 2 + 1
+            resp = await client.get(
+                f"/api/v1/testing-plans/{plan['id']}/locate", headers=auth, params=params,
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == {"found": True, "page": expected_page}
+
+            listed = await client.get(
+                "/api/v1/testing-plans",
+                headers=auth,
+                params={**params, "page": expected_page},
+            )
+            assert listed.status_code == 200, listed.text
+            assert plan["id"] in {item["id"] for item in listed.json()["items"]}
+
+        # Custom sort ties fall back to id desc exactly like the list endpoint.
+        tie_params = {"department": dept, "sort": "status", "order": "asc", "size": 2}
+        tied_ids = sorted((plan["id"] for plan in created), reverse=True)
+        for idx, plan_id in enumerate(tied_ids):
+            resp = await client.get(
+                f"/api/v1/testing-plans/{plan_id}/locate", headers=auth, params=tie_params,
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["page"] == idx // 2 + 1
+
+        # The default list order is receive_time desc, ticket_seq desc, id desc.
+        default_order = sorted(
+            created,
+            key=lambda plan: (plan["receive_time"], plan["ticket_seq"], plan["id"]),
+            reverse=True,
+        )
+        for idx, plan in enumerate(default_order):
+            resp = await client.get(
+                f"/api/v1/testing-plans/{plan['id']}/locate",
+                headers=auth,
+                params={"department": dept, "size": 2},
+            )
+            assert resp.status_code == 200, resp.text
+            assert resp.json()["page"] == idx // 2 + 1
+
+        target = created[2]
+        excluded_filters = json.dumps({
+            "logic": "and",
+            "children": [{
+                "kind": "rule", "field": "status", "op": "eq", "value": 60, "not": False,
+            }],
+        })
+        resp = await client.get(
+            f"/api/v1/testing-plans/{target['id']}/locate",
+            headers=auth,
+            params={"department": dept, "filters": excluded_filters},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"found": False, "page": 1}
+
+        bad_filters = json.dumps({
+            "logic": "and",
+            "children": [{
+                "kind": "rule", "field": "not_exist", "op": "eq", "value": 1, "not": False,
+            }],
+        })
+        resp = await client.get(
+            f"/api/v1/testing-plans/{target['id']}/locate",
+            headers=auth,
+            params={"filters": bad_filters},
+        )
+        assert resp.status_code == 400
+
+        resp = await client.get("/api/v1/testing-plans/999999999/locate", params=params)
+        assert resp.status_code == 401
+        resp = await client.get("/api/v1/testing-plans/999999999/locate", headers=auth)
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"found": False, "page": 1}
+    finally:
+        for plan in created:
+            await client.delete(f"/api/v1/testing-plans/{plan['id']}", headers=auth)
+
+
 async def test_testing_plan_nested_filters(client: AsyncClient, auth: dict):
     """聚合筛选支持条件分组与嵌套：「需求晚于 X 且（状态 Y 或 Z）」、组级取反、三层嵌套与结构非法。
 

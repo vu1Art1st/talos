@@ -60,6 +60,11 @@ def _auto_ticket_id_cond(model, date_like: str, seq: int):
 # 漏扫基线工单「可进行」判定所用的可测试状态（与 models/special.NonpenPlan.actionable 同口径）
 NONPEN_ACTIONABLE_STATUSES = ("not_started", "testing", "retesting")
 UNCLAIMED_TESTER = "__unclaimed__"
+PLAN_SORT_FIELDS = {
+    "id", "system_name", "plan_name", "test_type", "department", "status",
+    "est_mandays", "actual_mandays", "receive_time", "ticket_seq",
+    "first_test_done_time", "retest_done_time", "create_time",
+}
 
 
 def _auto_ticket_id_expr(model):
@@ -316,6 +321,15 @@ def plan_conditions(
         cond.append(period)
     _append_tester_scope(cond, tester_id, unclaimed)
     return cond
+
+
+def plan_order_by(sort: str, order: str):
+    """Stable ordering shared by the list and page-location queries."""
+    if sort and sort in PLAN_SORT_FIELDS:
+        col = getattr(TestingPlan, sort)
+        col = col.desc() if order == "desc" else col.asc()
+        return col, TestingPlan.id.desc()
+    return TestingPlan.receive_time.desc(), TestingPlan.ticket_seq.desc(), TestingPlan.id.desc()
 
 
 # 可筛选字段白名单：(列名, 字段类型, 是否为 DateTime 列)。日期字符串字段默认 "" 表示空，

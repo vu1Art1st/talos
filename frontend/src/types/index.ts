@@ -958,6 +958,12 @@ export interface PlanImportResult {
 }
 
 /** 无漏洞结项结果：工单字段 + 非阻断数据质量告警 */
+/** Page location of a testing plan within the current list context. */
+export interface TestingPlanLocate {
+  found: boolean
+  page: number
+}
+
 export interface CompleteNoVulnResult extends TestingPlan {
   warnings: string[]
 }

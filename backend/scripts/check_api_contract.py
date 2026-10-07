@@ -45,6 +45,7 @@ MAPPING: dict[str, str] = {
     "RetestRecord": "VulRetestRecordOut",
     "RetestRound": "RetestRoundOut",
     "TestingPlan": "TestingPlanOut",
+    "TestingPlanLocate": "TestingPlanLocateOut",
     "Report": "ReportListOut",
     "ReportDetail": "ReportOut",
     "ReportSection": "SectionOut",
