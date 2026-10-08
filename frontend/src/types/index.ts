@@ -1076,8 +1076,11 @@ export interface PlanConclusionRow {
 /**
  * 结论聚合（`GET /testing-plans/conclusion`）；各字段可空 —— 组件以 `{}` 初始化，未加载时无值。
  *
- * 口径（2026-09-19）：统计周期命中 = 初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期；
- * `systems` 为命中工单数（按工单去重），`first_test_*` 与 `retest_*` 分别对应周期内的初测与复测动作。
+ * 口径（2026-09-19；2026-10-08 补重叠说明）：统计周期命中 = 初测完成 / 复测发起 / 复测完成 /
+ * 复测报告生成 任一落入周期；`systems` 为命中工单数（按工单去重），`first_test_*` 与 `retest_*`
+ * 分别对应周期内的初测与复测动作——两者**可重叠**（同一工单同期既完成初测又进入复测，此时
+ * `first_test_systems + retest_systems > systems`；重合数由接口 `overlap_systems` 给出，
+ * 结论文案据此补括注，前端未直接消费故不声明）。
  */
 export interface PlanConclusion {
   summary?: string

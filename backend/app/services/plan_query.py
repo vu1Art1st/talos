@@ -690,12 +690,20 @@ def _ts_in_period(value: datetime | None, date_from: str, date_to: str) -> bool:
 
 
 def _conclusion_summary(agg: dict, period_text: str) -> str:
-    """结论文字（2026-09-19 新模板，措辞与顺序勿改）。"""
+    """结论文字（2026-09-19 模板；2026-10-08 修订：重叠非零时在复测句补括注）。
+
+    措辞与顺序勿改（本修订点除外）：初测完成数与复测完成数是两个**互相独立**的周期口径，
+    同一工单可在同一周期内既完成初测又发起复测，两者的**并集**才是「共完成系统数」。
+    只把两数并列会被读成 `n = a + b` 的分解式（2026-10-08 实测：19 = 10 + 13 - 4），
+    故 `overlap_systems` 非零时补一句括注说明重合关系；为零时输出与旧模板逐字相同。
+    """
     names = "、".join(agg["department_names"]) or "无"
+    overlap = agg["overlap_systems"]
+    overlap_note = f"（含{overlap}个系统同期完成初测并进入复测）" if overlap else ""
     return (
         f"渗透测试方面，统计周期内（{period_text}）共完成{agg['departments']}个部门（{names}）的"
         f"{agg['systems']}个系统测试工作。其中初测完成{agg['first_test_systems']}个系统"
-        f"发现{agg['first_test_vulns']}个漏洞。复测完成{agg['retest_systems']}个系统，"
+        f"发现{agg['first_test_vulns']}个漏洞。复测完成{agg['retest_systems']}个系统{overlap_note}，"
         f"其中{agg['retest_fixed_systems']}个系统已完成整改，"
         f"{agg['retest_unfixed_systems']}个系统未完成整改仍存在漏洞未修复。"
         "请相关部门尽快完成漏洞修复并提交复测。具体漏洞情况详见附件。"
@@ -729,6 +737,61 @@ def _conclusion_flags(
             if plan_id in flags:
                 flags[plan_id]["retest"] = True
     return {"flags": flags, "retest_report_count": report_count}
+
+
+def _aggregate_hit_plans(
+    plans: list, flags: dict, linked_count: dict[int, int],
+    open_count: dict[int, int], overdue_count: dict[int, int],
+) -> dict:
+    """按命中工单聚合结论计数与附件行。
+
+    `overlap_systems` 统计同时落在「初测完成」与「复测动作」两个口径里的工单——
+    两个口径可重叠，`systems`（并集，按工单去重）才是总数，故结论文字需据此补括注。
+    """
+    dept_names: list[str] = []
+    rows: list[dict] = []
+    first_test_systems = first_test_vulns = 0
+    retest_systems = retest_fixed = retest_started = overlap_systems = 0
+    for p in plans:
+        department = p.department or "未填写"
+        if department not in dept_names:
+            dept_names.append(department)
+        vul_count = _plan_vuln_count(p, linked_count)
+        all_closed = linked_count.get(p.id, 0) > 0 and open_count.get(p.id, 0) == 0
+        if flags[p.id]["first"] and flags[p.id]["retest"]:
+            overlap_systems += 1
+        if flags[p.id]["first"]:
+            first_test_systems += 1
+            first_test_vulns += vul_count
+        if flags[p.id]["retest"]:
+            retest_systems += 1
+            retest_fixed += 1 if all_closed else 0
+        if flags[p.id]["started"]:
+            retest_started += 1
+        rows.append({
+            "ticket_id": p.ticket_id,
+            "department": department,
+            "system_name": p.system_name,
+            "vuln_count": vul_count,
+            "test_type": p.test_type,
+            "first_test_done_time": p.first_test_done_time,
+            "retest_done_time": p.retest_done_time,
+            "rectify_state": _rectify_state(p.status),
+            "sla_overdue": overdue_count.get(p.id, 0),
+        })
+    return {
+        "rows": rows,
+        "departments": len(dept_names),
+        "department_names": dept_names,
+        "systems": len(plans),
+        "first_test_systems": first_test_systems,
+        "first_test_vulns": first_test_vulns,
+        "retest_systems": retest_systems,
+        "retest_fixed_systems": retest_fixed,
+        "retest_unfixed_systems": retest_systems - retest_fixed,
+        "retest_started_systems": retest_started,
+        "overlap_systems": overlap_systems,
+    }
 
 
 async def _count_vulns_by_plan(
@@ -800,50 +863,11 @@ async def _conclusion_aggregate(
         )
     ).all()
     marked = _conclusion_flags(plans, rounds, retest_reports, date_from, date_to)
-    flags = marked["flags"]
-
-    dept_names: list[str] = []
-    rows: list[dict] = []
-    first_test_systems = first_test_vulns = 0
-    retest_systems = retest_fixed = retest_started = 0
-    for p in plans:
-        department = p.department or "未填写"
-        if department not in dept_names:
-            dept_names.append(department)
-        vul_count = _plan_vuln_count(p, linked_count)
-        all_closed = linked_count.get(p.id, 0) > 0 and open_count.get(p.id, 0) == 0
-        if flags[p.id]["first"]:
-            first_test_systems += 1
-            first_test_vulns += vul_count
-        if flags[p.id]["retest"]:
-            retest_systems += 1
-            retest_fixed += 1 if all_closed else 0
-        if flags[p.id]["started"]:
-            retest_started += 1
-        rows.append({
-            "ticket_id": p.ticket_id,
-            "department": department,
-            "system_name": p.system_name,
-            "vuln_count": vul_count,
-            "test_type": p.test_type,
-            "first_test_done_time": p.first_test_done_time,
-            "retest_done_time": p.retest_done_time,
-            "rectify_state": _rectify_state(p.status),
-            "sla_overdue": overdue_count.get(p.id, 0),
-        })
-    return {
-        "rows": rows,
-        "departments": len(dept_names),
-        "department_names": dept_names,
-        "systems": len(plans),
-        "first_test_systems": first_test_systems,
-        "first_test_vulns": first_test_vulns,
-        "retest_systems": retest_systems,
-        "retest_fixed_systems": retest_fixed,
-        "retest_unfixed_systems": retest_systems - retest_fixed,
-        "retest_started_systems": retest_started,
-        "retest_report_count": marked["retest_report_count"],
-    }
+    agg = _aggregate_hit_plans(
+        plans, marked["flags"], linked_count, open_count, overdue_count,
+    )
+    agg["retest_report_count"] = marked["retest_report_count"]
+    return agg
 
 
 async def compute_conclusion(
@@ -859,6 +883,11 @@ async def compute_conclusion(
       （无关联回退手填 stat_* 之和，与 stats_service 一致）；
     - 复测完成系统 = 周期内有复测动作（发起 / 完成 / 复测报告生成）的工单；
       其中「已完成整改」= 该工单全部关联漏洞闭环（已修复/已忽略），其余为未完成整改仍存在漏洞未修复。
+
+    **初测与复测是可重叠的两个口径**（2026-10-08）：同一工单可在同一周期内既完成初测又发起/完成
+    复测，此时它会同时落入「初测完成系统」与「复测完成系统」，而 `systems` 只按工单记一次，
+    因此 `first_test_systems + retest_systems` 可以大于 `systems`。重合数由 `overlap_systems`
+    单独给出，结论文案据此补括注（见 `_conclusion_summary`），避免被读成加法分解。
     """
     agg = await _conclusion_aggregate(session, cond, date_from, date_to)
     period_text = _period_text(period_label, date_from, date_to)

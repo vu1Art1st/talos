@@ -7,6 +7,7 @@
 覆盖：
 - 统计周期命中 = 初测完成 / 复测发起 / 复测完成 / 复测报告生成 任一落入周期；
 - 结论新文案（周期括注 / 部门名 / 初测 / 复测 / 已完成整改 / 未完成整改）与计数；
+- 结论重叠口径（同一工单同期完成初测并进入复测时，系统数只记一次、文案补括注说明重合）；
 - 报告维度复测三态（none / ongoing / done）、轮次源报告关联、报告管理页同口径；
 - 无源报告轮次（报告导入复测 / 2.19.0 前存量）的覆盖代偿不误标无关报告；
 - 结论附件列扩展。
@@ -183,6 +184,39 @@ async def test_conclusion_text_and_counts(client: AsyncClient, auth: dict):
     assert row["first_test_done_time"] == "2020-01-01"
     assert row["retest_done_time"] == ""
     assert row["vuln_count"] == 2
+
+
+async def test_conclusion_overlap_collapses_to_one_system(client: AsyncClient, auth: dict):
+    """同一工单同期完成初测并进入复测：两个口径各记一次，但系统数只记一次，文案补「重合」括注。
+
+    线上实测（2026-10-08 上月周期）：8 部门 / 19 个系统 / 初测 10 / 复测 13，其中 4 单同期完成
+    初测与复测 → 10 + 13 大于 19，旧文案被读成加法分解。本用例复刻该形态并锁定新文案。
+    """
+    dept = "结论重叠专用部门"
+    today = _today()
+    plan_id = await _new_plan(
+        client, auth, "结论重叠系统", department=dept, first_test_done_time=today,
+    )
+    vul_a, vul_b = await _new_vulns(client, auth, plan_id, ["结论重叠漏洞A", "结论重叠漏洞B"])
+    report_id = await _new_report(client, auth, plan_id, [vul_a, vul_b], "结论重叠系统渗透测试报告")
+    await _start_retest(client, auth, report_id)
+    # 只闭环其中一个漏洞 → 工单整体未闭环，「复测完成」口径由轮次开始时间命中
+    await _transition(client, auth, vul_a, 60, "<p>复测通过</p>")
+
+    data = await _conclusion(
+        client, auth, {"department": dept, "first_test_from": today, "first_test_to": today},
+    )
+    assert data["systems"] == 1
+    assert data["first_test_systems"] == 1
+    assert data["retest_systems"] == 1
+    assert data["overlap_systems"] == 1
+    assert (data["retest_fixed_systems"], data["retest_unfixed_systems"]) == (0, 1)
+    assert data["summary"] == (
+        f"渗透测试方面，统计周期内（{today} - {today}）共完成1个部门（{dept}）的1个系统测试工作。"
+        "其中初测完成1个系统发现2个漏洞。复测完成1个系统（含1个系统同期完成初测并进入复测），"
+        "其中0个系统已完成整改，1个系统未完成整改仍存在漏洞未修复。"
+        "请相关部门尽快完成漏洞修复并提交复测。具体漏洞情况详见附件。"
+    )
 
 
 async def test_conclusion_export_columns(client: AsyncClient, auth: dict):
