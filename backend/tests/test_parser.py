@@ -101,6 +101,29 @@ def test_parse_docx_no_table(tmp_path: Path):
     assert parse_docx(str(docx_file), str(tmp_path / "img"), "/x") == []
 
 
+def test_parse_docx_multiline_url_list_strips_each_number(tmp_path: Path):
+    """固定模板多行漏洞链接逐行剥离序号，不能只处理首条。"""
+    doc = Document()
+    table = doc.add_table(rows=4, cols=2)
+    rows = (
+        ("漏洞名称", "多链接模板"),
+        ("漏洞等级", "高危"),
+        ("漏洞类型", "SQL注入"),
+        ("漏洞链接", "1. https://a.example/1\n2、https://b.example/2\n3)https://c.example/3"),
+    )
+    for i, (label, value) in enumerate(rows):
+        table.rows[i].cells[0].text = label
+        table.rows[i].cells[1].text = value
+    docx_file = tmp_path / "multiline_template.docx"
+    doc.save(str(docx_file))
+
+    records = parse_docx(str(docx_file), str(tmp_path / "img"), "/x")
+
+    assert records[0]["affected_url"] == (
+        "https://a.example/1\nhttps://b.example/2\nhttps://c.example/3"
+    )
+
+
 def test_import_template_roundtrip(tmp_path: Path):
     """官方模板应能被解析器识别。"""
     docx_file = tmp_path / "template.docx"
@@ -314,6 +337,27 @@ def test_report_inline_label_and_detail_level(tmp_path: Path):
     assert rec["level_source"] == "detail"
     assert rec["affected_url"] == "http://10.0.0.9/api/user"  # 手工编号前缀被剥离
     assert rec["errors"] == []
+
+
+def test_report_multiline_url_list_strips_each_number(tmp_path: Path):
+    """回归：同一段漏洞链接含多条手工编号 URL 时，逐行去除序号并保留换行。"""
+    docx_file = tmp_path / "multiline_urls.docx"
+    _make_report_docx(
+        docx_file,
+        summary_rows=[("高危", "信息泄露", "接口文档泄露", "未修复")],
+        sections=[("接口文档泄露", [
+            "漏洞等级：高危",
+            "漏洞链接：\n1. https://a.example/api\n2、https://b.example/api\n3)https://c.example/api",
+            "漏洞描述：",
+            "接口文档未授权访问。",
+        ])],
+    )
+
+    _, records = parse_any_docx(str(docx_file), str(tmp_path / "img"), "/x")[1:]
+
+    assert records[0]["affected_url"] == (
+        "https://a.example/api\nhttps://b.example/api\nhttps://c.example/api"
+    )
 
 
 def test_report_detail_level_wins_over_unmatched_summary(tmp_path: Path):

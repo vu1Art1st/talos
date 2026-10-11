@@ -200,7 +200,7 @@ def parse_docx(file_path: str, image_dir: str, image_url_prefix: str,
         if "affected_url" in fields:
             # 不做长度截断：列表模板一个单元格可能含多条 URL（换行分隔），
             # 定长截断会静默丢数据；长度上限统一由 schemas.common.normalize_affected_url 校验
-            record["affected_url"] = _cell_text(fields["affected_url"])
+            record["affected_url"] = _clean_url(_cell_text(fields["affected_url"]))
 
         for key in ("description_html", "reproduce_html", "solution_html"):
             if key in fields:
@@ -244,8 +244,8 @@ _SECTION_LABEL_COLON_PATTERNS: list[tuple[str, str, re.Pattern]] = [
     for label, key in _SECTION_LABELS.items()
 ]
 _RETEST_LABEL_COLON_RE = re.compile(r"^\s*(\d*漏洞复测)\s*[:：]")
-# 手工编号的链接前缀（如「1. http://…」），取值时剥离
-_URL_LEADING_NUM_RE = re.compile(r"^\s*\d+\s*[.、)）]\s*")
+# 手工编号的链接前缀（如「1. http://…」）；逐行匹配，且不跨行吞换行
+_URL_LEADING_NUM_RE = re.compile(r"^[ \t]*\d+[ \t]*[.、)）][ \t]*", re.MULTILINE)
 
 
 def _find_summary_table(doc: Document):
@@ -468,7 +468,7 @@ def _inline_value(text: str, label: str) -> str:
 
 
 def _clean_url(value: str) -> str:
-    """去掉手工编号前缀（如「1. http://…」），保证入库为可直接访问的链接。"""
+    """去掉每一行的手工编号前缀，保证多 URL 入库后均为可直接访问的链接。"""
     return _URL_LEADING_NUM_RE.sub("", (value or "").strip())
 
 

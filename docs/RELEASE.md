@@ -25,6 +25,20 @@
 
 ---
 
+## [2.30.0] - 2026-10-11
+
+知识库（漏洞模板库）新增「导出」能力，并修正 Word 导入时多行 `affected_url` 的链接清洗（新增对外用户功能、无 API 契约破坏、无 schema 迁移），按项目版本规则定为 `MINOR`。
+
+### 新增
+
+- **知识库导出**：`frontend/src/utils/knowledgeExport.ts`（`KnowledgeExportItem` 类型 + `buildKnowledgeExport()` 仅保留可回导字段，剔除主键 / 维护人 / 时间等运行期元数据）+ `serializeKnowledgeExport()`（序列化为 JSON）；`KnowledgeList.vue` 新增「导出」按钮，将当前筛选结果导出为 `knowledge-templates.json`，字段与后端 `KnowledgeBatchIn.items` 对齐，可原样再次导入，形成「导出 → 编辑 → 再导入」闭环。同步新增 `knowledgeExport.spec.ts`。
+
+### 修复
+
+- **Word 导入多行 URL 清洗**（`app/services/docx_parser.py`）：`_URL_LEADING_NUM_RE` 改为 `re.MULTILINE` 逐行匹配（不跨行吞换行），`affected_url` 经 `_clean_url()` 逐行剥离手工编号前缀（如「1. http://…」），修正此前仅清洗首行、多 URL 单元格其余行残留编号导致入库链接不可直接访问的问题；`test_parser.py` 新增多行 URL 清洗用例。
+
+---
+
 ## [2.29.1] - 2026-10-08
 
 修复渗透测试工单「结论输出」在统计周期内既有初测完成、又有复测动作时数字看起来自相矛盾的问题（向下兼容的缺陷修复：无 API 契约破坏、无 schema 迁移、统计口径与统计卡不变），按项目版本规则定为 `PATCH`。

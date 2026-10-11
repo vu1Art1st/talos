@@ -8,6 +8,9 @@
       </div>
       <span class="text-gray-400 text-xs">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
       <div class="flex-1" />
+      <el-button :disabled="!filteredItems.length" class="btn-min" @click="exportEntries">
+        <el-icon class="mr-1"><Download /></el-icon>导出
+      </el-button>
       <template v-if="auth.hasPerm('vuln:manage')">
         <el-button type="danger" plain :disabled="!selected.length" class="btn-min" @click="removeBatch">
           <el-icon class="mr-1"><Delete /></el-icon>批量删除{{ selected.length ? `(${selected.length})` : '' }}
@@ -145,7 +148,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Delete, Plus, Search, Upload } from '@element-plus/icons-vue'
+import { Delete, Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
 import RichEditor from '../components/RichEditor.vue'
 import { useAuthStore } from '../stores/auth'
@@ -154,6 +157,7 @@ import { scoreFromVector, scoreToLevel } from '../utils/cvss'
 import { levelColor } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import { saveBlob } from '../utils/download'
+import { serializeKnowledgeExport } from '../utils/knowledgeExport'
 import type { KnowledgeEntry, KnowledgeForm } from '../types'
 
 const auth = useAuthStore()
@@ -298,6 +302,14 @@ function downloadTemplate() {
   }]
   const blob = new Blob([JSON.stringify(sample, null, 2)], { type: 'application/json' })
   saveBlob(blob, 'knowledge-import-template.json')
+}
+
+function exportEntries() {
+  if (!filteredItems.value.length) return
+  const blob = new Blob([serializeKnowledgeExport(filteredItems.value)], {
+    type: 'application/json;charset=utf-8',
+  })
+  saveBlob(blob, 'knowledge-templates.json')
 }
 
 async function doImport() {
