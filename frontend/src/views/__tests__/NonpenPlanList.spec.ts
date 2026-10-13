@@ -5,6 +5,7 @@ import ElementPlus from 'element-plus'
 import { reactive } from 'vue'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectInfoEntryOpensDrawer } from '../../__tests__/helpers/viewSmoke'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -85,19 +86,9 @@ describe('NonpenPlanList 漏扫基线工单列表页', () => {
     wrapper.unmount()
   })
 
+  // 与工单列表页该用例逐字同构，集中到共享 helper
   it('行内「工单信息」入口打开同一抽屉并落到 info 标签', async () => {
-    const wrapper = mountPage()
-    await flushPromises()
-
-    const infoBtn = wrapper.findAll('button').find((b) => b.text() === '工单信息')
-    expect(infoBtn, '工单信息入口应可见').toBeTruthy()
-    await infoBtn!.trigger('click')
-    await flushPromises()
-
-    const drawer = wrapper.findComponent(NonpenPlanWorkflowDrawer)
-    expect(drawer.props('visible')).toBe(true)
-    expect(drawer.props('tab')).toBe('info')
-    wrapper.unmount()
+    await expectInfoEntryOpensDrawer({ mountPage, drawer: NonpenPlanWorkflowDrawer })
   })
 
   it('新增入口打开创建面板', async () => {

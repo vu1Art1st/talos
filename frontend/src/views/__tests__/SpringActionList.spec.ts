@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectMountSmoke } from '../../__tests__/helpers/viewSmoke'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -42,15 +43,11 @@ describe('SpringActionList 视图', () => {
   })
 
   it('挂载不抛错，并在首屏请求列表接口', async () => {
-    const wrapper = mount(SpringActionList, {
-      global: { plugins: [ElementPlus] },
+    const wrapper = await expectMountSmoke({
+      mountView: () => mount(SpringActionList, { global: { plugins: [ElementPlus] } }),
+      pagedUrls: ['/spring-actions'],
+      expectedTexts: ['新增春耕行动'],
     })
-    await flushPromises()
-    expect(getMock).toHaveBeenCalledWith(
-      '/spring-actions',
-      expect.objectContaining({ params: expect.objectContaining({ page: 1, size: 20 }) }),
-    )
-    expect(wrapper.text()).toContain('新增春耕行动')
     wrapper.unmount()
   })
 

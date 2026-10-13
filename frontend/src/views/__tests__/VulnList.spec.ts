@@ -5,6 +5,7 @@ import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectMountSmoke } from '../../__tests__/helpers/viewSmoke'
 
 // mock 路由：视图仅在跳转详情时使用 router。组件经 useAuthStore → stores/auth.ts → router/index.ts
 // 间接依赖 createRouter/createWebHistory，故用 importOriginal 保留真实导出、仅覆盖 hook。
@@ -58,15 +59,11 @@ describe('VulnList 视图', () => {
   })
 
   it('挂载不抛错，并在首屏请求列表 / 统计 / 字典接口', async () => {
-    const wrapper = mount(VulnList, {
-      global: { plugins: [ElementPlus, createPinia()] },
+    const wrapper = await expectMountSmoke({
+      mountView: () => mount(VulnList, { global: { plugins: [ElementPlus, createPinia()] } }),
+      expectedUrls: ['/vulns', '/vulns/stats', '/meta'],
+      expectedTexts: ['漏洞'],
     })
-    await flushPromises()
-    const urls = getMock.mock.calls.map((c) => c[0])
-    expect(urls).toContain('/vulns')
-    expect(urls).toContain('/vulns/stats')
-    expect(urls).toContain('/meta')
-    expect(wrapper.text()).toContain('漏洞')
     wrapper.unmount()
   })
 

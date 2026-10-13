@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
 import { clientMockFactory, getMock, postMock } from '../../__tests__/helpers/clientMock'
+import { describePlanDrawerTabs } from '../../__tests__/helpers/planDrawerTabs'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -171,46 +172,14 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
     wrapper.unmount()
   })
 
-  it('默认落在「测试流程」标签，信息面板不抢先挂载', async () => {
-    const wrapper = mountDrawer()
-    await flushPromises()
-
-    expect(wrapper.findComponent(PlanInfoPanel).exists()).toBe(false)
-    expect(wrapper.text()).toContain('录入漏洞')
-    wrapper.unmount()
-  })
-
-  it('tab=info 时渲染只读信息面板，点击「编辑」切换为表单态', async () => {
-    const wrapper = mountDrawer({ tab: 'info' })
-    await flushPromises()
-
-    const panel = wrapper.findComponent(PlanInfoPanel)
-    expect(panel.exists()).toBe(true)
-    expect(panel.props('mode')).toBe('view')
-    expect(wrapper.text()).toContain('工单信息')
-
-    const editBtn = wrapper.find('[data-test="plan-info-edit"]')
-    expect(editBtn.exists(), '管理员应看到编辑入口').toBe(true)
-    await editBtn.trigger('click')
-    await flushPromises()
-    expect(panel.props('mode')).toBe('edit')
-    wrapper.unmount()
-  })
-
-  it('切换标签只更新 tab，不重复拉取工单详情', async () => {
-    const wrapper = mountDrawer()
-    await flushPromises()
-    const before = getMock.mock.calls.filter((c) => c[0] === '/testing-plans/1').length
-
-    const infoTab = wrapper.findAll('.el-tabs__item').find((n) => n.text() === '工单信息')
-    expect(infoTab, '工单信息标签应可见').toBeTruthy()
-    await infoTab!.trigger('click')
-    await flushPromises()
-
-    expect(wrapper.emitted('update:tab')?.at(-1)).toEqual(['info'])
-    const after = getMock.mock.calls.filter((c) => c[0] === '/testing-plans/1').length
-    expect(after).toBe(before)
-    wrapper.unmount()
+  // 标签与信息面板契约的 3 条用例与漏扫抽屉逐字同构，集中到共享 helper
+  describePlanDrawerTabs({
+    suite: 'PlanWorkflowDrawer 工单流程抽屉',
+    infoPanel: PlanInfoPanel,
+    detailUrl: '/testing-plans/1',
+    defaultTabText: '录入漏洞',
+    editTestId: 'plan-info-edit',
+    mountDrawer,
   })
 
   it('录入漏洞面板以 embedded 模式嵌入抽屉，避免卡片套卡片', async () => {

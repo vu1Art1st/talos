@@ -5,6 +5,7 @@ import ElementPlus from 'element-plus'
 import { reactive } from 'vue'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectInfoEntryOpensDrawer } from '../../__tests__/helpers/viewSmoke'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -146,6 +147,7 @@ describe('TestingPlanList 工单列表页', () => {
     wrapper.unmount()
   })
 
+  // 断言与漏扫基线列表页逐字同构（集中到共享 helper），此处仅保留本页特有的详情接口覆写
   it('行内「工单信息」入口打开同一抽屉并落到 info 标签', async () => {
     const base = getMock.getMockImplementation()
     getMock.mockImplementation(async (url: string, ...rest: unknown[]) => {
@@ -156,17 +158,7 @@ describe('TestingPlanList 工单列表页', () => {
       return base?.(url, ...rest)
     })
 
-    const wrapper = mountPage()
-    await flushPromises()
-    const infoBtn = wrapper.findAll('button').find((b) => b.text() === '工单信息')
-    expect(infoBtn, '工单信息入口应可见').toBeTruthy()
-    await infoBtn!.trigger('click')
-    await flushPromises()
-
-    const drawer = wrapper.findComponent(PlanWorkflowDrawer)
-    expect(drawer.props('visible')).toBe(true)
-    expect(drawer.props('tab')).toBe('info')
-    wrapper.unmount()
+    await expectInfoEntryOpensDrawer({ mountPage, drawer: PlanWorkflowDrawer })
   })
 
   it('结论接口按当前筛选参数请求，返回内容渲染进结论面板', async () => {

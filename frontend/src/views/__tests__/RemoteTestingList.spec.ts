@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectMountSmoke } from '../../__tests__/helpers/viewSmoke'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -40,15 +41,11 @@ describe('RemoteTestingList 视图', () => {
 
   // 回归：2.0.2 重构后 onMounted 未从 vue 导入，setup 阶段抛 ReferenceError 导致整页白屏
   it('挂载不抛错，并在首屏请求列表接口', async () => {
-    const wrapper = mount(RemoteTestingList, {
-      global: { plugins: [ElementPlus] },
+    const wrapper = await expectMountSmoke({
+      mountView: () => mount(RemoteTestingList, { global: { plugins: [ElementPlus] } }),
+      pagedUrls: ['/remote-testings'],
+      expectedTexts: ['新增远程检测'],
     })
-    await flushPromises()
-    expect(getMock).toHaveBeenCalledWith(
-      '/remote-testings',
-      expect.objectContaining({ params: expect.objectContaining({ page: 1, size: 20 }) }),
-    )
-    expect(wrapper.text()).toContain('新增远程检测')
     wrapper.unmount()
   })
 

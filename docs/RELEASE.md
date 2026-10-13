@@ -25,6 +25,17 @@
 
 ---
 
+## [2.30.1] - 2026-10-13
+
+前端测试用例去重与共享 helper 抽取（仅测试与工程内务，无用户可见变化、无 API 契约变更、无 schema 迁移），按项目版本规则定为 `PATCH`。
+
+### 变更
+
+- **测试用例去重**：`PlanWorkflowDrawer` / `NonpenPlanWorkflowDrawer`（抽屉「标签与信息面板」3 条）、`PlanInfoPanel` / `NonpenPlanInfoPanel`（「只读渲染 / 编辑保存」2 条）、`NonpenPlanList` / `TestingPlanList`（行内「工单信息」入口 1 条）之间逐字同构的用例，以及四个列表页（`SpringActionList` / `RemoteTestingList` / `VulnList` / `ReportEditor`）的挂载冒烟断言，统一收敛为参数化 helper；**用例数量与覆盖保持不变**（各 SUT 仍各自被验证，仅消除重复代码）。
+- **新增共享 helper**：`frontend/src/__tests__/helpers/planDrawerTabs.ts`（`describePlanDrawerTabs`）、`planPanelCommon.ts`（`describePlanPanelCommon`）、`viewSmoke.ts`（`expectMountSmoke` / `expectInfoEntryOpensDrawer`）；均不带 `.spec.ts` 后缀，不被 vitest 的 `src/**/__tests__/*.spec.ts` include 命中。共改造 10 个 spec 并清理迁移后不再使用的导入，门禁实测：`vitest run` 10 files / 43 tests 全绿、`vue-tsc --noEmit` 0 错误。
+
+---
+
 ## [2.30.0] - 2026-10-11
 
 知识库（漏洞模板库）新增「导出」能力，并修正 Word 导入时多行 `affected_url` 的链接清洗（新增对外用户功能、无 API 契约破坏、无 schema 迁移），按项目版本规则定为 `MINOR`。

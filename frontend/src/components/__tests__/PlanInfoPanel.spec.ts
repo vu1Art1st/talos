@@ -4,6 +4,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
 import { clientMockFactory, getMock, putMock } from '../../__tests__/helpers/clientMock'
+import { describePlanPanelCommon } from '../../__tests__/helpers/planPanelCommon'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
@@ -78,19 +79,6 @@ describe('PlanInfoPanel 工单信息面板', () => {
     })
   }
 
-  it('只读模式渲染工单字段，点击「编辑」发出 request-edit', async () => {
-    const wrapper = mountPanel('view')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('商城系统')
-    expect(wrapper.text()).toContain('T-20260901-1')
-    const editBtn = wrapper.find('[data-test="plan-info-edit"]')
-    expect(editBtn.exists()).toBe(true)
-    await editBtn.trigger('click')
-    expect(wrapper.emitted('request-edit')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
   it('无操作权限时只读模式不显示编辑入口', async () => {
     authState.permissions = []
     const wrapper = mountPanel('view', planFixture({ testers: [] }))
@@ -100,26 +88,17 @@ describe('PlanInfoPanel 工单信息面板', () => {
     wrapper.unmount()
   })
 
-  it('编辑模式保存时 PUT 去除只读摘要字段并发出 saved', async () => {
-    putMock.mockResolvedValue({ data: planFixture({ system_name: '商城系统V2' }) })
-    const wrapper = mountPanel('edit')
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as { form: TestingPlan }
-    vm.form.system_name = '商城系统V2'
-    await flushPromises()
-    await wrapper.find('[data-test="plan-info-save"]').trigger('click')
-    await flushPromises()
-
-    expect(putMock).toHaveBeenCalledTimes(1)
-    const [url, body] = putMock.mock.calls[0] as [string, Record<string, unknown>]
-    expect(url).toBe('/testing-plans/7')
-    expect(body.system_name).toBe('商城系统V2')
-    expect(body).not.toHaveProperty('testers')
-    expect(body).not.toHaveProperty('vuls')
-    expect(body).not.toHaveProperty('reports')
-    expect(wrapper.emitted('saved')).toHaveLength(1)
-    wrapper.unmount()
+  // 只读渲染与编辑保存契约与漏扫信息面板逐字同构，集中到共享 helper
+  describePlanPanelCommon({
+    suite: 'PlanInfoPanel 工单信息面板',
+    readOnlyTexts: ['商城系统', 'T-20260901-1'],
+    editTestId: 'plan-info-edit',
+    saveTestId: 'plan-info-save',
+    putUrl: '/testing-plans/7',
+    readonlyFields: ['testers', 'vuls', 'reports'],
+    editedSystemName: '商城系统V2',
+    putResponse: () => planFixture({ system_name: '商城系统V2' }),
+    mountPanel,
   })
 
   it('存在业务进展时禁用「未测试」回退选项', async () => {

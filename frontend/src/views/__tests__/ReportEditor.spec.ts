@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { afterEach, beforeEach, describe, it, vi } from 'vitest'
+import { mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
 
 import { clientMockFactory, getMock } from '../../__tests__/helpers/clientMock'
+import { expectMountSmoke } from '../../__tests__/helpers/viewSmoke'
 
 // mock 路由：报告 ID 来自路由参数。组件经 useAuthStore → stores/auth.ts → router/index.ts
 // 间接依赖 createRouter/createWebHistory，故用 importOriginal 保留真实导出、仅覆盖 hook。
@@ -78,21 +79,22 @@ describe('ReportEditor 视图', () => {
   })
 
   it('挂载不抛错，首屏加载报告详情并渲染章节标题', async () => {
-    const wrapper = mount(ReportEditor, {
-      global: {
-        plugins: [ElementPlus, createPinia()],
-        // 富文本/漏洞录入等重子组件替换为占位，冒烟只验证编辑器自身
-        stubs: {
-          RichEditor: { template: '<div class="rich-stub" />' },
-          VulnFormPanel: { template: '<div class="vuln-stub" />' },
-          VulnRetestPanel: { template: '<div class="retest-stub" />' },
-          FilePreviewDialog: { template: '<div class="file-preview-stub" />' },
+    const wrapper = await expectMountSmoke({
+      mountView: () => mount(ReportEditor, {
+        global: {
+          plugins: [ElementPlus, createPinia()],
+          // 富文本/漏洞录入等重子组件替换为占位，冒烟只验证编辑器自身
+          stubs: {
+            RichEditor: { template: '<div class="rich-stub" />' },
+            VulnFormPanel: { template: '<div class="vuln-stub" />' },
+            VulnRetestPanel: { template: '<div class="retest-stub" />' },
+            FilePreviewDialog: { template: '<div class="file-preview-stub" />' },
+          },
         },
-      },
+      }),
+      expectedUrls: ['/reports/1'],
+      expectedTexts: ['测试结论'],
     })
-    await flushPromises()
-    expect(getMock).toHaveBeenCalledWith('/reports/1')
-    expect(wrapper.text()).toContain('测试结论')
     wrapper.unmount()
   })
 })

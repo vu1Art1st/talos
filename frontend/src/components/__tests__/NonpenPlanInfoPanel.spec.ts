@@ -4,12 +4,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 
 import { clientMockFactory, getMock, putMock } from '../../__tests__/helpers/clientMock'
+import { describePlanPanelCommon } from '../../__tests__/helpers/planPanelCommon'
 
 vi.mock('../../api/client', () => clientMockFactory())
 
 import NonpenPlanInfoPanel from '../NonpenPlanInfoPanel.vue'
 import { applyDictMeta } from '../../utils/colors'
-import type { NonpenPlan, NonpenPlanForm } from '../../types'
+import type { NonpenPlan } from '../../types'
 
 function planFixture(overrides: Partial<NonpenPlan> = {}): NonpenPlan {
   return {
@@ -76,39 +77,17 @@ describe('NonpenPlanInfoPanel 漏扫工单信息面板', () => {
     })
   }
 
-  it('只读模式渲染工单字段与测试项状态，点击「编辑」发出 request-edit', async () => {
-    const wrapper = mountPanel('view')
-    await flushPromises()
-
-    expect(wrapper.text()).toContain('商城系统')
-    expect(wrapper.text()).toContain('T-20260901-2')
-    expect(wrapper.text()).toContain('初测中')
-    const editBtn = wrapper.find('[data-test="nonpen-info-edit"]')
-    expect(editBtn.exists()).toBe(true)
-    await editBtn.trigger('click')
-    expect(wrapper.emitted('request-edit')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it('编辑模式保存时 PUT 去除只读摘要字段并发出 saved', async () => {
-    putMock.mockResolvedValue({ data: planFixture({ system_name: '商城系统V2' }) })
-    const wrapper = mountPanel('edit')
-    await flushPromises()
-
-    const vm = wrapper.vm as unknown as { form: NonpenPlanForm }
-    vm.form.system_name = '商城系统V2'
-    await flushPromises()
-    await wrapper.find('[data-test="nonpen-info-save"]').trigger('click')
-    await flushPromises()
-
-    expect(putMock).toHaveBeenCalledTimes(1)
-    const [url, body] = putMock.mock.calls[0] as [string, Record<string, unknown>]
-    expect(url).toBe('/nonpen-plans/9')
-    expect(body.system_name).toBe('商城系统V2')
-    expect(body).not.toHaveProperty('items')
-    expect(body).not.toHaveProperty('linked')
-    expect(wrapper.emitted('saved')).toHaveLength(1)
-    wrapper.unmount()
+  // 只读渲染与编辑保存契约与工单信息面板逐字同构，集中到共享 helper
+  describePlanPanelCommon({
+    suite: 'NonpenPlanInfoPanel 漏扫工单信息面板',
+    readOnlyTexts: ['商城系统', 'T-20260901-2', '初测中'],
+    editTestId: 'nonpen-info-edit',
+    saveTestId: 'nonpen-info-save',
+    putUrl: '/nonpen-plans/9',
+    readonlyFields: ['items', 'linked'],
+    editedSystemName: '商城系统V2',
+    putResponse: () => planFixture({ system_name: '商城系统V2' }),
+    mountPanel,
   })
 
   it('新增模式缺少测试系统或工单来源时不提交', async () => {
