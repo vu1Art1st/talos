@@ -322,6 +322,21 @@ def test_body_image_centered_and_width_14cm(tmp_path):
 
 
 # ---------- 复测封面标题 ----------
+def test_mixed_text_and_image_paragraph_not_centered(tmp_path):
+    # 回归：正文与图片混排时，文字段落不能被图片居中逻辑带偏。
+    img = tmp_path / "mix.png"
+    Image.new("RGB", (800, 600), "white").save(img)
+    sections = [{
+        "title": "混排图片章节",
+        "vul_id": None,
+        "content_html": f'<p>图片上一行文字<img src="{img}"></p>',
+    }]
+    doc = _build(tmp_path, sections=sections)
+    text_para = next((p for p in doc.paragraphs if "图片上一行文字" in p.text), None)
+    assert text_para is not None
+    assert text_para.alignment != WD_ALIGN_PARAGRAPH.CENTER
+
+
 def test_cover_retest_title(tmp_path):
     # 复测报告：首页第三行标题自动变更为「渗透测试复测报告」
     doc = _build(tmp_path, meta={"project_name": "统一门户系统", "is_retest": True})

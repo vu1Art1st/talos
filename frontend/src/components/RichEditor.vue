@@ -43,6 +43,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { Editor, EditorContent } from '@tiptap/vue-3'
+import { TextSelection } from '@tiptap/pm/state'
 import StarterKit from '@tiptap/starter-kit'
 import Image from '@tiptap/extension-image'
 import { Table, TableCell, TableHeader, TableRow } from '@tiptap/extension-table'
@@ -108,7 +109,52 @@ async function uploadImage(file: File) {
   const form = new FormData()
   form.append('file', file)
   const { data } = await client.post('/upload/image', form)
-  editor.chain().focus().setImage({ src: data.url }).run()
+  insertImageAsStandaloneLine(String(data.url || ''))
+}
+
+function insertImageAsStandaloneLine(src: string) {
+  if (!src) return
+  const { state, view } = editor
+  const { schema } = state
+  const paragraph = schema.nodes.paragraph
+  const image = schema.nodes.image
+  if (!paragraph || !image) return
+
+  let tr = state.tr
+  if (!tr.selection.empty) {
+    tr = tr.deleteSelection()
+  }
+
+  const $from = tr.selection.$from
+  let insertPos = tr.selection.from
+  if ($from.parent.type === paragraph) {
+    const blockStart = $from.before()
+    const blockEnd = $from.after()
+    const isEmptyParagraph = $from.parent.content.size === 0
+    if (isEmptyParagraph) {
+      tr = tr.delete(blockStart, blockEnd)
+      insertPos = blockStart
+    } else {
+      insertPos = blockEnd
+    }
+  }
+
+  const imageNode = image.create({ src })
+  tr = tr.insert(insertPos, imageNode)
+  const afterImagePos = insertPos + imageNode.nodeSize
+
+  const $after = tr.doc.resolve(afterImagePos)
+  const next = $after.nodeAfter
+  const hasTrailingEmptyParagraph = Boolean(
+    next && next.type === paragraph && next.content.size === 0,
+  )
+  if (!hasTrailingEmptyParagraph) {
+    tr = tr.insert(afterImagePos, paragraph.create())
+  }
+
+  const cursorPos = Math.min(afterImagePos + 1, tr.doc.content.size)
+  tr = tr.setSelection(TextSelection.create(tr.doc, cursorPos))
+  view.dispatch(tr.scrollIntoView())
 }
 
 function onPickImage(e: Event) {

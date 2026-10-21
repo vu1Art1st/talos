@@ -934,7 +934,11 @@ def _center_body_images(doc: Document) -> None:
             node = node.getparent()
         if node is None:
             continue
-        Paragraph(node, doc).alignment = WD_ALIGN_PARAGRAPH.CENTER
+        para = Paragraph(node, doc)
+        # 仅对图片独占段落执行居中，避免把同段正文一并置中。
+        if para.text.strip():
+            continue
+        para.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
 
 def _remove_image_placeholders(doc: Document) -> None:
