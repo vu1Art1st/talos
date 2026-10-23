@@ -30,6 +30,14 @@
           <el-step title="复测处理" />
           <el-step title="复测完成" />
         </el-steps>
+        <!-- 下一步推荐动作：按当前阶段推导，可直接点击跳转 -->
+        <div v-if="nextAction" class="mt-3 flex items-center gap-2 text-sm">
+          <el-icon class="text-brand-500 shrink-0" :size="14"><Right /></el-icon>
+          <span class="text-gray-500">下一步：</span>
+          <el-button size="small" type="primary" plain @click="nextAction.action">
+            {{ nextAction.label }}
+          </el-button>
+        </div>
       </el-card>
 
       <!-- 无漏洞闭环：已确认「测试通过」时展示结论横幅 -->
@@ -91,7 +99,7 @@
         </template>
 
         <div v-if="vulnFormVisible" class="mb-4 border-b border-gray-200 pb-4">
-          <VulnFormPanel :plan-id="planId" :embedded="true" @saved="onVulnSaved">
+          <VulnFormPanel ref="vulnFormPanelRef" :plan-id="planId" :embedded="true" @saved="onVulnSaved">
             <template #actions-right>
               <el-button @click="vulnFormVisible = false">收起</el-button>
             </template>
@@ -371,9 +379,10 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Plus, ArrowDown, ArrowRight, ArrowUp, Document, FolderOpened, WarningFilled, CircleCheck,
+  Right,
 } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
@@ -493,6 +502,8 @@ const {
 
 // ---------- 仅剩的组件内展示态 ----------
 const vulnFormVisible = ref(false)
+// 连续录入：保存成功后重置表单为下一条（不清空资产/计划/类型/等级）
+const vulnFormPanelRef = ref<InstanceType<typeof VulnFormPanel>>()
 
 // ---------- 漏洞详情弹窗（公共组件 VulnDetailDialog） ----------
 const vulnDetailVisible = ref(false)
@@ -529,6 +540,50 @@ const stepActive = computed(() => {
   if (s === 20) return vulns.value.length ? 2 : 1
   return plan.value?.testers?.length ? 1 : 0
 })
+
+/** 下一步推荐动作：按当前阶段推导，可直接点击执行对应操作 */
+const nextAction = computed<{ label: string; action: () => void } | null>(() => {
+  const s = plan.value?.status
+  if (!plan.value || s == null) return null
+  // 未认领 / 已认领但尚无漏洞时当前账号未认领：先认领（仅认领者可录入漏洞）
+  if (!isTester.value && (s === 10 || (s === 20 && !vulns.value.length))) {
+    return { label: '认领工单', action: claim }
+  }
+  // 已认领但未录入漏洞：录入漏洞
+  if (s === 20 && !vulns.value.length && canManageVulns.value) {
+    return { label: '录入漏洞', action: () => { vulnFormVisible.value = true } }
+  }
+  // 有漏洞但无报告：生成报告
+  if ((s === 20 || s === 30 || s === 40) && vulns.value.length && !plan.value.reports?.length && canOperate.value) {
+    return { label: '生成报告', action: toggleGenForm }
+  }
+  // 有报告但未发起复测：发起复测
+  if ((s === 30 || s === 40) && plan.value.reports?.length && canOperate.value) {
+    const firstReport = plan.value.reports[0]
+    if (firstReport && firstReport.retest_state === 'none') {
+      return { label: '发起复测', action: () => void confirmStartRetest(firstReport) }
+    }
+  }
+  // 复测中：处理复测漏洞
+  if (s === 50 && vulns.value.length) {
+    return { label: '处理复测漏洞', action: () => void focusVulnRow(vulns.value[0].id) }
+  }
+  return null
+})
+
+/** 下一步「发起复测」复用与行内按钮相同的确认文案，避免绕过确认直接发请求 */
+async function confirmStartRetest(r: Report) {
+  try {
+    await ElMessageBox.confirm(
+      '发起复测将通知整改并使漏洞进入复测中，系统将自动生成复测报告，确认？',
+      '发起复测',
+      { confirmButtonText: '确认', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch {
+    return
+  }
+  await startRetest(r)
+}
 
 // 数据加载（refresh）与漏洞选择器（openVulnPicker / loadPickerVulns / attachPickerVulns）
 // 已下沉至 composables/usePlanDetail.ts 与 composables/usePlanVulnPicker.ts（审计 E-1）
@@ -586,7 +641,9 @@ function onClosed() {
 // 录入漏洞保存 / 复测记录增删改后重载：选择复测结论（已修复/复测未修复）会同步流转漏洞状态，
 // 刷新计划与漏洞列表保证状态列、复测轮数实时联动（与「流转」行为一致）
 async function onVulnSaved() {
-  vulnFormVisible.value = false
+  // 连续录入：重置表单为下一条空白漏洞（保留资产/计划/类型/等级），用户可继续录入
+  vulnFormPanelRef.value?.resetForNext()
+  ElMessage.success('漏洞已录入，可继续录入下一条')
   await reloadAfterChange()
 }
 

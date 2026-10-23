@@ -15,6 +15,13 @@ export function fmtDate(v?: string | null): string {
   return d.isValid() ? d.format('YYYY-MM-DD') : String(v)
 }
 
+/** 时间：HH:mm:ss，用于「最后保存于 …」等同日时间戳场景 */
+export function fmtTime(v?: Date | string | null): string {
+  if (!v) return ''
+  const d = dayjs(v)
+  return d.isValid() ? d.format('HH:mm:ss') : String(v)
+}
+
 /** SLA 剩余时长展示（唯一口径，禁止视图内自行换算）：小时 → 「3 天 4 小时」/「-2 天」 */
 export function fmtSlaRemaining(hours?: number | null): string {
   if (hours === null || hours === undefined) return '-'

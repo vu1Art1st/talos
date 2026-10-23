@@ -59,6 +59,22 @@ describe('useAutosave 状态机', () => {
     autosave.dispose()
   })
 
+  it('markSaved 与保存成功都会刷新 lastSavedAt（报告页保存时间展示）', async () => {
+    const { autosave } = setup()
+    expect(autosave.lastSavedAt.value).toBeNull()
+
+    autosave.markSaved()
+    const initial = autosave.lastSavedAt.value
+    expect(initial).toBeInstanceOf(Date)
+
+    autosave.markDirty()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(autosave.state.value).toBe('saved')
+    expect(autosave.lastSavedAt.value).toBeInstanceOf(Date)
+    expect(autosave.lastSavedAt.value!.getTime()).toBeGreaterThanOrEqual(initial!.getTime())
+    autosave.dispose()
+  })
+
   it('保存失败 → failed，保留输入并可重试成功', async () => {
     const onError = vi.fn()
     const save = vi.fn()

@@ -66,7 +66,7 @@
         </el-form>
       </el-card>
 
-      <el-card v-for="(vul, idx) in vulns" :key="idx" shadow="never"
+      <el-card v-for="(vul, idx) in vulns" :key="`${idx}-${formRevision}`" shadow="never"
                :class="asideActions ? '' : 'mb-4'">
         <template #header>
           <div class="flex items-center">
@@ -329,6 +329,8 @@ const emptyVul = (): VulnForm => ({
   cvss_vector: '', cvss_sync_level: true,
 })
 const vulns = ref<VulnForm[]>([emptyVul()])
+/** 连续录入时递增，强制重建表单卡片（清空富文本编辑器内部状态与校验结果） */
+const formRevision = ref(0)
 
 // 每个漏洞卡片一张独立 el-form（动态多块），函数 ref 按下标收集，提交时逐一校验
 const vulFormRefs: FormInstance[] = []
@@ -456,6 +458,27 @@ function onRetestStatusChanged(status: number) {
   const current = vulns.value[0]
   if (current) current.status = status
 }
+
+/** 连续录入：保存成功后重置为下一条空白漏洞，保留资产/计划/类型/等级/来源 */
+function resetForNext() {
+  if (editId) return // 编辑态不支持连续录入
+  const prev = vulns.value[0]
+  const block = emptyVul()
+  // 保留上一条的上下文字段（资产/计划已在外层 targetForm/selectedPlanId，此处仅表单内字段）
+  block.vul_type = prev?.vul_type ?? block.vul_type
+  block.level = prev?.level ?? block.level
+  block.layer = prev?.layer ?? block.layer
+  block.source = prev?.source ?? block.source
+  block.cvss_sync_level = prev?.cvss_sync_level ?? block.cvss_sync_level
+  // 影响URL 按资产自动填充（与 addVuln 同口径）
+  const first = selectedAssets.value[0]
+  const url = (first?.public_urls ?? [])[0]?.url || (first?.internal_urls ?? [])[0] || ''
+  if (url) block.affected_url = url
+  vulns.value = [block]
+  formRevision.value += 1
+}
+
+defineExpose({ resetForNext })
 
 // 按资产ID加载并回显资产（供计划关联资产预填与编辑回显复用）
 async function loadAssetsByIds(ids: number[]) {

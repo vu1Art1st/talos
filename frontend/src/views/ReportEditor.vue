@@ -12,11 +12,15 @@
               </el-button>
               <span>报告信息</span>
             </div>
-            <!-- 未保存 / 保存失败态用 Element Plus 的 warning 令牌着色，明暗两态均可见 -->
-            <span class="text-xs" data-test="report-save-state" :class="hasUnsaved ? '' : 'text-gray-400'"
-                  :style="hasUnsaved ? 'color: var(--el-color-warning)' : ''">
-              版本 v{{ report.version }} · {{ saveStateLabel }}
-            </span>
+            <!-- 保存状态常驻 badge：色点 + 状态文案 + 最后保存时间，明暗两态可见 -->
+            <div class="flex items-center gap-2" data-test="report-save-state">
+              <span class="inline-block w-2 h-2 rounded-full shrink-0" :style="{ background: saveStateColor }" />
+              <span class="text-xs" :style="{ color: saveStateColor }">{{ saveStateLabel }}</span>
+              <span v-if="lastSavedAt" class="text-xs text-gray-400">
+                {{ fmtTime(lastSavedAt) }}
+              </span>
+              <span class="text-xs text-gray-400">v{{ report.version }}</span>
+            </div>
           </div>
         </template>
         <el-form label-width="90px" size="default">
@@ -232,6 +236,7 @@ import { ArrowDown, ArrowLeft, ArrowUp } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import client from '../api/client'
 import type { ExportFormat, ExportJob, ReportDetail, ReportSection, VulnState } from '../types'
+import { fmtTime } from '../utils/format'
 import RichEditor from '../components/RichEditor.vue'
 import FilePreviewDialog from '../components/FilePreviewDialog.vue'
 import VulnFormPanel from '../components/VulnFormPanel.vue'
@@ -250,6 +255,7 @@ import {
   statusName,
   statusSoftStyle,
 } from '../utils/colors'
+import type { AutosaveState } from '../composables/useAutosave'
 
 // 报告编辑页漏洞字段下拉框的中文名（提示消息用）
 const FIELD_LABELS: Record<string, string> = {
@@ -287,7 +293,7 @@ let jobTimer: number | undefined
 
 // 自动保存状态机（P0-5）：3 秒防抖自动保存 + 统一离页判定（路由离开 / 退出登录 / 关标签页）
 const {
-  state: saveState, saving, hasUnsaved, markDirty, saveNow, markSaved, confirmLeave, dispose: disposeAutosave,
+  state: saveState, saving, hasUnsaved, lastSavedAt, markDirty, saveNow, markSaved, confirmLeave, dispose: disposeAutosave,
 } = useAutosave({
   save: doSave,
   // 409 冲突不静默覆盖：由用户选择「加载最新 / 继续编辑」
@@ -301,6 +307,15 @@ const {
   },
 })
 const saveStateLabel = computed(() => AUTOSAVE_STATE_LABEL[saveState.value])
+// 保存状态色点：与状态语义一一对应（saved 薄荷绿、dirty 琥珀、saving 蓝、failed 红、conflict 橙）
+const SAVE_STATE_COLORS: Record<AutosaveState, string> = {
+  saved: 'var(--el-color-success)',
+  dirty: 'var(--el-color-warning)',
+  saving: 'var(--el-color-primary)',
+  failed: 'var(--el-color-danger)',
+  conflict: '#EA580C',
+}
+const saveStateColor = computed(() => SAVE_STATE_COLORS[saveState.value])
 // 退出登录 / 切换账号走同一守卫（路由离开在下方 onBeforeRouteLeave 中复用同一判定）
 const unregisterGuard = registerUnsavedGuard(confirmLeave)
 

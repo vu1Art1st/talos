@@ -76,6 +76,8 @@ export function useAutosave(options: UseAutosaveOptions) {
   const interval = options.interval ?? 3000
   const autoSave = options.autoSave ?? true
   const state = ref<AutosaveState>('saved')
+  /** 最近一次保存成功时间（页面级展示用；初始加载即视为已保存） */
+  const lastSavedAt = ref<Date | null>(null)
   let timer: ReturnType<typeof setTimeout> | undefined
   let dirtyWhileSaving = false
   /** 用户已明确「放弃修改」：同一次离开流程内不再重复询问 */
@@ -140,6 +142,7 @@ export function useAutosave(options: UseAutosaveOptions) {
       return true
     }
     state.value = 'saved'
+    lastSavedAt.value = new Date()
     if (previous === 'dirty' || previous === 'failed') discardConfirmed = false
     return true
   }
@@ -150,6 +153,7 @@ export function useAutosave(options: UseAutosaveOptions) {
     dirtyWhileSaving = false
     discardConfirmed = false
     state.value = 'saved'
+    lastSavedAt.value = new Date()
   }
 
   /**
@@ -188,5 +192,5 @@ export function useAutosave(options: UseAutosaveOptions) {
   }
   if (getCurrentInstance()) onBeforeUnmount(dispose)
 
-  return { state, saving, hasUnsaved, markDirty, saveNow, markSaved, confirmLeave, dispose }
+  return { state, saving, hasUnsaved, lastSavedAt, markDirty, saveNow, markSaved, confirmLeave, dispose }
 }

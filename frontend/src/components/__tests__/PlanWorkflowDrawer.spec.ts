@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
+import { defineComponent, h } from 'vue'
 
 import { clientMockFactory, getMock, postMock } from '../../__tests__/helpers/clientMock'
 import { describePlanDrawerTabs } from '../../__tests__/helpers/planDrawerTabs'
@@ -169,6 +170,51 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
       const value = (titleInput.element as HTMLInputElement).value
       expect(value).toContain('商城系统渗透测试报告')
     }
+    wrapper.unmount()
+  })
+
+  it('连续录入：保存后调用表单 resetForNext 并保持录入区展开', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/testing-plans/1') {
+        return {
+          data: {
+            ...planFixture(),
+            testers: [{ id: 1, username: 'admin', realname: '管理员' }],
+          },
+        }
+      }
+      if (url === '/testing-plans/1/vuln-order') return { data: {} }
+      return { data: { items: [], total: 0 } }
+    })
+    const resetForNext = vi.fn()
+    const VulnFormStub = defineComponent({
+      name: 'VulnFormPanel',
+      emits: ['saved'],
+      setup(_, { expose }) {
+        expose({ resetForNext })
+        return () => h('div', { class: 'vuln-form-stub' })
+      },
+    })
+    const wrapper = mount(PlanWorkflowDrawer, {
+      props: { planId: 1, visible: true },
+      global: {
+        plugins: [ElementPlus],
+        stubs: { FilePreviewDialog: true, VulnFormPanel: VulnFormStub },
+      },
+    })
+    await flushPromises()
+
+    const entryBtn = wrapper.findAll('button').find((b) => b.text().includes('录入漏洞'))
+    expect(entryBtn, '认领者可看到录入漏洞入口').toBeTruthy()
+    await entryBtn!.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.vuln-form-stub').exists()).toBe(true)
+
+    wrapper.findComponent(VulnFormStub).vm.$emit('saved', [])
+    await flushPromises()
+
+    expect(resetForNext).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('.vuln-form-stub').exists()).toBe(true)
     wrapper.unmount()
   })
 

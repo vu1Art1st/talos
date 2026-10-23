@@ -93,7 +93,7 @@ describe('ReportEditor 视图', () => {
         },
       }),
       expectedUrls: ['/reports/1'],
-      expectedTexts: ['测试结论'],
+      expectedTexts: ['测试结论', '已保存'],
     })
     wrapper.unmount()
   })
