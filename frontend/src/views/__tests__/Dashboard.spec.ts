@@ -51,7 +51,18 @@ vi.stubGlobal('localStorage', {
 function statsFixture() {
   return {
     total_vulns: 20, total_assets: 3, open_vulns: 5, fix_rate: 75,
-    by_status: [], by_level: [], by_type: [], trend: [],
+    by_status: [
+      { status: 60, name: '已修复', count: 5 },
+      { status: 10, name: '未修复', count: 2 },
+    ],
+    by_level: [
+      { level: 30, name: '中危', count: 3 },
+      { level: 10, name: '严重', count: 1 },
+      { level: 50, name: '安全', count: 2 },
+      { level: 20, name: '高危', count: 4 },
+      { level: 40, name: '低危', count: 5 },
+    ],
+    by_type: [], trend: [],
     sla: { by_department: [] },
     ops: {},
     by_department: DEPARTMENTS.map((department, i) => ({
@@ -92,6 +103,15 @@ function deptAxis(): DeptAxis {
   return option.xAxis as DeptAxis
 }
 
+function levelPieOption(): Record<string, unknown> {
+  const option = chartOptions.find((item) => {
+    const series = item.series as Array<{ type?: string }> | undefined
+    return series?.some((entry) => entry.type === 'pie')
+  })
+  if (!option) throw new Error('level pie not rendered')
+  return option
+}
+
 describe('Dashboard 安全态势看板', () => {
   beforeEach(() => {
     chartOptions.length = 0
@@ -115,5 +135,13 @@ describe('Dashboard 安全态势看板', () => {
     expect(axis.axisLabel.width).toBeGreaterThanOrEqual(56)
     expect(axis.axisLabel.overflow).toBe('truncate')
     expect(wrapper.text()).toContain('中移海算科技（雄安）有限公司')
+  })
+
+  it('漏洞等级图例按严重、高危、中危、低危、安全排序', async () => {
+    mount(Dashboard, { global: { plugins: [ElementPlus, createPinia()] } })
+    await flushPromises()
+
+    const series = levelPieOption().series as Array<{ data: Array<{ name: string }> }>
+    expect(series[0].data.map((item) => item.name)).toEqual(['严重', '高危', '中危', '低危', '安全'])
   })
 })

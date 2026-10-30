@@ -1,22 +1,18 @@
 <template>
-  <div class="flex flex-col gap-4">
+  <div class="flex flex-col gap-3">
     <el-card shadow="never" v-loading="loading">
       <template #header>
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold">SLA 修复时限策略</span>
-          <span class="text-xs text-gray-400">
-            配置漏洞修复截止时间的计算口径；策略变更默认只影响未来新漏洞，历史数据需显式重算
-          </span>
           <div class="flex-1" />
           <el-button class="btn-min" :loading="saving" @click="openRecalc">历史重算</el-button>
           <el-button type="primary" class="btn-min" :loading="saving" @click="saveConfig">保存配置</el-button>
         </div>
       </template>
 
-      <el-form :model="form" label-width="120px" class="max-w-[860px]">
+      <el-form :model="form" label-width="110px" class="sla-form">
         <el-form-item label="启用 SLA">
           <el-switch v-model="form.enabled" />
-          <span class="ml-3 text-xs text-gray-400">关闭后不再为新漏洞计算修复截止时间</span>
         </el-form-item>
         <el-form-item label="计时口径">
           <el-radio-group v-model="form.day_basis">
@@ -25,35 +21,34 @@
         </el-form-item>
         <el-form-item label="默认时限">
           <el-input-number v-model="form.default_days" :min="1" :max="3650" />
-          <span class="ml-2 text-xs text-gray-400">天（未单独配置等级的兜底值）</span>
+          <span class="ml-2 text-xs text-gray-400">天</span>
         </el-form-item>
         <el-form-item label="到期前提醒">
           <el-input-number v-model="form.warn_hours" :min="0" :max="8760" />
-          <span class="ml-2 text-xs text-gray-400">小时（进入该窗口标记为「即将到期」并触发提醒）</span>
+          <span class="ml-2 text-xs text-gray-400">小时</span>
         </el-form-item>
         <el-form-item label="允许延期">
           <el-switch v-model="form.allow_extend" />
-          <span class="ml-3 text-xs text-gray-400">关闭后延期接口将拒绝请求</span>
         </el-form-item>
-        <el-form-item v-if="form.day_basis === 'workday'" label="工作日">
+        <el-form-item v-if="form.day_basis === 'workday'" label="工作日" class="sla-form-wide">
           <el-checkbox-group v-model="form.workdays">
             <el-checkbox v-for="(name, idx) in WEEK_NAMES" :key="idx" :value="idx">{{ name }}</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
-        <el-form-item v-if="form.day_basis === 'workday'" label="节假日">
+        <el-form-item v-if="form.day_basis === 'workday'" label="节假日" class="sla-form-wide">
           <el-date-picker v-model="holidayDates" type="dates" value-format="YYYY-MM-DD"
                           format="YYYY-MM-DD" placeholder="选择节假日日期（可多选）" />
           <div class="mt-1 text-xs text-gray-400">
             工作日口径下，节假日与所选工作日之外的星期都顺延；首期不支持调休（补班日）配置
           </div>
         </el-form-item>
-        <el-form-item label="停止计时状态">
+        <el-form-item label="停止计时状态" class="sla-form-wide">
           <el-checkbox-group v-model="form.stop_statuses">
             <el-checkbox v-for="s in statusOptions" :key="s.status" :value="s.status">{{ s.name }}</el-checkbox>
           </el-checkbox-group>
           <div class="mt-1 text-xs text-gray-400">漏洞进入所选状态后视为闭环，不再计入逾期</div>
         </el-form-item>
-        <el-form-item label="备注">
+        <el-form-item label="备注" class="sla-form-wide">
           <el-input v-model="form.remark" type="textarea" :rows="2" maxlength="500" show-word-limit />
         </el-form-item>
       </el-form>
@@ -63,7 +58,6 @@
       <template #header>
         <div class="flex items-center gap-2">
           <span class="text-sm font-semibold">按等级时限</span>
-          <span class="text-xs text-gray-400">未配置的等级使用默认时限；停用某等级＝该等级不参与 SLA</span>
           <div class="flex-1" />
           <el-button class="btn-min" @click="addPolicy">新增等级策略</el-button>
         </div>
@@ -259,3 +253,28 @@ async function doRecalc() {
 
 onMounted(load)
 </script>
+
+<style scoped>
+.sla-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 24px;
+}
+.sla-form :deep(.el-form-item) {
+  margin-bottom: 18px;
+}
+.sla-form-wide {
+  grid-column: 1 / -1;
+}
+.sla-form-wide :deep(.el-form-item__content) {
+  display: block;
+}
+@media (max-width: 900px) {
+  .sla-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .sla-form-wide {
+    grid-column: auto;
+  }
+}
+</style>

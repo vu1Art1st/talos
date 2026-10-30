@@ -320,10 +320,10 @@ NOTIFY_DELIVERY_STATUS_NAME = {
     "dead": "死信",
 }
 NOTIFY_DELIVERY_STATUS_COLOR = {
-    "pending": "#D97706",
-    "success": "#059669",
-    "failed": "#D97706",
-    "dead": "#DC2626",
+    "pending": "amber",
+    "success": "jade",
+    "failed": "amber",
+    "dead": "red",
 }
 
 
@@ -389,11 +389,11 @@ SLA_STATES = {
     "closed": "已闭环",
 }
 SLA_STATE_COLORS = {
-    "none": "#8A968F",
-    "ok": "#059669",
-    "due_soon": "#D97706",
-    "overdue": "#DC2626",
-    "closed": "#8A968F",
+    "none": "sage",
+    "ok": "jade",
+    "due_soon": "amber",
+    "overdue": "red",
+    "closed": "sage",
 }
 
 
@@ -430,66 +430,66 @@ VUL_LEVEL_REVERSE = {v: k for k, v in VUL_LEVEL.items()}
 VUL_TYPE_REVERSE = {v: k for k, v in VUL_TYPE.items()}
 
 
-# ---------- 界面展示色值与展示名（/meta 下发，前端唯一色源，改此处即全端生效） ----------
+# ---------- 界面展示 Radix 色族与展示名（/meta 下发，前端唯一色源，改此处即全端生效） ----------
 # 屏幕展示口径；Word 导出与浏览器打印的色板在 services/report_builder.py 独立维护（打印色与屏幕色语义不同）
 VUL_LEVEL_COLOR = {
-    10: "#DC2626",  # 严重 红
-    20: "#EA580C",  # 高危 橙
-    30: "#D97706",  # 中危 琥珀
-    40: "#0284C7",  # 低危 蓝
-    50: "#059669",  # 安全 薄荷绿
+    10: "red",  # 严重 红
+    20: "orange",  # 高危 橙
+    30: "amber",  # 中危 琥珀
+    40: "sky",  # 低危 蓝
+    50: "jade",  # 安全 翡翠绿
 }
 
 VUL_STATUS_COLOR = {
-    VulStatus.UNFIXED: "#DC2626",    # 未修复 红
-    VulStatus.FIXING: "#D97706",     # 修复中 琥珀
-    VulStatus.RETESTING: "#0284C7",  # 复测中 蓝
-    VulStatus.FIXED: "#059669",      # 已修复 薄荷绿
-    VulStatus.IGNORED: "#8A968F",    # 已忽略 灰
-    VulStatus.DEFERRED: "#8A968F",   # 暂不处理 灰
+    VulStatus.UNFIXED: "red",    # 未修复 红
+    VulStatus.FIXING: "amber",     # 修复中 琥珀
+    VulStatus.RETESTING: "sky",  # 复测中 蓝
+    VulStatus.FIXED: "jade",      # 已修复 翡翠绿
+    VulStatus.IGNORED: "sage",    # 已忽略 灰绿
+    VulStatus.DEFERRED: "sage",   # 暂不处理 灰绿
 }
 
 VUL_TYPE_COLOR = {  # 色相分散便于区分；灰色固定留给「其他」，动态新增类型（code≥1000）由前端兜底灰色
-    10: "#E0442F",   # SQL注入 朱红
-    15: "#D97706",   # XSS跨站 琥珀
-    20: "#8C1D18",   # 命令执行 暗红
-    25: "#9333EA",   # 代码执行 紫
-    30: "#DB2777",   # 文件包含 品红
-    35: "#2D7DD2",   # 任意文件操作 蓝
-    40: "#F59E0B",   # 权限绕过 琥珀
-    45: "#0EA5E9",   # 逻辑漏洞 天蓝
-    50: "#DC2626",   # 存在后门 鲜红
-    55: "#059669",   # 信息泄露 翠绿
-    60: "#D97706",   # 文件上传 深橙
-    65: "#7C3AED",   # 弱口令 深紫
-    70: "#0D9488",   # 威胁情报 青
-    75: "#8A968F",   # 其他 灰
-    80: "#C026D3",   # 其他注入 洋红
-    85: "#0891B2",   # 服务端请求伪造 青
-    90: "#B45309",   # 拒绝服务 棕橙
-    95: "#4F46E5",   # 加密缺陷 靛蓝
-    100: "#15803D",  # 组件已知漏洞 深绿
+    10: "red",   # SQL注入 红
+    15: "amber",   # XSS跨站 琥珀
+    20: "red",   # 命令执行 深红
+    25: "violet",   # 代码执行 紫
+    30: "pink",   # 文件包含 品红
+    35: "blue",   # 任意文件操作 蓝
+    40: "amber",   # 权限绕过 琥珀
+    45: "sky",   # 逻辑漏洞 天蓝
+    50: "red",   # 存在后门 红
+    55: "jade",   # 信息泄露 翠绿
+    60: "amber",   # 文件上传 琥珀
+    65: "violet",   # 弱口令 紫
+    70: "teal",   # 威胁情报 青绿
+    75: "sage",   # 其他 灰绿
+    80: "pink",   # 其他注入 品红
+    85: "cyan",   # 服务端请求伪造 青
+    90: "orange",   # 拒绝服务 橙
+    95: "blue",   # 加密缺陷 蓝
+    100: "grass",  # 组件已知漏洞 绿色
 }
 
 TESTING_PLAN_STATUS_COLOR = {
-    PlanStatus.UNTESTED: "#8A968F",
-    PlanStatus.TESTING: "#D97706",
-    PlanStatus.WAIT_RETEST: "#0284C7",
-    PlanStatus.RETEST_APPLY: "#DC2626",
-    PlanStatus.RETESTING: "#D97706",
-    PlanStatus.RETEST_DONE: "#059669",
-    PlanStatus.PASSED: "#059669",
+    PlanStatus.UNTESTED: "sage",
+    PlanStatus.TESTING: "amber",
+    PlanStatus.WAIT_RETEST: "sky",
+    PlanStatus.RETEST_APPLY: "red",
+    PlanStatus.RETESTING: "amber",
+    PlanStatus.RETEST_DONE: "jade",
+    PlanStatus.PASSED: "jade",
 }
 
 ASSET_STATUS_COLOR = {
-    10: "#059669",  # 线上 薄荷绿
-    20: "#D97706",  # 上线前 琥珀
-    30: "#8A968F",  # 下线 灰
+    10: "jade",  # 线上 翡翠绿
+    20: "amber",  # 上线前 琥珀
+    30: "sage",  # 下线 灰
 }
 
 URL_TAG_COLOR = {
-    10: "#0284C7",  # 互联网 蓝
-    20: "#8A968F",  # 办公网 灰
+    10: "sky",  # 互联网 蓝
+    20: "sage",  # 办公网 灰
 }
 
 # Word 导入批次 / 记录状态展示（imports 与 workers 的状态字符串）
@@ -498,14 +498,14 @@ IMPORT_BATCH_STATUS_NAME = {
     "confirmed": "已入库", "failed": "解析失败",
 }
 IMPORT_BATCH_STATUS_COLOR = {
-    "pending": "#8A968F", "parsing": "#D97706", "parsed": "#0284C7",
-    "confirmed": "#059669", "failed": "#DC2626",
+    "pending": "sage", "parsing": "amber", "parsed": "sky",
+    "confirmed": "jade", "failed": "red",
 }
 IMPORT_RECORD_STATUS_NAME = {
     "parsed": "待确认", "error": "解析异常", "confirmed": "已入库", "discarded": "已丢弃",
 }
 IMPORT_RECORD_STATUS_COLOR = {
-    "parsed": "#0284C7", "error": "#D97706", "confirmed": "#059669", "discarded": "#8A968F",
+    "parsed": "sky", "error": "amber", "confirmed": "jade", "discarded": "sage",
 }
 
 # 导出任务状态展示（workers/export_report_task 的状态字符串）
@@ -513,7 +513,7 @@ EXPORT_JOB_STATUS_NAME = {
     "pending": "生成中", "running": "生成中", "done": "已完成", "failed": "失败",
 }
 EXPORT_JOB_STATUS_COLOR = {
-    "pending": "#D97706", "running": "#D97706", "done": "#059669", "failed": "#DC2626",
+    "pending": "amber", "running": "amber", "done": "jade", "failed": "red",
 }
 
 
@@ -557,12 +557,12 @@ NONPEN_ITEM_ACTION_NAMES = {
     "unignore": "取消忽略",
 }
 
-# 状态 -> 展示色值（明/暗双主题通用；「未开始」正常灰需关注，「忽略」更浅灰弱化）
+# 状态 -> Radix 语义色族（明/暗双主题由 Radix 变量切换）
 NONPEN_ITEM_COLORS = {
-    "not_started": "#8A968F",
-    "testing": "#0284C7",
-    "wait_retest": "#D97706",
-    "retesting": "#D97706",
-    "retest_done": "#059669",
-    "ignored": "#A6B1AB",
+    "not_started": "sage",
+    "testing": "sky",
+    "wait_retest": "amber",
+    "retesting": "amber",
+    "retest_done": "jade",
+    "ignored": "sage",
 }

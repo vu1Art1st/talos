@@ -25,7 +25,36 @@
       </template>
     </FilterToolbar>
 
-    <el-card shadow="never" body-style="padding: 0 0 12px">
+    <div v-loading="loading" class="mobile-record-list flex flex-col gap-2 md:hidden">
+      <div v-for="row in items" :key="row.id" class="mobile-record-card">
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="font-medium">{{ row.name }}</div>
+            <div v-if="row.sub_system" class="text-xs text-gray-400 mt-1">{{ row.sub_system }}</div>
+          </div>
+          <span class="dot-tag shrink-0" :style="dotStyle(assetStatusMeta(row.status ?? 0).color)">
+            <i></i>{{ assetStatusMeta(row.status ?? 0).label }}
+          </span>
+        </div>
+        <div class="mobile-record-meta">
+          <span>{{ row.department || '-' }}</span>
+          <span>{{ row.system_type || '-' }}</span>
+          <span>{{ (row.owners ?? []).map((o: { name: string }) => o.name).join('、') || '-' }}</span>
+        </div>
+        <div v-if="row.public_urls?.length" class="mobile-record-url">{{ row.public_urls[0].url }}</div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="openEdit(row)">编辑</el-button>
+          <el-popconfirm title="确认删除该资产？" @confirm="remove(row.id)">
+            <template #reference><el-button link type="danger">删除</el-button></template>
+          </el-popconfirm>
+        </div>
+      </div>
+      <el-empty v-if="!loading && !items.length" description="暂无资产记录" :image-size="64" />
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
+    </div>
+
+    <el-card shadow="never" body-style="padding: 0 0 12px" class="hidden md:block">
     <el-table v-loading="loading" :data="items" stripe @sort-change="onSortChange">
       <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
@@ -164,3 +193,37 @@ onMounted(async () => {
   await load(1)
 })
 </script>
+
+<style scoped>
+.mobile-record-list {
+  width: 100%;
+}
+.mobile-record-card {
+  padding: 14px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.mobile-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+.mobile-record-url {
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--tl-primary-text);
+  font-family: var(--tl-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mobile-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+</style>

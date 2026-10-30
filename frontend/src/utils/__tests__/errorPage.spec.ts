@@ -42,7 +42,7 @@ describe('errorPage 元数据', () => {
   it('非法状态码归一化为 404 兜底页', () => {
     for (const raw of ['abc', '', '99', '1000', '200', '301', undefined, null, {}, '五十']) {
       expect(getErrorMeta(raw).code).toBe(FALLBACK_CODE)
-      expect(getErrorMeta(raw).title).toBe('哎呀，页面走丢了')
+      expect(getErrorMeta(raw).title).toBe('页面不存在')
     }
     // 数字入参同样可解析
     expect(getErrorMeta(500).code).toBe('500')

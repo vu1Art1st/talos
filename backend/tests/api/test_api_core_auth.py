@@ -78,7 +78,7 @@ async def test_meta(client: AsyncClient, auth: dict):
     meta = resp.json()
     assert "vul_level" in meta and "vul_status" in meta
     # 字典单源：色值命名空间、导入/导出状态与 nonpen 命名空间随 /meta 下发
-    assert meta["colors"]["vul_level"]["10"] == "#DC2626"
+    assert meta["colors"]["vul_level"]["10"] == "red"
     assert meta["import_batch_status"]["parsed"] == "待确认"
     assert meta["export_job_status"]["done"] == "已完成"
     assert meta["data_scope"]["department"] == "本组织数据"
@@ -87,9 +87,9 @@ async def test_meta(client: AsyncClient, auth: dict):
     assert "report_status" not in meta["colors"]
     # 名称字典对应的色值必须同步下发：前端 applyDictMeta 无条件注入，
     # 任一 key 缺失会令导出/导入状态标签渲染崩溃（报告区域整体消失）
-    assert meta["colors"]["import_batch_status"]["parsed"] == "#0284C7"
-    assert meta["colors"]["import_record_status"]["confirmed"] == "#059669"
-    assert meta["colors"]["export_job_status"]["done"] == "#059669"
+    assert meta["colors"]["import_batch_status"]["parsed"] == "sky"
+    assert meta["colors"]["import_record_status"]["confirmed"] == "jade"
+    assert meta["colors"]["export_job_status"]["done"] == "jade"
     nonpen_items = {item["key"] for item in meta["nonpen"]["items"]}
     assert nonpen_items == {"baseline", "host", "web"}
     assert meta["nonpen"]["actions"]["not_started"] == ["start", "ignore"]

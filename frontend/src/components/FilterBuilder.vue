@@ -14,10 +14,6 @@
     </div>
 
     <div class="filter-builder__foot">
-      <span class="text-xs text-gray-400">
-        分组内条件按「且 / 或」组合，分组可用「非」整体取反；分组可嵌套（最多 {{ MAX_FILTER_DEPTH }} 层），
-        括号内的条件优先计算。
-      </span>
       <el-button v-if="totalRules" size="small" text type="danger" @click="clearTree">清空全部</el-button>
     </div>
   </div>
@@ -28,7 +24,6 @@ import { computed, ref, watch } from 'vue'
 
 import type { FilterFieldDef, FilterGroup } from '../types'
 import {
-  MAX_FILTER_DEPTH,
   cloneFilterNode,
   countFilterRules,
   createFilterGroup,
@@ -90,9 +85,9 @@ function clearTree() {
   gap: 4px 6px;
   margin-top: 10px;
   padding: 8px 10px;
-  border: 1px solid var(--tl-border, #e5e7eb);
-  border-radius: 6px;
-  background: var(--tl-fill, rgba(127, 127, 127, 0.06));
+  border: 0.5px solid var(--tl-border);
+  border-radius: 4px;
+  background: var(--tl-surface-2);
   font-size: 12px;
 }
 .filter-preview__label {
@@ -109,12 +104,11 @@ function clearTree() {
   font-family: inherit;
 }
 .filter-preview__hint {
-  color: var(--tl-warning, #d97706);
+  color: var(--tl-warning);
 }
 .filter-builder__foot {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
+  justify-content: flex-end;
   margin-top: 8px;
 }
 </style>

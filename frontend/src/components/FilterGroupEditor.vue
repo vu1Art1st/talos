@@ -107,11 +107,11 @@ function removeAt(index: number) {
 
 <style scoped>
 .filter-group {
-  border-radius: 8px;
+  border-radius: 4px;
 }
 .filter-group--nested {
-  border-left: 2px solid var(--tl-border, #e5e7eb);
-  background: var(--tl-fill, rgba(127, 127, 127, 0.04));
+  border-left: 0.5px solid var(--tl-border);
+  background: var(--tl-surface-2);
   padding: 8px 8px 2px 10px;
   margin: 4px 0 8px 8px;
 }
@@ -122,7 +122,7 @@ function removeAt(index: number) {
   margin-bottom: 8px;
 }
 .filter-group__title {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--tl-text-2);
   white-space: nowrap;

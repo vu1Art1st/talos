@@ -70,7 +70,7 @@ export function useExportJobs() {
     const fields = missingFieldText(data.missing_fields)
     const message =
       `<div>《${escapeHtml(data.report_title || fallbackTitle)}》以下信息为空，请补充后再导出报告：</div>` +
-      `<div style="margin-top: 8px;">· ${escapeHtml(fields)}</div>` +
+      `<div style="margin-top: 8px;">- ${escapeHtml(fields)}</div>` +
       `<div style="margin-top: 12px; color: var(--el-text-color-secondary);">如仍需导出，可继续。</div>`
     return await ElMessageBox.confirm(message, '报告信息不完整', {
       confirmButtonText: '仍要导出',
@@ -91,11 +91,11 @@ export function useExportJobs() {
     const sizeText = data.last_file_size != null ? `（${(data.last_file_size / 1024).toFixed(1)} KB）` : ''
     const message =
       `检测到该报告已有相同的导出记录：\n` +
-      `· 报告：《${data.report_title || fallbackTitle}》\n` +
-      `· 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
-      `· 导出版本：v${data.last_version ?? ''}\n` +
-      `· 已存在记录：${dayjs(data.last_time).format('YYYY-MM-DD HH:mm:ss')}（${statusName}）\n` +
-      `· 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
+      `- 报告：《${data.report_title || fallbackTitle}》\n` +
+      `- 导出格式：${(data.fmt || fmt).toUpperCase()}\n` +
+      `- 导出版本：v${data.last_version ?? ''}\n` +
+      `- 已存在记录：${dayjs(data.last_time).format('YYYY-MM-DD HH:mm:ss')}（${statusName}）\n` +
+      `- 导出文件：${data.last_file_name || '-'}${sizeText}\n\n` +
       `是否仍要继续导出？`
     return await ElMessageBox.confirm(message, '检测到重复导出', {
       confirmButtonText: '继续导出',
@@ -141,7 +141,7 @@ export function useExportJobs() {
       const warnings = data.filter((item) => item.missing_fields?.length)
       if (!warnings.length) return true
       const lines = warnings.map(
-        (item) => `· 《${escapeHtml(item.title || item.report_id)}》：${escapeHtml(missingFieldText(item.missing_fields))}`,
+        (item) => `- 《${escapeHtml(item.title || item.report_id)}》：${escapeHtml(missingFieldText(item.missing_fields))}`,
       )
       const message =
         `<div>以下报告存在待补充信息，请补充后再导出报告：</div>` +

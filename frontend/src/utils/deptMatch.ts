@@ -6,7 +6,7 @@ export const DEPT_SIMILARITY_THRESHOLD = 0.62
 
 // 通用组织后缀：剥离后核心相同（如 集成部 / 集成服务部）时视为高相似。
 const GENERIC_SUFFIXES = ['事业部', '分公司', '有限公司', '公司', '中心', '团队', '小组', '组', '部', '室']
-const PUNCTUATION_RE = /[\s\u3000()（）\[\]【】{}<>《》·,，.。;；:：!！?？'"`~\-—_/\\|]/g
+const PUNCTUATION_RE = /[\s\u3000()（）\[\]【】{}<>《》\u00B7,，.。;；:：!！?？'"`~\-—_/\\|]/g
 
 /** 归一化部门名：全半角统一、去空白与常见标点、英文小写。 */
 export function normalizeDeptName(name: string): string {

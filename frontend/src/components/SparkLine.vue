@@ -20,7 +20,7 @@ import { computed } from 'vue'
 const props = withDefaults(defineProps<{
   points: number[]
   color?: string
-}>(), { color: '#10b981' })
+}>(), { color: 'var(--jade-9)' })
 
 const W = 320
 const H = 38

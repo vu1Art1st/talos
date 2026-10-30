@@ -1,18 +1,17 @@
 <template>
-  <el-card shadow="never" v-loading="loading">
-    <template #header>
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold">消息中心</span>
-        <span class="text-xs text-gray-400">共 {{ total }} 条，未读 {{ unread }} 条</span>
-        <div class="flex-1" />
-        <el-select v-model="msgType" placeholder="全部类型" clearable class="!w-[150px]" @change="reload">
-          <el-option v-for="o in typeOptions" :key="o.value" :value="o.value" :label="o.label" />
-        </el-select>
-        <el-checkbox v-model="unreadOnly" @change="reload">仅未读</el-checkbox>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">共 {{ total }} 条，未读 {{ unread }} 条</span>
+      <el-select v-model="msgType" placeholder="全部类型" clearable class="!w-40" @change="reload">
+        <el-option v-for="o in typeOptions" :key="o.value" :value="o.value" :label="o.label" />
+      </el-select>
+      <el-checkbox v-model="unreadOnly" @change="reload">仅未读</el-checkbox>
+      <template #actions>
         <el-button class="btn-min" :disabled="!unread" @click="readAll">全部标为已读</el-button>
-      </div>
-    </template>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" v-loading="loading" body-style="padding: 0 0 12px">
     <el-table :data="items" stripe>
       <el-table-column label="" width="44">
         <template #default="{ row }">
@@ -40,7 +39,8 @@
 
     <TlPagination v-model:page="page" v-model:size="size" :total="total"
                   @page-change="load" @size-change="onSizeChange" />
-  </el-card>
+    </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -48,6 +48,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useAuthStore } from '../stores/auth'
 import { messageTypeName, messageTypeOptions, softStyle, STAT_CARD_COLORS } from '../utils/colors'
@@ -123,5 +124,5 @@ onMounted(async () => {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
   background: var(--tl-border-strong);
 }
-.msg-dot.unread { background: var(--tl-brand-mint); }
+.msg-dot.unread { background: var(--tl-brand-accent); }
 </style>

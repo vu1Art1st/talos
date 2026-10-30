@@ -258,7 +258,7 @@ function onOpChange() {
   padding: 0 4px;
 }
 .filter-value :deep(.el-range-editor .el-range__icon) {
-  font-size: 13px;
+  font-size: 14px;
   margin-right: 2px;
 }
 .filter-value :deep(.el-range-editor .el-range__close-icon) {

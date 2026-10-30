@@ -1,22 +1,18 @@
 <template>
-  <div class="flex flex-col gap-4">
-    <el-card shadow="never" v-loading="loading">
-      <template #header>
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-semibold">报告模板中心</span>
-          <span class="text-xs text-gray-400">
-            模板按名称 + 版本管理；同一名称同时只有一个启用版本，回滚＝重新启用旧版本
-          </span>
-          <div class="flex-1" />
-          <el-select v-model="filterType" placeholder="全部类型" clearable class="!w-[150px]" @change="load">
-            <el-option v-for="o in typeOptions" :key="o.value" :value="o.value" :label="o.label" />
-          </el-select>
-          <el-button type="primary" class="btn-min" @click="openUpload">
-            <el-icon class="mr-1"><Upload /></el-icon>上传模板
-          </el-button>
-        </div>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">共 {{ total }} 个模板</span>
+      <el-select v-model="filterType" placeholder="全部类型" clearable class="!w-40" @change="load">
+        <el-option v-for="o in typeOptions" :key="o.value" :value="o.value" :label="o.label" />
+      </el-select>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openUpload">
+          <el-icon class="mr-1"><Upload /></el-icon>上传模板
+        </el-button>
       </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" v-loading="loading" body-style="padding: 0 0 12px">
       <el-empty v-if="!items.length" description="暂无模板，导出将使用系统内置默认模板" :image-size="70" />
       <el-table v-else :data="items" stripe>
         <el-table-column prop="name" label="模板名称" min-width="200" />
@@ -37,7 +33,7 @@
           <template #default="{ row }">
             <el-popover v-if="row.anchors?.length" placement="top" width="280" trigger="hover">
               <template #reference>
-                <span class="text-xs" style="color: var(--tl-brand-mint)">{{ row.anchors.length }} 个锚点</span>
+                <span class="text-xs" style="color: var(--tl-brand-accent)">{{ row.anchors.length }} 个锚点</span>
               </template>
               <div v-for="a in row.anchors" :key="a.index" class="text-xs">{{ a.index }}. {{ a.desc }}</div>
             </el-popover>
@@ -104,6 +100,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, reportTemplateTypeName, reportTemplateTypeOptions, STAT_CARD_COLORS } from '../utils/colors'

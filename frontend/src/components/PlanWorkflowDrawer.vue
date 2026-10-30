@@ -3,7 +3,7 @@
              :before-close="onBeforeClose" @update:model-value="onVisibleChange" @closed="onClosed">
     <template #header>
       <div class="flex items-center gap-3">
-        <span class="text-base font-semibold">渗透测试工单 · {{ plan?.system_name || '' }}</span>
+        <span class="text-base font-semibold">渗透测试工单：{{ plan?.system_name || '' }}</span>
         <span v-if="plan" class="tl-tag" :style="planStatusSoftStyle(plan.status)">
           {{ statusMap[plan.status] ?? plan.status }}
         </span>
@@ -142,7 +142,7 @@
                 <div v-if="row.due_at" class="flex flex-col gap-0.5">
                   <span class="num text-xs">{{ fmtDateTime(row.due_at) }}</span>
                   <span class="tl-tag" :style="slaStateSoftStyle(row.sla_state)">
-                    {{ slaStateMeta(row.sla_state).label }} · {{ fmtSlaRemaining(row.sla_remaining_hours) }}
+                    {{ slaStateMeta(row.sla_state).label }}，{{ fmtSlaRemaining(row.sla_remaining_hours) }}
                   </span>
                 </div>
                 <span v-else class="text-xs text-gray-400">-</span>
@@ -721,5 +721,5 @@ function editReport(reportId: number) {
 // ---------- 认领 / 漏洞流转 / 报告 / 无漏洞闭环 / 导出 ----------
 // 认领与退出认领、漏洞状态流转、报告动作（生成含相似性检查、删除、发起复测、无漏洞闭环完结）、
 // 导出历史列表与轮询均已下沉至 composables/（审计 E-1）：
-//   usePlanDetail.ts · usePlanVulnFlow.ts · usePlanReports.ts · useReportExports.ts
+//   usePlanDetail.ts / usePlanVulnFlow.ts / usePlanReports.ts / useReportExports.ts
 </script>

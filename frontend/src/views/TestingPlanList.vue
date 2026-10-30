@@ -19,7 +19,8 @@
         :visible="filterVisible"
         trigger="manual"
         placement="bottom-start"
-        :width="960"
+        :width="800"
+        popper-class="plan-filter-popper"
       >
         <template #reference>
           <!-- manual 模式下 el-popover 不监听外部点击，失焦收回由 useClickOutside 负责；
@@ -32,7 +33,7 @@
           </span>
         </template>
         <div ref="filterPanelRef" class="filter-panel">
-          <div class="mb-2 text-sm font-medium">聚合筛选（支持条件分组与嵌套）</div>
+          <div class="mb-2 text-sm font-medium">筛选条件</div>
           <div class="filter-presets">
             <span class="filter-presets__label">快捷预设</span>
             <el-button
@@ -85,12 +86,34 @@
       </template>
     </FilterToolbar>
 
+    <section v-loading="statsLoading" class="plan-summary" aria-label="工单概览">
+      <StatCard label="工单总数" :value="stats.total_plans ?? 0"
+                :color="STAT_CARD_COLORS.blue" icon-bg="var(--sky-a3)">
+        <template #icon><el-icon><Tickets /></el-icon></template>
+      </StatCard>
+      <StatCard label="复测完成" :value="stats.retest_done_plans ?? 0"
+                :color="STAT_CARD_COLORS.green" icon-bg="var(--jade-a3)">
+        <template #icon><el-icon><CircleCheck /></el-icon></template>
+      </StatCard>
+      <StatCard label="初测工单" :value="stats.first_test_count ?? 0"
+                :color="STAT_CARD_COLORS.orange" icon-bg="var(--orange-a3)">
+        <template #icon><el-icon><Timer /></el-icon></template>
+      </StatCard>
+      <StatCard label="复测工单" :value="stats.retest_count ?? 0"
+                :color="STAT_CARD_COLORS.red" icon-bg="var(--red-a3)">
+        <template #icon><el-icon><Warning /></el-icon></template>
+      </StatCard>
+      <StatCard label="测试总次数" :value="stats.total_test_count ?? 0"
+                :color="STAT_CARD_COLORS.gray" icon-bg="var(--sage-a3)">
+        <template #icon><el-icon><List /></el-icon></template>
+      </StatCard>
+    </section>
+
     <el-collapse v-model="statsPanel" class="tl-collapse mb-3">
       <el-collapse-item name="stats">
         <template #title>
           <span class="tl-collapse-title">
             <span class="tl-collapse-title__main">统计概览</span>
-            <span class="tl-collapse-title__sub">（与筛选条件联动实时更新）</span>
           </span>
         </template>
         <div class="px-2">
@@ -111,14 +134,11 @@
         <template #title>
           <span class="tl-collapse-title">
             <span class="tl-collapse-title__main">结论输出</span>
-            <span class="tl-collapse-title__sub">
-              （按统计周期生成：初测完成 / 复测发起 / 复测完成 / 复测报告生成，可复制 / 下载附件）
-            </span>
           </span>
         </template>
         <div v-loading="conclusionLoading" class="px-2 py-1">
           <div class="conclusion-box">
-            <p class="conclusion-text">{{ conclusion.summary || '暂无符合条件的渗透测试工单，请先调整筛选条件' }}</p>
+            <p class="conclusion-text">{{ conclusion.summary || '暂无符合条件的渗透测试工单' }}</p>
           </div>
           <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 mt-3">
             <StatCard label="部门数" :color="STAT_CARD_COLORS.blue" :value="conclusion.departments ?? 0" />
@@ -139,13 +159,48 @@
       </el-collapse-item>
     </el-collapse>
 
-    <el-card shadow="never" body-style="padding: 0 0 12px">
+    <div v-loading="loading" class="mobile-record-list flex flex-col gap-2 md:hidden">
+      <div v-for="row in items" :key="row.id ?? row.ticket_id" class="mobile-record-card">
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1">
+            <div class="font-medium">{{ row.system_name }}</div>
+            <div class="text-xs text-gray-400 mt-1">{{ row.ticket_id }} {{ row.plan_name }}</div>
+          </div>
+          <span class="dot-tag shrink-0" :style="planStatusDotStyle(row.status)">
+            <i></i>{{ statusMap[row.status] ?? row.status }}
+          </span>
+        </div>
+        <div class="mobile-record-meta">
+          <span>{{ row.test_type || '-' }}</span>
+          <span>{{ row.department || '-' }}</span>
+          <span>{{ fmtDate(row.receive_time) }}</span>
+        </div>
+        <div class="mobile-record-meta">
+          <span>严重 {{ row.stat_critical ?? 0 }}</span>
+          <span>高危 {{ row.stat_high ?? 0 }}</span>
+          <span>中危 {{ row.stat_medium ?? 0 }}</span>
+          <span>低危 {{ row.stat_low ?? 0 }}</span>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="openPlanDrawer(row, 'info')">工单信息</el-button>
+          <el-button link type="primary" @click="openWorkflow(row)">流程</el-button>
+          <el-popconfirm title="确认删除该计划？" @confirm="removePlan(row.id)">
+            <template #reference><el-button link type="danger">删除</el-button></template>
+          </el-popconfirm>
+        </div>
+      </div>
+      <el-empty v-if="!loading && !items.length" description="暂无渗透测试工单" :image-size="64" />
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="onUserPageChange" @size-change="onUserSizeChange" />
+    </div>
+
+    <el-card shadow="never" body-style="padding: 0 0 12px" class="hidden md:block">
     <el-table ref="tableRef" v-loading="loading" :data="items" stripe row-key="id"
               :row-class-name="planRowClassName" @sort-change="onUserSortChange"
               :default-sort="{ prop: 'receive_time', order: 'descending' }">
       <template #empty>
         <el-empty :image-size="80"
-                  description="暂无符合条件的渗透测试工单，请调整筛选条件" />
+                  description="暂无符合条件的渗透测试工单" />
       </template>
       <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
@@ -306,7 +361,9 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type TableInstance } from 'element-plus'
-import { Download, Filter, Upload } from '@element-plus/icons-vue'
+import {
+  CircleCheck, Download, Filter, List, Tickets, Timer, Upload, Warning,
+} from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
@@ -527,7 +584,8 @@ async function onCreated() {
   await Promise.all([load(), loadStats()])
 }
 
-async function removePlan(id: number) {
+async function removePlan(id: number | null) {
+  if (id == null) return
   clearFocus()
   await client.delete(`/testing-plans/${id}`)
   ElMessage.success('删除成功')
@@ -715,6 +773,17 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.plan-summary {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+  min-height: 82px;
+}
+.plan-summary :deep(.tl-stat-card) {
+  min-height: 82px;
+  padding: 12px 14px;
+}
+
 /* 操作列紧凑排列：压缩按钮间距避免换行 */
 :deep(.op-col .cell) {
   display: flex;
@@ -730,10 +799,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 :deep(.el-table__body tr.plan-row-focus > td.el-table__cell) {
-  background: color-mix(in srgb, var(--tl-primary) 12%, var(--tl-surface)) !important;
-}
-:deep(.el-table__body tr.plan-row-focus > td:first-child) {
-  box-shadow: inset 3px 0 0 var(--tl-primary);
+  background: var(--jade-a3) !important;
 }
 /* 筛选按钮上的条件数徽标 */
 /* 快捷预设：直接写入下方条件树 */
@@ -758,10 +824,10 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 10px;
   padding: 10px 12px;
-  border: 1px dashed var(--tl-border);
+  border: 0.5px dashed var(--tl-border);
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: border-color 250ms ease-out, background-color 250ms ease-out;
 }
 .tp-create-head:hover { border-color: var(--el-color-primary); }
 .tp-create-head.on {
@@ -773,24 +839,24 @@ onBeforeUnmount(() => {
   height: 20px;
   flex: none;
   border-radius: 50%;
-  border: 1px solid var(--tl-border);
+  border: 0.5px solid var(--tl-border);
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s ease;
+  transition: border-color 250ms ease-out, background-color 250ms ease-out;
 }
 .tp-create-head.on .tp-create-check {
   border-color: var(--el-color-primary);
   background: var(--el-color-primary);
-  color: #fff;
+  color: var(--tl-on-primary);
 }
-.tp-create-title { font-size: 13px; font-weight: 500; }
+.tp-create-title { font-size: 14px; font-weight: 500; }
 .tp-create-desc { font-size: 12px; color: var(--tl-text-3); }
 
 /* 结论输出：结论文字卡片 */
 .conclusion-box {
   padding: 12px 14px;
-  border: 1px solid var(--tl-border);
+  border: 0.5px solid var(--tl-border);
   border-radius: 8px;
   background: var(--tl-surface);
 }
@@ -799,6 +865,45 @@ onBeforeUnmount(() => {
   font-size: 14px;
   line-height: 1.7;
   color: var(--tl-text-1);
+}
+
+.mobile-record-list {
+  width: 100%;
+}
+.mobile-record-card {
+  padding: 14px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.mobile-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+.mobile-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+@media (max-width: 1180px) {
+  .plan-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .plan-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+:global(.plan-filter-popper) {
+  max-width: calc(100vw - 24px);
 }
 
 /* 统计卡 / 勾选卡 / 折叠标题样式已上提 style.css 全局共用 */</style>

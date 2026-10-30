@@ -264,10 +264,13 @@ async def build_stats(
         {"status": s, "name": VUL_STATUS.get(s, str(s)), "count": c}
         for s, c in by_status_rows
     ]
-    by_level = [
-        {"level": lv, "name": VUL_LEVEL.get(lv, str(lv)), "count": c}
-        for lv, c in by_level_rows
-    ]
+    by_level = sorted(
+        [
+            {"level": lv, "name": VUL_LEVEL.get(lv, str(lv)), "count": c}
+            for lv, c in by_level_rows
+        ],
+        key=lambda item: item["level"],
+    )
     by_type = await _top_vul_types(session, vul_cond)
     # 近 12 个月提交趋势：取一年内数据在应用层按月聚合
     trend_rows = (

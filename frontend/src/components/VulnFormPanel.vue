@@ -55,9 +55,9 @@
                        :placeholder="editId ? '可选：调整关联的渗透测试工单' : '可选：关联到渗透测试工单'"
                        :loading="planLoading" @visible-change="(v: boolean) => v && loadPlans()">
               <el-option v-for="p in planOptions" :key="p.id" :value="p.id"
-                         :label="`${p.system_name}${p.plan_name ? ' · ' + p.plan_name : ''}`">
+                         :label="`${p.system_name}${p.plan_name ? '（' + p.plan_name + '）' : ''}`">
                 <div class="flex justify-between">
-                  <span class="truncate">{{ p.system_name }}{{ p.plan_name ? ' · ' + p.plan_name : '' }}</span>
+                  <span class="truncate">{{ p.system_name }}{{ p.plan_name ? '（' + p.plan_name + '）' : '' }}</span>
                   <span class="text-xs text-gray-400 shrink-0 ml-2">{{ p.status_name || '' }}</span>
                 </div>
               </el-option>
@@ -545,7 +545,7 @@ onMounted(async () => {
 }
 .vuln-form-embedded :deep(.el-card__header) {
   padding: 0 0 10px;
-  border-bottom: 1px solid var(--tl-border);
+  border-bottom:  0.5px solid var(--tl-border);
 }
 .vuln-form-embedded :deep(.el-card__body) {
   padding: 12px 0 0;

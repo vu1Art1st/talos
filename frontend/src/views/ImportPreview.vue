@@ -37,7 +37,7 @@
         </el-select>
       </div>
       <div v-if="batch?.doc_kind === 'report'" class="mt-2 text-xs text-gray-400">
-        报告格式确认入库时：已选择的渗透测试工单将作为关联计划，未选择则按系统名自动匹配/创建计划与资产（无系统名时复用计划首个关联资产）
+        未选择工单时，将按系统名匹配或创建计划与资产
       </div>
       <el-alert
         v-if="mismatchItems.length"
@@ -105,7 +105,7 @@
         </el-form>
       </template>
       <template v-else>
-        <div class="font-semibold" style="color: var(--tl-text-1)">{{ rec.title || '（未识别标题）' }}</div>
+        <div class="font-semibold" style="color: var(--tl-text-strong)">{{ rec.title || '（未识别标题）' }}</div>
         <div class="flex gap-2 mt-1 text-sm text-gray-500 items-center min-w-0">
           <span class="dot-tag flex-none" :style="levelDotStyle(rec.level)"><i></i>{{ meta?.vul_level?.[rec.level] }}</span>
           <span class="flex-none">{{ meta?.vul_type?.[rec.vul_type] }}</span>
@@ -133,7 +133,7 @@
     <ImportLevelMismatchDialog v-model="mismatchVisible" :items="mismatchItems" />
 
     <!-- P1-5 重复候选：标题 / URL / 等级 / 关联工单 / 相似度并列；可合并或保留为独立记录 -->
-    <el-dialog v-model="dupVisible" title="重复漏洞候选" width="960px">
+    <el-dialog v-model="dupVisible" title="重复漏洞候选" width="800px">
       <div class="text-xs text-gray-400 mb-2">
         相似度 ≥ 50%（或 URL 命中）的已入库漏洞会被列为候选；选择「合并」后该记录入库时将更新目标漏洞而非新建。
       </div>

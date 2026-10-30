@@ -1,16 +1,21 @@
 <template>
-  <div class="flex flex-col gap-4" v-loading="loading">
-    <div class="flex items-center gap-3">
+  <div class="flex flex-col gap-3" v-loading="loading">
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">待办分组 {{ groups.length }} 个</span>
+      <template #actions>
+        <el-button class="btn-min" @click="load">刷新</el-button>
+      </template>
+    </FilterToolbar>
+    <div class="todo-page-head flex items-center gap-3">
       <span class="text-sm font-semibold">个人待办</span>
-      <span class="text-xs text-gray-400">按权限聚合原有待办，并新增已认领的进行中 / 已完成工单</span>
       <div class="flex-1" />
       <el-button class="btn-min" @click="load">刷新</el-button>
     </div>
 
     <el-empty v-if="!loading && !groups.length" description="暂无待办事项" :image-size="80" />
 
-    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-      <el-card v-for="g in groups" :key="g.category" shadow="never" class="todo-card">
+    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 items-start">
+      <el-card v-for="g in groups" :key="g.category" shadow="never" class="todo-card" body-style="padding: 8px 12px">
         <template #header>
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold">{{ g.name || todoTypeName(g.category) }}</span>
@@ -21,7 +26,7 @@
             </el-button>
           </div>
         </template>
-        <el-empty v-if="!displayItems(g).length" description="无" :image-size="48" />
+        <el-empty v-if="!displayItems(g).length" class="todo-empty" description="无" :image-size="40" />
         <template v-else>
           <ul class="todo-list" :class="{ 'todo-list-scroll': expanded[g.category] }">
             <li v-for="(it, idx) in displayItems(g)" :key="String(it.id ?? idx)" @click="goItem(g, it)">
@@ -46,6 +51,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { softStyle, STAT_CARD_COLORS, todoTypeName } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
 import type { TodoGroup, TodoItemPage, TodoSummary } from '../types'
@@ -169,10 +175,13 @@ onMounted(load)
 </script>
 
 <style scoped>
+.todo-page-head { display: none; }
+.todo-card { align-self: start; }
+.todo-empty { padding: 4px 0; }
 .todo-list { list-style: none; margin: 0; padding: 0; }
 .todo-list li {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; border-radius: 6px; font-size: 13px;
+  padding: 5px 6px; border-radius: 4px; font-size: 14px;
   color: var(--tl-text-1); cursor: pointer;
 }
 .todo-list li:hover { background: var(--tl-surface-2); }

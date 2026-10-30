@@ -80,7 +80,7 @@ frontend/
   src/components/  # 可复用组件（StatCard / FilterBuilder / VulnFormPanel ...）
   src/views/       # 页面视图
   src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice / cvss（CVSS 3.1 评分）
-docs/              # DEPLOY / RELEASE / ROADMAP
+docs/              # DESIGN_SYSTEM / DEPLOY / RELEASE / ROADMAP
 ```
 
 ## 后端编码规范
@@ -132,6 +132,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - 时间格式化只用 `src/utils/format.ts`，禁止视图内 slice/replace。
 - 文件下载只用 `src/utils/download.ts` 的 `saveBlob()`。
 - 列表页（分页/排序/加载）、CRUD 弹窗、资产选择器、导出任务必须复用 `src/composables/` 对应组合式函数，禁止再复制样板。
+- 列表页的搜索、筛选与主操作统一使用 `FilterToolbar`；表格操作列固定在右侧并保持单行按钮，不得通过换行增加行高。
 - 领域类型统一声明在 `src/types/index.ts`（工单/漏洞/报告/导出记录等），页面与 composable 不得就地复制 `any` 或另起同名接口；新增字段先在该文件补声明（字段名与后端 API 一致，snake_case）。**新增代码不得引入 `any`**：确属边界（第三方写入的结构、用户输入 JSON）用 `unknown`，或在原处写明理由保留；类型收敛**不得改变运行时数据流**（`{...base, ...detail}` 必须保留 spread，只在边界做 `?? base.x` 归一）。`pnpm typecheck` 必须保持 **0 错误**。
 - **弹窗/抽屉打开函数命名统一为 `open<Target>`**（2026-09-17 审计 F-2）：`useCrudDialog` 的打开函数为 `openFormDialog`，业务侧为 `openCreateAsset` / `openWorkflow` 等；组件对外 API 可直接导出 `open`（与 `@closed` 对称）。禁止再引入 `openDialog`、`onOpen` 这类无目标或事件式命名（`onXxx` 仅用于「事件回调」语义，不作为「打开」动作名）。
 - 视图/组件冒烟测试统一复用 `src/__tests__/helpers/clientMock.ts`（`clientMockFactory()` + `getMock`），禁止在各 spec 内重复书写 axios client 的 `vi.mock` 样板。
@@ -144,18 +145,21 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 - **滚动位置记忆**：`el-main` 为滚动容器（非 `window`），按 `route.fullPath` 记录（LRU ≤120 条）；仅**返回式导航**恢复（异步数据未就绪时用 `rAF` 重试，1200ms 超时），前进式导航一律置顶。
 - 面包屑来源链由 `MainLayout.vue` 依 `resolveBackPath` 渲染（与当前标题相同或为过渡页时不渲染），色值/圆角/过渡沿用 `--tl-*` 令牌。守卫与兜底行为由 `src/composables/__tests__/useNavBack.spec.ts` 覆盖（四层兜底 + 非法 redirect）。
 
-## UI 设计规范精要
+## UI 设计规范
 
-风格：Linear 式暗色优先极简（视觉基准 `design-demos/demo-2`，本地设计稿不入库），信息优先、明暗双模式全覆盖。
+风格：Linear 式暗色优先极简（视觉基准 `design-demos/demo-2`，本地设计稿不入库），信息优先、明暗双模式全覆盖。完整视觉、文案、Radix UI Colors、排版、对齐、形状、动效与交互验收规范见 [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)；以下为强制摘要。
 
-- 品牌主色薄荷绿：浅色态交互/描边 #059669，主按钮用「薄荷底 + 深墨字」（或加深至 #047857），保证 ≥4.5:1；暗色态强调 #34D399、信息色淡蓝 #7DD3FC。风险五级色（浅色/暗色两套）：严重 #DC2626/#F87171 · 高危 #EA580C/#FB923C · 中危 #D97706/#FBBF24 · 低危 #0284C7/#7DD3FC · 安全 #059669/#34D399——字典色值以后端 `constants.py`（/meta 下发、前端 colors.ts 注册表消费）为准，本表仅供理解语义。
-- 密度双档：默认正文 14px，紧凑档 13.5px（表格/工具栏/侧栏）；模块标题 13.5-15px/600，页面标题 14px/600 工具栏式（面包屑 + 标题）；间距以 4px 为最小刻度；圆角 4/6/8/10px 四档，浮层（弹窗/命令面板）允许 12px，禁止更大。
-- 文本对比度分级：主要/次要文字 ≥ 4.5:1，弱化辅助文字（时间戳、占位符、分组标签）≥ 3:1，明暗两态都要达标；交互过渡 100-200ms，禁止闪烁/弹跳；图表入场动画豁免（≤ 1s、缓动收尾）。
-- 表格行内等级/状态用「色点 + 文字」dot-tag 变体（不单靠颜色传义，无障碍）；筛选器/详情/表单仍用 `tl-tag` + `softStyle()`；kbd 风格灰签仅用于弱分类（如漏洞类型）。
-- 弹窗：宽度三档 S=480 / M=640 / L=800；命令面板 560px 单列、不占弹窗层级（⌘K/Ctrl+K 全局唤起，支持页面跳转、动作与全局搜索，搜索结果需后端接口支持）；表单弹窗必须 `:close-on-click-modal="false"`；单场景仅一层弹窗，禁止多层嵌套。
-- 删除确认：行内操作用 `el-popconfirm`，批量/危险操作用 `ElMessageBox.confirm` 且确认按钮 `el-button--danger`。
-- 提交按钮必须绑定 `:loading` 防重复提交；列表/详情首屏必须有 `v-loading`，禁止空白闪现。
-- 统计卡统一用 `StatCard` 组件（支持迷你趋势线变体）；空状态统一 `el-empty` + 引导文案；数字与时间用 tabular-nums（关键指标可用等宽字体），格式化仍走 `format.ts`。
+- 颜色统一使用 Radix UI Colors 的 12 级色阶：延续原系统配色，中性色用 `sage`，品牌与安全色用 `jade`，低危与信息色用 `sky`，风险色用 `red` / `orange` / `amber`，并按需扩充 `ruby` / `violet` / `pink` / `cyan` / `teal` / `grass`。组件内禁止新增任意十六进制、RGB、HSL、`color-mix()` 或 Tailwind 默认色；`--tl-*` 语义令牌、Element Plus、Tailwind、图表和字典色均须从 Radix 色阶映射。浅色模式标题用 `12`、正文用 `11`、辅助信息用 `10`，不得让大面积正文全部使用最高对比；暗色辅助文字用 `11`。边框用 `6` 至 `8` 级，实心背景和图表数据色用 `9` / `10` 级；等级固定按严重、高危、中危、低危、安全排序。
+- 字号只保留三档：辅助 12px、正文与控件 14px、标题与关键指标 16px；禁止使用三档之外或小于 12px 的字号。层级优先用 400 / 500 / 600 字重、`--tl-text-strong` / `--tl-text-1` / `--tl-text-3` 与间距表达。
+- 所有边框和分隔线使用 `0.5px`；圆角只用 0 / 4px / 8px，嵌套表面遵循「外层圆角 = 内层圆角 + 间距」。页面分区、工具栏和表格默认方角；卡片、工具栏不使用阴影，禁止彩色左边线。列表表格默认启用 `stripe`，基础行、隔行、表头和悬停分别使用 `--tl-surface` / `--tl-table-stripe` / `--tl-table-head` / `--tl-table-hover`，悬停不得覆盖隔行纹理。
+- 登录页是唯一品牌视觉例外，允许受控的点阵、Radix Alpha 径向色晕、装饰角、浮层阴影和品牌渐变按钮；其余页面禁止装饰渐变和光晕。
+- 默认不使用动画；必要动效使用 `ease-out`，基础时长 250ms，禁止弹跳、回弹和循环装饰动画，并尊重 `prefers-reduced-motion`。
+- 文案禁止使用 U+00B7 作为分隔符；删除复述标题、解释常识和营销化描述。操作使用「动词 + 对象」，业务术语以字典为准；每区仅一个主操作，简单选择放在用户本来就会选择的字段或行内位置。
+- 表格行内等级和状态用「色点 + 文字」dot-tag 变体，不单靠颜色传义；筛选器、详情和表单仍用 `tl-tag` + `softStyle()`；kbd 风格灰签仅用于弱分类。
+- 弹窗宽度三档 S=480 / M=640 / L=800；命令面板 560px 单列、不占弹窗层级（⌘K/Ctrl+K 全局唤起，支持页面跳转、动作与全局搜索，搜索结果需后端接口支持）；表单弹窗必须 `:close-on-click-modal="false"`；单场景仅一层弹窗，禁止多层嵌套。
+- 删除确认：行内操作用 `el-popconfirm`，批量或危险操作用 `ElMessageBox.confirm` 且确认按钮 `el-button--danger`。
+- 提交按钮必须绑定 `:loading` 防重复提交；列表和详情首屏必须有 `v-loading`，禁止空白闪现。
+- 统计卡统一用 `StatCard` 组件（支持迷你趋势线变体）；空状态统一 `el-empty` + 必要的下一步文案；数字与时间用 tabular-nums（关键指标可用等宽字体），格式化仍走 `format.ts`。
 
 ## 测试规范（强制）
 
@@ -177,8 +181,8 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 **验收口径（改动涉及运行时必做）**：
 
-- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **399 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
-- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **40 files / 234 passed**）+ `pnpm run build`。
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **424 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
+- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **50 files / 288 passed**）+ `pnpm run build`。
 - **端到端（E2E）**（涉及前端交互或前后端联调时）：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`（或 `bash scripts/e2e.sh`）—— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + api 27016 + 前端 27017 + 独立 storage），跑 3 条黄金链路（登录 / 新建漏洞含影响URL 批量粘贴 / 报告编辑器渲染），每条都断言**控制台 0 error**。只有 3 条是**刻意**的：广度仍由分级浏览器冒烟负责，E2E 的维护成本与抖动风险不允许铺页面（取舍见 `playwright.config.ts`）。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
 - **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器账号以实际种子库为准（本机容器实测 `admin1/admin123`），用 `--username/--password` 覆盖。
@@ -189,7 +193,7 @@ docs/              # DEPLOY / RELEASE / ROADMAP
 
 ## 文档治理
 
-- `docs/` 只保留**长期有效**的文档：`DEPLOY.md`（部署/备份/回滚/排障）、`LOCAL_DEV_SETUP.md`（本地开发环境搭建与排障，含 DBngin 操作与测试口径）、`RELEASE.md`（发布史，唯一真相源）、`ROADMAP.md`（未来计划）、`SCRIPTS.md`（脚本清单）、`OPEN_API_GUIDE.md`、`USER_GUIDE.md`，以及**尚未闭环**的专项报告。
+- `docs/` 只保留**长期有效**的文档：`DESIGN_SYSTEM.md`（UI 视觉与交互规范）、`DEPLOY.md`（部署/备份/回滚/排障）、`LOCAL_DEV_SETUP.md`（本地开发环境搭建与排障，含 DBngin 操作与测试口径）、`RELEASE.md`（发布史，唯一真相源）、`ROADMAP.md`（未来计划）、`SCRIPTS.md`（脚本清单）、`OPEN_API_GUIDE.md`、`USER_GUIDE.md`，以及**尚未闭环**的专项报告。
 - **任务型文档**（审计报告、事故复盘、单次排查报告、批次执行记录）在满足以下三条后**删除**，删除前先归并内容：
   1. **任务闭环** —— 验收项全部打勾，或未打勾项已明确转为待办；
   2. **有价值结论已归并** —— 规范/阈值/坑 → 本文件；运维与排障操作 → `DEPLOY.md`；脚本用途 → `SCRIPTS.md`；跨会话事实 → `.codebuddy/memory/`；

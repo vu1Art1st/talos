@@ -1,14 +1,15 @@
 <template>
   <div class="space-y-3">
-    <el-card shadow="never">
-    <div class="flex items-center gap-2 mb-1">
-      <span class="text-gray-400 text-sm">组织（组）用于资产归属与用户分组管理</span>
-      <div class="flex-1" />
-      <el-button v-if="auth.hasPerm('user:manage')" type="primary" class="btn-min" @click="openFormDialog()">
-        <el-icon class="mr-1"><Plus /></el-icon>新建组织
-      </el-button>
-    </div>
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">共 {{ items.length }} 个组织</span>
+      <template #actions>
+        <el-button v-if="auth.hasPerm('user:manage')" type="primary" class="btn-min" @click="openFormDialog()">
+          <el-icon class="mr-1"><Plus /></el-icon>新建组织
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="items" stripe>
       <el-table-column type="index" label="序号" width="64" />
       <el-table-column prop="name" label="组织名称" min-width="160" sortable />
@@ -33,7 +34,7 @@
         <el-empty description="暂无组织，点击「新建组织」创建" :image-size="80" />
       </template>
     </el-table>
-  </el-card>
+    </el-card>
   </div>
 
   <!-- 组织编辑 -->
@@ -57,7 +58,6 @@
   <el-dialog
              :close-on-click-modal="false" v-model="memberDialogVisible" :title="`人员录入 - ${memberGroupName}`" width="640px">
     <div class="flex items-center gap-2 mb-3">
-      <span class="text-gray-400 text-sm">组织成员将作为资产「系统负责人」的可选项</span>
       <div class="flex-1" />
       <el-button type="primary" size="small" @click="openMemberForm()">
         <el-icon class="mr-1"><Plus /></el-icon>录入人员
@@ -114,6 +114,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { useAuthStore } from '../stores/auth'
 import type { Group, GroupMember } from '../types'
 

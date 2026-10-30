@@ -2,20 +2,17 @@
   <el-tabs v-model="tab" class="tl-tabs">
     <!-- ---------- 渠道配置 ---------- -->
     <el-tab-pane label="渠道配置" name="channels">
-      <el-card shadow="never" v-loading="loading">
-        <template #header>
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-semibold">通知渠道</span>
-            <span class="text-xs text-gray-400">
-              漏洞创建 / 工单认领 / 状态流转 / 复测完成 / SLA 到期与逾期事件推送
-            </span>
-            <div class="flex-1" />
+      <div class="space-y-3">
+        <FilterToolbar>
+          <span class="text-xs text-gray-400">共 {{ total }} 个渠道</span>
+          <template #actions>
             <el-button type="primary" class="btn-min" @click="openFormDialog()">
               <el-icon class="mr-1"><Plus /></el-icon>新建渠道
             </el-button>
-          </div>
-        </template>
+          </template>
+        </FilterToolbar>
 
+        <el-card shadow="never" v-loading="loading" body-style="padding: 0 0 12px">
         <el-table :data="items" stripe>
           <el-table-column prop="name" label="名称" min-width="140" />
           <el-table-column label="类型" width="110">
@@ -69,17 +66,14 @@
 
         <TlPagination v-model:page="page" v-model:size="size" :total="total"
                       @page-change="load" @size-change="onSizeChange" />
-      </el-card>
+        </el-card>
+      </div>
     </el-tab-pane>
 
     <!-- ---------- 投递记录 ---------- -->
     <el-tab-pane label="投递记录" name="deliveries">
-      <el-card shadow="never" v-loading="dlLoading">
-        <template #header>
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-sm font-semibold">投递记录</span>
-            <span class="text-xs text-gray-400">每条通知的最终状态可查询；进程重启不丢失待重试记录</span>
-            <div class="flex-1" />
+      <div class="space-y-3">
+        <FilterToolbar>
             <el-select v-model="dlFilter.channel_id" placeholder="全部渠道" clearable class="!w-[150px]"
                        @change="loadDeliveries(1)">
               <el-option v-for="c in items" :key="c.id" :value="c.id" :label="c.name" />
@@ -92,10 +86,12 @@
             <el-date-picker v-model="dlRange" type="daterange" value-format="YYYY-MM-DD" unformat
                             start-placeholder="开始日期" end-placeholder="结束日期" class="!w-[240px]"
                             @change="loadDeliveries(1)" />
-            <el-button class="btn-min" @click="loadDeliveries(dlPage)">刷新</el-button>
-          </div>
-        </template>
+            <template #actions>
+              <el-button class="btn-min" @click="loadDeliveries(dlPage)">刷新</el-button>
+            </template>
+        </FilterToolbar>
 
+        <el-card shadow="never" v-loading="dlLoading" body-style="padding: 0 0 12px">
         <el-table :data="deliveries" stripe>
           <el-table-column label="时间" width="170">
             <template #default="{ row }"><span class="num">{{ fmtDateTime(row.request_time) }}</span></template>
@@ -125,7 +121,7 @@
           </el-table-column>
           <el-table-column label="最后错误" min-width="220" show-overflow-tooltip>
             <template #default="{ row }">
-              <span v-if="row.dead_letter_reason" class="text-xs" style="color: var(--tl-danger, #DC2626)">
+              <span v-if="row.dead_letter_reason" class="text-xs" style="color: var(--tl-danger)">
                 {{ row.dead_letter_reason }}
               </span>
               <span v-else-if="row.last_error" class="text-xs">{{ row.last_error }}</span>
@@ -148,7 +144,8 @@
 
         <TlPagination v-model:page="dlPage" v-model:size="dlSize" :total="dlTotal"
                       @page-change="loadDeliveries" @size-change="onDeliverySizeChange" />
-      </el-card>
+        </el-card>
+      </div>
     </el-tab-pane>
   </el-tabs>
 
@@ -190,6 +187,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, notifyDeliveryMeta, notifyDeliveryStatusOptions } from '../utils/colors'

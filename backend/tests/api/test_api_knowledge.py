@@ -174,6 +174,38 @@ async def test_knowledge_default_sorting(client: AsyncClient, auth: dict):
     keys = [(r["severity_level"], r["vul_type"]) for r in rows]
     assert keys == sorted(keys), keys
 
+
+async def test_knowledge_paged_list_search_and_sort(client: AsyncClient, auth: dict):
+    """列表分页端点：只返回当前页，并支持关键词与白名单排序。"""
+    entries = [
+        {"vulnerability_name": "分页模板-A", "vul_type": 10, "severity_level": 30},
+        {"vulnerability_name": "分页模板-B", "vul_type": 15, "severity_level": 10},
+        {"vulnerability_name": "分页模板-C", "vul_type": 20, "severity_level": 20},
+    ]
+    for entry in entries:
+        resp = await client.post("/api/v1/knowledge", headers=auth, json=entry)
+        assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        "/api/v1/knowledge/page",
+        headers=auth,
+        params={"search": "分页模板", "page": 1, "size": 2, "sort": "severity_level", "order": "asc"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["total"] == 3
+    assert body["page"] == 1
+    assert body["size"] == 2
+    assert [row["vulnerability_name"] for row in body["items"]] == ["分页模板-B", "分页模板-C"]
+
+    resp = await client.get(
+        "/api/v1/knowledge/page",
+        headers=auth,
+        params={"search": "分页模板", "page": 2, "size": 2, "sort": "severity_level", "order": "asc"},
+    )
+    assert [row["vulnerability_name"] for row in resp.json()["items"]] == ["分页模板-A"]
+    assert (await client.get("/api/v1/knowledge/page")).status_code == 401
+
 async def test_knowledge_global_search(client: AsyncClient, auth: dict):
     """跨模板全局搜索：不预选漏洞类型即可按名称 / CVE 编号 / 参考链接命中，并标注所属类型。"""
     await _seed_search_entries(client, auth)

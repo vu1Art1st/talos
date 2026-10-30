@@ -54,7 +54,7 @@ onMounted(async () => {
   padding: 24px; background: var(--tl-bg);
 }
 .auth-card {
-  width: 480px; max-width: 100%; padding: 28px; border: 1px solid var(--tl-border);
-  border-radius: 12px; background: var(--tl-surface); box-shadow: 0 16px 40px rgba(15, 23, 20, .08);
+  width: 480px; max-width: 100%; padding: 28px; border:  0.5px solid var(--tl-border);
+  border-radius: 8px; background: var(--tl-surface);
 }
 </style>

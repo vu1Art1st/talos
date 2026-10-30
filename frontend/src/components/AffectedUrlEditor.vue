@@ -153,6 +153,6 @@ refreshValidation()
 <style scoped>
 /* 不合规条目标红：与 el-form-item 的错误态视觉一致 */
 .is-invalid :deep(.el-input__wrapper) {
-  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+  box-shadow: 0 0 0 0.5px var(--el-color-danger) inset;
 }
 </style>

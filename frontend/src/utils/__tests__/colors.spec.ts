@@ -23,6 +23,7 @@ import {
   retestStateSoftStyle,
   slaStateMeta,
   slaStateSoftStyle,
+  solidColor,
   softStyle,
   statusColorByName,
   statusLabel,
@@ -43,16 +44,16 @@ function metaFixture(): DictMetaPayload {
     import_record_status: { confirmed: '已入库' },
     export_job_status: { done: '已完成' },
     colors: {
-      vul_level: { 10: '#DC2626', 50: '#059669' },
-      vul_status: { 50: '#D97706', 60: '#059669' },
-      vul_type: { 55: '#059669' },
-      testing_plan_status: { 70: '#059669' },
-      asset_status: { 10: '#059669' },
-      url_tag: { 10: '#0284C7' },
-      nonpen_item: { not_started: '#8A968F' },
-      import_batch_status: { parsed: '#0284C7' },
-      import_record_status: { confirmed: '#059669' },
-      export_job_status: { done: '#059669' },
+      vul_level: { 10: 'red', 50: 'jade' },
+      vul_status: { 50: 'amber', 60: 'jade' },
+      vul_type: { 55: 'jade' },
+      testing_plan_status: { 70: 'jade' },
+      asset_status: { 10: 'jade' },
+      url_tag: { 10: 'sky' },
+      nonpen_item: { not_started: 'sage' },
+      import_batch_status: { parsed: 'sky' },
+      import_record_status: { confirmed: 'jade' },
+      export_job_status: { done: 'jade' },
     },
     nonpen: {
       items: [{ key: 'baseline', name: '基线扫描', desc: '配置基线 / 安全基线核查' }],
@@ -71,11 +72,11 @@ beforeEach(() => {
 describe('colors 字典注册表（meta 单源）', () => {
   it('applyDictMeta 注入后按码查询名称与色值', () => {
     expect(levelName(10)).toBe('严重')
-    expect(levelColor(10)).toBe('#DC2626')
+    expect(levelColor(10)).toBe('var(--red-11)')
   })
 
   it('未知码回退：色值灰色、名称原样输出', () => {
-    expect(levelColor(999)).toBe('#8A968F')
+    expect(levelColor(999)).toBe('var(--sage-11)')
     expect(levelName(999)).toBe('999')
   })
 
@@ -85,7 +86,7 @@ describe('colors 字典注册表（meta 单源）', () => {
       vul_level: {},
       colors: { ...metaFixture().colors, vul_level: {} },
     })
-    expect(levelColor(10)).toBe('#8A968F')
+    expect(levelColor(10)).toBe('var(--sage-11)')
     expect(levelName(10)).toBe('10')
   })
 
@@ -96,18 +97,18 @@ describe('colors 字典注册表（meta 单源）', () => {
     delete partial.export_job_status
     delete partial.colors?.export_job_status
     applyDictMeta(partial as DictMetaPayload)
-    expect(exportJobSoftStyle('done')).toEqual(softStyle('#8A968F'))
+    expect(exportJobSoftStyle('done')).toEqual(softStyle('sage'))
     expect(exportJobName('done')).toBe('done')
   })
 
-  it('softStyle 生成半透明底 + 同色文字', () => {
-    expect(softStyle('#DC2626')).toEqual({ background: '#DC26261f', color: '#DC2626' })
+  it('softStyle 生成 Radix Alpha 底 + 11 级文字', () => {
+    expect(softStyle('red')).toEqual({ background: 'var(--red-a3)', color: 'var(--red-11)' })
   })
 
   // P1 批次新增字典：/meta 未下发时按原值兜底，不抛错
   it('P1 新增字典（SLA / 投递 / scope）在 meta 缺省时回退原值', () => {
     expect(slaStateMeta('overdue').label).toBe('overdue')
-    expect(slaStateSoftStyle('overdue')).toEqual(softStyle('#8A968F'))
+    expect(slaStateSoftStyle('overdue')).toEqual(softStyle('sage'))
     expect(notifyDeliveryMeta('dead').label).toBe('dead')
     expect(patScopeName('plan_write')).toBe('plan_write')
     expect(patScopeOptions()).toEqual([])
@@ -122,18 +123,18 @@ describe('colors 字典注册表（meta 单源）', () => {
       pat_scope: { read: '只读' },
       colors: {
         ...metaFixture().colors,
-        sla_state: { overdue: '#DC2626' },
-        notify_delivery_status: { dead: '#DC2626' },
+        sla_state: { overdue: 'red' },
+        notify_delivery_status: { dead: 'red' },
       },
     })
-    expect(slaStateMeta('overdue')).toEqual({ label: '已逾期', color: '#DC2626' })
+    expect(slaStateMeta('overdue')).toEqual({ label: '已逾期', color: 'var(--red-11)' })
     expect(notifyDeliveryMeta('dead').label).toBe('死信')
     expect(patScopeOptions()).toEqual([{ value: 'read', label: '只读' }])
   })
 
   it('statusSoftStyleWithRetest 复测未通过覆盖状态色，普通状态走字典色', () => {
-    expect(statusSoftStyleWithRetest(50, true)).toEqual(softStyle('#E11D48'))
-    expect(statusSoftStyleWithRetest(50, false)).toEqual(softStyle('#D97706'))
+    expect(statusSoftStyleWithRetest(50, true)).toEqual(softStyle('ruby'))
+    expect(statusSoftStyleWithRetest(50, false)).toEqual(softStyle('amber'))
   })
 
   it('statusLabel：复测未通过优先，map 参数优先于注册表', () => {
@@ -142,46 +143,47 @@ describe('colors 字典注册表（meta 单源）', () => {
     expect(statusLabel(50, false)).toBe('修复中')
   })
 
-  it('levelBadgeStyle 数量>0 深底白字，数量=0 柔和标签', () => {
-    expect(levelBadgeStyle(10, 3)).toEqual({ background: '#DC2626', color: '#fff' })
-    expect(levelBadgeStyle(10, 0)).toEqual(softStyle('#DC2626'))
+  it('levelBadgeStyle 数量>0 实心底色，数量=0 柔和标签', () => {
+    expect(levelBadgeStyle(10, 3)).toEqual({ background: 'var(--red-9)', color: 'var(--tl-on-primary)' })
+    expect(levelBadgeStyle(10, 0)).toEqual(softStyle('red'))
   })
 
-  it('dotStyle 输出 --c 变量；暗色 tone 映射为降饱和变体', () => {
-    expect(dotStyle('#DC2626')).toEqual({ '--c': '#DC2626' })
+  it('dotStyle 输出 --c 变量；明暗模式由 Radix 变量切换', () => {
+    expect(dotStyle('red')).toEqual({ '--c': 'var(--red-9)' })
+    expect(solidColor('var(--sky-11)')).toBe('var(--sky-9)')
     isDarkTheme.value = true
-    expect(tone('#DC2626')).toBe('#f87171')
-    expect(tone('#059669')).toBe('#34d399')
-    expect(softStyle('#DC2626')).toEqual({ background: '#f871711f', color: '#f87171' })
-    // 未收录色值走通用提亮（#123456 各通道向白混合 35% → #657b91）
-    expect(tone('#123456')).toBe('#657b91')
+    expect(tone('red')).toBe('var(--red-11)')
+    expect(tone('jade')).toBe('var(--jade-11)')
+    expect(softStyle('red')).toEqual({ background: 'var(--red-a3)', color: 'var(--red-11)' })
+    expect(dotStyle('jade')).toEqual({ '--c': 'var(--jade-9)' })
+    expect(tone('unknown-family')).toBe('var(--sage-11)')
     isDarkTheme.value = false
-    expect(tone('#DC2626')).toBe('#DC2626')
+    expect(tone('red')).toBe('var(--red-11)')
   })
 
   it('按名反查：levelColorByName / statusColorByName', () => {
-    expect(levelColorByName('严重')).toBe('#DC2626')
-    expect(statusColorByName('已修复')).toBe('#059669')
-    expect(levelColorByName('不存在的等级')).toBe('#8A968F')
+    expect(levelColorByName('严重')).toBe('var(--red-11)')
+    expect(statusColorByName('已修复')).toBe('var(--jade-11)')
+    expect(levelColorByName('不存在的等级')).toBe('var(--sage-11)')
   })
 
   it('vulTypeColor：已知类型取字典色，null/undefined/未知码兜底灰色', () => {
-    expect(vulTypeColor(55)).toBe('#059669')
-    expect(vulTypeColor(null)).toBe('#8A968F')
-    expect(vulTypeColor(undefined)).toBe('#8A968F')
-    expect(vulTypeColor(1000)).toBe('#8A968F')
+    expect(vulTypeColor(55)).toBe('var(--jade-11)')
+    expect(vulTypeColor(null)).toBe('var(--sage-11)')
+    expect(vulTypeColor(undefined)).toBe('var(--sage-11)')
+    expect(vulTypeColor(1000)).toBe('var(--sage-11)')
   })
 
   it('导入批次 / 资产状态查询走 meta 名称 + 色值', () => {
-    expect(importStatusMeta('parsed')).toEqual({ label: '待确认', color: '#0284C7' })
-    expect(importStatusMeta('unknown')).toEqual({ label: 'unknown', color: '#8A968F' })
-    expect(assetStatusMeta(10)).toEqual({ label: '线上', color: '#059669' })
+    expect(importStatusMeta('parsed')).toEqual({ label: '待确认', color: 'var(--sky-11)' })
+    expect(importStatusMeta('unknown')).toEqual({ label: 'unknown', color: 'var(--sage-11)' })
+    expect(assetStatusMeta(10)).toEqual({ label: '线上', color: 'var(--jade-11)' })
   })
 
   it('nonpen 命名空间助手：测试项 / 状态标签 / 操作与文案', () => {
     expect(nonpenItems()).toEqual([{ key: 'baseline', name: '基线扫描', desc: '配置基线 / 安全基线核查' }])
-    expect(nonpenItemMeta('not_started')).toEqual({ label: '未开始', color: '#8A968F' })
-    expect(nonpenItemMeta('unknown')).toEqual({ label: 'unknown', color: '#8A968F' })
+    expect(nonpenItemMeta('not_started')).toEqual({ label: '未开始', color: 'var(--sage-11)' })
+    expect(nonpenItemMeta('unknown')).toEqual({ label: 'unknown', color: 'var(--sage-11)' })
     expect(nonpenActions('not_started')).toEqual(['start', 'ignore'])
     expect(nonpenActions('unknown')).toEqual([])
     expect(nonpenActionLabel('start')).toBe('开始初测')
@@ -194,7 +196,7 @@ describe('colors 字典注册表（meta 单源）', () => {
     expect(retestStateName('done')).toBe('复测完成')
     expect(retestStateName(undefined)).toBe('未发起复测')
     expect(retestStateName('unknown')).toBe('未发起复测')
-    expect(retestStateSoftStyle('done')).toEqual(softStyle('#059669'))
-    expect(retestStateSoftStyle(null)).toEqual(softStyle('#8A968F'))
+    expect(retestStateSoftStyle('done')).toEqual(softStyle('jade'))
+    expect(retestStateSoftStyle(null)).toEqual(softStyle('sage'))
   })
 })

@@ -165,7 +165,7 @@ pnpm test                               # 前端 vitest
 │   └── tests/             # pytest 测试
 ├── frontend/
 │   └── src/{api, stores, router, views, components, composables, utils, layouts}
-├── docs/                  # DEPLOY（部署运维）/ RELEASE（版本记录）/ ROADMAP（演进路线）
+├── docs/                  # DESIGN_SYSTEM（UI 规范）/ DEPLOY（部署运维）/ RELEASE（版本记录）/ ROADMAP（演进路线）
 ├── scripts/               # upgrade.sh / backup.sh / restore.sh / migrate.sh 等部署脚本
 ├── dev.ps1 / dev.sh       # 一键本地开发脚本
 └── docker-compose.yml
@@ -184,6 +184,7 @@ pnpm test                               # 前端 vitest
 ## 功能规划与版本
 
 - 路线与规划：[docs/ROADMAP.md](docs/ROADMAP.md)
+- UI 视觉与交互规范：[docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md)
 - 版本号遵循语义化版本（SemVer），历次更新记录见 [docs/RELEASE.md](docs/RELEASE.md)（唯一版本真相源），当前版本 **2.20.3**
 
 ## License

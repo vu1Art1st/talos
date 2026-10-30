@@ -1,17 +1,25 @@
 <template>
   <el-container class="h-full">
-    <el-aside :width="collapsed ? '64px' : '224px'" class="tl-aside flex flex-col">
+    <el-aside id="primary-navigation"
+              aria-label="主导航"
+              :width="collapsed ? '64px' : '216px'"
+              :class="{ 'mobile-open': mobileNavOpen }"
+              :role="isMobile ? 'dialog' : undefined"
+              :aria-modal="isMobile ? 'true' : undefined"
+              :aria-hidden="isMobile && !mobileNavOpen ? 'true' : undefined"
+              :inert="isMobile && !mobileNavOpen"
+              class="tl-aside flex flex-col">
       <!-- Logo：双层六边形品牌标志 + 双行文字组 -->
       <div class="flex items-center flex-none tl-logo" :class="collapsed ? 'justify-center' : 'gap-2 px-4'">
-        <BrandMark :size="30" class="flex-none" style="color: var(--tl-text-1)" />
+        <BrandMark :size="32" class="flex-none" style="color: var(--tl-brand-accent)" />
         <div v-if="!collapsed" class="leading-tight whitespace-nowrap">
-          <div class="font-extrabold text-[17px] tracking-tight tl-title">Talos</div>
-          <div class="text-2xs font-semibold" style="color: var(--tl-brand-mint)">漏洞管理平台</div>
+          <div class="font-semibold text-lg tl-title">Talos</div>
+          <div class="text-2xs font-semibold" style="color: var(--tl-brand-accent)">漏洞管理平台</div>
         </div>
       </div>
 
       <!-- 平铺分组导航 -->
-      <nav class="flex-1 overflow-y-auto tl-nav">
+      <nav ref="navEl" class="flex-1 overflow-y-auto tl-nav">
         <button class="nav-item" :class="{ active: activeMenu === '/dashboard' }"
                 :title="collapsed ? '安全态势' : undefined" @click="go('/dashboard')">
           <el-icon :size="15"><DataLine /></el-icon><span v-if="!collapsed">安全态势</span>
@@ -100,11 +108,17 @@
         </button>
       </div>
     </el-aside>
+    <div v-if="mobileNavOpen" class="mobile-nav-scrim" @click="closeMobileNav" />
 
     <!-- 显式 direction="vertical"：el-container 靠子组件名检测方向，原生 header 元素会被误判为横向 -->
     <el-container direction="vertical" class="min-w-0">
       <!-- 顶栏：50px 毛玻璃工具栏 -->
-      <el-header class="tl-topbar flex items-center gap-3 flex-none" height="50px">
+      <el-header class="tl-topbar flex items-center gap-3 flex-none" height="52px">
+        <button ref="mobileMenuRef" class="icon-btn mobile-menu-btn" type="button"
+                aria-label="打开导航" aria-controls="primary-navigation" :aria-expanded="mobileNavOpen"
+                @click="openMobileNav">
+          <el-icon :size="16"><Menu /></el-icon>
+        </button>
         <span class="crumb text-xs text-gray-400">Talos /</span>
         <!-- 来源链：编辑/详情类页面展示可点的来源页（redirect 参数优先，回落浏览器站内历史） -->
         <button v-if="crumbBack" class="crumb-back text-xs" type="button"
@@ -145,11 +159,9 @@
         <div class="max-w-[1920px] mx-auto w-full h-full">
           <!-- 视图多为多根节点（Fragment），transition 需单元素根，故用带 key 的 div 包裹 -->
           <router-view v-slot="{ Component, route: r }">
-            <transition name="fade-slide" mode="out-in">
-              <div :key="r.name as string" class="h-full">
-                <component :is="Component" />
-              </div>
-            </transition>
+            <div :key="r.name as string" class="h-full">
+              <component :is="Component" />
+            </div>
           </router-view>
         </div>
       </el-main>
@@ -182,14 +194,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { resolveBackPath } from '../composables/useNavBack'
 import {
   Aim, ArrowLeft, Bell, Collection, Connection, DataLine, Document, Expand, Files, Finished, Flag, Fold, Key,
-  Memo, Monitor, OfficeBuilding, Search, Sunny, Tickets, Timer, User, Warning, Moon,
+  Memo, Menu, Monitor, OfficeBuilding, Search, Sunny, Tickets, Timer, User, Warning, Moon,
 } from '@element-plus/icons-vue'
 import client from '../api/client'
 import BrandMark from '../components/BrandMark.vue'
@@ -211,7 +223,18 @@ const isMac = /mac/i.test(navigator.platform || navigator.userAgent)
 const collapsed = ref(
   (localStorage.getItem('sidebarCollapsed') ?? localStorage.getItem('sidebar_collapsed')) === '1',
 )
+const mobileNavOpen = ref(false)
+const isMobile = ref(false)
+const mobileMenuRef = ref<HTMLButtonElement>()
+const navEl = ref<HTMLElement>()
+let mobileQuery: MediaQueryList | null = null
 watch(collapsed, (v) => localStorage.setItem('sidebarCollapsed', v ? '1' : '0'))
+watch(() => route.fullPath, () => {
+  if (isMobile.value && mobileNavOpen.value) {
+    mobileNavOpen.value = false
+    collapsed.value = true
+  }
+})
 
 // 窄屏（<1024px）自动折叠侧边栏，恢复宽屏时还原用户偏好
 onMounted(() => {
@@ -226,8 +249,36 @@ const activeMenu = computed(() =>
   route.path === '/assets/groups' ? route.path : '/' + route.path.split('/')[1],
 )
 function go(path: string) {
+  closeMobileNav()
   if (route.path === path) return
   router.push(path)
+}
+
+function openMobileNav() {
+  collapsed.value = false
+  mobileNavOpen.value = true
+  void nextTick(() => navEl.value?.querySelector('button')?.focus())
+}
+
+function closeMobileNav() {
+  const wasOpen = mobileNavOpen.value
+  mobileNavOpen.value = false
+  if (window.matchMedia('(max-width: 760px)').matches) collapsed.value = true
+  if (wasOpen) void nextTick(() => mobileMenuRef.value?.focus())
+}
+
+function toggleSidebar() {
+  if (window.matchMedia('(max-width: 760px)').matches) closeMobileNav()
+  else collapsed.value = !collapsed.value
+}
+
+function syncMobileViewport() {
+  isMobile.value = !!mobileQuery?.matches
+  if (!isMobile.value) mobileNavOpen.value = false
+}
+
+function onWindowKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileNavOpen.value) closeMobileNav()
 }
 
 // ---------- 面包屑来源链（回退 UX） ----------
@@ -312,10 +363,16 @@ watch(
 
 onMounted(() => {
   mainEl.value?.$el?.addEventListener('scroll', onMainScroll, { passive: true })
+  window.addEventListener('keydown', onWindowKeydown)
+  mobileQuery = window.matchMedia('(max-width: 760px)')
+  syncMobileViewport()
+  mobileQuery.addEventListener('change', syncMobileViewport)
 })
 onBeforeUnmount(() => {
   cancelAnimationFrame(scrollRaf)
   mainEl.value?.$el?.removeEventListener('scroll', onMainScroll)
+  window.removeEventListener('keydown', onWindowKeydown)
+  mobileQuery?.removeEventListener('change', syncMobileViewport)
 })
 
 const pwdVisible = ref(false)
@@ -384,75 +441,86 @@ async function changePassword() {
 <style scoped>
 .tl-aside {
   background: var(--tl-surface);
-  border-right: 1px solid var(--tl-border);
-  transition: width .2s ease, background-color .25s ease;
+  border-right: 0.5px solid var(--tl-border);
+  transition: width 250ms ease-out, background-color 250ms ease-out;
   overflow: hidden;
 }
-.tl-logo { height: 52px; padding-top: 14px; padding-bottom: 10px; }
-.tl-title { color: var(--tl-text-1); }
+.icon-btn.mobile-menu-btn {
+  display: none;
+}
+.mobile-nav-scrim {
+  display: none;
+}
+.tl-logo { min-height: 68px; padding: 14px 18px; }
+.tl-title { color: var(--tl-text-strong); }
 
-/* 分组标签：10.5px / 加宽字距 */
+/* 分组标签 */
 .nav-group {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: .1em;
+  letter-spacing: 0;
   color: var(--tl-text-3);
   margin: 14px 8px 4px;
   white-space: nowrap;
 }
 
-/* 紧凑导航项：约 30px 高、6px 圆角、半透明主色激活底 */
+/* 紧凑导航项 */
 .nav-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 5.5px 8px;
+  min-height: 34px;
+  padding: 6px 9px;
   margin: 1px 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--tl-text-2);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
   white-space: nowrap;
-  transition: background .12s ease, color .12s ease;
+  transition: background-color 250ms ease-out, color 250ms ease-out;
 }
 .nav-item:hover { background: var(--tl-surface-2); color: var(--tl-text-1); }
 .nav-item.active {
-  background: color-mix(in srgb, var(--tl-primary) 10%, transparent);
-  color: var(--tl-primary);
+  background: var(--jade-a3);
+  color: var(--tl-primary-text);
   font-weight: 600;
 }
-.tl-nav { padding: 4px 10px 10px; }
+.tl-nav {
+  padding: 4px 10px 16px;
+  scrollbar-width: none;
+}
+.tl-nav::-webkit-scrollbar {
+  display: none;
+}
 
-.tl-side-foot { padding: 12px; border-top: 1px solid var(--tl-border); }
+.tl-side-foot { padding: 12px; border-top: 0.5px solid var(--tl-border); }
 .avatar-box {
   width: 26px;
   height: 26px;
-  border-radius: 6px;
+  border-radius: 4px;
   flex: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--tl-text-2);
   background: var(--tl-surface-3);
-  border: 1px solid var(--tl-border-strong);
+  border: 0.5px solid var(--tl-border-strong);
 }
 .topbar-avatar { width: 28px; height: 28px; }
 
-/* 顶栏：50px，主色调 82% 透明底 + 毛玻璃 */
+/* 顶栏 */
 .tl-topbar {
-  height: 50px;
-  padding: 0 28px;
-  background: color-mix(in srgb, var(--tl-bg) 82%, transparent);
-  -webkit-backdrop-filter: blur(12px);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--tl-border);
+  height: 52px;
+  padding: 0 24px;
+  background: var(--tl-surface);
+  border-bottom: 0.5px solid var(--tl-border);
 }
 .crumb { white-space: nowrap; }
 /* 来源链按钮：轻量可点，hover 反馈与侧栏导航一致 */
@@ -462,16 +530,24 @@ async function changePassword() {
   gap: 3px;
   padding: 3px 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--tl-text-2);
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition: background .12s ease, color .12s ease;
+  transition: background-color 250ms ease-out, color 250ms ease-out;
 }
 .crumb-back:hover { background: var(--tl-surface-2); color: var(--tl-primary); }
-.tl-topbar h1 { color: var(--tl-text-1); white-space: nowrap; }
+.tl-topbar h1 {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tl-text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .cmdbtn {
   display: flex;
@@ -479,36 +555,75 @@ async function changePassword() {
   gap: 8px;
   width: 200px;
   padding: 5.5px 10px;
-  border-radius: 7px;
-  border: 1px solid var(--tl-border);
+  border-radius: 4px;
+  border: 0.5px solid var(--tl-border);
   background: var(--tl-surface);
   color: var(--tl-text-3);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
-  transition: border-color .12s ease;
+  transition: border-color 250ms ease-out, color 250ms ease-out;
 }
 .cmdbtn:hover { border-color: var(--tl-border-strong); color: var(--tl-text-2); }
 .cmdbtn-text { flex: 1; text-align: left; white-space: nowrap; overflow: hidden; }
-@media (max-width: 1100px) { .cmdbtn { width: auto; } .cmdbtn-text { display: none; } }
+@media (max-width: 1100px) { .cmdbtn { width: auto; } .cmdbtn-text, .cmdbtn .kbd { display: none; } }
 
 .icon-btn {
   width: 30px;
   height: 30px;
-  border-radius: 7px;
-  border: 1px solid var(--tl-border);
+  border-radius: 4px;
+  border: 0.5px solid var(--tl-border);
   background: var(--tl-surface);
   color: var(--tl-text-2);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all .12s ease;
+  transition: border-color 250ms ease-out, color 250ms ease-out;
 }
 .icon-btn:hover { border-color: var(--tl-border-strong); color: var(--tl-text-1); }
 
 /* 主区：20/28/48，≥1536px 提升 24/32/48；内容 1920px 封顶居中（MASTER.md 6.2） */
-.tl-main { padding: 20px 28px 48px; }
-@media (min-width: 1536px) { .tl-main { padding: 24px 32px 48px; } }
+.tl-main { padding: 18px 24px 40px; }
+@media (min-width: 1536px) { .tl-main { padding: 24px 32px 40px; } }
 @media (max-width: 1023px) { .tl-main { padding: 16px 16px 40px; } }
+@media (max-width: 760px) {
+  .tl-aside {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 60;
+    width: 216px !important;
+    transform: translateX(-100%);
+    box-shadow: var(--tl-shadow-pop);
+    transition: transform 250ms ease-out;
+  }
+  .tl-aside.mobile-open {
+    transform: translateX(0);
+  }
+  .mobile-nav-scrim {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background: var(--sage-a6);
+  }
+  .icon-btn.mobile-menu-btn {
+    display: inline-flex;
+  }
+  .tl-side-foot {
+    display: none;
+  }
+  .tl-main {
+    padding: 12px 12px 32px;
+  }
+}
+@media (max-width: 700px) {
+  .tl-topbar { gap: 4px; padding: 0 12px; }
+  .tl-topbar .crumb,
+  .tl-topbar .crumb-back { display: none; }
+  .tl-topbar h1 { flex: 1; }
+  .tl-topbar .ml-auto { gap: 4px; }
+  .icon-btn { width: 28px; height: 28px; }
+  .cmdbtn { padding: 5px 7px; }
+}
 </style>

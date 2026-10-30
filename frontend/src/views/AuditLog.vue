@@ -1,13 +1,6 @@
 <template>
-  <el-card shadow="never" v-loading="loading">
-    <template #header>
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold">审计日志</span>
-        <span class="text-xs text-gray-400">登录事件与敏感操作记录</span>
-      </div>
-    </template>
-
-    <div class="flex flex-wrap items-center gap-2 mb-3">
+  <div class="space-y-3">
+    <FilterToolbar>
       <el-input v-model="filters.username" placeholder="用户名" clearable class="!w-40" />
       <el-select v-model="filters.action" placeholder="动作" clearable filterable class="!w-44">
         <el-option v-for="(name, code) in actionOptions" :key="code" :label="name" :value="code" />
@@ -18,8 +11,8 @@
       <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD"
                       start-placeholder="开始日期" end-placeholder="结束日期" class="!w-64 !grow-0" />
       <el-button @click="reload">查询</el-button>
-    </div>
-
+    </FilterToolbar>
+    <el-card shadow="never" v-loading="loading" body-style="padding: 0 0 12px">
     <el-tabs v-model="activeTab" @tab-change="reload">
       <el-tab-pane label="登录日志" name="login" />
       <el-tab-pane label="操作日志" name="operation" />
@@ -55,11 +48,13 @@
 
     <TlPagination v-model:page="page" v-model:size="size" :total="total"
                   @page-change="load" @size-change="onSizeChange" />
-  </el-card>
+    </el-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'

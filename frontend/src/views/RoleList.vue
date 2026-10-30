@@ -1,13 +1,15 @@
 <template>
-  <el-card shadow="never">
-    <div class="flex items-center gap-2 mb-4">
-      <span class="text-gray-400 text-sm">基于角色的权限配置，权限按功能模块分组，控制菜单显示与操作范围</span>
-      <div class="flex-1" />
-      <el-button type="primary" class="btn-min" @click="openRole()">
-        <el-icon class="mr-1"><Plus /></el-icon>新建角色
-      </el-button>
-    </div>
+  <div class="space-y-3">
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">共 {{ roles.length }} 个角色</span>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openRole()">
+          <el-icon class="mr-1"><Plus /></el-icon>新建角色
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="roles" stripe>
       <el-table-column type="index" label="序号" width="64" />
       <el-table-column prop="name" label="角色名称" width="160" show-overflow-tooltip />
@@ -54,7 +56,8 @@
         <el-empty description="暂无角色，点击「新建角色」创建" :image-size="80" />
       </template>
     </el-table>
-  </el-card>
+    </el-card>
+  </div>
 
   <el-dialog
              :close-on-click-modal="false" v-model="roleDialog" :title="roleForm.id ? '编辑角色' : '新建角色'" width="640px">
@@ -70,7 +73,6 @@
       <el-form-item label="权限配置">
         <div class="w-full">
           <div class="flex items-center justify-between mb-2">
-            <span class="text-xs text-gray-400">勾选该角色可访问的菜单与操作权限</span>
             <div>
               <el-button size="small" text type="primary" @click="checkAll">全选</el-button>
               <el-button size="small" text @click="clearAll">清空</el-button>
@@ -88,7 +90,7 @@
                 <el-checkbox v-for="it in g.items" :key="it.key" :value="it.key">
                   {{ it.label }}
                   <el-tooltip :content="it.desc" placement="top">
-                    <el-icon class="text-gray-400 align-middle ml-0.5" style="font-size: 13px"><QuestionFilled /></el-icon>
+                    <el-icon class="text-gray-400 align-middle ml-0.5" style="font-size: 14px"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </el-checkbox>
               </el-checkbox-group>
@@ -112,6 +114,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { useAuthStore } from '../stores/auth'
 import { softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import type { Role, RoleForm } from '../types'

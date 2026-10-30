@@ -25,6 +25,21 @@
 
 ---
 
+## [2.31.0] - 2026-10-31
+
+### 新增
+
+- **设计系统建设**：新增 `docs/DESIGN_SYSTEM.md`（设计令牌基线：语义色彩 / 字号三档 `12/14/16px` / `4px` 网格间距 / 圆角 `0·4·8px` / 动效 `ease-out 250ms`）与 `docs/UI_OPTIMIZATION_MR_SPEC.md`（基于已评审三 demo 的统一实施规格 + 三批可独立合入 MR 方案）。
+- **预设头像资源**：`frontend/public/avatars/` 落地头像资源（承接 2.27.0 预设头像系统），`UserAvatar` 组件适配语义化加载。
+
+### 变更
+
+- **全站 UI 优化**：按设计基线重构 `views` / `components` / `style.css`（登录、安全态势 Dashboard、渗透工单、各列表与表单、工单流程抽屉、报告编辑等 60+ 文件），统一语义令牌、字号三档、边框 `0.5px`、圆角与间距规范，恢复柔和观感且保持业务页高信息密度。
+- **色彩体系语义化**：`frontend/utils/chartTheme.ts`、`colors.ts` 改为基于 Radix 语义色族；后端 `constants.py` 颜色字典由裸 hex 切到 Radix 语义色族（`amber`/`jade`/`red`/`sage` 等），`/api/meta` 同批下发，前端消费侧同步。
+- **组件级增强**：筛选工具条 `FilterToolbar`（新增 `FilterToolbar.spec.ts`）、命令面板、CVSS 计算器、通知铃、统计卡 `StatCard` / `SparkLine` 等按基线重做；新增 `utils/__tests__/designTokens.spec.ts` 锁定令牌契约；`Dashboard.spec.ts` / `ErrorPage.spec.ts` 用例同步更新。
+
+---
+
 ## [2.30.3] - 2026-10-23
 
 ### 变更

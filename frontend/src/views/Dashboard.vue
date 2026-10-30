@@ -2,11 +2,10 @@
   <div class="space-y-3">
     <!-- 筛选工具栏 -->
     <FilterToolbar>
-      <span class="text-xs text-gray-400">按时间筛选：</span>
       <!-- daterange 根节点即 .el-input__wrapper（自带 flex-grow:1），在 .tl-filterbar 内会被拉伸撑满，
            必须显式 grow-0 才能让 !w-60 的固定宽度生效 -->
       <el-date-picker v-model="dateRange" type="daterange" value-format="YYYY-MM-DD" class="!w-60 !grow-0"
-                      start-placeholder="提交起" end-placeholder="提交止" @change="reload" />
+                      start-placeholder="开始日期" end-placeholder="结束日期" @change="reload" />
       <el-select v-model="deptFilter" filterable clearable placeholder="全部部门" class="!w-40" @change="reload">
         <el-option v-for="d in departments" :key="d" :label="d" :value="d" />
       </el-select>
@@ -20,7 +19,7 @@
       <template #actions>
         <el-select v-model="viewId" placeholder="选择视图" clearable class="!w-44" @change="applyView">
           <el-option v-for="v in views" :key="v.id" :value="v.id"
-                     :label="`${dashboardViewScopeName(v.scope)} · ${v.name}`" />
+                     :label="`${dashboardViewScopeName(v.scope)}（${v.name}）`" />
         </el-select>
         <el-button class="btn-min" @click="openSaveView">保存视图</el-button>
       </template>
@@ -28,31 +27,44 @@
 
     <div v-loading="loading" class="space-y-3">
       <!-- 统计卡（StatCard v2 + SVG 迷你趋势线） -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard v-for="card in cards" :key="card.label" :label="card.label" :value="card.value">
+      <div class="dashboard-stat-grid grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <StatCard v-for="card in cards" :key="card.label" :label="card.label" :value="card.value"
+                  :color="card.sparkColor" :icon-bg="card.iconBg">
+          <template #icon><el-icon><component :is="card.icon" /></el-icon></template>
           <template #spark><SparkLine :points="card.spark" :color="card.sparkColor" /></template>
         </StatCard>
       </div>
 
-      <!-- P1-1 / P1-7 运营指标：SLA 逾期、平均修复时长、复测积压、报告未交付 -->
-      <div class="grid grid-cols-2 lg:grid-cols-6 gap-3">
-        <StatCard label="SLA 逾期" :value="sla?.overdue ?? 0" :color="STAT_CARD_COLORS.red">
-          <template #meta>逾期率 {{ sla?.overdue_rate ?? 0 }}%</template>
-        </StatCard>
-        <StatCard label="SLA 临期" :value="sla?.due_soon ?? 0" :color="STAT_CARD_COLORS.orange" />
-        <StatCard label="平均修复时长"
-                  :value="sla?.avg_fix_days === null || sla?.avg_fix_days === undefined ? '-' : `${sla.avg_fix_days} 天`"
-                  :color="STAT_CARD_COLORS.green" />
-        <StatCard label="平均逾期时长"
-                  :value="sla?.avg_overdue_days === null || sla?.avg_overdue_days === undefined ? '-' : `${sla.avg_overdue_days} 天`"
-                  :color="STAT_CARD_COLORS.red" />
-        <StatCard label="复测积压" :value="ops?.retest_backlog ?? 0" :color="STAT_CARD_COLORS.orange">
-          <template #meta>漏洞 {{ ops?.retest_backlog_vulns ?? 0 }} · 工单 {{ ops?.retest_backlog_plans ?? 0 }}</template>
-        </StatCard>
-        <StatCard label="报告未交付" :value="ops?.undelivered_reports ?? 0" :color="STAT_CARD_COLORS.blue" />
+      <div class="ops-strip">
+        <div class="ops-item">
+          <span class="ops-label">SLA 逾期</span>
+          <b class="num risk">{{ sla?.overdue ?? 0 }}</b>
+          <span>逾期率 {{ sla?.overdue_rate ?? 0 }}%</span>
+        </div>
+        <div class="ops-item">
+          <span class="ops-label">SLA 临期</span>
+          <b class="num warn">{{ sla?.due_soon ?? 0 }}</b>
+        </div>
+        <div class="ops-item">
+          <span class="ops-label">平均修复时长</span>
+          <b class="num">{{ sla?.avg_fix_days == null ? '-' : `${sla.avg_fix_days} 天` }}</b>
+        </div>
+        <div class="ops-item">
+          <span class="ops-label">平均逾期时长</span>
+          <b class="num">{{ sla?.avg_overdue_days == null ? '-' : `${sla.avg_overdue_days} 天` }}</b>
+        </div>
+        <div class="ops-item">
+          <span class="ops-label">复测积压</span>
+          <b class="num">{{ ops?.retest_backlog ?? 0 }}</b>
+          <span>漏洞 {{ ops?.retest_backlog_vulns ?? 0 }}，工单 {{ ops?.retest_backlog_plans ?? 0 }}</span>
+        </div>
+        <div class="ops-item">
+          <span class="ops-label">报告未交付</span>
+          <b class="num">{{ ops?.undelivered_reports ?? 0 }}</b>
+        </div>
       </div>
-      <div v-if="lastData?.cached_at" class="text-2xs text-gray-400 text-right">
-        数据截至 {{ fmtDateTime(lastData.cached_at) }}（短时缓存，写入后自动失效）
+      <div v-if="lastData?.cached_at" class="dashboard-data-note">
+        数据截至 {{ fmtDateTime(lastData.cached_at) }}
       </div>
 
       <!-- 趋势（2fr） + 等级分布（1fr） -->
@@ -75,7 +87,7 @@
             <div v-for="t in byType" :key="t.name" class="hb-row">
               <span class="hb-label" :title="t.name">{{ t.name }}</span>
               <span class="hb-track">
-                <span class="hb-bar" :style="{ width: typePct(t.count), background: vulTypeColor(t.type) }"></span>
+                <span class="hb-bar" :style="{ width: typePct(t.count), background: solidColor(vulTypeColor(t.type)) }"></span>
               </span>
               <span class="hb-val num">{{ t.count }}</span>
             </div>
@@ -87,12 +99,12 @@
           <template v-if="byStatus.length">
             <div class="stack-bar">
               <i v-for="s in byStatus" :key="s.name"
-                 :style="{ width: statusPct(s.count), background: statusColorByName(s.name) }"
+                 :style="{ width: statusPct(s.count), background: solidColor(statusColorByName(s.name)) }"
                  :title="`${s.name} ${s.count}`"></i>
             </div>
             <div class="grid grid-cols-2 gap-x-4 gap-y-2">
               <div v-for="s in byStatus" :key="s.name" class="flex items-center gap-2 text-xs text-gray-500">
-                <i class="w-2 h-2 rounded-[3px] flex-none" :style="{ background: statusColorByName(s.name) }"></i>
+                <i class="w-2 h-2 rounded flex-none" :style="{ background: solidColor(statusColorByName(s.name)) }"></i>
                 <span class="truncate">{{ s.name }}</span>
                 <b class="ml-auto num">{{ s.count }}</b>
               </div>
@@ -104,7 +116,7 @@
 
       <!-- 部门安全概况 -->
       <el-card shadow="never">
-        <template #header>各部门安全概况（按渗透测试工单所属部门统计）</template>
+        <template #header>各部门安全概况</template>
         <template v-if="deptData.length">
           <div ref="deptRef" class="h-72" />
           <el-table :data="deptData" stripe size="small" class="mt-3">
@@ -181,21 +193,19 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
+import { CircleCheck, Monitor, TrendCharts, Warning } from '@element-plus/icons-vue'
 import client from '../api/client'
 import FilterToolbar from '../components/FilterToolbar.vue'
 import SparkLine from '../components/SparkLine.vue'
 import StatCard from '../components/StatCard.vue'
-import { areaGradient, chartThemeName, PALETTE } from '../utils/chartTheme'
+import { areaGradient, chartColorFor, chartNeutral, chartPalette, chartThemeName } from '../utils/chartTheme'
 import { useAuthStore } from '../stores/auth'
 import { useThemeStore } from '../stores/theme'
 import type { DashboardDepartment, DashboardStats, DashboardView, IdName, QueryParams } from '../types'
 import {
-  dashboardViewScopeName, levelColorByName, STAT_CARD_COLORS, statusColorByName, vulTypeColor,
+  dashboardViewScopeName, levelColorByName, solidColor, STAT_CARD_COLORS, statusColorByName, vulTypeColor,
 } from '../utils/colors'
 import { fmtDateTime } from '../utils/format'
-
-// 图表系列色（唯一色源 chartTheme.PALETTE，语义化命名便于系列引用）
-const [SERIES_MINT, SERIES_SKY, SERIES_AMBER, , , , SERIES_PINK] = PALETTE
 
 const auth = useAuthStore()
 const theme = useThemeStore()
@@ -208,7 +218,17 @@ const loading = ref(false)
 const lastData = ref<DashboardStats | null>(null)
 
 const byType = computed(() => lastData.value?.by_type ?? [])
-const byStatus = computed(() => lastData.value?.by_status ?? [])
+const STATUS_ORDER = ['未修复', '修复中', '复测中', '已修复', '已忽略', '暂不处理']
+const statusRank = (name: string) => {
+  const index = STATUS_ORDER.indexOf(name)
+  return index === -1 ? STATUS_ORDER.length : index
+}
+const byStatus = computed(() =>
+  [...(lastData.value?.by_status ?? [])].sort((a, b) => statusRank(a.name) - statusRank(b.name)),
+)
+const byLevel = computed(() =>
+  [...(lastData.value?.by_level ?? [])].sort((a, b) => a.level - b.level),
+)
 const typeMax = computed(() => Math.max(1, ...byType.value.map((t) => t.count)))
 const statusTotal = computed(() => byStatus.value.reduce((s: number, x) => s + x.count, 0))
 const typePct = (n: number) => `${((n / typeMax.value) * 100).toFixed(1)}%`
@@ -226,10 +246,22 @@ const hasFilter = computed(() =>
   !!dateRange.value || !!deptFilter.value || sourceFilter.value !== null || levelFilter.value !== null)
 
 const cards = ref([
-  { label: '漏洞总数', value: 0 as number | string, sparkColor: '#10b981', spark: [] as number[] },
-  { label: '未闭环漏洞', value: 0 as number | string, sparkColor: '#fb923c', spark: [] as number[] },
-  { label: '修复率', value: '0%' as number | string, sparkColor: '#34d399', spark: [] as number[] },
-  { label: '在管资产', value: 0 as number | string, sparkColor: '#38bdf8', spark: [] as number[] },
+  {
+    label: '漏洞总数', value: 0 as number | string, sparkColor: 'var(--jade-9)',
+    iconBg: 'var(--jade-a3)', icon: TrendCharts, spark: [] as number[],
+  },
+  {
+    label: '未闭环漏洞', value: 0 as number | string, sparkColor: 'var(--orange-9)',
+    iconBg: 'var(--orange-a3)', icon: Warning, spark: [] as number[],
+  },
+  {
+    label: '修复率', value: '0%' as number | string, sparkColor: 'var(--jade-10)',
+    iconBg: 'var(--jade-a3)', icon: CircleCheck, spark: [] as number[],
+  },
+  {
+    label: '在管资产', value: 0 as number | string, sparkColor: 'var(--sky-9)',
+    iconBg: 'var(--sky-a3)', icon: Monitor, spark: [] as number[],
+  },
 ])
 
 // ---------- P1-1 / P1-7：SLA 与运营指标（与列表/导出/开放 API 同一数据源） ----------
@@ -304,7 +336,7 @@ async function saveView() {
 function mk(el: HTMLElement | undefined, option: echarts.EChartsOption) {
   if (!el) return
   const chart = echarts.init(el, chartThemeName(theme.dark))
-  chart.setOption(option)
+  chart.setOption({ animationDuration: 0, animationDurationUpdate: 0, ...option })
   charts.value.push(chart)
 }
 
@@ -364,6 +396,8 @@ async function reload() {
 function renderCharts() {
   if (!lastData.value) return
   const data = lastData.value
+  const [seriesJade, seriesSky, seriesAmber, , , seriesViolet] = chartPalette(theme.dark)
+  const neutral = chartNeutral(theme.dark)
   disposeCharts()
 
   // 渐变面积趋势图
@@ -377,32 +411,33 @@ function renderCharts() {
     yAxis: { type: 'value', minInterval: 1 },
     series: [
       { name: '提交', type: 'line', smooth: true, symbol: 'none', data: submitted,
-        lineStyle: { width: 2.5, color: SERIES_MINT }, itemStyle: { color: SERIES_MINT }, areaStyle: { color: areaGradient(SERIES_MINT) } },
+        lineStyle: { width: 2, color: seriesJade }, itemStyle: { color: seriesJade }, areaStyle: { color: areaGradient(seriesJade) } },
       { name: '修复完成', type: 'line', smooth: true, symbol: 'none', data: fixed,
-        lineStyle: { width: 2.5, color: SERIES_SKY }, itemStyle: { color: SERIES_SKY }, areaStyle: { color: areaGradient(SERIES_SKY) } },
+        lineStyle: { width: 2, color: seriesSky }, itemStyle: { color: seriesSky }, areaStyle: { color: areaGradient(seriesSky) } },
     ],
   })
 
   // 等级分布：圆角环形 + 中心 KPI 总数 + 右侧图例
-  const levelTotal = data.by_level.reduce((s: number, x) => s + x.count, 0)
+  const levelRows = byLevel.value
+  const levelTotal = levelRows.reduce((s: number, x) => s + x.count, 0)
   mk(levelRef.value, {
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', right: 4, top: 'middle', formatter: (name: string) => {
-      const x = data.by_level.find((l) => l.name === name)
+      const x = levelRows.find((l) => l.name === name)
       return `${name}  ${x ? x.count : ''}`
     } },
     title: {
       text: String(levelTotal), subtext: '漏洞总数', left: '34%', top: '40%',
       textAlign: 'center',
-      textStyle: { fontSize: 22, fontWeight: 700, color: theme.dark ? '#e8efec' : '#1c2622' },
-      subtextStyle: { fontSize: 11.5, color: theme.dark ? '#5f716b' : '#8a968f' },
+      textStyle: { fontSize: 16, fontWeight: 600, color: neutral.text },
+      subtextStyle: { fontSize: 12, color: neutral.muted },
     },
     series: [{
       type: 'pie', radius: ['52%', '74%'], center: ['36%', '50%'],
-      itemStyle: { borderRadius: 8, borderColor: theme.dark ? '#101513' : '#ffffff', borderWidth: 3 },
+      itemStyle: { borderRadius: 4, borderColor: neutral.surface, borderWidth: 0.5 },
       label: { show: false },
-      data: data.by_level.map((x) => ({
-        name: x.name, value: x.count, itemStyle: { color: levelColorByName(x.name) },
+      data: levelRows.map((x) => ({
+        name: x.name, value: x.count, itemStyle: { color: chartColorFor(levelColorByName(x.name), theme.dark) },
       })),
     }],
   })
@@ -428,11 +463,11 @@ function renderCharts() {
         { type: 'value', min: 0, max: 100, axisLabel: { formatter: '{value}%' }, splitLine: { show: false } },
       ],
       series: [
-        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_MINT }, data: deptData.value.map((d) => d.plans) },
-        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_AMBER }, data: deptData.value.map((d) => d.vulns) },
-        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: SERIES_SKY }, data: deptData.value.map((d) => d.fixed) },
+        { name: '提测次数', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: seriesJade }, data: deptData.value.map((d) => d.plans) },
+        { name: '发现漏洞', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: seriesAmber }, data: deptData.value.map((d) => d.vulns) },
+        { name: '已修复', type: 'bar', barMaxWidth: 20, itemStyle: { borderRadius: [4, 4, 0, 0], color: seriesSky }, data: deptData.value.map((d) => d.fixed) },
         { name: '修复率(%)', type: 'line', yAxisIndex: 1, smooth: true, symbolSize: 7,
-          lineStyle: { width: 2.5, color: SERIES_PINK }, itemStyle: { color: SERIES_PINK }, data: deptData.value.map((d) => d.fix_rate) },
+          lineStyle: { width: 2, color: seriesViolet }, itemStyle: { color: seriesViolet }, data: deptData.value.map((d) => d.fix_rate) },
       ],
     })
   }
@@ -467,6 +502,48 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.dashboard-stat-grid :deep(.tl-stat-card) {
+  min-height: 108px;
+  padding: 14px 16px;
+}
+
+.ops-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0;
+  padding: 4px 0;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.ops-item {
+  min-width: 0;
+  padding: 8px 14px;
+  border-right: 0.5px solid var(--tl-border);
+}
+.ops-item:last-child {
+  border-right: 0;
+}
+.ops-label,
+.ops-item span {
+  display: block;
+  color: var(--tl-text-3);
+  font-size: 12px;
+}
+.ops-item b {
+  display: block;
+  margin: 3px 0;
+  color: var(--tl-text-strong);
+  font-size: 16px;
+  font-weight: 600;
+}
+.ops-item b.risk {
+  color: var(--red-11);
+}
+.ops-item b.warn {
+  color: var(--amber-11);
+}
+
 /* 类型 Top10 横条（demo-2 hb-row 范式，CSS 替代 ECharts 横柱） */
 .hb-row {
   display: grid;
@@ -476,25 +553,55 @@ onBeforeUnmount(() => {
   padding: 5px 0;
 }
 .hb-label {
-  font-size: 12.5px;
+  font-size: 12px;
   color: var(--tl-text-2);
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.hb-track { height: 12px; border-radius: 6px; background: var(--tl-surface-2); overflow: hidden; }
-.hb-bar { display: block; height: 100%; border-radius: 6px; transition: width .6s cubic-bezier(.22, 1, .36, 1); }
-.hb-val { font-size: 12px; font-weight: 600; color: var(--tl-text-1); text-align: right; }
+.hb-track { height: 12px; border-radius: 4px; background: var(--tl-surface-2); overflow: hidden; }
+.hb-bar { display: block; height: 100%; border-radius: 4px; transition: width 250ms ease-out; }
+.hb-val { font-size: 12px; font-weight: 600; color: var(--tl-text-strong); text-align: right; }
 
 /* 状态分布堆叠条 + 图例 */
 .stack-bar {
   display: flex;
   height: 12px;
-  border-radius: 6px;
+  border-radius: 4px;
   overflow: hidden;
   gap: 2px;
   margin: 6px 0 14px;
 }
 .stack-bar i { display: block; height: 100%; min-width: 3px; }
+
+.dashboard-data-note {
+  text-align: right;
+  color: var(--tl-text-3);
+  font-size: 12px;
+}
+
+@media (max-width: 1023px) {
+  .ops-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .ops-item:nth-child(3n) {
+    border-right: 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .ops-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ops-item:nth-child(3n) {
+    border-right: 0.5px solid var(--tl-border);
+  }
+
+  .ops-item:nth-child(2n) {
+    border-right: 0;
+  }
+}
 </style>

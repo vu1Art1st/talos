@@ -37,6 +37,8 @@ async def test_dashboard(client: AsyncClient, auth: dict):
         assert stats["total_vulns"] >= 2
         assert "by_level" in stats and "trend" in stats
         assert len(stats["trend"]) == 12
+        level_codes = [item["level"] for item in stats["by_level"]]
+        assert level_codes == sorted(level_codes)
     finally:
         for vul_id in created:
             await client.delete(f"/api/v1/vulns/{vul_id}", headers=auth)

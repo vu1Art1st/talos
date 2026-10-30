@@ -1,10 +1,10 @@
 <template>
   <!-- 需求4：小屏内容滚动与页面滚动分离 —— 页面整体不滚动，内容区/侧栏各自滚动 -->
-  <div v-if="report" class="flex h-full min-h-0 flex-col xl:flex-row gap-4">
-    <div ref="contentScrollRef" class="flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
+  <div v-if="report" class="report-editor flex min-h-0 flex-col gap-4 xl:h-full xl:flex-row">
+    <div ref="contentScrollRef" class="report-editor__content flex-1 min-h-0 overflow-y-auto space-y-4 pr-1">
       <el-card shadow="never">
         <template #header>
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between flex-wrap gap-2">
             <div class="flex items-center gap-2">
               <!-- 原路返回：从工单流程抽屉进入时回到抽屉，常规进入时回到报告列表 -->
               <el-button size="small" class="!mr-1" data-test="report-back" @click="onBack">
@@ -62,9 +62,9 @@
       <el-card v-for="(sec, i) in sections" :key="sec.id ?? `n${i}`" :id="`section-${i}`"
                shadow="never" class="scroll-mt-4">
         <template #header>
-          <div class="flex items-center gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
             <span class="text-gray-400">{{ i + 1 }}.</span>
-            <el-input v-model="sec.title" placeholder="章节标题" class="!w-80" size="small" @input="markDirty" />
+            <el-input v-model="sec.title" placeholder="章节标题" class="section-title-input w-full max-w-[320px]" size="small" @input="markDirty" />
             <span v-if="sec.vul_id" class="ktag">关联漏洞</span>
             <div class="flex-1" />
             <el-button size="small" :disabled="i === 0" @click="move(i, -1)">上移</el-button>
@@ -88,7 +88,7 @@
                          @change="(v: number) => changeVulnField(sec.vul_id!, 'level', v)">
                 <el-option v-for="(name, code) in meta?.vul_level" :key="code" :label="name" :value="Number(code)">
                   <span class="flex items-center gap-1.5">
-                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: levelColor(Number(code)) }" />
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: solidColor(levelColor(Number(code))) }" />
                     <span :style="{ color: levelColor(Number(code)) }">{{ name }}</span>
                   </span>
                 </el-option>
@@ -99,7 +99,7 @@
                          @change="(v: number) => changeVulnField(sec.vul_id!, 'status', v)">
                 <el-option v-for="(name, code) in meta?.vul_status" :key="code" :label="name" :value="Number(code)">
                   <span class="flex items-center gap-1.5">
-                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: statusColor(Number(code)) }" />
+                    <span class="inline-block w-2 h-2 rounded-full" :style="{ background: solidColor(statusColor(Number(code))) }" />
                     <span :style="{ color: statusColor(Number(code)) }">{{ name }}</span>
                   </span>
                 </el-option>
@@ -120,7 +120,7 @@
     </div>
 
     <!-- 侧栏：小屏时置于底部且独立滚动，大屏固定右侧随内容区独立滚动 -->
-    <div class="xl:w-[300px] xl:shrink-0 space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
+    <div class="report-editor__side xl:w-[300px] xl:shrink-0 space-y-4 max-h-[45vh] xl:max-h-none xl:h-full xl:min-h-0 xl:overflow-y-auto">
       <!-- 章节导航：点击快速跳转到对应漏洞编辑区域 -->
       <el-card shadow="never">
         <template #header>
@@ -179,7 +179,7 @@
         <div class="space-y-2">
           <el-button type="primary" class="w-full" data-test="report-save"
                      :loading="saving" @click="saveManual">保存报告</el-button>
-          <el-button type="success" class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
+          <el-button class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
           <el-divider class="!my-3" />
           <el-button class="w-full" @click="doExport('docx')">
             <el-icon class="mr-1"><Document /></el-icon>导出 Word
@@ -228,6 +228,45 @@
   </el-dialog>
 </template>
 
+<style scoped>
+@media (max-width: 1279px) {
+  .report-editor {
+    height: auto;
+    min-height: 100%;
+  }
+
+  .report-editor__content {
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .report-editor__side {
+    max-height: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .report-editor :deep(.el-form-item) {
+    display: block;
+  }
+
+  .report-editor :deep(.el-form-item__label) {
+    width: 100% !important;
+    justify-content: flex-start;
+    margin-bottom: 4px;
+    text-align: left;
+  }
+
+  .report-editor :deep(.el-form-item__content) {
+    margin-left: 0 !important;
+  }
+
+  .section-title-input {
+    max-width: none;
+  }
+}
+</style>
+
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
@@ -251,6 +290,7 @@ import {
   exportJobName,
   exportJobSoftStyle,
   levelColor,
+  solidColor,
   statusColor,
   statusName,
   statusSoftStyle,
@@ -313,7 +353,7 @@ const SAVE_STATE_COLORS: Record<AutosaveState, string> = {
   dirty: 'var(--el-color-warning)',
   saving: 'var(--el-color-primary)',
   failed: 'var(--el-color-danger)',
-  conflict: '#EA580C',
+  conflict: 'var(--orange-11)',
 }
 const saveStateColor = computed(() => SAVE_STATE_COLORS[saveState.value])
 // 退出登录 / 切换账号走同一守卫（路由离开在下方 onBeforeRouteLeave 中复用同一判定）

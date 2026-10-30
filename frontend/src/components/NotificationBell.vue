@@ -8,7 +8,7 @@
       </button>
     </template>
 
-    <div class="flex items-center gap-2 px-1 pb-2" style="border-bottom: 1px solid var(--tl-border)">
+    <div class="flex items-center gap-2 px-1 pb-2" style="border-bottom:  0.5px solid var(--tl-border)">
       <span class="text-xs font-semibold">消息中心</span>
       <span v-if="unread" class="text-xs text-gray-400">{{ unread }} 条未读</span>
       <div class="flex-1" />
@@ -22,16 +22,17 @@
            @click="openMessage(m)">
         <i class="msg-dot" :class="{ unread: !m.is_read }"></i>
         <div class="min-w-0 flex-1">
-          <div class="text-xs font-medium truncate" style="color: var(--tl-text-1)">{{ m.title }}</div>
+          <div class="text-xs font-medium truncate" style="color: var(--tl-text-strong)">{{ m.title }}</div>
           <div class="text-2xs text-gray-400 truncate">{{ m.content }}</div>
-          <div class="text-2xs text-gray-400 mt-0.5">
-            {{ messageTypeName(m.msg_type) }} · {{ fmtDateTime(m.create_time) }}
+          <div class="text-2xs text-gray-400 mt-0.5 flex gap-2">
+            <span>{{ messageTypeName(m.msg_type) }}</span>
+            <span>{{ fmtDateTime(m.create_time) }}</span>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="flex items-center justify-center pt-2" style="border-top: 1px solid var(--tl-border)">
+    <div class="flex items-center justify-center pt-2" style="border-top:  0.5px solid var(--tl-border)">
       <el-button size="small" link @click="goAll">查看全部消息 →</el-button>
     </div>
   </el-popover>
@@ -106,11 +107,11 @@ defineExpose({ refreshUnread })
 </script>
 
 <style scoped>
-.bell-badge :deep(.el-badge__content) { font-size: 10px; height: 15px; line-height: 15px; padding: 0 4px; }
+.bell-badge :deep(.el-badge__content) { font-size: 12px; height: 15px; line-height: 15px; padding: 0 4px; }
 .msg-item:hover { background: var(--tl-surface-2); }
 .msg-dot {
   width: 6px; height: 6px; border-radius: 50%; flex: none; margin-top: 5px;
   background: var(--tl-border-strong);
 }
-.msg-dot.unread { background: var(--tl-brand-mint); }
+.msg-dot.unread { background: var(--tl-brand-accent); }
 </style>

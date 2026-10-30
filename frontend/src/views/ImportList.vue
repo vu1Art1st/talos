@@ -5,8 +5,7 @@
                  :on-remove="onFileRemove" :on-exceed="onFileExceed" :limit="20" :file-list="fileList"
                  drag class="!flex-1">
         <el-icon class="mr-1"><Upload /></el-icon>选择报告文件（可多选）
-        <div class="mt-1 text-xs text-gray-400">支持一次选择多份 .docx（标准模板或平台导出的渗透测试/复测报告），选好后点「开始上传」批量入库解析</div>
-        <div class="text-xs text-gray-400">支持标准导入模板及平台导出的渗透测试（复测）报告，上传后自动解析；复测报告确认入库时将自动生成渗透测试工单。同一工单下相同名称的漏洞将自动去重合并。</div>
+        <div class="mt-1 text-xs text-gray-400">支持 .docx，单次最多 20 份</div>
       </el-upload>
       <div class="flex flex-col gap-1 upload-actions">
         <el-button type="primary" class="w-full" :disabled="!fileList.length || uploading" @click="doUpload" :loading="uploading">
@@ -114,7 +113,7 @@ async function onBatchConfirmSuccess(data: BatchConfirmResult) {
   if (failed > 0) {
     const lines = data.details
       .filter((d) => d.status === 'failed')
-      .map((d) => `· ${d.filename || `批次#${d.batch_id}`}：${d.detail}`)
+      .map((d) => `- ${d.filename || `批次#${d.batch_id}`}：${d.detail}`)
     await ElMessageBox.alert(lines.join('\n'), `确认完成：成功 ${confirmed} 个 / 跳过 ${skipped} 个 / 失败 ${failed} 个`, {
       type: 'warning',
       confirmButtonText: '知道了',

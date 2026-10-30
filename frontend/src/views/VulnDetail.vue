@@ -56,7 +56,7 @@
             <div v-if="vul.due_at" class="flex items-center gap-2">
               <span class="num">{{ fmtDateTime(vul.due_at) }}</span>
               <span class="tl-tag" :style="slaStateSoftStyle(vul.sla_state)">
-                {{ slaStateMeta(vul.sla_state).label }} · {{ fmtSlaRemaining(vul.sla_remaining_hours) }}
+                {{ slaStateMeta(vul.sla_state).label }}，{{ fmtSlaRemaining(vul.sla_remaining_hours) }}
               </span>
             </div>
             <span v-else>-</span>
@@ -98,7 +98,7 @@
       <el-card shadow="never">
         <template #header>操作日志</template>
         <el-timeline class="!pl-1">
-          <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmtDateTime(log.create_time)" size="small">
+          <el-timeline-item v-for="log in logs" :key="log.id" :timestamp="fmtDateTime(log.create_time)" size="normal">
             <div class="text-sm"><b>{{ log.realname || log.username }}</b> {{ log.action }}</div>
             <div v-if="log.content" class="text-xs text-gray-400 mt-0.5">{{ log.content }}</div>
           </el-timeline-item>

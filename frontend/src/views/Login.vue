@@ -1,20 +1,25 @@
 <template>
   <div class="login-bg min-h-full flex items-center justify-center">
-    <!-- 装饰：细点阵与光斑 -->
-    <div class="bg-dots"></div>
-    <div class="bg-blob blob-1"></div>
-    <div class="bg-blob blob-2"></div>
-    <div class="bg-blob blob-3"></div>
+    <div class="login-dots" aria-hidden="true"></div>
+    <div class="login-orb orb-a" aria-hidden="true"></div>
+    <div class="login-orb orb-b" aria-hidden="true"></div>
+    <div class="login-orb orb-c" aria-hidden="true"></div>
 
-    <div class="login-card w-[400px] max-w-[calc(100vw-32px)] px-9 pt-10 pb-7">
-      <span class="corner tl"></span><span class="corner br"></span>
+    <button class="login-theme-toggle" type="button"
+            :aria-label="theme.dark ? '切换到浅色模式' : '切换到暗色模式'"
+            :title="theme.dark ? '切换到浅色模式' : '切换到暗色模式'"
+            @click="theme.toggle()">
+      <el-icon :size="16"><Sunny v-if="theme.dark" /><Moon v-else /></el-icon>
+    </button>
 
-      <!-- 品牌区：标志 + 双行文字组（与侧边栏一致） -->
+    <div class="login-card w-[416px] max-w-[calc(100vw-32px)] px-8 pt-[30px] pb-6">
+      <span class="corner corner-top" aria-hidden="true"></span>
+      <span class="corner corner-bottom" aria-hidden="true"></span>
       <div class="flex items-center justify-center gap-3.5 mb-7">
-        <BrandMark :size="56" class="flex-none logo-mark" />
-        <div class="flex flex-col items-start gap-[7px]">
-          <div class="text-[27px] font-extrabold tracking-[1px] leading-none" style="color: var(--tl-text-1)">Talos</div>
-          <span class="subtitle"><span class="dot"></span>漏洞管理平台</span>
+        <BrandMark :size="46" class="flex-none logo-mark" />
+        <div class="flex flex-col items-start">
+          <div class="brand-name">Talos</div>
+          <span class="subtitle"><i aria-hidden="true"></i>漏洞管理平台</span>
         </div>
       </div>
 
@@ -36,23 +41,29 @@
         </div>
 
         <el-button class="login-btn w-full" data-test="login-submit" size="large" :loading="loading" @click="onLogin">
-          登 录
+          登录
           <el-icon class="ml-1"><Right /></el-icon>
         </el-button>
       </el-form>
 
-      <div class="divider">平台能力</div>
-      <div class="env-chips">
-        <span class="chip"><span class="chip-dot" style="background: var(--tl-primary)"></span>漏洞全生命周期</span>
-        <span class="chip"><span class="chip-dot" style="background: var(--tl-accent)"></span>资产管理</span>
-        <span class="chip"><span class="chip-dot" style="background: var(--tl-warning)"></span>报告与态势</span>
+      <div class="capability-divider">平台能力</div>
+      <div class="capability-list">
+        <span class="capability-chip"><i></i>漏洞全生命周期</span>
+        <span class="capability-chip"><i></i>资产管理</span>
+        <span class="capability-chip"><i></i>报告与态势</span>
       </div>
-
-      <div class="footer">Talos Vulnerability Management</div>
+      <div class="character-note">
+        <img class="character-avatar" src="/avatars/duty-roxy.webp" alt="值守角色洛克茜" />
+        <div class="character-copy">
+          <strong>安全值守已就绪</strong>
+          <span>洛克茜等待接入本次工作任务</span>
+        </div>
+      </div>
+      <div class="login-card-footer">Talos 漏洞全生命周期管理平台</div>
     </div>
 
-    <div class="slogan">🛡️ <b>Talos</b> · 漏洞收录、验证、复测、报告与安全态势一站式管理</div>
-    <div class="ver-chip">Talos v{{ version }} · Lovely UI</div>
+    <div class="login-slogan"><b>Talos</b><span>漏洞全生命周期管理平台</span></div>
+    <div class="ver-chip">Talos v{{ version }}</div>
   </div>
 </template>
 
@@ -60,18 +71,20 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
-import { Key, Right, User } from '@element-plus/icons-vue'
+import { Key, Moon, Right, Sunny, User } from '@element-plus/icons-vue'
 import BrandMark from '../components/BrandMark.vue'
 import { useAuthStore } from '../stores/auth'
+import { useThemeStore } from '../stores/theme'
 
 const REMEMBER_KEY = 'tl_login_username'
 
 const auth = useAuthStore()
+const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 const version = __APP_VERSION__
 const loading = ref(false)
-const remember = ref(false)
+const remember = ref(true)
 const form = reactive({ username: '', password: '' })
 const formRef = ref<FormInstance>()
 const formRules: FormRules = {
@@ -103,123 +116,311 @@ async function onLogin() {
 </script>
 
 <style scoped>
-/* 背景与光斑：明暗双态跟随 --tl-* 令牌（html.dark 自动切换） */
 .login-bg {
-  --lp-primary: var(--tl-primary);
-  --lp-soft: color-mix(in srgb, var(--tl-primary) 12%, transparent);
-  --lp-glow-a: color-mix(in srgb, var(--tl-primary) 11%, transparent);
-  --lp-glow-b: color-mix(in srgb, var(--tl-accent) 9%, transparent);
-  --lp-glow-c: color-mix(in srgb, var(--tl-primary) 9%, transparent);
-  --lp-dot: color-mix(in srgb, var(--tl-text-1) 5%, transparent);
-  --lp-chip-bg: var(--tl-surface-2);
   --lp-field-bg: var(--tl-surface-2);
-  --lp-btn-grad: linear-gradient(135deg, #10b981, #059669 55%, #047857);
-  --lp-btn-shadow: color-mix(in srgb, var(--tl-primary) 28%, transparent);
   position: relative;
+  overflow: hidden;
   background:
-    radial-gradient(720px 420px at 12% 8%, var(--lp-glow-a), transparent 60%),
-    radial-gradient(640px 420px at 88% 12%, var(--lp-glow-b), transparent 60%),
-    radial-gradient(760px 480px at 78% 92%, var(--lp-glow-c), transparent 62%),
+    radial-gradient(720px 420px at 12% 8%, var(--jade-a3), transparent 62%),
+    radial-gradient(620px 400px at 88% 12%, var(--sky-a3), transparent 62%),
+    radial-gradient(760px 480px at 78% 92%, var(--jade-a2), transparent 64%),
     var(--tl-bg);
 }
-html.dark .login-bg {
-  --lp-btn-grad: linear-gradient(135deg, #6ee7b7, #34d399 55%, #10b981);
-  --lp-btn-shadow: color-mix(in srgb, var(--tl-primary) 22%, transparent);
+
+.login-dots {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: radial-gradient(var(--sage-a6) 0.5px, transparent 0.5px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse at center, var(--sage-a8), transparent 76%);
 }
 
-.bg-dots {
-  position: fixed; inset: 0; pointer-events: none;
-  background-image: radial-gradient(var(--lp-dot) 1px, transparent 1px);
-  background-size: 22px 22px;
-  mask-image: radial-gradient(ellipse at center, rgba(0, 0, 0, .9), transparent 75%);
+.login-orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: .48;
+  pointer-events: none;
 }
-.bg-blob { position: fixed; border-radius: 50%; filter: blur(70px); opacity: .55; pointer-events: none; }
-.blob-1 { width: 340px; height: 340px; left: -90px; bottom: -110px; background: var(--lp-glow-a); }
-.blob-2 { width: 300px; height: 300px; right: -70px; top: -80px; background: var(--lp-glow-b); }
-.blob-3 { width: 220px; height: 220px; right: 16%; bottom: -80px; background: var(--lp-glow-c); }
+
+.orb-a {
+  width: 340px;
+  height: 340px;
+  left: -90px;
+  bottom: -110px;
+  background: var(--jade-a4);
+}
+
+.orb-b {
+  width: 300px;
+  height: 300px;
+  right: -70px;
+  top: -80px;
+  background: var(--sky-a4);
+}
+
+.orb-c {
+  width: 220px;
+  height: 220px;
+  right: 16%;
+  bottom: -80px;
+  background: var(--jade-a3);
+}
+
+.login-theme-toggle {
+  position: fixed;
+  top: 22px;
+  right: 24px;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 4px;
+  background: var(--tl-surface);
+  color: var(--tl-text-2);
+  transition: background-color 250ms ease-out, border-color 250ms ease-out, color 250ms ease-out;
+}
+
+.login-theme-toggle:hover {
+  border-color: var(--tl-border-strong);
+  background: var(--tl-surface-2);
+  color: var(--tl-text-strong);
+}
 
 .login-card {
   position: relative; z-index: 1;
   background: var(--tl-surface);
-  border: 1px solid var(--tl-border);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(15, 23, 20, .04), 0 16px 40px rgba(15, 23, 20, .08);
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  box-shadow: 0 20px 56px var(--sage-a7);
 }
-.corner { position: absolute; width: 46px; height: 46px; pointer-events: none; }
-.corner.tl { top: 14px; left: 14px; border-top: 2px solid var(--lp-soft); border-left: 2px solid var(--lp-soft); border-radius: 8px 0 0 0; }
-.corner.br { right: 14px; bottom: 14px; border-bottom: 2px solid var(--lp-soft); border-right: 2px solid var(--lp-soft); border-radius: 0 0 8px 0; }
 
-.logo-mark { color: var(--tl-brand-mint); }
+.corner {
+  position: absolute;
+  width: 46px;
+  height: 46px;
+  pointer-events: none;
+}
+
+.corner-top {
+  top: 14px;
+  left: 14px;
+  border-top: 0.5px solid var(--jade-a8);
+  border-left: 0.5px solid var(--jade-a8);
+  border-radius: 4px 0 0 0;
+}
+
+.corner-bottom {
+  right: 14px;
+  bottom: 14px;
+  border-right: 0.5px solid var(--jade-a8);
+  border-bottom: 0.5px solid var(--jade-a8);
+  border-radius: 0 0 4px 0;
+}
+
+.logo-mark { color: var(--tl-brand-accent); }
+.brand-name {
+  color: var(--tl-text-strong);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+}
 .subtitle {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 12px; color: var(--tl-text-2);
-  background: var(--lp-soft); border: 1px solid var(--tl-border);
-  padding: 3px 10px; border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--tl-primary-text);
+  background: var(--jade-a3);
+  border: 0.5px solid var(--jade-a5);
+  border-radius: 4px;
+  padding: 2px 7px;
 }
-.subtitle .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--tl-primary); box-shadow: 0 0 0 3px var(--lp-soft); }
+.subtitle i {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--jade-9);
+}
 
-/* 表单：标签在字段上方，输入框对齐 demo（44px 高、10px 圆角、聚焦薄荷描边） */
 .field { margin-bottom: 16px; }
 .field :deep(.el-form-item__label) {
-  font-size: 13px; font-weight: 500; color: var(--tl-text-2);
+  font-size: 14px; font-weight: 500; color: var(--tl-text-2);
   margin-bottom: 6px; line-height: 1.4; padding: 0;
 }
+.field :deep(.el-form-item__label::before) {
+  display: none;
+}
 .field :deep(.el-input__wrapper) {
-  height: 44px; border-radius: 10px;
+  height: 44px; border-radius: 4px;
   background: var(--lp-field-bg);
-  box-shadow: 0 0 0 1px var(--tl-border) inset;
-  transition: box-shadow .15s, background .15s;
+  border: 0.5px solid var(--tl-border);
+  box-shadow: none;
+  transition: border-color 250ms ease-out, background-color 250ms ease-out;
 }
 .field :deep(.el-input__wrapper.is-focus) {
   background: var(--tl-surface);
-  box-shadow: 0 0 0 1px var(--tl-primary) inset, 0 0 0 3px var(--lp-soft);
+  border-color: var(--tl-primary);
+  box-shadow: 0 0 0 0.5px var(--tl-focus);
 }
 
-.aux-row { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 18px; font-size: 13px; color: var(--tl-text-2); }
-.aux-row :deep(.el-checkbox__label) { font-size: 13px; color: var(--tl-text-2); }
+.aux-row { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 18px; font-size: 14px; color: var(--tl-text-2); }
+.aux-row :deep(.el-checkbox__label) { font-size: 14px; color: var(--tl-text-2); }
 
-/* 登录按钮：薄荷渐变（亮：白字 / 暗：深墨字），对比度 ≥4.5:1 */
 .login-btn {
-  height: 46px; border: none; border-radius: 10px;
-  font-size: 15px; font-weight: 700; letter-spacing: 2px;
+  height: 44px;
+  border: none;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
   color: var(--tl-on-primary);
-  background: var(--lp-btn-grad);
-  box-shadow: 0 6px 16px var(--lp-btn-shadow);
-  transition: filter .15s ease, box-shadow .15s ease, transform .12s ease;
+  background: linear-gradient(135deg, var(--jade-9), var(--jade-10) 55%, var(--jade-11));
+  box-shadow: 0 6px 16px var(--jade-a5);
+  transition: filter 250ms ease-out, box-shadow 250ms ease-out;
 }
 .login-btn:hover {
   color: var(--tl-on-primary);
-  background: var(--lp-btn-grad);
-  filter: brightness(1.06);
-  box-shadow: 0 8px 20px var(--lp-btn-shadow);
+  background: linear-gradient(135deg, var(--jade-9), var(--jade-10) 55%, var(--jade-11));
+  filter: brightness(1.04);
+  box-shadow: 0 8px 20px var(--jade-a6);
 }
-.login-btn:active { transform: translateY(1px); }
 
-.divider { display: flex; align-items: center; gap: 12px; margin: 22px 0 14px; color: var(--tl-text-3); font-size: 12px; }
-.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--tl-border); }
-.env-chips { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; }
-.chip {
-  font-size: 12px; color: var(--tl-text-2); background: var(--lp-chip-bg);
-  border: 1px solid var(--tl-border); border-radius: 999px; padding: 3px 8px;
-  display: inline-flex; align-items: center; gap: 5px;
+.capability-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 22px 0 14px;
+  color: var(--tl-text-3);
+  font-size: 12px;
 }
-.chip-dot { width: 6px; height: 6px; border-radius: 50%; }
 
-.footer { margin-top: 18px; text-align: center; font-size: 12px; color: var(--tl-text-3); }
-.footer .sep { margin: 0 8px; color: var(--tl-border); }
-
-.slogan {
-  position: fixed; left: 40px; bottom: 36px; z-index: 1;
-  color: var(--tl-text-2); font-size: 13px; letter-spacing: .5px;
-  display: flex; align-items: center; gap: 10px;
+.capability-divider::before,
+.capability-divider::after {
+  content: "";
+  flex: 1;
+  height: 0.5px;
+  background: var(--tl-border);
 }
-.slogan b { color: var(--tl-text-1); }
+
+.capability-list {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.capability-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 4px;
+  background: var(--tl-surface-2);
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+
+.capability-chip i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--jade-9);
+}
+
+.capability-chip:nth-child(2) i {
+  background: var(--sky-9);
+}
+
+.capability-chip:nth-child(3) i {
+  background: var(--amber-9);
+}
+
+.login-card-footer {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--tl-border);
+  color: var(--tl-text-3);
+  font-size: 12px;
+  text-align: center;
+}
+
+.character-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 0.5px solid var(--tl-border);
+}
+
+.character-avatar {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  object-fit: contain;
+}
+
+.character-copy {
+  min-width: 0;
+}
+
+.character-copy strong {
+  display: block;
+  color: var(--tl-text-strong);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.character-copy span {
+  display: block;
+  color: var(--tl-text-3);
+  font-size: 12px;
+}
+
+.login-slogan {
+  position: fixed;
+  left: 40px;
+  bottom: 36px;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--tl-text-2);
+  font-size: 14px;
+}
+
+.login-slogan b {
+  color: var(--tl-text-strong);
+  font-weight: 600;
+}
 .ver-chip {
   position: fixed; right: 40px; bottom: 36px; z-index: 1;
-  font-size: 12px; color: var(--tl-text-2);
-  background: color-mix(in srgb, var(--tl-surface) 70%, transparent);
-  border: 1px solid var(--tl-border);
-  padding: 4px 12px; border-radius: 999px; backdrop-filter: blur(6px);
+  font-size: 12px; color: var(--tl-text-3);
+  padding: 3px 8px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 4px;
+  background: var(--sage-a3);
 }
-@media (max-width: 900px) { .slogan, .ver-chip { display: none; } }
+@media (max-width: 760px) {
+  .login-slogan,
+  .ver-chip {
+    display: none;
+  }
+  .login-theme-toggle {
+    top: 12px;
+    right: 12px;
+  }
+}
+@media (max-width: 480px) {
+  .login-card {
+    padding: 28px 24px 24px;
+  }
+}
 </style>

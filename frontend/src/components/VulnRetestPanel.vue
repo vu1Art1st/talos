@@ -32,7 +32,7 @@
             <span class="font-medium">{{ titles[i] }}</span>
             <el-icon v-if="canEdit" class="text-gray-300 group-hover:text-primary" :size="13"><EditPen /></el-icon>
           </div>
-          <span class="text-xs text-gray-400">{{ rec.username }} · {{ fmtDateTime(rec.create_time) }}</span>
+          <span class="text-xs text-gray-400">{{ rec.username }}（{{ fmtDateTime(rec.create_time) }}）</span>
           <div class="flex-1" />
           <el-button v-if="canEdit" size="small" type="primary" :loading="savingId === rec.id" @click="saveRecord(rec)">
             保存

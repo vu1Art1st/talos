@@ -1,19 +1,18 @@
 <template>
-  <el-card shadow="never" v-loading="loading">
-    <template #header>
-      <div class="flex items-center gap-2">
-        <span class="text-sm font-semibold">个人访问令牌</span>
-        <span class="text-xs text-gray-400">供内部看板与脚本调用开放 API（/api/v1/open/*）</span>
-        <div class="flex-1" />
+  <div class="space-y-3">
+    <FilterToolbar>
+      <span class="text-xs text-gray-400">共 {{ total }} 个令牌</span>
+      <template #actions>
         <el-button class="btn-min" @click="guideVisible = true">
           <el-icon class="mr-1"><Document /></el-icon>接口文档
         </el-button>
         <el-button type="primary" class="btn-min" @click="openCreate">
           <el-icon class="mr-1"><Plus /></el-icon>新建令牌
         </el-button>
-      </div>
-    </template>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" v-loading="loading" body-style="padding: 0 0 12px">
     <el-table :data="items" stripe>
       <el-table-column prop="name" label="名称" min-width="160" />
       <el-table-column label="令牌前缀" width="160">
@@ -61,7 +60,8 @@
 
     <TlPagination v-model:page="page" v-model:size="size" :total="total"
                   @page-change="load" @size-change="onSizeChange" />
-  </el-card>
+    </el-card>
+  </div>
 
   <!-- 新建令牌 -->
   <el-dialog :close-on-click-modal="false" v-model="createVisible" title="新建访问令牌" width="480px">
@@ -112,6 +112,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Document, Plus } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
 import { dotStyle, patScopeName, patScopeOptions, STAT_CARD_COLORS } from '../utils/colors'
@@ -182,43 +183,43 @@ onMounted(async () => {
 <style scoped>
 /* 指南抽屉排版：v-html 内容不带 scoped 属性，须用 :deep；色值全部走 --tl-* 令牌保证明暗两态 */
 .md-doc {
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.75;
-  color: rgb(var(--tl-gray-700));
+  color: var(--tl-gray-700);
 }
 .md-doc :deep(h1),
 .md-doc :deep(h2),
 .md-doc :deep(h3),
 .md-doc :deep(h4) {
-  color: rgb(var(--tl-gray-800));
+  color: var(--tl-gray-800);
   font-weight: 600;
   line-height: 1.4;
   margin: 20px 0 10px;
 }
-.md-doc :deep(h1) { font-size: 18px; }
+.md-doc :deep(h1) { font-size: 16px; }
 .md-doc :deep(h2) {
-  font-size: 15.5px;
+  font-size: 16px;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgb(var(--tl-gray-200));
+  border-bottom: 0.5px solid var(--tl-gray-200);
 }
 .md-doc :deep(h3) { font-size: 14px; }
-.md-doc :deep(h4) { font-size: 13.5px; }
+.md-doc :deep(h4) { font-size: 14px; }
 .md-doc :deep(p) { margin: 8px 0; }
 .md-doc :deep(ul),
 .md-doc :deep(ol) { padding-left: 20px; margin: 8px 0; }
 .md-doc :deep(li) { margin: 3px 0; }
 .md-doc :deep(code) {
   font-family: var(--tl-mono);
-  font-size: 12.5px;
-  background: rgb(var(--tl-gray-100));
-  border: 1px solid rgb(var(--tl-gray-200));
+  font-size: 12px;
+  background: var(--tl-gray-100);
+  border: 0.5px solid var(--tl-gray-200);
   border-radius: 4px;
   padding: 1px 5px;
 }
 .md-doc :deep(pre) {
-  background: rgb(var(--tl-gray-100));
-  border: 1px solid rgb(var(--tl-gray-200));
-  border-radius: 6px;
+  background: var(--tl-gray-100);
+  border: 0.5px solid var(--tl-gray-200);
+  border-radius: 4px;
   padding: 10px 12px;
   overflow-x: auto;
   margin: 10px 0;
@@ -228,28 +229,28 @@ onMounted(async () => {
   width: 100%;
   border-collapse: collapse;
   margin: 10px 0;
-  font-size: 12.5px;
+  font-size: 12px;
 }
 .md-doc :deep(th),
 .md-doc :deep(td) {
-  border: 1px solid rgb(var(--tl-gray-200));
+  border: 0.5px solid var(--tl-gray-200);
   padding: 5px 8px;
   text-align: left;
   vertical-align: top;
 }
 .md-doc :deep(th) {
-  background: rgb(var(--tl-gray-100));
-  color: rgb(var(--tl-gray-800));
+  background: var(--tl-gray-100);
+  color: var(--tl-gray-800);
   font-weight: 600;
 }
 .md-doc :deep(blockquote) {
   margin: 10px 0;
   padding: 6px 12px;
-  border-left: 3px solid var(--tl-primary);
-  background: rgb(var(--tl-gray-100));
-  border-radius: 0 6px 6px 0;
-  color: rgb(var(--tl-gray-600));
+  border-left:  0.5px solid var(--tl-primary);
+  background: var(--tl-gray-100);
+  border-radius: 0 4px 4px 0;
+  color: var(--tl-gray-600);
 }
-.md-doc :deep(hr) { border: none; border-top: 1px solid rgb(var(--tl-gray-200)); margin: 16px 0; }
+.md-doc :deep(hr) { border: none; border-top: 0.5px solid var(--tl-gray-200); margin: 16px 0; }
 .md-doc :deep(a) { color: var(--tl-accent); }
 </style>

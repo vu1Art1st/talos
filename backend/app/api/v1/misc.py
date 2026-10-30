@@ -103,7 +103,7 @@ async def _name_dicts(session: AsyncSession) -> dict:
 
 
 def _color_dicts() -> dict:
-    """各字典的展示色值（key 与名称字典一一对应）。"""
+    """各字典的 Radix 语义色族（key 与名称字典一一对应）。"""
     return {
         "vul_level": VUL_LEVEL_COLOR,
         "vul_status": VUL_STATUS_COLOR,
@@ -140,8 +140,8 @@ async def meta(
 ):
     """业务字典，前端下拉框与状态标签统一从此获取（名称 + 颜色 + nonpen 命名空间均在此单源下发）。
 
-    漏洞类型从数据库读取，支持动态新增；colors 命名空间为各字典的展示色值，
-    动态新增的漏洞类型（code≥1000）无内置色值，由前端兜底灰色。
+    漏洞类型从数据库读取，支持动态新增；colors 命名空间为各字典的 Radix 语义色族，
+    动态新增的漏洞类型（code≥1000）无内置色族，由前端兜底灰色。
     """
     return {
         **await _name_dicts(session),

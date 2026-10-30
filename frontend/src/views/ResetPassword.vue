@@ -82,10 +82,10 @@ async function submit() {
   padding: 24px; background: var(--tl-bg);
 }
 .auth-card {
-  width: 420px; max-width: 100%; padding: 30px; border: 1px solid var(--tl-border);
-  border-radius: 12px; background: var(--tl-surface); box-shadow: 0 16px 40px rgba(15, 23, 20, .08);
+  width: 420px; max-width: 100%; padding: 30px; border:  0.5px solid var(--tl-border);
+  border-radius: 8px; background: var(--tl-surface);
 }
-.auth-title { font-size: 22px; font-weight: 700; color: var(--tl-text-1); }
-.auth-subtitle { margin: 8px 0 22px; font-size: 13px; color: var(--tl-text-3); }
+.auth-title { font-size: 16px; font-weight: 600; color: var(--tl-text-strong); }
+.auth-subtitle { margin: 8px 0 22px; font-size: 14px; color: var(--tl-text-3); }
 .auth-links { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
 </style>

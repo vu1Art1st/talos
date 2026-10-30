@@ -7,7 +7,7 @@
         <div class="min-w-0">
           <div class="text-base font-semibold">{{ displayName }}</div>
           <div class="text-xs text-gray-400 mt-1">
-            {{ auth.user?.username }} · {{ auth.user?.role_name || '未分配角色' }}
+            {{ auth.user?.username }}（{{ auth.user?.role_name || '未分配角色' }}）
           </div>
         </div>
         <div class="flex-1" />
@@ -24,21 +24,24 @@
               <UserAvatar :avatar="auth.user?.avatar" :avatar-url="auth.user?.avatar_url"
                           :name="displayName" :size="96" />
             </div>
-            <div class="preset-grid">
-              <button v-for="preset in presetIds" :key="preset" class="preset-btn"
-                      :class="{ active: auth.user?.avatar === `preset:${preset}` }"
-                      type="button" :title="presetName(preset)" @click="setPreset(preset)">
-                <img class="preset-img" :src="presetUrl(preset)" :alt="presetName(preset)"
-                     width="34" height="34" />
-              </button>
-            </div>
             <div class="flex gap-2 mt-4">
+              <el-button class="btn-min" @click="avatarDialogVisible = true">选择预设</el-button>
               <el-button class="btn-min" @click="fileInput?.click()">
                 <el-icon class="mr-1"><Upload /></el-icon>上传
               </el-button>
               <el-button class="btn-min" :disabled="!auth.user?.avatar" @click="resetAvatar">恢复默认</el-button>
             </div>
             <input ref="fileInput" class="hidden" type="file" accept=".png,.jpg,.jpeg,.webp" @change="uploadAvatar" />
+            <el-dialog v-model="avatarDialogVisible" title="选择头像" width="480px" append-to-body>
+              <div class="preset-grid">
+                <button v-for="preset in presetIds" :key="preset" class="preset-btn"
+                        :class="{ active: auth.user?.avatar === `preset:${preset}` }"
+                        type="button" :title="presetName(preset)" @click="setPreset(preset)">
+                  <img class="preset-img" :src="presetUrl(preset)" :alt="presetName(preset)"
+                       width="34" height="34" />
+                </button>
+              </div>
+            </el-dialog>
           </section>
 
           <section class="setting-block">
@@ -177,6 +180,7 @@ const auth = useAuthStore()
 const router = useRouter()
 const tab = ref('profile')
 const fileInput = ref<HTMLInputElement>()
+const avatarDialogVisible = ref(false)
 const sessions = ref<UserSession[]>([])
 const sessionLoading = ref(false)
 const form = reactive({ realname: '', phone: '' })
@@ -387,16 +391,21 @@ onBeforeRouteLeave(() => confirmLeave())
 .save-state { font-size: 12px; color: var(--tl-text-3); }
 .save-state.is-failed, .save-state.is-conflict { color: var(--tl-danger); }
 .profile-tabs { min-height: 420px; }
-.profile-grid { display: grid; grid-template-columns: minmax(300px, 420px) minmax(320px, 1fr); gap: 16px; }
+.profile-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 420px) minmax(320px, 1fr);
+  align-items: start;
+  gap: 16px;
+}
 .setting-block {
-  border: 1px solid var(--tl-border);
+  border:  0.5px solid var(--tl-border);
   border-radius: 8px;
   background: var(--tl-surface);
   padding: 18px;
   min-width: 0;
 }
 .setting-block.wide { width: 100%; }
-.block-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--tl-text-1); }
+.block-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; color: var(--tl-text-strong); }
 .avatar-stage { display: flex; justify-content: center; margin-bottom: 16px; }
 .preset-grid {
   display: grid; grid-template-columns: repeat(8, 38px); gap: 8px; justify-content: center;
@@ -404,15 +413,15 @@ onBeforeRouteLeave(() => confirmLeave())
 }
 .preset-img { display: block; width: 34px; height: 34px; border-radius: 8px; }
 .preset-btn {
-  width: 38px; height: 38px; padding: 2px; border: 1px solid transparent; border-radius: 8px;
-  background: transparent; cursor: pointer; transition: border-color .15s, background .15s;
+  width: 38px; height: 38px; padding: 2px; border:  0.5px solid transparent; border-radius: 8px;
+  background: transparent; cursor: pointer; transition: border-color 250ms ease-out, background-color 250ms ease-out;
 }
 .preset-btn:hover, .preset-btn.active { border-color: var(--tl-primary); background: var(--tl-surface-2); }
-.meta-grid { display: grid; grid-template-columns: 88px 1fr; gap: 10px 14px; font-size: 13px; margin-top: 16px; }
+.meta-grid { display: grid; grid-template-columns: 88px 1fr; gap: 10px 14px; font-size: 14px; margin-top: 16px; }
 .meta-grid span { color: var(--tl-text-3); }
 .meta-grid b { font-weight: 500; color: var(--tl-text-2); }
 .pref-list { max-width: 480px; }
-.pref-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-bottom: 1px solid var(--tl-border); }
+.pref-row { display: flex; align-items: center; justify-content: space-between; padding: 11px 0; border-bottom:  0.5px solid var(--tl-border); }
 .pref-row:last-child { border-bottom: 0; }
 @media (max-width: 900px) {
   .profile-grid { grid-template-columns: 1fr; }

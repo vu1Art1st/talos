@@ -42,7 +42,7 @@ type ErrorPageMetaBody = Omit<ErrorPageMeta, 'code'>
 /** 专属文案页：系统实际会产出的 4xx / 5xx（含 nginx 侧的 502/503/504） */
 const PAGES: Record<string, ErrorPageMetaBody> = {
   '400': {
-    chip: 'HTTP 400 · 请求无效',
+    chip: 'HTTP 400 请求无效',
     title: '请求无法被识别',
     desc: '提交的请求格式有误或参数不完整，服务器无法处理。请返回上一步检查填写内容后重新提交。',
     icon: '#i-400',
@@ -50,7 +50,7 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
     hint: '若为接口调用，请核对请求参数与格式。',
   },
   '401': {
-    chip: 'HTTP 401 · 身份未验证',
+    chip: 'HTTP 401 身份未验证',
     title: '登录状态已失效',
     desc: '你的登录凭证已过期或尚未登录，无法访问该页面。请重新登录，登录后会自动返回原页面。',
     icon: '#i-401',
@@ -58,7 +58,7 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
     hint: '登录成功后会回到你原本访问的页面。',
   },
   '403': {
-    chip: 'HTTP 403 · 无访问权限',
+    chip: 'HTTP 403 无访问权限',
     title: '你没有访问权限',
     desc: '当前账号无权访问该页面或资源。如确需使用，请联系管理员为账号开通相应权限。',
     icon: '#i-403',
@@ -66,23 +66,23 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
     hint: '权限有误请联系管理员核对角色与权限组。',
   },
   '404': {
-    chip: 'HTTP 404 · 页面未找到',
-    title: '哎呀，页面走丢了',
-    desc: '你访问的页面不存在，可能已被移动或删除，也可能是链接地址输入有误，请核对后再试。',
+    chip: 'HTTP 404 页面未找到',
+    title: '页面不存在',
+    desc: '该地址可能已被移动或删除，请从首页重新进入。',
     icon: '#i-404',
     actions: [home(true), back()],
     hint: '仍无法解决？请联系管理员核对访问地址。',
   },
   '500': {
-    chip: 'HTTP 500 · 服务器内部错误',
-    title: '服务器开小差了',
+    chip: 'HTTP 500 服务器内部错误',
+    title: '服务暂时不可用',
     desc: '服务在处理这次请求时发生异常，通常与你的操作无关。请稍后重试，或联系管理员。',
     icon: '#i-500',
     actions: [reload, home()],
     hint: '反馈时请附上页面地址与操作时间，便于定位。',
   },
   '502': {
-    chip: 'HTTP 502 · 网关错误',
+    chip: 'HTTP 502 网关错误',
     title: '服务暂时不可用',
     desc: '网关暂时无法连接到上游服务，可能是服务正在重启或短暂过载。请稍后刷新重试。',
     icon: '#i-502',
@@ -90,7 +90,7 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
     hint: '若长时间未恢复，请联系管理员确认服务状态。',
   },
   '503': {
-    chip: 'HTTP 503 · 服务不可用',
+    chip: 'HTTP 503 服务不可用',
     title: '服务正在维护中',
     desc: '服务当前不可用，可能正在重启或处于维护状态。请稍后刷新重试。',
     icon: '#i-502',
@@ -98,7 +98,7 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
     hint: '若长时间未恢复，请联系管理员确认服务状态。',
   },
   '504': {
-    chip: 'HTTP 504 · 网关超时',
+    chip: 'HTTP 504 网关超时',
     title: '请求响应超时',
     desc: '上游服务在规定时间内未返回结果，可能是任务繁忙或网络拥塞。请稍后刷新重试。',
     icon: '#i-502',
@@ -110,7 +110,7 @@ const PAGES: Record<string, ErrorPageMetaBody> = {
 /** 未登记状态码的通用模板：按首位数字归属 4xx / 5xx，保证任意三位码都有页面 */
 function generic4xx(code: string): ErrorPageMetaBody {
   return {
-    chip: `HTTP ${code} · 请求未能完成`,
+    chip: `HTTP ${code} 请求未能完成`,
     title: '请求未能完成',
     desc: '服务器拒绝了本次请求，可能是参数、状态或资源已发生变化。请返回上一步核对后重试。',
     icon: '#i-400',
@@ -121,7 +121,7 @@ function generic4xx(code: string): ErrorPageMetaBody {
 
 function generic5xx(code: string): ErrorPageMetaBody {
   return {
-    chip: `HTTP ${code} · 服务异常`,
+    chip: `HTTP ${code} 服务异常`,
     title: '服务出现异常',
     desc: '服务在处理这次请求时发生异常，通常与你的操作无关。请稍后重试，或联系管理员。',
     icon: '#i-500',

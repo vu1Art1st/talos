@@ -80,7 +80,7 @@
               </el-select>
             </div>
           </div>
-          <div class="flex items-center justify-between mt-3 pt-3" style="border-top: 1px solid var(--tl-border)">
+          <div class="flex items-center justify-between mt-3 pt-3" style="border-top:  0.5px solid var(--tl-border)">
             <el-checkbox v-model="query.mine" @change="reload">只看我提交的</el-checkbox>
             <el-button size="small" text type="primary" @click="resetFilters">重置筛选</el-button>
           </div>
@@ -173,8 +173,42 @@
       </el-collapse-item>
     </el-collapse>
 
-    <!-- 漏洞列表 -->
-    <el-card shadow="never" body-style="padding: 0 0 12px">
+    <div v-loading="loading" class="mobile-record-list flex flex-col gap-2 md:hidden">
+      <div v-for="row in items" :key="row.id" class="mobile-record-card" @click="router.push(`/vulns/${row.id}`)">
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1 font-medium">{{ row.title }}</div>
+          <span class="dot-tag shrink-0" :style="levelDotStyle(row.level)">
+            <i></i>{{ meta?.vul_level?.[row.level] ?? row.level }}
+          </span>
+        </div>
+        <div class="mobile-record-meta">
+          <span class="dot-tag" :style="statusDotStyle(row.status, row.is_retest)">
+            <i></i>{{ statusLabel(row.status, row.is_retest, meta?.vul_status) }}
+          </span>
+          <span>{{ row.department || '-' }}</span>
+          <span>{{ fmtDateTime(row.submit_time) }}</span>
+        </div>
+        <div v-if="row.due_at" class="mobile-record-meta">
+          <span>修复时限 {{ fmtDateTime(row.due_at) }}</span>
+          <span>{{ slaStateMeta(row.sla_state).label }}</span>
+          <span>{{ fmtSlaRemaining(row.sla_remaining_hours) }}</span>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button v-if="row.can_edit" link type="primary" @click.stop="router.push(`/vulns/${row.id}/edit`)">编辑</el-button>
+          <el-popconfirm v-if="canDeleteVuln(row)" title="确认删除该漏洞？删除后不可恢复" width="220" @confirm="removeVuln(row)">
+            <template #reference>
+              <el-button link type="danger" @click.stop>删除</el-button>
+            </template>
+          </el-popconfirm>
+        </div>
+      </div>
+      <el-empty v-if="!loading && !items.length" description="暂无漏洞记录" :image-size="64" />
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
+    </div>
+
+    <!-- 桌面漏洞列表 -->
+    <el-card shadow="never" body-style="padding: 0 0 12px" class="hidden md:block">
       <el-table v-loading="loading" :data="items" stripe @row-click="(row: Vuln) => router.push(`/vulns/${row.id}`)"
                class="cursor-pointer" @selection-change="(rows: Vuln[]) => (selected = rows)"
                 @sort-change="onSortChange">
@@ -218,7 +252,9 @@
             <div v-if="row.due_at" class="flex flex-col gap-0.5">
               <span class="num text-xs">{{ fmtDateTime(row.due_at) }}</span>
               <span class="dot-tag" :style="dotStyle(slaStateMeta(row.sla_state).color)">
-                <i></i>{{ slaStateMeta(row.sla_state).label }} · {{ fmtSlaRemaining(row.sla_remaining_hours) }}
+                <i></i>
+                <span>{{ slaStateMeta(row.sla_state).label }}</span>
+                <span class="text-gray-400">{{ fmtSlaRemaining(row.sla_remaining_hours) }}</span>
               </span>
             </div>
             <span v-else class="text-xs text-gray-400">-</span>
@@ -471,6 +507,29 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.mobile-record-list {
+  width: 100%;
+}
+.mobile-record-card {
+  padding: 14px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.mobile-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+.mobile-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 8px;
+}
 /* 筛选弹窗：字段小标签（统计卡/勾选卡/折叠标题样式已上提 style.css 全局共用） */
 .filter-label {
   font-size: 12px;

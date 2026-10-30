@@ -1,18 +1,20 @@
 <template>
-  <el-card shadow="never">
-    <div class="flex items-center flex-wrap gap-2 mb-3">
+  <div class="space-y-3">
+    <FilterToolbar>
       <div class="tl-search-field">
         <el-input v-model="search" placeholder="搜索用户名 / 姓名" clearable
                   @keyup.enter="load(1)" @clear="load(1)">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <div class="flex-1" />
-      <el-button type="primary" class="btn-min" @click="openUser()">
-        <el-icon class="mr-1"><Plus /></el-icon>新建用户
-      </el-button>
-    </div>
+      <template #actions>
+        <el-button type="primary" class="btn-min" @click="openUser()">
+          <el-icon class="mr-1"><Plus /></el-icon>新建用户
+        </el-button>
+      </template>
+    </FilterToolbar>
 
+    <el-card shadow="never" body-style="padding: 0 0 12px">
     <el-table v-loading="loading" :data="users" stripe @sort-change="onSortChange">
       <el-table-column type="index" label="序号" width="64"
                        :index="(i: number) => (page - 1) * size + i + 1" />
@@ -45,7 +47,8 @@
 
     <TlPagination v-model:page="page" v-model:size="size" :total="total"
                   @page-change="load" @size-change="onSizeChange" />
-  </el-card>
+    </el-card>
+  </div>
 
   <el-dialog
              :close-on-click-modal="false" v-model="userDialog" :title="userForm.id ? '编辑用户' : '新建用户'" width="480px">
@@ -113,6 +116,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import { useListPage } from '../composables/useListPage'
 import { dotStyle, softStyle, STAT_CARD_COLORS } from '../utils/colors'
 import TlPagination from '../components/TlPagination.vue'

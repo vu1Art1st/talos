@@ -3,7 +3,7 @@
              :before-close="onBeforeClose" @update:model-value="onVisibleChange">
     <template #header>
       <div class="flex items-center gap-3">
-        <span class="text-base font-semibold">漏扫基线工单 · {{ plan?.system_name || '' }}</span>
+        <span class="text-base font-semibold">漏扫基线工单：{{ plan?.system_name || '' }}</span>
         <span v-if="plan" class="font-mono text-sm" style="color: var(--el-color-primary)">
           {{ plan.ticket_id || '-' }}
         </span>
@@ -32,14 +32,14 @@
                 </span>
                 <div class="flex-1" />
                 <span v-if="!isIgnored(t.key)" class="text-xs" style="color: var(--tl-text-3)">
-                  初测 <b>{{ itemOf(t.key).first_times ?? 0 }}</b> 次 · 复测 <b>{{ itemOf(t.key).retest_times ?? 0 }}</b> 次
+                  初测 <b>{{ itemOf(t.key).first_times ?? 0 }}</b> 次，复测 <b>{{ itemOf(t.key).retest_times ?? 0 }}</b> 次
                 </span>
                 <span v-else class="text-xs" style="color: var(--tl-text-3)">不参与统计</span>
               </div>
 
               <!-- 步骤条：忽略项灰度占位，不显示进度 -->
               <div v-if="isIgnored(t.key)" class="steps mb-3">
-                <div class="step-placeholder">已忽略 · 不参与统计</div>
+                <div class="step-placeholder">已忽略，不参与统计</div>
               </div>
               <div v-else class="steps mb-3">
                 <template v-for="(s, i) in FLOW_STATES" :key="s.key">
@@ -244,21 +244,21 @@ watch(
   font-size: 12px;
   color: var(--tl-text-3);
   background: var(--tl-surface-2);
-  border: 1px solid var(--tl-border);
+  border:  0.5px solid var(--tl-border);
 }
 .step.done .dot {
   background: var(--tl-success);
   border-color: var(--tl-success);
-  color: #fff;
+  color: var(--tl-on-primary);
 }
 .step.current .dot {
   background: var(--el-color-primary);
   border-color: var(--el-color-primary);
-  color: #fff;
+  color: var(--tl-on-primary);
   font-weight: 600;
 }
 .step-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--tl-text-3);
   white-space: nowrap;
 }
@@ -281,7 +281,7 @@ watch(
   font-size: 12px;
   color: var(--tl-text-3);
   padding: 12px 0;
-  border: 1px dashed var(--tl-border);
-  border-radius: 6px;
+  border:  0.5px dashed var(--tl-border);
+  border-radius: 4px;
 }
 </style>

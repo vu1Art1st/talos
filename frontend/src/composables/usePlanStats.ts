@@ -4,7 +4,7 @@ import * as echarts from 'echarts'
 import client from '../api/client'
 import { useThemeStore } from '../stores/theme'
 import type { PlanStats, QueryParams } from '../types'
-import { chartThemeName } from '../utils/chartTheme'
+import { chartNeutral, chartPalette, chartThemeName } from '../utils/chartTheme'
 import { STAT_CARD_COLORS } from '../utils/colors'
 
 /** 统计面板可选维度（与后端 `GET /testing-plans/stats` 返回字段一致） */
@@ -55,7 +55,7 @@ export function usePlanStats(getFilterParams: () => QueryParams) {
 
   watch(dims, (v) => {
     localStorage.setItem(STATS_DIMS_KEY, JSON.stringify(v))
-    if (v.includes('vulns_by_month')) nextTick(renderMonthChart)
+    if (statsPanel.value.includes('stats') && v.includes('vulns_by_month')) nextTick(renderMonthChart)
   })
 
   // 折叠面板展开 / 明暗切换时，按新主题重建月度图表（隐藏态 init 会得到 0 尺寸，需在可见后渲染；
@@ -64,7 +64,7 @@ export function usePlanStats(getFilterParams: () => QueryParams) {
     if (panel.includes('stats') && dims.value.includes('vulns_by_month')) {
       await nextTick()
       renderMonthChart()
-      setTimeout(() => monthChart?.resize(), 320)
+      setTimeout(() => monthChart?.resize(), 250)
     }
   })
 
@@ -73,7 +73,9 @@ export function usePlanStats(getFilterParams: () => QueryParams) {
     try {
       const { data } = await client.get('/testing-plans/stats', { params: getFilterParams() })
       stats.value = data
-      if (dims.value.includes('vulns_by_month')) nextTick(renderMonthChart)
+      if (statsPanel.value.includes('stats') && dims.value.includes('vulns_by_month')) {
+        nextTick(renderMonthChart)
+      }
     } finally {
       statsLoading.value = false
     }
@@ -91,16 +93,20 @@ export function usePlanStats(getFilterParams: () => QueryParams) {
       monthChartTheme = themeName
     }
     const rows = stats.value.vulns_by_month ?? []
+    const neutral = chartNeutral(theme.dark)
+    const [, sky] = chartPalette(theme.dark)
     monthChart.setOption({
+      animationDuration: 0,
+      animationDurationUpdate: 0,
       tooltip: { trigger: 'axis' },
       grid: { left: 40, right: 16, top: 30, bottom: 72 },
-      title: { text: '按月漏洞数', textStyle: { fontSize: 12.5, fontWeight: 'normal', color: STAT_CARD_COLORS.gray } },
+      title: { text: '按月漏洞数', textStyle: { fontSize: 12, fontWeight: 'normal', color: neutral.muted } },
       xAxis: {
         type: 'category', data: rows.map((r) => r.month),
-        axisLabel: { rotate: 45, fontSize: 10.5, hideOverlap: true },
+        axisLabel: { rotate: 45, fontSize: 12, hideOverlap: true },
       },
       yAxis: { type: 'value', minInterval: 1 },
-      series: [{ type: 'bar', data: rows.map((r) => r.count), itemStyle: { color: STAT_CARD_COLORS.blue }, barMaxWidth: 32 }],
+      series: [{ type: 'bar', data: rows.map((r) => r.count), itemStyle: { color: sky }, barMaxWidth: 32 }],
     })
     monthChart.resize()
   }

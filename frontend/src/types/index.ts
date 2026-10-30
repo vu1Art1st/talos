@@ -299,7 +299,7 @@ export interface NonpenPlan {
 /** 漏扫基线工单表单模型 */
 export type NonpenPlanForm = NonpenPlan & { id: number | null }
 
-/** 工单抽屉标签：`info` 工单信息（只读/编辑） · `flow` 测试流程 */
+/** 工单抽屉标签：`info` 工单信息（只读/编辑），`flow` 测试流程 */
 export type PlanDrawerTab = 'info' | 'flow'
 
 /** 组织成员（`GET /group-members/all`，资产负责人下拉数据源 / 组织成员管理） */
@@ -843,6 +843,9 @@ export interface VulnStats {
 export interface Report {
   id: number
   title: string
+  project_name?: string | null
+  author?: string | null
+  update_time?: string
   actual_mandays?: number | null
   create_time?: string
   /** 本报告所含漏洞是否已全部闭环（已修复/已忽略），用于「复测完成」标注 */
@@ -865,13 +868,11 @@ export type RetestState = 'none' | 'ongoing' | 'done'
 export interface ReportDetail extends Report {
   sections: ReportSection[]
   customer?: string | null
-  project_name?: string | null
   target_ip?: string | null
   test_account?: string | null
   version?: number
   test_start?: string | null
   test_end?: string | null
-  author?: string | null
   testing_plan_id?: number | null
   /**
    * 编辑乐观锁版本（后端每次保存 +1）：保存时必须把服务端返回的原值原样回传，

@@ -23,7 +23,31 @@
       </template>
     </FilterToolbar>
 
-    <el-card shadow="never" body-style="padding: 0 0 12px">
+    <div v-loading="loading" class="mobile-record-list flex flex-col gap-2 md:hidden">
+      <div v-for="row in items" :key="row.id" class="mobile-record-card">
+        <button class="mobile-record-title" type="button" @click="router.push(`/reports/${row.id}`)">
+          {{ row.title }}
+        </button>
+        <div class="mobile-record-meta">
+          <span>{{ row.project_name || '未填写测试系统' }}</span>
+          <span class="tl-tag" :style="retestStateSoftStyle(row.retest_state)">{{ retestStateName(row.retest_state) }}</span>
+          <span>{{ row.author || '-' }}</span>
+          <span>{{ fmtDateTime(row.update_time) }}</span>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="router.push(`/reports/${row.id}`)">编辑</el-button>
+          <el-button link type="warning" @click="retest(row.id)">复测</el-button>
+          <el-popconfirm title="确认删除该报告？" @confirm="remove(row.id)">
+            <template #reference><el-button link type="danger">删除</el-button></template>
+          </el-popconfirm>
+        </div>
+      </div>
+      <el-empty v-if="!loading && !items.length" description="暂无报告" :image-size="64" />
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
+    </div>
+
+    <el-card shadow="never" body-style="padding: 0 0 12px" class="hidden md:block">
     <el-table ref="tableRef" v-loading="loading" :data="items" stripe @sort-change="onSortChange"
               @selection-change="onSelectionChange" @expand-change="onExpandChange"
               row-key="id" class="report-table">
@@ -73,7 +97,7 @@
         <template #default="{ row }">
           <template v-if="row.ticket_id">
             <span class="font-mono">{{ row.ticket_id }}</span>
-            <span class="text-gray-400"> · {{ row.ticket_system_name || '未填写' }}</span>
+            <span class="text-gray-400 ml-2">{{ row.ticket_system_name || '未填写' }}</span>
           </template>
           <span v-else class="text-gray-400">-</span>
         </template>
@@ -364,4 +388,37 @@ onMounted(async () => {
 .report-table :deep(.el-table__expand-column) { padding: 0; }
 .report-table :deep(.el-table__expand-column .cell) { padding: 0; }
 .report-table :deep(.el-table__expand-icon) { display: none; }
+.mobile-record-list {
+  width: 100%;
+}
+.mobile-record-card {
+  padding: 14px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.mobile-record-title {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tl-text-strong);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+}
+.mobile-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+.mobile-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
 </style>

@@ -173,29 +173,29 @@ function onSearch() {
       for (const v of r.vulns ?? []) items.push({
         key: `s-vuln-${v.id}`, label: v.title ?? String(v.id),
         html: highlight(v.title ?? String(v.id), kw),
-        sub: `漏洞 · ${v.snippet ?? ''}`, subHtml: highlight(`漏洞 · ${v.snippet ?? ''}`, kw),
+        sub: `漏洞：${v.snippet ?? ''}`, subHtml: highlight(`漏洞：${v.snippet ?? ''}`, kw),
         icon: Warning, path: `/vulns/${v.id}`,
         run: () => { router.push(`/vulns/${v.id}`); close() },
       })
       for (const a of r.assets ?? []) items.push({
         key: `s-asset-${a.id}`, label: a.name ?? String(a.id),
         html: highlight(a.name ?? String(a.id), kw),
-        sub: `资产 · ${a.snippet ?? ''}`, subHtml: highlight(`资产 · ${a.snippet ?? ''}`, kw),
+        sub: `资产：${a.snippet ?? ''}`, subHtml: highlight(`资产：${a.snippet ?? ''}`, kw),
         icon: Monitor, path: '/assets',
         run: () => { router.push('/assets'); close() },
       })
       for (const pl of r.plans ?? []) items.push({
         key: `s-plan-${pl.type}-${pl.id}`, label: pl.title ?? String(pl.id),
         html: highlight(pl.title ?? String(pl.id), kw),
-        sub: `${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'} · ${pl.snippet ?? ''}`,
-        subHtml: highlight(`${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'} · ${pl.snippet ?? ''}`, kw),
+        sub: `${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'}：${pl.snippet ?? ''}`,
+        subHtml: highlight(`${pl.type === 'nonpen' ? '漏扫基线工单' : '渗透测试工单'}：${pl.snippet ?? ''}`, kw),
         icon: Tickets, path: pl.type === 'nonpen' ? '/nonpen-plans' : '/testing-plans',
         run: () => { router.push(pl.type === 'nonpen' ? '/nonpen-plans' : '/testing-plans'); close() },
       })
       for (const rp of r.reports ?? []) items.push({
         key: `s-report-${rp.id}`, label: rp.title ?? String(rp.id),
         html: highlight(rp.title ?? String(rp.id), kw),
-        sub: `报告 · ${rp.snippet ?? ''}`, subHtml: highlight(`报告 · ${rp.snippet ?? ''}`, kw),
+        sub: `报告：${rp.snippet ?? ''}`, subHtml: highlight(`报告：${rp.snippet ?? ''}`, kw),
         icon: Document, path: `/reports/${rp.id}`,
         run: () => { router.push(`/reports/${rp.id}`); close() },
       })
@@ -228,7 +228,7 @@ function run(item: CmdItem) {
     const entry: RecentCmd = {
       key: item.key.replace(/^recent-/, ''),
       label: item.label,
-      sub: item.sub?.split(' · ')[0] || '最近访问',
+      sub: item.sub?.split('：')[0] || '最近访问',
       path: item.path,
     }
     recent.value = [entry, ...recent.value.filter((x) => x.key !== entry.key)].slice(0, 5)
@@ -272,20 +272,20 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   position: fixed;
   inset: 0;
   z-index: 2100;
-  background: rgba(4, 8, 6, .45);
+  background: var(--sage-a6);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 14vh;
 }
-html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
+html:not(.dark) .cmdk-mask { background: var(--sage-a4); }
 .cmdk {
   width: 560px;
   max-width: calc(100vw - 40px);
-  border-radius: 12px;
+  border-radius: 8px;
   background: var(--tl-surface);
-  border: 1px solid var(--tl-border-strong);
-  box-shadow: 0 16px 48px rgba(15, 23, 20, .30);
+  border:  0.5px solid var(--tl-border-strong);
+  box-shadow: var(--tl-shadow-pop);
   overflow: hidden;
 }
 .cmdk-input {
@@ -293,7 +293,7 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
   align-items: center;
   gap: 10px;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--tl-border);
+  border-bottom:  0.5px solid var(--tl-border);
   color: var(--tl-text-3);
 }
 .cmdk-input input {
@@ -303,7 +303,7 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
   background: transparent;
   color: var(--tl-text-1);
   font: inherit;
-  font-size: 13.5px;
+  font-size: 14px;
 }
 .cmdk-input input::placeholder { color: var(--tl-text-3); }
 .cmdk-list { padding: 8px; max-height: 320px; overflow-y: auto; }
@@ -313,12 +313,12 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
   padding: 8px 12px 0;
 }
 .cmdk-filters button {
-  border: 1px solid var(--tl-border);
-  border-radius: 6px;
+  border:  0.5px solid var(--tl-border);
+  border-radius: 4px;
   background: transparent;
   color: var(--tl-text-3);
   padding: 3px 8px;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
 }
 .cmdk-filters button.active {
@@ -327,10 +327,10 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
   color: var(--tl-text-1);
 }
 .cmdk-group {
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--tl-text-3);
-  letter-spacing: .08em;
+  letter-spacing: 0;
   margin: 8px 8px 4px;
 }
 .cmdk-item {
@@ -338,8 +338,8 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 7px;
-  font-size: 13px;
+  border-radius: 4px;
+  font-size: 14px;
   color: var(--tl-text-2);
   cursor: pointer;
 }
@@ -347,15 +347,15 @@ html:not(.dark) .cmdk-mask { background: rgba(20, 30, 26, .30); }
 .cmdk-item.sel { outline: 1px solid var(--tl-border-strong); }
 .cmdk-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cmdk-label.rich { min-width: 0; }
-.cmdk-sub { font-size: 10.5px; color: var(--tl-text-3); flex: none; }
+.cmdk-sub { font-size: 12px; color: var(--tl-text-3); flex: none; }
 .cmdk-item .kbd { margin-left: auto; }
-.cmdk-empty { padding: 28px 0; text-align: center; color: var(--tl-text-3); font-size: 12.5px; }
+.cmdk-empty { padding: 28px 0; text-align: center; color: var(--tl-text-3); font-size: 12px; }
 .cmdk-foot {
   display: flex;
   gap: 14px;
   padding: 9px 16px;
-  border-top: 1px solid var(--tl-border);
-  font-size: 11px;
+  border-top:  0.5px solid var(--tl-border);
+  font-size: 12px;
   color: var(--tl-text-3);
 }
 .cmdk-foot span { display: flex; align-items: center; gap: 4px; }

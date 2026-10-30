@@ -1,15 +1,15 @@
 <template>
-  <el-card shadow="never">
-    <div class="flex items-center flex-wrap gap-2 mb-3">
+  <FilterToolbar>
       <div class="tl-search-field">
-        <el-input v-model="keyword" placeholder="搜索漏洞名称 / 类型" clearable>
+        <el-input v-model="keyword" placeholder="搜索漏洞名称 / 类型" clearable
+                  @keyup.enter="load(1)" @clear="load(1)">
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
       </div>
-      <span class="text-gray-400 text-xs">按漏洞名称沉淀标准描述 / 危害说明 / 修复建议，提交漏洞与 Word 导入时可自动套用</span>
+      <span class="text-gray-400 text-xs">共 {{ total }} 条</span>
       <div class="flex-1" />
-      <el-button :disabled="!filteredItems.length" class="btn-min" @click="exportEntries">
-        <el-icon class="mr-1"><Download /></el-icon>导出
+      <el-button :disabled="!items.length" class="btn-min" @click="exportEntries">
+        <el-icon class="mr-1"><Download /></el-icon>导出当前页
       </el-button>
       <template v-if="auth.hasPerm('vuln:manage')">
         <el-button type="danger" plain :disabled="!selected.length" class="btn-min" @click="removeBatch">
@@ -22,9 +22,37 @@
           <el-icon class="mr-1"><Plus /></el-icon>新建条目
         </el-button>
       </template>
+  </FilterToolbar>
+
+  <el-card shadow="never" body-style="padding: 0 0 12px">
+    <div v-loading="loading" class="mobile-record-list flex flex-col gap-2 md:hidden">
+      <div v-for="row in items" :key="row.id" class="mobile-record-card">
+        <div class="flex items-start gap-2">
+          <div class="min-w-0 flex-1 font-medium">{{ row.vulnerability_name }}</div>
+          <span class="dot-tag shrink-0" :style="levelDotStyle(row.severity_level)">
+            <i></i>{{ meta?.vul_level?.[row.severity_level] ?? row.severity_level }}
+          </span>
+        </div>
+        <div class="mobile-record-meta">
+          <span class="ktag">{{ meta?.vul_type?.[row.vul_type] ?? row.vul_type }}</span>
+          <span>{{ row.username || '-' }}</span>
+          <span>{{ fmtDateTime(row.update_time) }}</span>
+        </div>
+        <div class="mobile-record-actions">
+          <el-button link type="primary" @click="openFormDialog(row)">编辑</el-button>
+          <el-popconfirm v-if="auth.hasPerm('vuln:manage')" title="确认删除该模板？" @confirm="remove(row.id)">
+            <template #reference><el-button link type="danger">删除</el-button></template>
+          </el-popconfirm>
+        </div>
+      </div>
+      <el-empty v-if="!loading && !items.length" description="暂无模板" :image-size="64" />
+      <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                    @page-change="load" @size-change="onSizeChange" />
     </div>
 
-    <el-table v-loading="loading" :data="filteredItems" stripe @selection-change="(rows: KnowledgeEntry[]) => (selected = rows)">
+    <el-table v-loading="loading" :data="items" stripe class="hidden md:block"
+              @selection-change="(rows: KnowledgeEntry[]) => (selected = rows)"
+              @sort-change="onSortChange">
       <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
       <el-table-column prop="vulnerability_name" label="漏洞名称" min-width="200" show-overflow-tooltip sortable />
       <el-table-column prop="vul_type" label="漏洞类型" width="140" sortable>
@@ -65,6 +93,8 @@
         <el-empty description="暂无知识库条目，可新建或批量导入" :image-size="80" />
       </template>
     </el-table>
+    <TlPagination v-model:page="page" v-model:size="size" :total="total"
+                  @page-change="load" @size-change="onSizeChange" />
   </el-card>
 
   <el-dialog
@@ -145,13 +175,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormRules } from 'element-plus'
 import { Delete, Download, Plus, Search, Upload } from '@element-plus/icons-vue'
 import client from '../api/client'
+import FilterToolbar from '../components/FilterToolbar.vue'
 import RichEditor from '../components/RichEditor.vue'
+import TlPagination from '../components/TlPagination.vue'
 import { useAuthStore } from '../stores/auth'
+import { useListPage } from '../composables/useListPage'
 import { levelDotStyle, softStyle } from '../utils/colors'
 import { scoreFromVector, scoreToLevel } from '../utils/cvss'
 import { levelColor } from '../utils/colors'
@@ -162,17 +195,16 @@ import type { KnowledgeEntry, KnowledgeForm } from '../types'
 
 const auth = useAuthStore()
 const meta = ref<Record<string, Record<number, string>> | null>(null)
-const items = ref<KnowledgeEntry[]>([])
-const keyword = ref('')
-const filteredItems = computed(() => {
-  const k = keyword.value.trim().toLowerCase()
-  if (!k) return items.value
-  return items.value.filter((r) =>
-    (r.vulnerability_name || '').toLowerCase().includes(k) ||
-    (meta.value?.vul_type?.[r.vul_type] || '').toLowerCase().includes(k))
+const {
+  items, total, page, size, search: keyword, loading, load, onSortChange, onSizeChange,
+} = useListPage<KnowledgeEntry>('/knowledge/page', {
+  size: 20,
+  defaultSort: { prop: 'severity_level', order: 'asc' },
 })
 const selected = ref<KnowledgeEntry[]>([])
-const loading = ref(false)
+watch(items, () => {
+  selected.value = []
+})
 const saving = ref(false)
 const dialogVisible = ref(false)
 const editing = ref(false)
@@ -196,9 +228,9 @@ const form = reactive<KnowledgeForm>(emptyForm())
 // CVSS 向量评分预览：合法向量实时展示评分与等级色
 const cvssPreview = computed(() => scoreFromVector(form.cvss_vector))
 const cvssPreviewColor = computed(() => {
-  if (!cvssPreview.value) return '#8a968f'
+  if (!cvssPreview.value) return 'var(--sage-11)'
   const lv = scoreToLevel(cvssPreview.value.score)
-  return lv !== null ? levelColor(lv) : '#8a968f'
+  return lv !== null ? levelColor(lv) : 'var(--sage-11)'
 })
 const formRef = ref<FormInstance>()
 const formRules: FormRules = {
@@ -213,16 +245,6 @@ function plainText(html: string) {
     el.insertAdjacentText('beforeend', '\n')
   })
   return (doc.body.textContent ?? '').replace(/\n{2,}/g, '\n').trim()
-}
-
-async function load() {
-  loading.value = true
-  try {
-    const { data } = await client.get<KnowledgeEntry[]>('/knowledge')
-    items.value = data
-  } finally {
-    loading.value = false
-  }
 }
 
 function openFormDialog(row?: KnowledgeEntry) {
@@ -305,8 +327,8 @@ function downloadTemplate() {
 }
 
 function exportEntries() {
-  if (!filteredItems.value.length) return
-  const blob = new Blob([serializeKnowledgeExport(filteredItems.value)], {
+  if (!items.value.length) return
+  const blob = new Blob([serializeKnowledgeExport(items.value)], {
     type: 'application/json;charset=utf-8',
   })
   saveBlob(blob, 'knowledge-templates.json')
@@ -342,3 +364,29 @@ onMounted(async () => {
   await load()
 })
 </script>
+
+<style scoped>
+.mobile-record-list {
+  width: 100%;
+}
+.mobile-record-card {
+  padding: 14px;
+  border: 0.5px solid var(--tl-border);
+  border-radius: 8px;
+  background: var(--tl-surface);
+}
+.mobile-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin-top: 8px;
+  color: var(--tl-text-2);
+  font-size: 12px;
+}
+.mobile-record-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+</style>

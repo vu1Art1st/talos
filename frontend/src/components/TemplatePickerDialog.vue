@@ -69,7 +69,7 @@
           漏洞模板库 / {{ t.vul_type_name }} / {{ t.vulnerability_name }}
         </div>
         <div class="text-xs text-gray-400 mt-1">
-          维护人 {{ t.username || '-' }} · 更新于 {{ fmtDateTime(t.update_time) }}
+          维护人 {{ t.username || '-' }}，更新于 {{ fmtDateTime(t.update_time) }}
         </div>
         <p class="text-xs text-gray-500 mt-1 line-clamp-2" v-html="highlight(t.summary, q.trim())"></p>
       </div>

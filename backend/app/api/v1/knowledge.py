@@ -24,6 +24,7 @@ from app.schemas import (
     KnowledgeOut,
     KnowledgeSearchItem,
     KnowledgeSearchOut,
+    Page,
 )
 from app.services.audit_service import audit
 
@@ -35,6 +36,13 @@ _SEARCH_SORT_FIELDS = {
     "update_time": "update_time",
     "severity_level": "severity_level",
     "name": "vulnerability_name",
+}
+_LIST_SORT_FIELDS = {
+    "vulnerability_name",
+    "severity_level",
+    "vul_type",
+    "username",
+    "update_time",
 }
 _SEARCH_SUMMARY_LIMIT = 80
 
@@ -127,6 +135,33 @@ async def list_entries(
             )
         )
     ).scalars().all()
+
+
+@router.get("/page", response_model=Page[KnowledgeOut])
+async def page_entries(
+    search: str = Query("", max_length=64),
+    sort: str = Query("severity_level", max_length=32),
+    order: str = Query("asc", pattern="^(asc|desc)$"),
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    _: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """漏洞模板库分页列表，供主列表页避免一次加载全部模板。"""
+    stmt = select(KnowledgeEntry)
+    where_cond, _score = _keyword_match(search.strip(), False)
+    if where_cond is not None:
+        stmt = stmt.where(where_cond)
+    stmt = apply_sort(
+        stmt,
+        KnowledgeEntry,
+        sort,
+        order,
+        _LIST_SORT_FIELDS,
+        (KnowledgeEntry.severity_level, KnowledgeEntry.vul_type, KnowledgeEntry.id),
+    )
+    total, rows = await paginate(session, stmt, page, size)
+    return Page(items=rows, total=total, page=page, size=size)
 
 
 def _apply_search_filters(
