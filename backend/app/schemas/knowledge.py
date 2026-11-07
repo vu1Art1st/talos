@@ -19,7 +19,7 @@ class KnowledgeIn(BaseModel):
     solution_html: HtmlStr = ""
     solution_json: dict | None = None
     references: list[str] = []
-    # CVSS 3.1 向量字符串（F4）：套用模板时一并带入漏洞表单的计算器
+    # CVSS 向量字符串：新建使用 4.0，套用模板时一并带入漏洞表单
     cvss_vector: str = ""
 
     @field_validator("vulnerability_name", mode="after")

@@ -167,6 +167,7 @@
   --tl-table-stripe: var(--sage-2);
   --tl-table-head: var(--sage-3);
   --tl-table-hover: var(--sage-4);
+  --tl-table-focus: var(--jade-3);
 }
 
 html.dark {
@@ -268,6 +269,10 @@ html.dark { color-scheme: dark; }
   --el-table-bg-color: var(--tl-surface);
   --el-table-tr-bg-color: var(--tl-surface);
   --el-table-header-bg-color: var(--tl-table-head);
+}
+/* 固定操作列覆盖在横向滚动内容上，背景必须保持不透明，避免行底色或标签透出。 */
+.el-table .el-table-fixed-column--right {
+  background-color: var(--el-table-tr-bg-color);
 }
 
 .el-table__body tr.el-table__row--striped > td.el-table__cell {

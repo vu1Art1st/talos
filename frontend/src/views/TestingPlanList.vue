@@ -799,7 +799,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 :deep(.el-table__body tr.plan-row-focus > td.el-table__cell) {
-  background: var(--jade-a3) !important;
+  background-color: var(--tl-table-focus) !important;
 }
 /* 筛选按钮上的条件数徽标 */
 /* 快捷预设：直接写入下方条件树 */

@@ -25,6 +25,16 @@
 
 ---
 
+## [2.32.0] - 2026-11-07
+
+### 变更
+
+- **CVSS 评分体系升级至 4.0**：新建与重新计算统一使用 CVSS 4.0 Base（11 项基础指标，MacroVector 计算由 `@pandatix/js-cvss@0.4.4` 提供）；`utils/cvss.ts` 改为评分适配层，`CvssCalculator.vue` 按 4.0 指标重做，新增 `CvssCalculator.spec.ts` 并扩充 `cvss.spec.ts` 用例。
+- **存量 3.1 向后兼容**：历史 CVSS 3.1 向量保持只读解析与评分展示，计算器提供「按 CVSS 4.0 重新评分」入口；`cvss_vector` / `score` 字段类型与 API 契约不变，无数据库迁移。
+- **知识库与文档同步**：知识库 `cvss_vector` 注释及模板套用口径对齐 4.0；README / README_EN / USER_GUIDE / OPEN_API_GUIDE / ROADMAP / AGENTS 全量校订（开放 API 示例向量改 4.0、字段说明标注兼容口径、路线图能力项更新）。
+
+---
+
 ## [2.31.0] - 2026-10-31
 
 ### 新增

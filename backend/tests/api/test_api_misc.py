@@ -199,24 +199,24 @@ async def test_notify_emit_on_vuln_created(client: AsyncClient, auth: dict, monk
 
 # ---------- F4 CVSS ----------
 async def test_vuln_cvss_fields(client: AsyncClient, auth: dict):
-    vector = "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"
+    vector = "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N"
     resp = await client.post(
         "/api/v1/vulns", headers=auth,
-        json={"title": "CVSS评分漏洞", "level": 10, "score": 9.8, "cvss_vector": vector},
+        json={"title": "CVSS评分漏洞", "level": 10, "score": 9.3, "cvss_vector": vector},
     )
     assert resp.status_code == 200, resp.text
     vul = resp.json()
-    assert vul["score"] == 9.8
+    assert vul["score"] == 9.3
     assert vul["cvss_vector"] == vector
 
     # 编辑改分
     resp = await client.put(
         f"/api/v1/vulns/{vul['id']}", headers=auth,
-        json={"title": "CVSS评分漏洞", "level": 10, "score": 5.3,
-              "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:N/A:N"},
+        json={"title": "CVSS评分漏洞", "level": 30, "score": 5.2,
+              "cvss_vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:P/VC:N/VI:H/VA:H/SC:N/SI:L/SA:L"},
     )
     assert resp.status_code == 200
-    assert resp.json()["score"] == 5.3
+    assert resp.json()["score"] == 5.2
 
 async def test_affected_url_multi_value_within_limits(client: AsyncClient, auth: dict):
     """回归：影响URL 录入 20/50/100 条（总远超前 varchar(512)）不再 500，且读回一致。

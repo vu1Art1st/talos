@@ -80,12 +80,12 @@ class Vul(Base):
     retest_html: Mapped[str] = mapped_column(Text, default="")
     retest_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
-    # CVSS 3.1 基础评分（0.0-10.0，一位小数；0 表示未评分）
+    # CVSS 基础评分（0.0-10.0，一位小数；0 表示未评分）
     score: Mapped[float] = mapped_column(Float, default=0)
     risk_score: Mapped[int] = mapped_column(Integer, default=0)
     left_risk_score: Mapped[int] = mapped_column(Integer, default=0)
     asset_level: Mapped[int] = mapped_column(Integer, default=0)
-    # CVSS 3.1 向量字符串（F4 计算器写入），空表示未评
+    # CVSS 4.0 向量字符串（新建/重算）；存量 3.1 向量保持可读，空表示未评
     cvss_vector: Mapped[str] = mapped_column(String(255), default="")
     # ---- P1-1 SLA 修复时限 ----
     # 修复截止时间：由 services/sla_service 在新增 / 等级变更时按策略计算落库；

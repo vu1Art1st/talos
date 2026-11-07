@@ -206,7 +206,7 @@ GET /api/v1/open/vulns
       "risk_score": 0,
       "left_risk_score": 0,
       "asset_level": 0,
-      "cvss_vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H",
+      "cvss_vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N",
       "asset_ids": [12, 30],
       "testing_plan_id": 88,
       "status": 50,
@@ -254,7 +254,7 @@ GET /api/v1/open/vulns
 | `level` / `vul_type` / `status` / `layer` / `source` | 字典码（int），按 4.2 表翻译；`source=0` 表示未选择来源（关联渗透测试工单的漏洞固定为 0） |
 | `affected_url` | 受影响 URL |
 | `description_html` / `reproduce_html` / `solution_html` | 漏洞描述 / 复现过程 / 修复建议（**富文本 HTML**，已消毒；`*_json` 为 TipTap 文档结构，可能为 `null`） |
-| `cvss_vector` | CVSS 3.1 向量串，空串表示未评分 |
+| `cvss_vector` | CVSS 向量串；新建使用 4.0，存量 3.1 继续兼容，空串表示未评分 |
 | `score` / `risk_score` / `left_risk_score` / `asset_level` | 评分与风险分值 |
 | `assets[]` / `asset_ids[]` | 关联资产（多对多）。`assets[]` 含 `id` / `name` / `sub_system` / `department` |
 | `department` | 归属部门，由关联资产聚合，多个用「、」连接 |

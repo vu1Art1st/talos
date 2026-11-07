@@ -79,7 +79,7 @@ frontend/
   src/composables/ # 组合式函数（useListPage / useCrudDialog / useAssetSelect / useExportJobs / useDictOptions）
   src/components/  # 可复用组件（StatCard / FilterBuilder / VulnFormPanel ...）
   src/views/       # 页面视图
-  src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice / cvss（CVSS 3.1 评分）
+  src/utils/       # colors（字典展示唯一出口：meta 注册表）/ format（时间口径）/ download（blob 下载）/ chartTheme / html / tocNotice / cvss（CVSS 4.0 评分，兼容 3.1 存量）
 docs/              # DESIGN_SYSTEM / DEPLOY / RELEASE / ROADMAP
 ```
 

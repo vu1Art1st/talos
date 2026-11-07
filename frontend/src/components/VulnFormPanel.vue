@@ -126,7 +126,7 @@
               <AffectedUrlEditor v-model="vul.affected_url" />
             </el-form-item>
           </div>
-          <el-form-item label="CVSS 3.1">
+          <el-form-item label="CVSS 4.0">
             <div class="w-full">
               <div class="mb-1 flex items-center justify-between">
                 <span class="text-xs text-gray-400">按向量计算基础评分并写入漏洞评分</span>

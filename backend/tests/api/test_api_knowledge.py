@@ -364,7 +364,7 @@ async def test_knowledge_get_entry_detail(client: AsyncClient, auth: dict):
     assert (await client.get("/api/v1/knowledge/999999", headers=auth)).status_code == 404
 
 async def test_knowledge_cvss_vector(client: AsyncClient, auth: dict):
-    vector = "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:C/C:H/I:H/A:H"
+    vector = "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:H/SC:L/SI:L/SA:L"
     resp = await client.post(
         "/api/v1/knowledge", headers=auth,
         json={"vulnerability_name": "SSRF向量模板", "vul_type": 75, "severity_level": 20, "cvss_vector": vector},

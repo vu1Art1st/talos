@@ -31,7 +31,7 @@ class KnowledgeEntry(Base):
     solution_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 参考链接：[str]，每项一个 URL
     references: Mapped[list | None] = mapped_column(JSON, default=list)
-    # CVSS 3.1 向量字符串（F4）：套用模板时带入漏洞表单计算器
+    # CVSS 向量字符串：新建使用 4.0，存量 3.1 保持可读
     cvss_vector: Mapped[str] = mapped_column(String(255), default="")
     creator_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     username: Mapped[str] = mapped_column(String(64), default="")

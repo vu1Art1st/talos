@@ -11,7 +11,7 @@ Talos is a modern, full-lifecycle vulnerability management platform — a ground
 ### Vulnerability Management
 
 - **Full-lifecycle state machine**: Pending Review → Confirmed → Fixing → Retest → Completed, with a full operation trail; supports multiple retest rounds with conclusions linked to vulnerability states
-- **CVSS 3.1 scoring**: an embedded calculator scores eight metrics in real time and syncs the risk severity accordingly; CVSS vectors are persisted
+- **CVSS 4.0 scoring**: an embedded calculator scores 11 base metrics in real time and syncs the risk severity accordingly; CVSS vectors are persisted, with legacy 3.1 vectors still supported
 - **Vulnerability knowledge base**: curated templates for common vulnerability types, one-click apply in the submission form, auto backfill during report imports
 - **Application & asset inventory**: many-to-many linkage between assets and vulnerabilities; public/intranet URLs feed tickets and reports
 

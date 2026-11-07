@@ -1,6 +1,6 @@
 {
   "name": "talos-frontend",
-  "version": "2.31.0",
+  "version": "2.32.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.6.0",
@@ -21,6 +21,7 @@
     "@file-viewer/core": "3.1.2",
     "@file-viewer/renderer-word": "3.1.2",
     "@file-viewer/vue3": "3.1.2",
+    "@pandatix/js-cvss": "0.4.4",
     "@radix-ui/colors": "^3.0.0",
     "@tiptap/extension-image": "3.31.3",
     "@tiptap/extension-table": "3.31.3",

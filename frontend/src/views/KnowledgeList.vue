@@ -121,7 +121,7 @@
       <el-form-item label="CVSS向量">
         <div class="w-full flex items-center gap-3">
           <el-input v-model="form.cvss_vector" class="flex-1" maxlength="255" clearable
-                    placeholder="CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" />
+                    placeholder="CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:H/VA:H/SC:N/SI:N/SA:N" />
           <template v-if="cvssPreview">
             <span class="text-lg font-semibold tabular-nums shrink-0" :style="{ color: cvssPreviewColor }">
               {{ cvssPreview.score.toFixed(1) }}
