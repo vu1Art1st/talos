@@ -245,14 +245,14 @@ async def sync_plan_retest_state(
     plan_ids: list[int] | None = None,
     done_date: str | None = None,
 ) -> list:
-    """漏洞闭环与工单复测状态双向联动（需求6：报告状态不再由漏洞闭环驱动，
-    仅保留工单「复测完成/复测中」联动；报告状态由导出 Word 与内容变更管理）。
+    """漏洞复测结论与工单复测状态双向联动（报告状态由导出 Word 与内容变更管理）。
 
-    判定口径为**工单级**：以工单全部关联漏洞（`Vul.testing_plan_id`）是否闭环为准，
-    不按单份报告的章节聚合——工单含多份报告/多个漏洞时，单份报告全部闭环**不会**推动
-    工单进入「复测完成」，必须工单全部漏洞闭环才流转：
+    判定口径为**工单级**：以工单全部关联漏洞（`Vul.testing_plan_id`）的复测结论为准，
+    不按单份报告的章节聚合：
     - 全部漏洞均为「已修复/已忽略」且工单处于「提请复测/复测中」→ 进入「复测完成」，
       打复测完成时间并给当前复测轮次打完成点；
+    - 当前轮次已有复测报告、全部漏洞均已形成复测结论且仍有未闭环漏洞 →
+      进入「复测未通过」，结束本轮但不写复测完成时间；
     - 存在未闭环漏洞且工单已是「复测完成」→ 回退「复测中」，清完成时间并重开最近一轮复测；
     - 其余情况不动（幂等，如工单无关联漏洞、状态本已一致）。
 
@@ -294,21 +294,40 @@ async def sync_plan_retest_state(
         plan = await session.get(TestingPlan, plan_id)
         if plan is None:
             continue
+        # 导入链路先建轮次再关联报告，关系集合可能仍是旧快照；统一刷新后再按当前轮次判定
+        await session.refresh(plan, attribute_names=["retest_rounds"])
         # 工单级闭环判定：统计工单全部关联漏洞（含未纳入任何报告章节的漏洞）
-        statuses = (
+        rows = (
             await session.execute(
-                select(Vul.status).where(Vul.testing_plan_id == plan_id)
+                select(Vul.status, Vul.is_retest).where(Vul.testing_plan_id == plan_id)
             )
-        ).scalars().all()
-        if not statuses:
+        ).all()
+        if not rows:
             continue
-        all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s in statuses)
+        all_closed = all(s in (VulStatus.IGNORED, VulStatus.FIXED) for s, _ in rows)
+        all_retested = (
+            all(s != VulStatus.RETESTING for s, _ in rows)
+            and all(s in (VulStatus.IGNORED, VulStatus.FIXED) or is_retest for s, is_retest in rows)
+        )
+        current_round_has_report = any(
+            r.done_time is None and r.report_id is not None for r in plan.retest_rounds
+        )
         if all_closed and plan.status in (PlanStatus.RETEST_APPLY, PlanStatus.RETESTING):
             plan.status = PlanStatus.RETEST_DONE  # 复测完成
             plan.retest_done_time = done_date or now().date().isoformat()
             # 当前复测轮次闭环，打完成点
             plan_service.finish_retest_round(plan)
             completed.append(plan)
+        elif (
+            plan.status == PlanStatus.RETESTING
+            and all_retested
+            and current_round_has_report
+            and not all_closed
+        ):
+            plan.status = PlanStatus.RETEST_FAILED
+            plan.retest_done_time = ""
+            # 本轮复测处理已结束，但结论未通过；再次发起复测时开启新一轮
+            plan_service.finish_retest_round(plan)
         elif not all_closed and plan.status == PlanStatus.RETEST_DONE:
             plan.status = PlanStatus.RETESTING  # 复测完成 → 复测中
             plan.retest_done_time = ""

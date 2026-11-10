@@ -15,7 +15,7 @@
 | 服务 | 版本 | 端口 | 说明 |
 |---|---|---|---|
 | PostgreSQL | **16** | 5432（默认） | 版本刻意对齐生产镜像；勿选 15/17 造成方言窗口 |
-| Redis | **7.x** | 6379（默认） | 默认配置即可，无需认证 |
+| Redis | **7.x** | 16379（自定义） | 避免 Windows 保留端口占用；默认配置即可，无需认证 |
 
 在 DBngin 中点 `+` 新建并 Start。DBngin 的数据目录（本项目为仓库内 `dev-database/`）
 已被 `.gitignore` 覆盖，**勿提交入库**。
@@ -53,7 +53,7 @@ WHERE datname IN ('vulnplatform', 'vulnplatform_test');
 # PG：以 vulnplatform 账号连两个库各执行一次
 psql "postgresql://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform" -c "SELECT version();"
 # Redis
-redis-cli -p 6379 ping   # 期望 PONG
+redis-cli -p 16379 ping   # 期望 PONG
 ```
 
 ### 4. 前端工具链前置
@@ -65,7 +65,7 @@ redis-cli -p 6379 ping   # 期望 PONG
 ## 二、日常使用
 
 ```bash
-# 一键开发（自动预检 5432/6379、解析 .env 凭据；前端 27014 / 后端 27015）
+# 一键开发（自动预检 5432/16379、解析 .env 凭据；前端 27014 / 后端 27015）
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\dev.ps1    # Windows（一律 pwsh 7，见 .codebuddy/rules/pwsh7.md）
 bash dev.sh                                            # Linux / macOS / WSL
 
@@ -75,7 +75,7 @@ bash scripts/test.sh                                          # WSL / Linux / ma
 ```
 
 - **dev 脚本口径**：`VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform`，
-  `VP_REDIS_URL=redis://127.0.0.1:6379/0`，`VP_DISABLE_REDIS=0`（Redis 真实承担限流/登录锁定/token 轮换），
+  `VP_REDIS_URL=redis://127.0.0.1:16379/0`，`VP_DISABLE_REDIS=0`（Redis 真实承担限流/登录锁定/token 轮换），
   `VP_DISABLE_QUEUE=1`（后台任务在 API 进程内执行，无需另开 arq worker，热重载友好）。
 - **测试口径**：conftest 优先读外部 `VP_DATABASE_URL`（CI services 容器兼容），否则从根 `.env`
   派生 `vulnplatform_test`；**目标库必须以 `_test` 结尾**，否则拒绝启动（session fixture 会整库
@@ -92,7 +92,7 @@ bash scripts/test.sh                                          # WSL / Linux / ma
 | 单文件跑全绿、全量跑却几十个 ERROR（`assert not self._finalizers`） | 受管终端的删除守卫在 pytest 清理 basetemp 时抛 `SystemExit(1)`，级联破坏 fixture 状态；以 `CODEBUDDY_SAFE_DELETE_ENABLED=0` 运行；见第四节 |
 | 密码更换后连不上 | `.env` 的 `POSTGRES_PASSWORD` 与 DBngin 角色密码不一致；用 `ALTER ROLE vulnplatform WITH PASSWORD '...'` 对齐 |
 | 密码含 URL 特殊字符 | `@ : / # ?` 等字符在 DSN 中需 URL 编码（当前 `.env` 密码为 URL 安全字符，无需处理） |
-| 5432/6379 被占用 | 生产 `docker-compose.yml` 的 postgres/redis 不映射宿主端口，通常是本机其它服务；换端口需同步改 dev 脚本与 conftest |
+| 5432/16379 被占用 | 生产 `docker-compose.yml` 的 postgres/redis 不映射宿主端口，通常是本机其它服务；换端口需同步改 dev/test/e2e 脚本、默认 `VP_REDIS_URL` 与文档 |
 | 与 WSL-Kali 部署验证并存 | 两者无端口冲突（compose 只暴露 27012）；DBngin 服务与容器可同时运行 |
 
 ## 四、测试与事件循环（pytest-asyncio，改动必读）
@@ -185,9 +185,10 @@ services:
     ports: ["5432:5432"]
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    ports: ["16379:6379"]
 env:
   VP_DATABASE_URL: postgresql+asyncpg://vulnplatform:test@127.0.0.1:5432/vulnplatform_test
+  VP_REDIS_URL: redis://127.0.0.1:16379/0
 ```
 
 ## 六、端到端测试（E2E）环境

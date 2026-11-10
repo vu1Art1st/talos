@@ -146,6 +146,7 @@ from .special import (
     TestingPlanLocateOut,
     TestingPlanOut,
     TestingPlanTesterOption,
+    TestingPlanUpdateIn,
 )
 from .system import (
     NotifyChannelIn,

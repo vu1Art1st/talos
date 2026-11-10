@@ -157,9 +157,9 @@ def plan_search_condition(search: str):
     return or_(*conds)
 
 
-# 「当前可测试」判定所用状态：初测中 / 提请复测 / 复测中（测试人视角的进行中状态）
+# 「当前可测试」判定所用状态：初测中 / 提请复测 / 复测中 / 复测未通过（测试人视角的进行中状态）
 _TESTER_ACTIVE_STATUSES = [
-    PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
+    PlanStatus.TESTING, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING, PlanStatus.RETEST_FAILED,
 ]
 
 
@@ -296,7 +296,7 @@ def plan_conditions(
 
     tester_id 非空时过滤「当前可测试系统」：当前用户为测试人且状态为初测中/提请复测/复测中。
     unclaimed 为真时过滤「无人认领的测试」：测试人员列表为空。
-    pending 为真时过滤「待办流程」：状态为未测试/初测中/复测中。
+    pending 为真时过滤「待办流程」：状态为未测试/初测中/复测中/复测未通过。
     两个快捷模式同时启用时按并集处理：满足任一条件的记录均展示。
     """
     cond: list = []
@@ -305,10 +305,10 @@ def plan_conditions(
     if status is not None:
         cond.append(TestingPlan.status == status)
     if pending:
-        # 待办流程：未测试 / 初测中 / 复测中
+        # 待办流程：未测试 / 初测中 / 复测中 / 复测未通过
         cond.append(
             TestingPlan.status.in_([
-                PlanStatus.UNTESTED, PlanStatus.TESTING, PlanStatus.RETESTING,
+                PlanStatus.UNTESTED, PlanStatus.TESTING, PlanStatus.RETESTING, PlanStatus.RETEST_FAILED,
             ])
         )
     if test_type:

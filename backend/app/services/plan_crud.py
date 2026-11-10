@@ -10,7 +10,7 @@ from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import NONPEN_ITEMS, PlanStatus
+from app.constants import NONPEN_ITEMS, PLAN_FORCE_STATUS_CONFIRM, TESTING_PLAN_STATUS, PlanStatus
 from app.models import NonpenPlan, TestingPlan, User, Vul
 from app.services import nonpen_service, plan_service, ticket_service, vul_service
 
@@ -57,7 +57,13 @@ async def create_plan(session: AsyncSession, data: dict, user: User) -> TestingP
 
 
 async def update_plan(
-    session: AsyncSession, row: TestingPlan, data: dict, user: User,
+    session: AsyncSession,
+    row: TestingPlan,
+    data: dict,
+    user: User,
+    *,
+    force_status: bool = False,
+    force_status_confirmation: str = "",
 ) -> tuple[TestingPlan, int]:
     """全量更新渗透测试工单，返回 (工单, 更新前状态) 供调用方按需写审计日志。"""
     locked = await plan_service.get_plan_for_update(session, row.id)
@@ -66,7 +72,17 @@ async def update_plan(
     row = locked
     old_status = row.status
     new_status = data.get("status", row.status)
-    reset_to_untested = old_status == PlanStatus.TESTING and new_status == PlanStatus.UNTESTED
+    if new_status not in TESTING_PLAN_STATUS:
+        raise HTTPException(400, "非法测试状态")
+    status_changed = new_status != old_status
+    forced = bool(force_status and status_changed)
+    if forced and force_status_confirmation != PLAN_FORCE_STATUS_CONFIRM:
+        raise HTTPException(400, f"强制修改状态须输入「{PLAN_FORCE_STATUS_CONFIRM}」")
+    reset_to_untested = (
+        not forced
+        and old_status == PlanStatus.TESTING
+        and new_status == PlanStatus.UNTESTED
+    )
     if reset_to_untested:
         if not plan_service.is_admin(user):
             raise HTTPException(403, "仅管理员可将「初测中」纠错为「未测试」")
@@ -75,11 +91,12 @@ async def update_plan(
                 400,
                 "仅无测试人员且未关联漏洞、报告或复测轮次的工单可回退为「未测试」",
             )
-    elif new_status != row.status and not plan_service.can_operate(user, row):
+    elif status_changed and not plan_service.can_operate(user, row):
         raise HTTPException(403, "仅认领者或管理员可修改测试状态")
     if (
-        not reset_to_untested
-        and new_status != row.status
+        not forced
+        and not reset_to_untested
+        and status_changed
         and not vul_service.can_plan_transition(row.status, new_status)
     ):
         raise HTTPException(400, "不允许从当前状态流转到目标状态")
@@ -93,10 +110,12 @@ async def update_plan(
         if vul_count:
             raise HTTPException(400, "该计划存在关联漏洞，不能流转为「测试通过」")
     # 手动流转到「复测中」时记一轮复测（已有进行中轮次则不重复计数）
-    if new_status == 50 and row.status != 50:
+    if not forced and new_status == PlanStatus.RETESTING and row.status != PlanStatus.RETESTING:
         plan_service.start_retest_round(session, row, "手动流转至复测中", user.id)
 
     payload = dict(data)
+    payload.pop("force_status", None)
+    payload.pop("force_status_confirmation", None)
     # 联动相关字段仅创建时生效：编辑不回写 create_nonpen 勾选，也不存在 nonpen_test_items 列
     payload.pop("create_nonpen", None)
     payload.pop("nonpen_test_items", None)

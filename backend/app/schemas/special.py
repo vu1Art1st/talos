@@ -98,6 +98,13 @@ class TestingPlanIn(BaseModel):
     nonpen_test_items: list[str] = []  # 勾选的非渗透测试项（baseline/host/web），联动创建时使用
 
 
+class TestingPlanUpdateIn(TestingPlanIn):
+    """站内编辑更新：支持经二次确认后强制绕过状态机。开放 API 不暴露该能力。"""
+
+    force_status: bool = False
+    force_status_confirmation: str = ""
+
+
 class TestingPlanOut(TestingPlanIn):
     model_config = ConfigDict(from_attributes=True)
 

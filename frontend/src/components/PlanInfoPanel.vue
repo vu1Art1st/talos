@@ -161,10 +161,16 @@
             </el-select>
           </el-form-item>
           <el-form-item label="测试状态">
-            <el-select v-model="form.status" class="w-full" :disabled="!statusEditable">
-              <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)"
-                         :disabled="statusOptionDisabled(Number(code))" />
-            </el-select>
+            <div class="w-full flex gap-2">
+              <el-select v-model="form.status" class="flex-1" :disabled="!statusFieldEditable"
+                         data-test="plan-status-select">
+                <el-option v-for="(name, code) in statusMap" :key="code" :label="name" :value="Number(code)" />
+              </el-select>
+              <el-button v-if="form.id && canOperate && !forceStatusUnlocked"
+                         data-test="plan-force-status" @click="openForceStatus">
+                <el-icon class="mr-1"><Unlock /></el-icon>强制修改
+              </el-button>
+            </div>
           </el-form-item>
           <el-form-item label="工单提起">
             <el-date-picker v-model="form.ticket_time" type="date" value-format="YYYY-MM-DD" class="!w-full" />
@@ -216,8 +222,9 @@
         <div v-if="statsAuto" class="text-xs text-gray-400 mb-2 pl-[100px]">
           已有关联漏洞，统计由系统按漏洞等级自动重算
         </div>
-        <div v-if="form.id && !statusEditable" class="text-xs text-gray-400 mb-2 pl-[100px]">
-          认领该计划后才可修改测试状态
+        <div v-if="form.id" class="text-xs text-gray-400 mb-2 pl-[100px]">
+          <template v-if="forceStatusUnlocked">状态已解锁，保存后将记录人工强制修改审计</template>
+          <template v-else>测试状态由业务流程自动流转；如需纠错请点击「强制修改」</template>
         </div>
         <!-- 创建漏扫基线工单：勾选后展开测试项；保存时自动同步新增漏扫基线工单 -->
         <el-form-item v-if="mode === 'create'" label=" " prop="nonpen_test_items" class="!mb-4">
@@ -275,7 +282,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { FormInstance, FormItemRule, FormRules } from 'element-plus'
-import { Check, Edit, Plus } from '@element-plus/icons-vue'
+import { Check, Edit, Plus, Unlock } from '@element-plus/icons-vue'
 import client from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { AUTOSAVE_STATE_LABEL, useAutosave } from '../composables/useAutosave'
@@ -339,26 +346,17 @@ const form = ref<TestingPlan>(emptyForm())
 const formRef = ref<FormInstance>()
 let hydrating = false
 let savedPlan: TestingPlan | null = null
+const originalStatus = ref(10)
+const forceStatusUnlocked = ref(false)
+const forceStatusConfirmation = ref('')
+const FORCE_STATUS_CONFIRM = '我确认修改'
 
 const isAdmin = computed(() => auth.user?.permissions?.includes('*') ?? false)
 const isTester = computed(() => props.plan?.testers?.some((u) => u.id === auth.user?.id) ?? false)
 const canOperate = computed(() => isAdmin.value || isTester.value)
-const statusEditable = computed(() => (form.value.id ? canOperate.value : isAdmin.value))
-
-const canResetToUntested = computed(() => Boolean(
-  props.plan
-  && isAdmin.value
-  && form.value.status === 20
-  && !(props.plan.testers?.length)
-  && !(props.plan.vuls?.length)
-  && !(props.plan.reports?.length)
-  && !(props.plan.retest_rounds?.length),
-))
-
-function statusOptionDisabled(code: number) {
-  if (code !== 10 || !form.value.id || form.value.status === 10) return false
-  return !canResetToUntested.value
-}
+const statusFieldEditable = computed(() =>
+  form.value.id ? canOperate.value && forceStatusUnlocked.value : isAdmin.value,
+)
 
 const statsAuto = computed(() => (props.plan?.vuls?.length ?? 0) > 0)
 const mandaysAuto = computed(() =>
@@ -476,6 +474,27 @@ async function addDepartment() {
   form.value.department = value.trim()
 }
 
+async function openForceStatus() {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `强制修改将绕过工单状态机，仅用于数据纠错。请输入「${FORCE_STATUS_CONFIRM}」继续。`,
+      '强制修改工单状态',
+      {
+        confirmButtonText: '确认强制修改',
+        cancelButtonText: '取消',
+        inputPlaceholder: FORCE_STATUS_CONFIRM,
+        inputValidator: (input: string) =>
+          input.trim() === FORCE_STATUS_CONFIRM || `请输入「${FORCE_STATUS_CONFIRM}」`,
+        type: 'warning',
+      },
+    )
+    forceStatusConfirmation.value = String(value).trim()
+    forceStatusUnlocked.value = true
+  } catch {
+    // 用户取消或关闭确认框时保持状态只读
+  }
+}
+
 async function doSave() {
   const body: Record<string, unknown> = { ...form.value }
   delete body.testers
@@ -486,6 +505,9 @@ async function doSave() {
   delete body.ticket_seq
   body.target_urls = cleanUrls(form.value.target_urls)
   if (form.value.id) {
+    const forceStatus = forceStatusUnlocked.value && form.value.status !== originalStatus.value
+    body.force_status = forceStatus
+    body.force_status_confirmation = forceStatus ? forceStatusConfirmation.value : ''
     delete body.create_nonpen
     delete body.nonpen_test_items
     const { data } = await client.put<TestingPlan>(`/testing-plans/${form.value.id}`, body)
@@ -519,6 +541,9 @@ async function onCancel() {
 function hydrate(plan?: TestingPlan | null) {
   hydrating = true
   form.value = plan ? { ...emptyForm(), ...plan } : emptyForm()
+  originalStatus.value = form.value.status
+  forceStatusUnlocked.value = false
+  forceStatusConfirmation.value = ''
   form.value.asset_ids = Array.isArray(form.value.asset_ids) ? [...form.value.asset_ids] : []
   form.value.target_urls = Array.isArray(form.value.target_urls) ? [...form.value.target_urls] : []
   assetOptions.value = []
@@ -563,5 +588,5 @@ onBeforeUnmount(() => {
   disposeAutosave()
 })
 
-defineExpose({ confirmLeave, hasUnsaved })
+defineExpose({ confirmLeave, hasUnsaved, openForceStatus, forceStatusUnlocked })
 </script>

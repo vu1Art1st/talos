@@ -25,6 +25,21 @@
 
 ---
 
+## [2.33.0] - 2026-11-10
+
+### 新增
+
+- **工单「复测未通过」状态（65）**：`PlanStatus.RETEST_FAILED` 纳入状态机（`复测中 → 复测未通过 → 再次发起复测 → 复测中`）、字典下发与开放 API 状态表；`vul_service.sync_plan_retest_state` 新增判定口径「当前轮次已有复测报告 + 全部漏洞均形成复测结论 + 仍有未闭环 → 复测未通过（结束本轮但不写复测完成时间）」，判定前刷新 `retest_rounds` 关系避免导入链路旧快照；统计（应交付报告 / 复测工单数）、待办（`_retest_todos`）、「当前可测试」与待办筛选同步纳入该状态；`rollback_retest_round_by_report` 覆盖该状态的轮次撤销回退。
+- **站内编辑强制修改工单状态**：`TestingPlanUpdateIn` 新增 `force_status` / `force_status_confirmation`（仅站内 PUT 使用，开放 API 不暴露）；`plan_crud.update_plan` 以 `PLAN_FORCE_STATUS_CONFIRM`「我确认修改」做后端兜底校验并拦截非法状态（400）；`PlanInfoPanel.vue` 提供「强制修改」解锁按钮与二次确认，`plan_transition` 审计新增 `forced` 标记，状态默认仍由业务流程自动流转。
+- **存量复测结果纠偏脚本**：`backend/scripts/backfill_plan_retest_failed.py` 幂等扫描仍为「复测中」的工单，按新口径补记「复测未通过 / 复测完成」，默认执行前备份原值到 `storage/backups/`，支持 `--dry-run`。
+
+### 变更
+
+- **本地开发栈 Redis 端口统一 16379**：`REDIS_URL` 默认、`dev.ps1` / `dev.sh`、`.env.example`、`scripts/test.{sh,ps1}`、`scripts/e2e.{sh,ps1}`、`.githooks/pre-push` 依赖预检，以及 `AGENTS.md` / `README` / `README_EN` / `LOCAL_DEV_SETUP.md` / `SCRIPTS.md` 与历史发布说明中的 5432/6379 口径一并校订（避免默认 6379 被本机保留端口占用）。
+- `docs/OPEN_API_GUIDE.md` / `USER_GUIDE.md` 同步新状态与强制纠错说明；测试基线更新（后端 424→427 passed、前端 50→51 files / 288→291 passed）。
+
+---
+
 ## [2.32.0] - 2026-11-07
 
 ### 变更
@@ -642,7 +657,7 @@ ROADMAP「批次 A：正确性补丁与可靠性底座」——P0 六项（P0-1 
 
 - **测试统一入口 + 并发隔离（测试流程改进 P0/P1/P2）**（2026-09-21）：
   - 新增 `scripts/test.sh` / `scripts/test.ps1` 作为测试唯一入口，固化三件「记错就得到误导性结果」的事：
-    关闭受管终端删除守卫、每次运行唯一 basetemp（仓库内）、5432/6379 依赖预检；并支持 `--workers N`（pytest-xdist
+    关闭受管终端删除守卫、每次运行唯一 basetemp（仓库内）、5432/16379 依赖预检；并支持 `--workers N`（pytest-xdist
     并行）与 `--prune`（回收残留 schema 与 basetemp）。
   - `conftest.py` 改为**每个 pytest 进程独占一个 PostgreSQL schema**（`VP_DB_SCHEMA` → 业务连接与 Alembic 的
     `search_path`；存储目录同步按 run 隔离），消除并发跑测试互相 `DROP SCHEMA` 造成的假失败 ——
@@ -722,7 +737,7 @@ ROADMAP「批次 A：正确性补丁与可靠性底座」——P0 六项（P0-1 
 
 - **本地开发环境切换 DBngin 托管 PostgreSQL + Redis**（2026-09-21）：`dev.ps1` / `dev.sh`
   由「SQLite + 免队列」改为连接 DBngin 本机原生托管的 PostgreSQL 16（`vulnplatform` 开发库）与
-  Redis 7——凭据复用根目录 `.env`，新增依赖服务预检（5432/6379 未监听即给出明确指引）；
+  Redis 7——凭据复用根目录 `.env`，新增依赖服务预检（5432/16379 未监听即给出明确指引）；
   后端测试库同步切至 `vulnplatform_test`（conftest 支持外部 `VP_DATABASE_URL` 覆盖以兼容
   CI services 容器，并以「库名必须 `_test` 结尾」护栏防止误清开发/生产库，session 开始/结束
   各执行一次 DROP SCHEMA 重建）。开发与测试自此与生产同方言同大版本，消除 SQLite 掩盖

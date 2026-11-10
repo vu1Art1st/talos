@@ -18,7 +18,7 @@ Talos 后端测试入口（Windows；与 scripts/test.sh 行为对齐）。
 param(
     # 并行 worker 数（>0 时启用 pytest-xdist；--dist loadscope 保证同一模块不拆散）
     [int]$Workers = 0,
-    # 跳过 5432/6379 预检（CI 由 services 容器保证）
+    # 跳过 5432/16379 预检（CI 由 services 容器保证）
     [switch]$NoDepsCheck,
     # 清理残留 test_* schema 与 basetemp 后退出
     [switch]$Prune,
@@ -60,13 +60,13 @@ if ($Prune) {
 
 # ---------- 依赖服务预检 ----------
 if (-not $NoDepsCheck) {
-    foreach ($svc in @(@{ Port = 5432; Name = 'PostgreSQL(DBngin)' }, @{ Port = 6379; Name = 'Redis(DBngin)' })) {
+    foreach ($svc in @(@{ Port = 5432; Name = 'PostgreSQL(DBngin)' }, @{ Port = 16379; Name = 'Redis(DBngin)' })) {
         if (-not (Test-PortListening -Port $svc.Port)) {
             Write-Host "[test] ⚠ $($svc.Name) 未监听 127.0.0.1:$($svc.Port) —— 测试库/限流依赖它，请先启动（见 docs/LOCAL_DEV_SETUP.md）" -ForegroundColor Yellow
             exit 1
         }
     }
-    Write-Host '[test] 依赖服务就绪：PostgreSQL(5432) / Redis(6379)' -ForegroundColor Green
+    Write-Host '[test] 依赖服务就绪：PostgreSQL(5432) / Redis(16379)' -ForegroundColor Green
 }
 
 # ---------- 运行 ----------
@@ -84,6 +84,7 @@ if ($PytestArgs) { $argList += $PytestArgs }
 
 # 受管终端的删除守卫会打断 pytest 清理 basetemp（症状：单文件全绿、全量几十个 ERROR）
 $env:CODEBUDDY_SAFE_DELETE_ENABLED = '0'
+$env:VP_REDIS_URL = 'redis://127.0.0.1:16379/0'
 
 Write-Host "[test] $venvPython $($argList -join ' ')" -ForegroundColor Cyan
 Push-Location $backend

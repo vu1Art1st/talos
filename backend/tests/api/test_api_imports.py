@@ -80,7 +80,7 @@ async def test_word_import_flow(client: AsyncClient, auth: dict):
     assert items[0]["source"] == 0
 
 async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict):
-    """复测报告含未修复漏洞：计划应为复测中(50)、未修复漏洞置「复测未修复」(50+is_retest)、自动建资产与报告。"""
+    """复测报告含未修复漏洞：计划复测未通过(65)，漏洞为 50+is_retest，自动建资产与报告。"""
     system_name = "综合办公系统ZZ"
     target_url = "http://10.9.9.9/officezz"
     doc = _build_report_docx(
@@ -95,11 +95,11 @@ async def test_report_import_partial_fixed_flow(client: AsyncClient, auth: dict)
     )
     assert result["created"] == 2
 
-    # 计划：复测中(50)，不是复测完成(60)
+    # 计划：复测未通过(65)，不是复测完成(60)
     resp = await client.get("/api/v1/testing-plans", headers=auth, params={"search": system_name})
     plans = resp.json()["items"]
     assert len(plans) == 1, plans
-    assert plans[0]["status"] == 50
+    assert plans[0]["status"] == 65
 
     # 已修复漏洞 → 60；未修复漏洞 → 50 且 is_retest=True（展示层为「复测未修复/复测未通过」）
     fixed_vuln = await _find_vuln(client, auth, "平行越权访问漏洞ZZ")
@@ -212,7 +212,7 @@ async def test_report_import_full_rounds_flow(client: AsyncClient, auth: dict):
     assert result["created"] == 1
     plan = (await client.get("/api/v1/testing-plans", headers=auth,
                              params={"search": system_name})).json()["items"][0]
-    assert plan["status"] == 50  # 复测中
+    assert plan["status"] == 65  # 复测未通过
     vuln = await _find_vuln(client, auth, vuln_title)
     assert vuln["status"] == 50 and vuln["is_retest"] is True
 

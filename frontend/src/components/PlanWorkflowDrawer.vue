@@ -48,6 +48,12 @@
           <div class="text-xs mt-1">若后续补录/关联新漏洞，计划将自动重开为「初测中」。</div>
         </template>
       </el-alert>
+      <el-alert v-if="plan.status === 65" type="error" :closable="false" show-icon
+                title="本轮复测未通过">
+        <template #default>
+          仍有复测未修复的漏洞；再次收到复测需求并发起复测后，工单将重新进入「复测中」。
+        </template>
+      </el-alert>
 
       <!-- 信息区 + 认领区 -->
       <el-card shadow="never">
@@ -531,11 +537,11 @@ function retestStateTip(r: Report): string {
   return `该报告已发起复测，仍有未闭环漏洞（${progress}）`
 }
 
-// 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50→4；60/70→全部完成（含无漏洞闭环）
+// 步骤条 active 推导：10 未认领→0，已认领→1；20 无漏洞→1、有漏洞→2；30/40→3；50/65→4；60/70→全部完成
 const stepActive = computed(() => {
   const s = plan.value?.status
   if (s === 60 || s === 70) return 6
-  if (s === 50) return 4
+  if (s === 50 || s === 65) return 4
   if (s === 30 || s === 40) return 3
   if (s === 20) return vulns.value.length ? 2 : 1
   return plan.value?.testers?.length ? 1 : 0
@@ -564,8 +570,8 @@ const nextAction = computed<{ label: string; action: () => void } | null>(() => 
       return { label: '发起复测', action: () => void confirmStartRetest(firstReport) }
     }
   }
-  // 复测中：处理复测漏洞
-  if (s === 50 && vulns.value.length) {
+  // 复测中 / 复测未通过：处理复测漏洞
+  if ((s === 50 || s === 65) && vulns.value.length) {
     return { label: '处理复测漏洞', action: () => void focusVulnRow(vulns.value[0].id) }
   }
   return null

@@ -14,7 +14,8 @@ _STATUS_CLOSED = (20, 60)
 
 # 已完成初测、应交付报告的工单状态（不含「测试通过」无漏洞结项）
 _REPORT_EXPECTED_STATUSES = (
-    PlanStatus.WAIT_RETEST, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING, PlanStatus.RETEST_DONE,
+    PlanStatus.WAIT_RETEST, PlanStatus.RETEST_APPLY, PlanStatus.RETESTING,
+    PlanStatus.RETEST_DONE, PlanStatus.RETEST_FAILED,
 )
 
 
@@ -196,7 +197,9 @@ async def _operational_stats(session: AsyncSession, vul_cond: list) -> dict:
     retest_plans = (
         await session.execute(
             select(func.count(TestingPlan.id)).where(
-                TestingPlan.status.in_((PlanStatus.RETEST_APPLY, PlanStatus.RETESTING))
+                TestingPlan.status.in_(
+                    (PlanStatus.RETEST_APPLY, PlanStatus.RETESTING, PlanStatus.RETEST_FAILED)
+                )
             )
         )
     ).scalar_one()

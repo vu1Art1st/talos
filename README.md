@@ -88,7 +88,7 @@ Talos 是一个现代化漏洞全生命周期管理平台，基于 FastAPI + Vue
 
 一键脚本（自动创建虚拟环境、安装依赖；连接本机 DBngin 的 PostgreSQL 16 + Redis 7；固定内置账号 `admin / admin123`）：
 
-> 前置：本机已用 [DBngin](https://dbngin.com/) 启动 PostgreSQL 16（5432）与 Redis 7（6379），并建好角色与
+> 前置：本机已用 [DBngin](https://dbngin.com/) 启动 PostgreSQL 16（5432）与 Redis 7（16379），并建好角色与
 > `vulnplatform` / `vulnplatform_test` 两个库（**建库须显式 UTF8**）——一次性步骤与排障见
 > [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md)。脚本会预检这两个端口，未就绪时给出明确提示。
 
@@ -111,7 +111,7 @@ bash dev.sh
 cd backend
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
 set VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<密码>@127.0.0.1:5432/vulnplatform
-set VP_REDIS_URL=redis://127.0.0.1:6379/0
+set VP_REDIS_URL=redis://127.0.0.1:16379/0
 set VP_DISABLE_QUEUE=1
 set VP_DEBUG=1
 set VP_INITIAL_ADMIN_PASSWORD=admin123

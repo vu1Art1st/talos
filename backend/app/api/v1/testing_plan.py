@@ -31,6 +31,7 @@ from app.schemas import (
     TestingPlanLocateOut,
     TestingPlanOut,
     TestingPlanTesterOption,
+    TestingPlanUpdateIn,
 )
 from app.services import plan_crud, plan_io, plan_query, plan_service, vul_service
 from app.services.audit_service import audit
@@ -617,19 +618,24 @@ async def attach_vulns_to_plan(
 @router.put("/testing-plans/{row_id}", response_model=TestingPlanOut)
 async def update_testing_plan(
     row_id: int,
-    body: TestingPlanIn,
+    body: TestingPlanUpdateIn,
     request: Request,
     user: User = Depends(require_perm("special:manage")),
     session: AsyncSession = Depends(get_session),
 ):
     row = await get_or_404(session, TestingPlan, row_id, "渗透测试工单不存在")
     # 写入核心逻辑与开放 API 共用（services/plan_crud.update_plan），返回更新前状态供审计
-    row, old_status = await plan_crud.update_plan(session, row, body.model_dump(), user)
+    row, old_status = await plan_crud.update_plan(
+        session, row, body.model_dump(), user,
+        force_status=body.force_status,
+        force_status_confirmation=body.force_status_confirmation,
+    )
     if body.status != old_status:
         await audit(session, request, "plan_transition", user, {
             "target": f"testing-plans/{row_id}", "system": row.system_name,
             "from": TESTING_PLAN_STATUS.get(old_status, str(old_status)),
             "to": TESTING_PLAN_STATUS.get(body.status, str(body.status)),
+            "forced": bool(body.force_status),
         })
     return row
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.32.0"
+    APP_VERSION: str = "2.33.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     # DROP SCHEMA 造成「relation ... does not exist」的假失败（见 docs/LOCAL_DEV_SETUP.md）。
     # 不要在生产/开发库上设置：留空即默认行为。
     DB_SCHEMA: str = ""
-    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_URL: str = "redis://127.0.0.1:16379/0"
     # Redis 连接/读写超时（秒，必须 > 0）：Redis 不可达但被防火墙 DROP（而非主动拒绝）时，
     # 无超时的客户端会停在 TCP 握手阶段无限挂起，使进程内降级逻辑（登录失败计数、arq 任务）
     # 永不触发（2026-09-18 实测复现：全量测试曾卡在 PAT 限流用例）

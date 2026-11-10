@@ -121,6 +121,43 @@ async def test_plan_completes_only_when_all_vulns_closed(client: AsyncClient, au
     assert (brief["vul_total"], brief["vul_closed"], brief["all_closed"]) == (2, 2, True)
 
 
+async def test_plan_marks_retest_failed_after_all_vulns_concluded(client: AsyncClient, auth: dict):
+    """全部漏洞完成复测且仍有未闭环项时进入「复测未通过」；再次发起复测回到「复测中」。"""
+    plan_id = await _new_plan(client, auth, "复测未通过系统")
+    vul_a, vul_b = await _new_vulns(client, auth, plan_id, ["复测通过漏洞A", "复测失败漏洞B"])
+    report_id = await _new_report(client, auth, plan_id, [vul_a, vul_b], "复测未通过报告")
+    await _start_retest(client, auth, report_id)
+
+    await _transition(client, auth, vul_a, 60, "<p>复测通过</p>")
+    assert (await _plan(client, auth, plan_id))["status"] == 50
+
+    await _transition(client, auth, vul_b, 50, "<p>复测仍可利用</p>")
+    plan = await _plan(client, auth, plan_id)
+    assert plan["status"] == 65
+    assert plan["retest_done_time"] == ""
+    assert plan["retest_rounds"][-1]["done_time"] is not None
+
+    await _start_retest(client, auth, report_id)
+    plan = await _plan(client, auth, plan_id)
+    assert plan["status"] == 50
+    assert plan["retest_round_count"] == 2
+    assert plan["retest_rounds"][-1]["done_time"] is None
+
+
+async def test_retest_failed_waits_for_untouched_vuln_conclusion(client: AsyncClient, auth: dict):
+    """报告外仍未进入复测的漏洞会阻止工单提前进入「复测未通过」。"""
+    plan_id = await _new_plan(client, auth, "复测未通过等待系统")
+    vul_a, vul_b = await _new_vulns(client, auth, plan_id, ["报告内失败漏洞", "报告外未测漏洞"])
+    report_id = await _new_report(client, auth, plan_id, [vul_a], "部分覆盖复测报告")
+    await _start_retest(client, auth, report_id)
+
+    await _transition(client, auth, vul_a, 50, "<p>报告内漏洞复测失败</p>")
+    plan = await _plan(client, auth, plan_id)
+    assert plan["status"] == 50
+    assert plan["retest_done_time"] == ""
+    assert (await _vuln(client, auth, vul_b))["is_retest"] is False
+
+
 async def test_done_plan_reverts_when_new_vuln_added(client: AsyncClient, auth: dict):
     """工单已「复测完成」后新增未闭环漏洞 → 回退「复测中」；再次闭环后恢复「复测完成」。"""
     plan_id = await _new_plan(client, auth, "完成后新增漏洞系统")

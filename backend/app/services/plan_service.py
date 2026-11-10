@@ -376,7 +376,7 @@ async def rollback_retest_round_by_report(
     """删除由某份复测报告发起的复测轮次（删除复测报告时回退复测轮数）。
 
     - 移除 report_id 匹配的轮次记录（即该次发起复测新增的轮次），复测轮数相应减少；
-    - 该轮次若为 force 发起，其上一轮已被强制打完成点；删除后若计划仍处于「复测中」
+    - 该轮次若为 force 发起，其上一轮已被强制打完成点；删除后若计划仍处于复测流程
       且无任何进行中轮次，则撤销最近一轮的完成点（与 start_retest_round(force=True) 对称），
       保证轮次状态与计划状态一致。
     """
@@ -387,10 +387,15 @@ async def rollback_retest_round_by_report(
         await session.delete(r)
     await session.flush()
     remaining = [r for r in plan.retest_rounds if r.report_id != report_id]
-    if plan.status == PlanStatus.RETESTING and not any(r.done_time is None for r in remaining):
+    if plan.status in (PlanStatus.RETESTING, PlanStatus.RETEST_FAILED) and not any(
+        r.done_time is None for r in remaining
+    ):
         finished = [r for r in remaining if r.done_time is not None]
         if finished:
             finished[-1].done_time = None
+        if plan.status == PlanStatus.RETEST_FAILED:
+            plan.status = PlanStatus.RETESTING
+            plan.retest_done_time = ""
 
 
 def finish_retest_round(plan: TestingPlan) -> None:

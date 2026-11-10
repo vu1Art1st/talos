@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
-import ElementPlus from 'element-plus'
+import ElementPlus, { ElMessageBox } from 'element-plus'
 
 import { clientMockFactory, getMock, putMock } from '../../__tests__/helpers/clientMock'
 import { describePlanPanelCommon } from '../../__tests__/helpers/planPanelCommon'
@@ -101,22 +101,34 @@ describe('PlanInfoPanel 工单信息面板', () => {
     mountPanel,
   })
 
-  it('存在业务进展时禁用「未测试」回退选项', async () => {
+  it('编辑态状态默认只读，输入确认文本后解锁并提交强制修改标记', async () => {
+    const prompt = vi.spyOn(ElMessageBox, 'prompt').mockResolvedValue({
+      value: '我确认修改', action: 'confirm',
+    } as never)
+    putMock.mockResolvedValue({ data: planFixture({ status: 65 }) })
     const wrapper = mountPanel('edit', planFixture({ vuls: [{ id: 11 } as never] }))
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { statusOptionDisabled: (code: number) => boolean }
-    expect(vm.statusOptionDisabled(10)).toBe(true)
-    wrapper.unmount()
-  })
-
-  it('无业务进展时允许管理员回退为「未测试」', async () => {
-    // 回退口径：无测试人员且无漏洞/报告/复测轮次
-    const wrapper = mountPanel('edit', planFixture({ testers: [] }))
+    const findStatusSelect = () => wrapper.findAllComponents({ name: 'ElSelect' })
+      .find((select) => select.attributes('data-test') === 'plan-status-select')
+    expect(findStatusSelect()?.props('disabled')).toBe(true)
+    await wrapper.find('[data-test="plan-force-status"]').trigger('click')
     await flushPromises()
 
-    const vm = wrapper.vm as unknown as { statusOptionDisabled: (code: number) => boolean }
-    expect(vm.statusOptionDisabled(10)).toBe(false)
+    const options = prompt.mock.calls[0]?.[2] as { inputValidator: (v: string) => boolean | string }
+    expect(options.inputValidator('错误文本')).toContain('我确认修改')
+    expect(options.inputValidator('我确认修改')).toBe(true)
+    expect(findStatusSelect()?.props('disabled')).toBe(false)
+
+    const vm = wrapper.vm as unknown as { form: TestingPlan }
+    vm.form.status = 65
+    await wrapper.find('[data-test="plan-info-save"]').trigger('click')
+    await flushPromises()
+
+    const [, body] = putMock.mock.calls[0] as [string, Record<string, unknown>]
+    expect(body.force_status).toBe(true)
+    expect(body.force_status_confirmation).toBe('我确认修改')
+    prompt.mockRestore()
     wrapper.unmount()
   })
 })

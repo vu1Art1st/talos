@@ -25,6 +25,7 @@ class PlanStatus(IntEnum):
     RETEST_APPLY = 40  # 提请复测
     RETESTING = 50     # 复测中
     RETEST_DONE = 60   # 复测完成
+    RETEST_FAILED = 65 # 复测未通过
     PASSED = 70        # 测试通过（测试完成且确认未发现安全漏洞，无漏洞闭环终态）
 
 
@@ -83,6 +84,7 @@ VUL_TRANSITIONS = {
 # 测试计划状态机：当前状态 -> 允许流转到的状态
 # 未测试 --开始初测--> 初测中 --初测完成--> 初测完成 --提请复测--> 提请复测
 # 提请复测 --确认复测--> 复测中 --全部漏洞闭环--> 复测完成
+# 复测中 --全部漏洞完成复测且仍有未闭环--> 复测未通过 --再次发起复测--> 复测中
 # 初测完成/提请复测 --报告发起复测--> 复测中（报告联动）
 # 复测完成 --漏洞重新打开--> 复测中
 # 初测中 --确认无漏洞--> 测试通过（无漏洞闭环，无需复测）
@@ -92,10 +94,14 @@ PLAN_TRANSITIONS = {
     PlanStatus.TESTING: {PlanStatus.WAIT_RETEST, PlanStatus.PASSED},
     PlanStatus.WAIT_RETEST: {PlanStatus.RETEST_APPLY, PlanStatus.RETESTING},  # 提请复测或报告直接发起复测
     PlanStatus.RETEST_APPLY: {PlanStatus.RETESTING},
-    PlanStatus.RETESTING: {PlanStatus.RETEST_DONE},
+    PlanStatus.RETESTING: {PlanStatus.RETEST_DONE, PlanStatus.RETEST_FAILED},
     PlanStatus.RETEST_DONE: {PlanStatus.RETESTING},  # 漏洞回退时重新打开
+    PlanStatus.RETEST_FAILED: {PlanStatus.RETESTING},  # 再次收到复测需求并发起复测
     PlanStatus.PASSED: {PlanStatus.TESTING},  # 无漏洞确认后补录漏洞时重新打开
 }
+
+# 站内编辑页强制修改工单状态时要求输入的确认文本（后端兜底校验，不依赖前端）
+PLAN_FORCE_STATUS_CONFIRM = "我确认修改"
 
 # 进入某状态时需要打点的时间字段（漏洞状态）
 STATUS_TIMESTAMP = {
@@ -130,6 +136,7 @@ TESTING_PLAN_STATUS = {
     PlanStatus.RETEST_APPLY: "提请复测",
     PlanStatus.RETESTING: "复测中",
     PlanStatus.RETEST_DONE: "复测完成",
+    PlanStatus.RETEST_FAILED: "复测未通过",
     PlanStatus.PASSED: "测试通过",
 }
 
@@ -478,6 +485,7 @@ TESTING_PLAN_STATUS_COLOR = {
     PlanStatus.RETEST_APPLY: "red",
     PlanStatus.RETESTING: "amber",
     PlanStatus.RETEST_DONE: "jade",
+    PlanStatus.RETEST_FAILED: "ruby",
     PlanStatus.PASSED: "jade",
 }
 

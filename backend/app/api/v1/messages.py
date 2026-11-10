@@ -181,7 +181,11 @@ async def _my_vuln_todos(
 async def _retest_todos(
     session: AsyncSession, user: User, *, offset: int = 0, limit: int = _TODO_ITEM_LIMIT,
 ) -> TodoItemOut:
-    cond = [TestingPlan.status.in_((PlanStatus.RETEST_APPLY, PlanStatus.RETESTING))]
+    cond = [
+        TestingPlan.status.in_(
+            (PlanStatus.RETEST_APPLY, PlanStatus.RETESTING, PlanStatus.RETEST_FAILED)
+        )
+    ]
     if not _has(user, "special:manage"):
         cond.append(
             exists().where(

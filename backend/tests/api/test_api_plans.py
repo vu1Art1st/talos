@@ -626,6 +626,42 @@ async def test_testing_plan_workflow(client: AsyncClient, auth: dict):
     assert resp.status_code == 403
 
 
+async def test_plan_force_status_requires_exact_confirmation(client: AsyncClient, auth: dict):
+    """站内编辑可强制纠错，但必须携带确认文本；普通更新仍受状态机限制。"""
+    resp = await client.post(
+        "/api/v1/testing-plans", headers=auth,
+        json={"system_name": "强制状态系统", "status": 30},
+    )
+    assert resp.status_code == 200, resp.text
+    plan_id = resp.json()["id"]
+    body = {"system_name": "强制状态系统", "status": 10}
+
+    resp = await client.put(f"/api/v1/testing-plans/{plan_id}", headers=auth, json=body)
+    assert resp.status_code == 400
+
+    resp = await client.put(
+        f"/api/v1/testing-plans/{plan_id}", headers=auth,
+        json={**body, "force_status": True, "force_status_confirmation": "确认修改"},
+    )
+    assert resp.status_code == 400
+
+    resp = await client.put(
+        f"/api/v1/testing-plans/{plan_id}", headers=auth,
+        json={
+            "system_name": "强制状态系统", "status": 999,
+            "force_status": True, "force_status_confirmation": "我确认修改",
+        },
+    )
+    assert resp.status_code == 400
+
+    resp = await client.put(
+        f"/api/v1/testing-plans/{plan_id}", headers=auth,
+        json={**body, "force_status": True, "force_status_confirmation": "我确认修改"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == 10
+
+
 async def test_plan_quit_rolls_back_last_tester_without_progress(client: AsyncClient, auth: dict):
     """最后一名测试人员退出且无业务进展时，初测中自动回退为未测试。"""
     resp = await client.post(

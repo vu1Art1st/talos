@@ -13,7 +13,7 @@
 #   bash scripts/test.sh                          # 全量（串行）
 #   bash scripts/test.sh -k retest -x             # 透传 pytest 参数
 #   bash scripts/test.sh --workers 4              # 4 进程并行（--dist loadscope）
-#   bash scripts/test.sh --no-deps-check          # 跳过 5432/6379 预检（CI 由 services 保证）
+#   bash scripts/test.sh --no-deps-check          # 跳过 5432/16379 预检（CI 由 services 保证）
 #   bash scripts/test.sh --prune --yes            # 清理残留 test_* schema 与 basetemp 后退出
 set -euo pipefail
 
@@ -98,7 +98,7 @@ port_listening() {
   fi
 }
 if [ "$DO_DEPS_CHECK" -eq 1 ]; then
-  for spec in "5432:PostgreSQL(DBngin)" "6379:Redis(DBngin)"; do
+  for spec in "5432:PostgreSQL(DBngin)" "16379:Redis(DBngin)"; do
     port="${spec%%:*}"
     name="${spec#*:}"
     if ! port_listening "$port"; then
@@ -123,4 +123,5 @@ fi
 
 echo "[test] $PY -m pytest ${PYTEST_ARGS[*]}"
 cd "$BACKEND"
-CODEBUDDY_SAFE_DELETE_ENABLED=0 "$PY" -m pytest "${PYTEST_ARGS[@]}"
+CODEBUDDY_SAFE_DELETE_ENABLED=0 VP_REDIS_URL='redis://127.0.0.1:16379/0' \
+  "$PY" -m pytest "${PYTEST_ARGS[@]}"

@@ -139,6 +139,7 @@ async def test_special_modules_crud(client: AsyncClient, auth: dict):
     assert meta["testing_plan_status"]["30"] == "初测完成"
     assert meta["testing_plan_status"]["40"] == "提请复测"
     assert meta["testing_plan_status"]["60"] == "复测完成"
+    assert meta["testing_plan_status"]["65"] == "复测未通过"
 
     # ---- 春耕行动 ----
     resp = await client.post(

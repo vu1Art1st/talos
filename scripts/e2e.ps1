@@ -35,7 +35,7 @@ function Log($msg) { Write-Host "[e2e] $msg" }
 function Die($msg) { Write-Host "[e2e] ✗ $msg" -ForegroundColor Red; exit 1 }
 
 # ---------- 依赖预检 ----------
-foreach ($spec in @(@(5432, 'PostgreSQL'), @(6379, 'Redis'))) {
+foreach ($spec in @(@(5432, 'PostgreSQL'), @(16379, 'Redis'))) {
     $listening = Test-PortListening -Port $spec[0]
     if (-not $listening) {
         Die "$($spec[1]) 未监听 127.0.0.1:$($spec[0]) —— 请先在 DBngin 启动（见 docs/LOCAL_DEV_SETUP.md）"
@@ -68,6 +68,7 @@ if (-not $pgPw) { Die '.env 缺少 POSTGRES_PASSWORD' }
 $env:VP_DATABASE_URL = "postgresql+asyncpg://${pgUser}:${pgPw}@127.0.0.1:5432/$Database"
 $env:VP_DEBUG = '0'   # 0：贴近生产行为，且避免 SQL echo 刷爆日志
 $env:VP_DISABLE_QUEUE = '1'
+$env:VP_REDIS_URL = 'redis://127.0.0.1:16379/0'
 $env:VP_SECRET_KEY = 'e2e-only-secret-key-0123456789abcdef'
 $env:VP_INITIAL_ADMIN_PASSWORD = 'admin123'
 $env:VP_STORAGE_DIR = 'storage_e2e'

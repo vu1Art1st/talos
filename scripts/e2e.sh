@@ -45,7 +45,7 @@ die() {
 }
 
 # ---------- 依赖预检 ----------
-for spec in "5432:PostgreSQL" "6379:Redis"; do
+for spec in "5432:PostgreSQL" "16379:Redis"; do
   port="${spec%%:*}"
   name="${spec#*:}"
   (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null ||
@@ -80,6 +80,7 @@ export VP_DATABASE_URL="${E2E_DATABASE_URL:-postgresql+asyncpg://${PG_USER}:${PG
 # E2E 栈专用运行参数：debug（本地凭据校验放宽）+ 免队列 + 独立 storage + 固定初始管理员密码
 export VP_DEBUG=0   # 贴近生产行为，且避免 SQL echo 刷爆日志
 export VP_DISABLE_QUEUE=1
+export VP_REDIS_URL='redis://127.0.0.1:16379/0'
 export VP_SECRET_KEY="e2e-only-secret-key-0123456789abcdef"
 export VP_INITIAL_ADMIN_PASSWORD="admin123"
 export VP_STORAGE_DIR="storage_e2e"

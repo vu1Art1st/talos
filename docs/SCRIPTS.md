@@ -195,7 +195,7 @@
 ### 2.12 `test.sh` / `test.ps1` — 后端测试统一入口（活跃·开发辅助）
 
 - **用途**：把「跑后端测试」的正确姿势固化为命令 —— 关闭受管终端删除守卫、每次运行唯一 `--basetemp`（仓库内）、
-  依赖服务（5432/6379）预检、可选并行与残留回收。
+  依赖服务（5432/16379）预检、可选并行与残留回收。
 - **为什么需要**：手工跑 pytest 有三处「记错就得到误导性结果」的陷阱：① 受管终端的删除守卫会打断 pytest 清理
   basetemp，症状是「单文件全绿、全量几十个 ERROR」；② `--basetemp` 用系统临时目录会被守卫视为越界；③ 固定
   basetemp / 固定 schema 下并发跑两份测试会互相破坏。
@@ -217,7 +217,7 @@
   因此跑 E2E 不动开发数据，也不受"开发库正在被用"影响。
 - **调用**：`bash scripts/e2e.sh` / `pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`
   （`--headed`/`-Headed` 带界面、`--keep`/`-Keep` 跑完保留栈、`--` 之后/`-PlaywrightArgs` 透传给 playwright）。
-- **前置**：本机 PG 5432 + Redis 6379（DBngin）；`vulnplatform_e2e` 库已创建（一次即可，
+- **前置**：本机 PG 5432 + Redis 16379（DBngin）；`vulnplatform_e2e` 库已创建（一次即可，
   SQL 见 `docs/LOCAL_DEV_SETUP.md` 第六节）；根目录 `pnpm install`（Playwright 装在**仓库根**
   工具包里，不进 `frontend/`，避免污染前端三门禁）。
 - **关键坑（都已踩过并固化）**：① 受管终端的删除守卫会拦截 Playwright 清理 `outputDir` → 脚本内设
@@ -355,6 +355,14 @@ bash scripts/restore-drill.sh backups/anchors/2026/09/<时间戳>
 - **幂等性**：是；**只向下纠偏，不反向把 50 改成 60**（脚本 10 行明确说明，避免覆盖人工状态）。
 - **产物**：`storage/backups/plan_retest_state_<时间戳>.json`。
 - **调用出处**：RELEASE.md:65（v2.17.1 工单级复测口径修复）。
+
+### 3.7.1 `backfill_plan_retest_failed.py` — 工单复测未通过补记（一次性）
+
+- **用途**：按当前工单级口径重算仍为「复测中」的工单；全部漏洞已形成复测结论且仍有未闭环项时补记为「复测未通过(65)」，
+  全部闭环时同步进入「复测完成(60)」。
+- **调用**：`python -m scripts.backfill_plan_retest_failed [--dry-run]`。
+- **依赖**：`vul_service.sync_plan_retest_state`（与在线业务共用唯一判定实现）。
+- **幂等性**：是；默认先备份到 `storage/backups/plan_retest_failed_<时间戳>.json`。
 
 ### 3.8 `repair_report_section_order.py` — 报告章节顺序修复（一次性）
 

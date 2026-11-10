@@ -53,7 +53,7 @@ pnpm test           # vitest 单测
 > 前端提交前门禁：`pnpm typecheck` + `pnpm test` + `pnpm run build` 三者全绿（与后端 `ruff` + `pytest` 对应）。
 > **本项目不采用 CI（2026-09-22 决策）**：上述门禁一律在**本机**执行（`scripts/test.ps1` + 前端三门禁），发布前按「验收口径」逐项走；不要在仓库内新增 `.github/workflows` 等流水线配置。替代「机器强制」的手段是 **pre-push 钩子**（`.githooks/pre-push`，需各人自行执行一次 `git config core.hooksPath .githooks` 启用；临时跳过 `git push --no-verify`）。**成立前提、代价对照与重估触发条件**见 `docs/LOCAL_DEV_SETUP.md` §五。
 
-开发态环境变量：`VP_DATABASE_URL=postgresql+asyncpg://<user>:<pass>@127.0.0.1:5432/vulnplatform`、`VP_REDIS_URL=redis://127.0.0.1:6379/0`、`VP_DISABLE_REDIS=0`、`VP_DISABLE_QUEUE=1`（后台任务进程内执行，免开 arq worker）、`VP_DEBUG=1`（dev 脚本已内置，凭据取自仓库根 `.env`）。
+开发态环境变量：`VP_DATABASE_URL=postgresql+asyncpg://<user>:<pass>@127.0.0.1:5432/vulnplatform`、`VP_REDIS_URL=redis://127.0.0.1:16379/0`、`VP_DISABLE_REDIS=0`、`VP_DISABLE_QUEUE=1`（后台任务进程内执行，免开 arq worker）、`VP_DEBUG=1`（dev 脚本已内置，凭据取自仓库根 `.env`）。
 
 ## 目录结构
 
@@ -181,8 +181,8 @@ docs/              # DESIGN_SYSTEM / DEPLOY / RELEASE / ROADMAP
 
 **验收口径（改动涉及运行时必做）**：
 
-- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **424 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
-- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **50 files / 288 passed**）+ `pnpm run build`。
+- **后端**：`ruff` + `vulture` 全绿 + **全量 pytest**（基线 **427 passed / 1 skipped**，测试库为 PostgreSQL；统一入口 `scripts/test.ps1` / `scripts/test.sh`，提速加 `-Workers 4` / `--workers 4`）+ **前后端契约检查**（`python -m scripts.check_api_contract`，不连库；「前端声明但 API 不返回」即失败）。
+- **前端**：`pnpm typecheck`（**0 错误**）+ `pnpm test`（基线 **51 files / 291 passed**）+ `pnpm run build`。
 - **端到端（E2E）**（涉及前端交互或前后端联调时）：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\e2e.ps1`（或 `bash scripts/e2e.sh`）—— 自动起**独立 E2E 栈**（`vulnplatform_e2e` 库 + api 27016 + 前端 27017 + 独立 storage），跑 3 条黄金链路（登录 / 新建漏洞含影响URL 批量粘贴 / 报告编辑器渲染），每条都断言**控制台 0 error**。只有 3 条是**刻意**的：广度仍由分级浏览器冒烟负责，E2E 的维护成本与抖动风险不允许铺页面（取舍见 `playwright.config.ts`）。
 - **运行时改动必须在 WSL-Kali 重建镜像**后验证：`docker compose build api worker frontend && docker compose up -d` —— 容器源码为**镜像内置**，不重建则改动不生效（导入解析与报告导出跑在 worker，务必与 api 一并重建）。
 - **接口探针**：`cd backend && .venv/Scripts/python -m scripts.probe_api --base-url <地址>`（**已固化为脚本，不再手写临时脚本**；22 个关键接口清单见脚本 `ENDPOINTS`，**全部 200 视为通过**，任一失败退出码 1 并打印明细）。地址：本地开发 `http://127.0.0.1:27015`、容器经前端反代 `http://127.0.0.1:27012`、容器内直连 `http://127.0.0.1:8000`。登录必须用 **form 表单**而非 JSON（`POST /api/v1/auth/login`）；本地 dev 库账号 `admin/admin123`，容器账号以实际种子库为准（本机容器实测 `admin1/admin123`），用 `--username/--password` 覆盖。

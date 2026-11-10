@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Talos 一键本地开发脚本（Linux / macOS）
-# - 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 6379，见 docs/LOCAL_DEV_SETUP.md）
+# - 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 16379，见 docs/LOCAL_DEV_SETUP.md）
 #   凭据复用仓库根目录 .env 的 POSTGRES_USER / POSTGRES_PASSWORD；开发库 = POSTGRES_DB（默认 vulnplatform）
 # - 后端：免队列模式（后台任务进程内执行，无需另开 arq worker），绑定 0.0.0.0:${BACKEND_PORT}
 # - 前端：Vite Dev Server，绑定 0.0.0.0:${FRONTEND_PORT}，支持通过 VPS_IP:PORT 外部访问
@@ -145,12 +145,12 @@ if ! is_port_listening 5432; then
   echo "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
   exit 1
 fi
-if ! is_port_listening 6379; then
-  echo "[dev] ⚠ 依赖服务未启动：Redis (DBngin, 7.x) 未监听 127.0.0.1:6379！"
+if ! is_port_listening 16379; then
+  echo "[dev] ⚠ 依赖服务未启动：Redis (DBngin, 7.x) 未监听 127.0.0.1:16379！"
   echo "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
   exit 1
 fi
-echo "[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(6379) 均在监听。"
+echo "[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(16379) 均在监听。"
 
 # ---------- 解析根 .env 的 PostgreSQL 凭据（与 docker-compose 共用一份） ----------
 PG_USER=""
@@ -212,7 +212,7 @@ echo "[dev] 启动后端 http://0.0.0.0:$BACKEND_PORT （PostgreSQL[DBngin] + Re
   # DISABLE_QUEUE=1：后台任务在 API 进程内执行，无需另开 arq worker（热重载友好）；
   # Redis 真实承担限流/登录锁定/token 轮换（不再走进程内降级）。
   VP_DATABASE_URL="postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@127.0.0.1:5432/${PG_DB}" \
-  VP_REDIS_URL='redis://127.0.0.1:6379/0' VP_DISABLE_REDIS=0 VP_DISABLE_QUEUE=1 VP_DEBUG=1 \
+  VP_REDIS_URL='redis://127.0.0.1:16379/0' VP_DISABLE_REDIS=0 VP_DISABLE_QUEUE=1 VP_DEBUG=1 \
   VP_INITIAL_ADMIN_PASSWORD='admin123' \
     exec "$BACKEND/.venv/bin/python" -m uvicorn app.main:app --reload --host 0.0.0.0 --port "$BACKEND_PORT"
 ) &

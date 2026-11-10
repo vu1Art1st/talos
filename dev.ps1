@@ -1,6 +1,6 @@
 ﻿<#
 Talos 一键本地开发脚本（Windows）
-- 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 6379，见 docs/LOCAL_DEV_SETUP.md）
+- 数据库：PostgreSQL 16 + Redis 7，由 DBngin 原生托管（本机 127.0.0.1:5432 / 16379，见 docs/LOCAL_DEV_SETUP.md）
   凭据复用仓库根目录 .env 的 POSTGRES_USER / POSTGRES_PASSWORD；开发库 = POSTGRES_DB（默认 vulnplatform）
 - 后端：免队列模式（后台任务进程内执行，无需另开 arq worker），绑定 0.0.0.0:$BackendPort
 - 前端：Vite Dev Server，绑定 0.0.0.0:$FrontendPort，支持通过 VPS_IP:PORT 外部访问
@@ -142,15 +142,15 @@ foreach ($check in @(@{ Port = $BackendPort; Name = '后端' }, @{ Port = $Front
 Write-Host "[dev] 端口检查通过：$BackendPort / $FrontendPort 均空闲。" -ForegroundColor Green
 
 # ---------- 依赖服务预检（DBngin 托管的 PostgreSQL / Redis） ----------
-# 复用端口检测：5432/6379 处于 LISTEN 即视为服务已启动（DBngin 面板 Start 后即监听）
-foreach ($svc in @(@{ Port = 5432; Name = 'PostgreSQL (DBngin, 16)' }, @{ Port = 6379; Name = 'Redis (DBngin, 7.x)' })) {
+# 复用端口检测：5432/16379 处于 LISTEN 即视为服务已启动（DBngin 面板 Start 后即监听）
+foreach ($svc in @(@{ Port = 5432; Name = 'PostgreSQL (DBngin, 16)' }, @{ Port = 16379; Name = 'Redis (DBngin, 7.x)' })) {
     if (-not (Test-PortInUse -Port $svc.Port)) {
         Write-Host "[dev] ⚠ 依赖服务未启动：$($svc.Name) 未监听 127.0.0.1:$($svc.Port)！" -ForegroundColor Yellow
         Write-Host "[dev] 请先打开 DBngin 启动对应服务（建库步骤见 docs/LOCAL_DEV_SETUP.md）。"
         exit 1
     }
 }
-Write-Host '[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(6379) 均在监听。' -ForegroundColor Green
+Write-Host '[dev] 依赖服务就绪：PostgreSQL(5432) / Redis(16379) 均在监听。' -ForegroundColor Green
 
 # ---------- 解析根 .env 的 PostgreSQL 凭据（与 docker-compose 共用一份） ----------
 $envFile = Join-Path $root '.env'
@@ -210,7 +210,7 @@ try {
     # DISABLE_QUEUE=1：后台任务在 API 进程内执行，无需另开 arq worker（热重载友好）；
     # Redis 真实承担限流/登录锁定/token 轮换（不再走进程内降级）。
     $env:VP_DATABASE_URL = "postgresql+asyncpg://${pgUser}:${pgPassword}@127.0.0.1:5432/$pgDb"
-    $env:VP_REDIS_URL = 'redis://127.0.0.1:6379/0'
+    $env:VP_REDIS_URL = 'redis://127.0.0.1:16379/0'
     $env:VP_DISABLE_REDIS = '0'
     $env:VP_DISABLE_QUEUE = '1'
     $env:VP_DEBUG = '1'

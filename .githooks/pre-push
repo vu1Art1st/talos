@@ -26,7 +26,7 @@ fail() {
   exit 1
 }
 
-# ---------- 依赖预检（PG 5432 / Redis 6379） ----------
+# ---------- 依赖预检（PG 5432 / Redis 16379） ----------
 deps_up() {
   local port=$1
   (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null
@@ -34,7 +34,7 @@ deps_up() {
 
 STRICT="${TALOS_PREPUSH_STRICT:-0}"
 DEPS_OK=1
-for spec in "5432:PostgreSQL" "6379:Redis"; do
+for spec in "5432:PostgreSQL" "16379:Redis"; do
   port="${spec%%:*}"
   name="${spec#*:}"
   if ! deps_up "$port"; then

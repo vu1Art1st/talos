@@ -88,7 +88,7 @@ Prerequisites: Docker and the Docker Compose plugin installed on the server.
 
 One-command scripts (create the virtualenv and install dependencies automatically; connect to a local DBngin-hosted PostgreSQL 16 + Redis 7; built-in account fixed to `admin / admin123`):
 
-> Prerequisite: PostgreSQL 16 (5432) and Redis 7 (6379) started locally via [DBngin](https://dbngin.com/),
+> Prerequisite: PostgreSQL 16 (5432) and Redis 7 (16379) started locally via [DBngin](https://dbngin.com/),
 > with the role plus the `vulnplatform` / `vulnplatform_test` databases created (**databases must be created
 > with explicit UTF8 encoding**). One-time setup and troubleshooting:
 > [docs/LOCAL_DEV_SETUP.md](docs/LOCAL_DEV_SETUP.md). The scripts probe both ports and fail with a clear
@@ -113,7 +113,7 @@ Backend (requires the local DBngin PostgreSQL 16 to be running with the `vulnpla
 cd backend
 python -m venv .venv && .venv/Scripts/pip install -r requirements-dev.txt
 set VP_DATABASE_URL=postgresql+asyncpg://vulnplatform:<password>@127.0.0.1:5432/vulnplatform
-set VP_REDIS_URL=redis://127.0.0.1:6379/0
+set VP_REDIS_URL=redis://127.0.0.1:16379/0
 set VP_DISABLE_QUEUE=1
 set VP_DEBUG=1
 set VP_INITIAL_ADMIN_PASSWORD=admin123

@@ -155,6 +155,20 @@ describe('PlanWorkflowDrawer 工单流程抽屉', () => {
     wrapper.unmount()
   })
 
+  it('工单复测未通过时展示告警并保持复测处理阶段', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/testing-plans/1') return { data: { ...planFixture(), status: 65 } }
+      if (url === '/testing-plans/1/vuln-order') return { data: {} }
+      return { data: { items: [], total: 0 } }
+    })
+    const wrapper = mountDrawer()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('本轮复测未通过')
+    expect(wrapper.text()).toContain('仍有复测未修复的漏洞')
+    wrapper.unmount()
+  })
+
   it('点击「生成报告」展开表单并预填标题与全部漏洞', async () => {
     const wrapper = mountDrawer()
     await flushPromises()
