@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import ElementPlus from 'element-plus'
 import { createPinia } from 'pinia'
@@ -46,6 +46,10 @@ function metaFixture() {
 }
 
 describe('VulnList 视图', () => {
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
   beforeEach(() => {
     getMock.mockReset()
     getMock.mockImplementation(async (url: string) => {
@@ -93,6 +97,42 @@ describe('VulnList 视图', () => {
     const editButton = wrapper.findAll('button').find((b) => b.text().includes('编辑'))
     expect(editButton).toBeTruthy()
     expect(editButton!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('筛选面板内点击 teleported 日期浮层不会误关，点击外部才关闭', async () => {
+    const wrapper = mount(VulnList, {
+      attachTo: document.body,
+      global: { plugins: [ElementPlus, createPinia()] },
+    })
+    await flushPromises()
+
+    const filterButton = wrapper.findAll('button').find((b) => b.text().includes('筛选'))
+    expect(filterButton).toBeTruthy()
+    await filterButton!.trigger('click')
+    await flushPromises()
+
+    const filterPopper = () =>
+      document.querySelector<HTMLElement>('.vuln-filter-panel')?.closest<HTMLElement>('.el-popper')
+
+    expect(filterPopper()?.style.display).not.toBe('none')
+    expect(document.querySelector('.vuln-filter-panel .el-date-editor--daterange')).not.toBeNull()
+
+    // 模拟 Element Plus 日期面板 teleport 到 body 后的真实点击目标。
+    document.body.insertAdjacentHTML(
+      'beforeend',
+      '<div class="el-popper el-picker__popper"><span class="date-cell">18</span></div>',
+    )
+    document.querySelector('.date-cell')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await flushPromises()
+    expect(filterPopper()?.style.display).not.toBe('none')
+
+    document.body.insertAdjacentHTML('beforeend', '<div class="outside-target"></div>')
+    document.querySelector('.outside-target')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+    await vi.waitFor(() => {
+      expect(filterPopper()?.style.display).toBe('none')
+    })
+
     wrapper.unmount()
   })
 })

@@ -25,6 +25,15 @@
 
 ---
 
+## [2.33.2] - 2026-11-18
+
+### 修复
+
+- **漏洞列表筛选面板点击日期浮层误关闭**：`VulnList.vue` 将筛选 `el-popover` 由 click 触发改为手动显隐（`filterVisible` + trigger ref），接入 `useClickOutside` 统一判定外部点击，并通过 `ignoreSelectors: ['.el-popper']` 放行 Element Plus 日期选择等 teleport 到 body 的子浮层——此前点击日期区间内部会误判为「面板外点击」而收起整个筛选面板，导致条件无法选完。
+- 新增 `VulnList.spec.ts` 回归用例：覆盖「面板内点击 teleported 日期浮层不关闭 / 点击真正外部目标才关闭」两条路径。
+
+---
+
 ## [2.33.1] - 2026-11-18
 
 ### 修复

@@ -9,14 +9,17 @@
         </el-input>
       </div>
       <!-- 筛选：多组筛选条件收纳为单个下拉弹窗，勾选后实时联动列表与统计 -->
-      <el-popover trigger="click" placement="bottom-start" :width="680">
+      <el-popover :visible="filterVisible" trigger="manual" placement="bottom-start" :width="680">
         <template #reference>
-          <el-button :type="activeFilterCount ? 'primary' : 'default'">
-            <el-icon class="mr-1"><Filter /></el-icon>筛选
-            <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
-          </el-button>
+          <span ref="filterTriggerRef" class="inline-flex">
+            <el-button :type="activeFilterCount ? 'primary' : 'default'"
+                       @click="filterVisible = !filterVisible">
+              <el-icon class="mr-1"><Filter /></el-icon>筛选
+              <span v-if="activeFilterCount" class="filter-count">{{ activeFilterCount }}</span>
+            </el-button>
+          </span>
         </template>
-        <div class="vuln-filter-panel">
+        <div ref="filterPanelRef" class="vuln-filter-panel">
           <div class="grid grid-cols-2 gap-x-4 gap-y-3">
             <div>
               <div class="filter-label">状态</div>
@@ -300,6 +303,7 @@ import FilterToolbar from '../components/FilterToolbar.vue'
 import StatCard from '../components/StatCard.vue'
 import TlPagination from '../components/TlPagination.vue'
 import { useAssetSelect } from '../composables/useAssetSelect'
+import { useClickOutside } from '../composables/useClickOutside'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
 import { useAuthStore } from '../stores/auth'
@@ -323,6 +327,17 @@ const query = reactive({
 const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Vuln>('/vulns', { extraParams: filterParams })
 
 const slaStateOpts = computed(() => slaStateOptions())
+const filterVisible = ref(false)
+const filterTriggerRef = ref<HTMLElement>()
+const filterPanelRef = ref<HTMLElement>()
+
+// 面板内的下拉与日期浮层会 teleport 到 body；放行这些子浮层，避免点击选项时误关整个筛选面板。
+useClickOutside(
+  [filterTriggerRef, filterPanelRef],
+  filterVisible,
+  () => { filterVisible.value = false },
+  { ignoreSelectors: ['.el-popper'] },
+)
 
 // 已启用的筛选维度数（用于「筛选」按钮徽标）
 const activeFilterCount = computed(() => {
