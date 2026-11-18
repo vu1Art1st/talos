@@ -25,9 +25,11 @@ from app.constants import VulStatus
 from app.core.config import settings
 from app.core.timeutil import now as tznow
 from app.services.report_builder import (
+    _add_html,
     _drop_unresolvable_images,
     _localize_images,
     FIXED_STATUS_COLOR,
+    IGNORED_STATUS_COLOR,
     build_report_docx,
 )
 from app.services import report_targets
@@ -100,27 +102,97 @@ def test_vuln_section_html_multi_url():
     assert "漏洞链接：</strong>https://a.com/1<br/>https://a.com/2" in html
 
 
-def test_summary_counts_exclude_fixed_and_green_cell(tmp_path):
+def test_summary_counts_exclude_closed_and_status_colors(tmp_path):
     vulns = [
         {"id": 1, "title": "高危未修复", "level": 20, "vul_type": 10,
          "status": VulStatus.UNFIXED, "is_retest": False},
         {"id": 2, "title": "高危已修复", "level": 20, "vul_type": 10,
          "status": VulStatus.FIXED, "is_retest": False},
+        {"id": 3, "title": "中危已忽略", "level": 30, "vul_type": 55,
+         "status": VulStatus.IGNORED, "is_retest": False},
     ]
     doc = _build(tmp_path, vulns=vulns)
 
-    # 统计段：高危漏洞仅计未修复 = 1 个
+    # 统计段：已修复 / 已忽略均视为闭环，不参与等级计数
     para_texts = [p.text.strip() for p in doc.paragraphs]
     assert any(t.startswith("高危漏洞1个") for t in para_texts), para_texts
+    assert any(t.startswith("中危漏洞0个") for t in para_texts), para_texts
 
-    # 汇总表列出全部漏洞（表头 + 2 行）
+    # 汇总表仍列出全部漏洞（表头 + 3 行）
     table = doc.tables[6]
-    assert len(table.rows) == 3
-    # 已修复行状态列为绿色，未修复行状态列非绿色
+    assert len(table.rows) == 4
+    # 已修复绿色、已忽略灰色、未修复继承模板红色
     fixed_row = next(r for r in table.rows[1:] if r.cells[2].text.strip() == "高危已修复")
     unfixed_row = next(r for r in table.rows[1:] if r.cells[2].text.strip() == "高危未修复")
+    ignored_row = next(r for r in table.rows[1:] if r.cells[2].text.strip() == "中危已忽略")
     assert FIXED_STATUS_COLOR in _cell_run_colors(fixed_row.cells[3])
+    assert IGNORED_STATUS_COLOR in _cell_run_colors(ignored_row.cells[3])
+    assert IGNORED_STATUS_COLOR not in _cell_run_colors(unfixed_row.cells[3])
     assert FIXED_STATUS_COLOR not in _cell_run_colors(unfixed_row.cells[3])
+
+
+def test_repair_ordered_list_rendered_once(tmp_path):
+    """复现 SSRF：修复建议有序列表不得触发整段漏洞内容重复。"""
+    vulns = [{"id": 1, "title": "网站链接预检接口 SSRF", "level": 20, "vul_type": 85,
+              "status": VulStatus.UNFIXED, "is_retest": False}]
+    sections = [{
+        "title": "网站链接预检接口 SSRF",
+        "vul_id": 1,
+        "content_html": (
+            "<p><strong>测试状态：</strong>初测</p>"
+            "<p><strong>漏洞等级：</strong>高危</p>"
+            "<p><strong>漏洞证明：</strong></p><p>内网回显仅出现一次</p>"
+            "<p><strong>修复建议：</strong></p>"
+            "<ol><li><p>限制私网地址</p></li><li><p>禁止重定向</p></li></ol>"
+        ),
+    }]
+    doc = _build(tmp_path, vulns=vulns, sections=sections)
+    texts = [p.text.strip() for p in doc.paragraphs]
+
+    assert texts.count("修复建议：") == 1, texts
+    assert sum("内网回显仅出现一次" in t for t in texts) == 1, texts
+    assert sum("限制私网地址" in t for t in texts) == 1, texts
+    assert any(t.startswith("1. 限制私网地址") for t in texts), texts
+
+
+def test_repair_list_after_code_block_has_single_label(tmp_path):
+    """复现任意文件上传：代码块后的修复建议列表不得重复输出标签。"""
+    vulns = [{"id": 1, "title": "任意类型文件上传", "level": 30, "vul_type": 60,
+              "status": VulStatus.FIXED, "is_retest": True}]
+    sections = [{
+        "title": "任意类型文件上传",
+        "vul_id": 1,
+        "content_html": (
+            "<p><strong>测试状态：</strong>复测</p>"
+            "<p><strong>漏洞证明：</strong></p>"
+            "<pre><code>POST /upload HTTP/1.1\nHost: example.com</code></pre>"
+            "<p><strong>修复建议：</strong></p>"
+            "<ol><li><p>校验扩展名与 MIME</p></li><li><p>对象存储禁止内联渲染</p></li></ol>"
+        ),
+    }]
+    doc = _build(tmp_path, vulns=vulns, sections=sections)
+    texts = [p.text.strip() for p in doc.paragraphs]
+
+    assert texts.count("修复建议：") == 1, texts
+    assert sum("校验扩展名与 MIME" in t for t in texts) == 1, texts
+    assert sum("POST /upload HTTP/1.1" in t for t in texts) == 1, texts
+
+
+def test_html_fallback_rolls_back_partial_output(monkeypatch):
+    """转换器部分写入后异常：先回滚半成品，再追加一次纯文本。"""
+    from app.services import report_builder
+
+    def broken_add_html(self, html, doc):
+        doc.add_paragraph("半成品")
+        raise RuntimeError("converter failed")
+
+    monkeypatch.setattr(report_builder._ReportHtmlToDocx, "add_html_to_document", broken_add_html)
+    doc = Document(settings.REPORT_TEMPLATE)
+    _add_html(doc, "<p>唯一正文</p>")
+    texts = [p.text.strip() for p in doc.paragraphs]
+
+    assert "半成品" not in texts
+    assert texts.count("唯一正文") == 1, texts
 
 
 def test_detail_test_state_rewritten_by_is_retest(tmp_path):

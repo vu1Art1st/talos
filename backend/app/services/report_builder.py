@@ -64,6 +64,8 @@ _LEVEL_COLORS = {
 
 # 汇总表「问题状态」已修复漏洞的绿色
 FIXED_STATUS_COLOR = RGBColor(0x00, 0xB0, 0x50)
+# 汇总表「问题状态」已忽略漏洞的灰色
+IGNORED_STATUS_COLOR = RGBColor(0x80, 0x80, 0x80)
 
 # 模板中用于定位替换的封面/统计段落文案
 _TPL_COVER_TITLE = "标准名称（邮件、台账）-系统名称（网页）"
@@ -482,6 +484,42 @@ def _number_vuln_urls(html: str) -> str:
     )
 
 
+class _ReportHtmlToDocx(HtmlToDocx):
+    """报告富文本转换器：列表使用手动编号，不依赖模板中的 Word 列表样式。"""
+
+    def set_initial_attrs(self, document=None):
+        super().set_initial_attrs(document)
+        self._manual_lists: list[dict[str, int | str]] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("ol", "ul"):
+            current_attrs = dict(attrs)
+            start = 1
+            if tag == "ol":
+                try:
+                    start = int(current_attrs.get("start", "1"))
+                except (TypeError, ValueError):
+                    start = 1
+            self._manual_lists.append({"tag": tag, "count": start - 1})
+        super().handle_starttag(tag, attrs)
+
+    def handle_endtag(self, tag):
+        super().handle_endtag(tag)
+        if tag in ("ol", "ul") and self._manual_lists:
+            self._manual_lists.pop()
+
+    def handle_li(self):
+        list_frame = self._manual_lists[-1] if self._manual_lists else {"tag": "ul", "count": 0}
+        list_frame["count"] += 1
+        if list_frame["tag"] == "ol":
+            prefix = f"{list_frame['count']}. "
+        else:
+            prefix = "- " if len(self._manual_lists) <= 1 else "  - "
+        self.paragraph = self.doc.add_paragraph()
+        self.paragraph.add_run(prefix)
+        self.in_li = True
+
+
 def _add_html(doc: Document, html: str) -> None:
     # 图片统一宽度在 docx 层面由 _normalize_image_width 处理（html4docx 忽略 HTML width）；
     # 先本地化 /storage 路径 → 压缩图像数据（重采样+JPEG）→ 过滤仍无法解析的 img，
@@ -500,13 +538,20 @@ def _add_html(doc: Document, html: str) -> None:
         text = _strip_links(content)
         if not text.strip():
             continue
-        parser = HtmlToDocx()
+        body = doc.element.body
+        existing_children = list(body.iterchildren())
+        parser = _ReportHtmlToDocx()
         try:
             parser.add_html_to_document(text, doc)
-        except Exception:
-            # 富文本转换失败时降级为纯文本，避免导出整体失败
+        except Exception as exc:
+            # 转换器会边解析边写入；失败时先移除本次半成品，避免兜底文本与已输出内容重复
+            for child in list(body.iterchildren()):
+                if child not in existing_children and child.tag != qn("w:sectPr"):
+                    body.remove(child)
             plain = re.sub(r"<[^>]+>", "", text)
-            doc.add_paragraph(plain)
+            if plain.strip():
+                logger.warning("富文本转换失败，已回退为纯文本: %s", exc)
+                doc.add_paragraph(plain)
 
 
 def _set_para_text(para: Paragraph, text: str) -> None:
@@ -702,8 +747,8 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
     """重写「风险问题汇总」统计段落与汇总表。"""
     counts = {"超危": 0, "高危": 0, "中危": 0, "低危": 0}
     for v in vulns:
-        # 统计段仅计入当前未修复漏洞（状态非已修复）
-        if v.get("status") == VulStatus.FIXED:
+        # 统计段仅计入未闭环漏洞；已修复 / 已忽略不参与等级计数
+        if v.get("status") in (VulStatus.FIXED, VulStatus.IGNORED):
             continue
         label = VUL_LEVEL_EXPORT.get(v.get("level"))
         if label in counts:
@@ -749,6 +794,9 @@ def _fill_summary(doc: Document, meta: dict, vulns: list[dict]) -> None:
         if v.get("status") == VulStatus.FIXED:
             for run in row.cells[3].paragraphs[0].runs:
                 run.font.color.rgb = FIXED_STATUS_COLOR
+        elif v.get("status") == VulStatus.IGNORED:
+            for run in row.cells[3].paragraphs[0].runs:
+                run.font.color.rgb = IGNORED_STATUS_COLOR
     if not vulns:
         # 无漏洞报告：汇总表占位字段统一用反斜杠填充
         for cell in sample.cells:
