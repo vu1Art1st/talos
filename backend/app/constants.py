@@ -186,6 +186,8 @@ AUDIT_ACTIONS = {
     "user_delete": "删除用户",
     "role_update": "角色变更",
     "vuln_create": "创建漏洞",
+    "vuln_push": "远程推送漏洞",
+    "vuln_image_upload": "远程上传漏洞图片",
     "vuln_delete": "删除漏洞",
     "vuln_transition": "漏洞流转",
     "plan_transition": "工单流转",
@@ -363,14 +365,17 @@ TODO_TYPES = {
 PAT_SCOPES = {
     "read": "只读",
     "plan_write": "工单读写",
+    "vuln_write": "漏洞推送",
     "admin_read": "管理只读",
     "full": "读写（含工单写与管理只读）",
 }
 PAT_DEFAULT_SCOPE = "full"
 # 「读」能力集合：所有 scope 均可读
-PAT_READ_SCOPES = ("read", "plan_write", "admin_read", "full")
+PAT_READ_SCOPES = ("read", "plan_write", "vuln_write", "admin_read", "full")
 # 「工单写」能力集合
 PAT_PLAN_WRITE_SCOPES = ("plan_write", "full")
+# 「远程漏洞推送」能力集合
+PAT_VULN_WRITE_SCOPES = ("vuln_write", "full")
 # 「管理只读」能力集合
 PAT_ADMIN_READ_SCOPES = ("admin_read", "full")
 

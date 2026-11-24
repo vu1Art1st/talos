@@ -19,7 +19,9 @@ vi.mock('vue-router', async (importOriginal) => {
 
 // mock axios client：/meta 下发最小字典，/vulns 列表与统计返回空数据
 vi.mock('../../api/client', () => clientMockFactory())
+vi.mock('../../utils/download', () => ({ saveBlob: vi.fn() }))
 
+import { saveBlob } from '../../utils/download'
 import VulnList from '../VulnList.vue'
 
 // vitest 的 jsdom 环境未注入 localStorage（Node 内建实现不可用），用内存版替身
@@ -52,6 +54,7 @@ describe('VulnList 视图', () => {
 
   beforeEach(() => {
     getMock.mockReset()
+    vi.mocked(saveBlob).mockReset()
     getMock.mockImplementation(async (url: string) => {
       if (url === '/meta') return { data: metaFixture() }
       if (url === '/vulns/stats') return { data: {} }
@@ -97,6 +100,78 @@ describe('VulnList 视图', () => {
     const editButton = wrapper.findAll('button').find((b) => b.text().includes('编辑'))
     expect(editButton).toBeTruthy()
     expect(editButton!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('按当前筛选与排序导出 Excel', async () => {
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/meta') return { data: metaFixture() }
+      if (url === '/vulns/stats') return { data: {} }
+      if (url === '/vulns/export') return { data: new Blob(['xlsx']) }
+      if (url === '/vulns') {
+        return {
+          data: {
+            items: [{
+              id: 1, title: '导出漏洞', level: 20, vul_type: 75, status: 10,
+              source: 0, assets: [], department: '', submit_time: null, can_edit: false,
+            }],
+            total: 1,
+          },
+        }
+      }
+      if (url === '/assets') return { data: { items: [], total: 0 } }
+      return { data: [] }
+    })
+    const wrapper = mount(VulnList, {
+      global: { plugins: [ElementPlus, createPinia()] },
+    })
+    await flushPromises()
+
+    const exportButton = wrapper.findAll('button').find((b) => b.text().includes('导出 Excel'))
+    expect(exportButton).toBeTruthy()
+    await exportButton!.trigger('click')
+    await flushPromises()
+
+    const call = getMock.mock.calls.find((item) => item[0] === '/vulns/export')
+    expect(call?.[1]).toMatchObject({
+      params: { search: undefined, mine: false, sort: '', order: '' },
+      responseType: 'blob',
+    })
+    expect(saveBlob).toHaveBeenCalledWith(expect.any(Blob), '历史漏洞库导出.xlsx')
+    wrapper.unmount()
+  })
+
+  it('勾选漏洞后切换为导出选中并携带 ID', async () => {
+    const row = {
+      id: 7, title: '勾选导出漏洞', level: 20, vul_type: 75, status: 10,
+      source: 0, assets: [], department: '', submit_time: null, can_edit: false,
+    }
+    getMock.mockImplementation(async (url: string) => {
+      if (url === '/meta') return { data: metaFixture() }
+      if (url === '/vulns/stats') return { data: {} }
+      if (url === '/vulns/export') return { data: new Blob(['xlsx']) }
+      if (url === '/vulns') return { data: { items: [row], total: 1 } }
+      if (url === '/assets') return { data: { items: [], total: 0 } }
+      return { data: [] }
+    })
+    const wrapper = mount(VulnList, {
+      global: { plugins: [ElementPlus, createPinia()] },
+    })
+    await flushPromises()
+
+    const table = wrapper.findAllComponents({ name: 'ElTable' })
+      .find((item) => (item.props('data') as { id: number }[] | undefined)?.some((r) => r.id === row.id))
+    expect(table).toBeTruthy()
+    table!.vm.$emit('selection-change', [row])
+    await flushPromises()
+
+    const exportButton = wrapper.findAll('button').find((b) => b.text().includes('导出选中 (1)'))
+    expect(exportButton).toBeTruthy()
+    await exportButton!.trigger('click')
+    await flushPromises()
+
+    const call = getMock.mock.calls.find((item) => item[0] === '/vulns/export')
+    expect(call?.[1]?.params).toMatchObject({ ids: '7', sort: '', order: '' })
     wrapper.unmount()
   })
 

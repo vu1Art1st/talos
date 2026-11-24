@@ -220,7 +220,7 @@ export interface ApiToken {
   name?: string
   /** 令牌前缀（仅展示用，完整值只在创建时返回一次） */
   prefix: string
-  /** 令牌 scope（`meta.pat_scope` 映射名称）：read / plan_write / admin_read / full */
+  /** 令牌 scope（`meta.pat_scope` 映射名称）：read / plan_write / vuln_write / admin_read / full */
   scope?: string
   create_time?: string | null
   expires_at?: string | null
@@ -905,6 +905,13 @@ export interface ExportJob {
 
 /** 报告导出格式（与后端导出接口一致） */
 export type ExportFormat = 'docx'
+
+/** 短时报告下载凭证：URL 只含随机 ticket，浏览器通过同路径 Cookie 完成鉴权。 */
+export interface DownloadTicket {
+  url: string
+  filename: string
+  expires_in: number
+}
 
 /**
  * 测试工单。

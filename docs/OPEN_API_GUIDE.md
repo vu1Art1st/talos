@@ -1,7 +1,7 @@
 # Talos 开放 API 访问指南（个人访问令牌调用篇）
 
 > 面向**已创建个人访问令牌（PAT）的调用方**：本文档说明如何用令牌通过 HTTP 接口访问 Talos 系统数据
-> —— 漏洞与态势（只读）、渗透测试工单与漏扫基线工单（查询 / 创建 / 更新）——
+> —— 漏洞与态势、渗透测试工单与漏扫基线工单（查询 / 创建 / 更新）、远程 Agent 漏洞与图片推送 ——
 > 包含认证方式、接口清单与参数、响应字段、错误码处理，以及 curl / Python / JavaScript 完整示例。
 >
 > 令牌的**创建与吊销**在 Web 界面操作（右上角头像 →「访问令牌」→ `/tokens`，页面内亦可打开本文档），第 2 节仅作简要交代。
@@ -12,19 +12,19 @@
 
 | 项目 | 说明 |
 |---|---|
-| 可访问端点 | **漏洞与态势（只读）**：`GET /open/vulns`、`GET /open/stats`；**工单（读写）**：`/open/testing-plans`、`/open/nonpen-plans`；**管理只读**：`GET /open/sla-config`、`GET /open/notify-deliveries` |
+| 可访问端点 | **漏洞与态势**：`GET /open/vulns`、`GET /open/stats`；**远程漏洞推送**：`POST /open/testing-plans/{id}/vulns`、`POST /open/testing-plans/{id}/images`；**工单（读写）**：`/open/testing-plans`、`/open/nonpen-plans`；**管理只读**：`GET /open/sla-config`、`GET /open/notify-deliveries` |
 | 认证方式 | 仅个人访问令牌（`tlp_` 前缀），JWT 会话令牌**不接受** |
-| 令牌 scope | `read`（只读）/ `plan_write`（工单读写）/ `admin_read`（只读 + SLA 配置与投递记录）/ `full`（全部能力，默认，存量令牌迁移值）。scope 不足返回 **403**（见 §3.4） |
+| 令牌 scope | `read`（只读）/ `plan_write`（工单读写）/ `vuln_write`（远程漏洞与图片推送）/ `admin_read`（只读 + SLA 配置与投递记录）/ `full`（全部能力，默认，存量令牌迁移值）。scope 不足返回 **403**（见 §3.4） |
 | 读权限 | 令牌代表**创建者身份**，但查询接口不做 RBAC 校验、不过滤数据归属，可读取全量漏洞 / 态势 / 工单 |
-| 写权限 | **仅工单接口支持写入**（创建与更新），且按令牌所属用户的角色权限校验 `special:manage`，与站内一致；**删除、漏洞与报告写入一律不支持** |
+| 写权限 | 工单创建/更新要求 `plan_write` + `special:manage`；远程漏洞与图片推送要求 `vuln_write` + `vuln:submit`，且令牌账号必须是目标工单认领者。**删除、报告写入与远程更新漏洞不支持** |
 | 幂等 | 写接口支持 `Idempotency-Key` 请求头：同键重放返回首次结果，同键不同内容 **409**（见 §6.3） |
 | 站内接口 | **不可用**。`GET /api/v1/vulns`、`/api/v1/testing-plans` 等站内端点只认 JWT，携带 PAT 访问返回 401 |
 | 限流 | 每令牌每分钟 120 次（`PAT_RATE_LIMIT`，服务端可用 `VP_PAT_RATE_LIMIT` 调整），超限 429 并带 `Retry-After`；正常响应回写 `X-RateLimit-Limit` / `X-RateLimit-Remaining` |
 | 版本标识 | 所有开放 API 响应带 `X-API-Version`（当前 `1`）；**破坏性调整必须递增该头并保留旧版本一段时间**（见 §13） |
 | 请求追踪 | 响应带 `X-Request-Id`（可自行传入同值以串联调用链）；开放 API 写操作的审计日志同时记录 PAT 名称 |
 
-> 结论：PAT 是**漏洞/态势只读出口 + 工单读写出口**，适合安全大屏、日报脚本、工单自动化与数据同步；
-> 漏洞录入、报告编辑、工单删除等仍需在系统界面或站内接口（JWT）完成。
+> 结论：PAT 可用于漏洞/态势查询、工单自动化、远程 Agent 漏洞与图片推送；
+> 报告编辑、工单删除、远程覆盖已有漏洞等仍需在系统界面或站内接口（JWT）完成。
 
 ---
 
@@ -84,6 +84,7 @@ Accept: application/json
 |---|---|---|
 | `read` | 只读：`/open/vulns`、`/open/stats`、工单查询 | 安全大屏、日报脚本 |
 | `plan_write` | 只读 + 工单创建 / 更新（`/open/testing-plans`、`/open/nonpen-plans`） | 工单自动化同步 |
+| `vuln_write` | 只读 + 指定工单的漏洞与图片推送 | 远程渗透测试 Agent |
 | `admin_read` | 只读 + `GET /open/sla-config`、`GET /open/notify-deliveries` | 投递成功率监控、SLA 口径核对 |
 | `full` | 全部能力（**默认**；2026-09-26 之前创建的令牌迁移为该值） | 内部集成 |
 
@@ -471,7 +472,7 @@ curl -sS -X POST "$TALOS_BASE/open/testing-plans" \
 
 - 键的生效范围是 `(令牌所属用户, 具体接口, 键值)`，不同接口/不同用户互不干扰；超过 128 字符截断。
 - 幂等记录保留 **7 天**（worker 定期清理），客户端超时重试窗口内请沿用同一个键。
-- 覆盖接口：`POST/PUT /open/testing-plans`、`POST/PUT /open/nonpen-plans`。
+- 覆盖接口：`POST/PUT /open/testing-plans`、`POST/PUT /open/nonpen-plans`、`POST /open/testing-plans/{id}/vulns`、`POST /open/testing-plans/{id}/images`。
 
 ### 6.4 更新工单（PUT）
 
@@ -501,6 +502,68 @@ curl -sS -X PUT "$TALOS_BASE/open/testing-plans/88" \
 | 工单ID 与其他工单重复（含联动的漏扫基线工单） | 400「工单ID「xxx」已存在，请更换后保存」 |
 | 工单 ID 不存在 | 404「渗透测试工单不存在」 |
 | 状态发生流转 | 额外写一条 `plan_transition` 审计日志 |
+
+### 6.5 远程漏洞推送与图片上传
+
+远程 Agent 只提交 Markdown，`*_html` 与 ProseMirror `*_json` 均由 Talos 生成。接口要求 PAT scope `vuln_write` 或 `full`，账号具备 `vuln:submit`，且必须是目标工单认领者。
+
+**上传图片**
+
+```http
+POST /api/v1/open/testing-plans/{plan_id}/images
+Authorization: Bearer tlp_xxx
+Idempotency-Key: image-20261119-001
+Content-Type: multipart/form-data
+```
+
+表单字段：`file`（png/jpg/jpeg/gif/webp，≤10MB）、`source_system`、可选 `external_image_id`。响应中的 `markdown` 可直接嵌入漏洞正文：
+
+```json
+{
+  "image_id": "img-001",
+  "url": "/storage/uploads/images/6f6c8f0d8d9a4d4c8a5e1d2b3c4d5e6f.png",
+  "markdown": "![漏洞截图](/storage/uploads/images/6f6c8f0d8d9a4d4c8a5e1d2b3c4d5e6f.png)",
+  "sha256": "...",
+  "size_bytes": 183421,
+  "content_type": "image/png",
+  "result": "created"
+}
+```
+
+相同工单、来源和文件内容重复上传返回 `result=duplicated` 与首次 URL；同一 `external_image_id` 上传不同内容返回 409。
+
+**推送漏洞**
+
+```http
+POST /api/v1/open/testing-plans/{plan_id}/vulns
+Authorization: Bearer tlp_xxx
+Idempotency-Key: push-20261119-001
+Content-Type: application/json
+```
+
+```json
+{
+  "source_system": "remote-pentest-agent",
+  "items": [{
+    "external_id": "agent-20261119-0001",
+    "title": "用户查询接口 SQL 注入",
+    "level": 20,
+    "vul_type": 10,
+    "affected_url": "https://example.com/api/user?id=1",
+    "description_md": "## 漏洞描述\n\n存在 SQL 注入。",
+    "reproduce_md": "1. 访问接口\n2. 构造注入参数",
+    "solution_md": "使用参数化查询。"
+  }]
+}
+```
+
+必填核心字段：`external_id`、`title`、`level`、`vul_type`、`affected_url`、`description_md`、`reproduce_md`、`solution_md`。`items` 为 1–100 条，整批原子提交。
+
+- Markdown 原始 HTML 关闭；链接只允许 `http/https`。
+- 图片只允许引用本工单已上传的 `/storage/uploads/images/<32位hex>.<ext>`。
+- 未被漏洞正文使用且超过 24 小时的 Agent 图片由后台清理任务删除。
+- 同一 `(source_system, external_id)` 内容相同返回 `duplicated`；内容变化返回 409，v1 不支持覆盖。
+- 生成内容会执行 HTML 消毒、可见内容校验、TipTap JSON 转换、SLA 计算、工单重开/复测状态同步、统计重算和审计。
 
 ---
 
@@ -620,7 +683,7 @@ curl -sS -X POST "$TALOS_BASE/open/nonpen-plans" \
 | 401 | `令牌所属用户不可用` | 令牌所属账号被禁用 | 联系管理员恢复账号，或换用其他账号的令牌 |
 | 401 | `登录已过期，请重新登录` | 用 **PAT 访问了站内端点**（如 `/api/v1/vulns`、`/api/v1/testing-plans`） | PAT 只能访问 `/open/*`；如需站内能力请改用 JWT 登录流程 |
 | 403 | `当前令牌所属账号缺少权限: special:manage` | 用 PAT 调用工单**写接口**（POST / PUT），但令牌所属账号的角色没有 `special:manage` | 换用具备专项管理权限的账号创建的令牌；查询接口不受此限制 |
-| 403 | `当前访问令牌 scope「read」不足，工单写操作需为 plan_write / full` | 工单写接口的**令牌 scope 不足**（P1-6）：只读令牌不允许写 | 新建 `plan_write` 或 `full` scope 的令牌（scope 不可修改） |
+| 403 | `当前访问令牌 scope「read」不足，写操作需为 ...` | 写接口的**令牌 scope 不足**：只读令牌不允许写 | 按接口新建 `plan_write` / `vuln_write` / `full` scope 的令牌（scope 不可修改） |
 | 403 | `当前访问令牌 scope「read」不足，需为 admin_read / full` | 调用管理只读接口（`/open/sla-config`、`/open/notify-deliveries`）时 scope 不足 | 改用 `admin_read` / `full` scope 的令牌 |
 | 409 | `Idempotency-Key 已用于不同的请求内容，请更换幂等键` | 同一键先后提交了**不同请求体**（P1-6） | 为不同请求使用不同的键；确认键的生成规则（建议 `业务单号+操作`） |
 | 409 | `同一 Idempotency-Key 的请求正在处理中，请稍后重试` | 首次请求尚未完成，第二次已到达 | 稍后（秒级）重试同键请求，即可拿到首次结果 |
@@ -1154,7 +1217,7 @@ const npUpdated = await openApi(`/open/nonpen-plans/${np.id}`, {}, {
 });
 ```
 
-> 写接口要求令牌所属账号具备 `special:manage` 权限，否则返回 403；查询接口无此要求。
+> 工单写接口要求账号具备 `special:manage`；远程漏洞/图片推送要求 `vuln:submit` 且为工单认领者；查询接口无写权限要求。
 
 ---
 
@@ -1164,7 +1227,7 @@ const npUpdated = await openApi(`/open/nonpen-plans/${np.id}`, {}, {
 |---|---|
 | 存放 | 存环境变量 / 密钥库 / CI Secrets，**禁止**硬编码进源码、提交到 Git、写进前端包 |
 | 一令牌一用途 | 大屏、日报脚本、数据同步各建一枚，便于单独吊销与通过「最近使用」定位调用方 |
-| 最小权限 | 按需选择 scope：只读脚本用 `read`（**不要**图省事选 `full`）；写工单用 `plan_write`；要读 SLA 配置/投递记录再给 `admin_read` |
+| 最小权限 | 按需选择 scope：只读脚本用 `read`；写工单用 `plan_write`；远程 Agent 推送漏洞用 `vuln_write`；要读 SLA 配置/投递记录再给 `admin_read` |
 | 有效期 | 脚本类建议 90 天；临时排查用 7 天；365 天仅用于长期稳定集成 |
 | 即将过期 | 系统**不提供续期接口、也不会自动续期**：提前新建一枚 → 更新调用方配置 → 验证通过后再吊销旧令牌 |
 | 已过期 | 调用返回 401「访问令牌已过期，请重新生成」，只能新建替换 |
@@ -1217,10 +1280,10 @@ A：工单更新是 **PUT 全量语义**（与站内一致），请求体与创�
 正确姿势：先 `GET /open/testing-plans/{id}` 取详情，在返回 JSON 上修改字段后整体 PUT（只读字段会被忽略）。
 
 **Q13：可以通过 API 删除工单、录入漏洞或推进漏扫测试项吗？**
-A：不可以。开放接口仅提供工单的查询、创建与更新；删除、漏洞写入、测试项流转等请使用系统界面或站内接口（JWT 认证）。
+A：可以按远程 Agent 契约向已认领工单推送漏洞和图片；工单删除、远程覆盖已有漏洞、漏扫测试项流转仍请使用系统界面或站内接口（JWT 认证）。
 
 **Q14：只读令牌调用工单写接口报 403「scope 不足」，但我账号明明有权限？**
-A：这是刻意设计：scope 与账号权限**两道校验都要过**。只读令牌（`read`）不能写，请另建 `plan_write` 或 `full` scope 的令牌。scope 创建后不可修改。
+A：这是刻意设计：scope 与账号权限**两道校验都要过**。只读令牌（`read`）不能写，请按用途另建 `plan_write`、`vuln_write` 或 `full` scope 的令牌。scope 创建后不可修改。
 
 **Q15：想全量同步十万条漏洞，翻页到后面出现重复/漏行怎么办？**
 A：用游标模式：首次请求取 `items` 最后一条的 `id`，后续带 `cursor=<该 id>`（按 `id` 降序稳定遍历），直到 `next_cursor` 为 `null`。
@@ -1235,7 +1298,7 @@ A：带同一个 `Idempotency-Key` 就不会——重放返回首次结果。**�
 ```
 Base URL : https://<host>/api/v1
 认证头    : Authorization: Bearer tlp_xxx
-令牌 scope: read | plan_write | admin_read | full
+令牌 scope: read | plan_write | vuln_write | admin_read | full
 限流      : 120 次/分钟/令牌（超限 429 + Retry-After；正常响应带 X-RateLimit-*）
 版本头    : X-API-Version: 1（所有响应）
 幂等头    : Idempotency-Key: <唯一键>（仅工单写接口）
@@ -1269,6 +1332,11 @@ GET /open/nonpen-plans?search=&actionable=&sort=&order=&page=1&size=20
 GET /open/nonpen-plans/{id}                                -> NonpenPlanOut
 POST /open/nonpen-plans         body=NonpenPlanIn          -> NonpenPlanOut     (需 plan_write/full + special:manage；支持 Idempotency-Key)
 PUT  /open/nonpen-plans/{id}    body=NonpenPlanIn(全量)    -> NonpenPlanOut     (同上)
+
+POST /open/testing-plans/{id}/images  multipart file/source_system/external_image_id
+                -> VulImageUploadOut  (需 vuln_write/full + vuln:submit + 工单认领者)
+POST /open/testing-plans/{id}/vulns   body=VulPushIn(Markdown)
+                -> VulPushOut         (同上；支持 Idempotency-Key)
 
 工单状态: 10未测试 20初测中 30初测完成 40提请复测 50复测中 60复测完成 65复测未通过 70测试通过
 漏扫测试项: baseline基线扫描 / host主机漏洞扫描 / web Web漏洞扫描

@@ -28,6 +28,11 @@ ALGORITHM = "HS256"
 IMAGE_COOKIE = "vp_img"
 IMAGE_COOKIE_PATH = "/storage"
 
+# 报告原生下载凭证：HttpOnly Cookie + 精确 Path（每个 ticket 一个路径）。
+# 该令牌只允许访问 `/api/v1/reports/downloads/<ticket>`，不能作为普通 access token 使用。
+DOWNLOAD_COOKIE = "vp_dl"
+DOWNLOAD_COOKIE_PREFIX = "/api/v1/reports/downloads/"
+
 
 def hash_password(password: str) -> str:
     return password_hasher.hash(password)
@@ -135,6 +140,68 @@ def decode_refresh_token(token: str) -> tuple[int, int, str, str] | None:
         return None
 
 
+def create_download_token(
+    user_id: int,
+    ver: int,
+    sid: str,
+    ticket: str,
+    kind: str,
+    job_ids: list[int],
+    *,
+    expires_seconds: int,
+) -> str:
+    """签发短时报告下载令牌。
+
+    令牌类型刻意使用 `download`：普通 `decode_token(..., "access")` 会拒绝它，
+    防止下载凭证被当作站内 API 的通用登录凭证。
+    """
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "type": "download",
+        "ver": ver,
+        "sid": sid,
+        "ticket": ticket,
+        "kind": kind,
+        "job_ids": job_ids,
+        "iat": now,
+        "exp": now + timedelta(seconds=expires_seconds),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=ALGORITHM)
+
+
+def decode_download_token(token: str) -> tuple[int, int, str, str, str, list[int]] | None:
+    """校验下载令牌并返回 (用户 id, 版本, 会话 id, ticket, kind, job_ids)。"""
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("type") != "download":
+        return None
+    kind = str(payload.get("kind") or "")
+    if kind not in {"export", "batch"}:
+        return None
+    raw_job_ids = payload.get("job_ids")
+    if not isinstance(raw_job_ids, list) or not 1 <= len(raw_job_ids) <= 200:
+        return None
+    try:
+        job_ids = [int(value) for value in raw_job_ids]
+        user_id = int(payload["sub"])
+        ver = int(payload.get("ver", 0))
+    except (KeyError, TypeError, ValueError):
+        return None
+    if not job_ids or any(job_id <= 0 for job_id in job_ids):
+        return None
+    return (
+        user_id,
+        ver,
+        str(payload.get("sid") or ""),
+        str(payload.get("ticket") or ""),
+        kind,
+        job_ids,
+    )
+
+
 def refresh_ttl_seconds() -> int:
     """refresh 轮换状态的 TTL：与 token 自身有效期一致。"""
     return settings.REFRESH_TOKEN_EXPIRE_HOURS * 3600
@@ -156,3 +223,16 @@ def set_image_cookie(response: Response, access_token: str) -> None:
 def clear_image_cookie(response: Response) -> None:
     """清除图片访问 Cookie（退出登录；HttpOnly 无法由 JS 删除，必须服务端下发清除）。"""
     response.delete_cookie(IMAGE_COOKIE, path=IMAGE_COOKIE_PATH)
+
+
+def set_download_cookie(response: Response, ticket: str, token: str) -> None:
+    """下发报告下载 Cookie：精确绑定本次 ticket 路径，多标签页互不覆盖。"""
+    response.set_cookie(
+        key=DOWNLOAD_COOKIE,
+        value=token,
+        max_age=settings.DOWNLOAD_TOKEN_EXPIRE_SECONDS,
+        path=f"{DOWNLOAD_COOKIE_PREFIX}{ticket}",
+        httponly=True,
+        samesite="strict",
+        secure=settings.COOKIE_SECURE,
+    )

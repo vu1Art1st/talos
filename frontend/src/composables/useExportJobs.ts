@@ -6,12 +6,14 @@ import dayjs from 'dayjs'
 import client from '../api/client'
 import type {
   BatchExportCheckResult,
+  DownloadTicket,
   ExportCheckResult,
   ExportFormat,
   ExportJob,
   ExportMissingField,
 } from '../types'
-import { saveBlob, saveReportBlob } from '../utils/download'
+import { startUrlDownload } from '../utils/download'
+import { showTocNotice } from '../utils/tocNotice'
 
 // 导出记录类型上提到 src/types（审计 E-5）：本文件改为转出，保证「单一来源」
 export type { ExportJob }
@@ -161,8 +163,11 @@ export function useExportJobs() {
 
   /** 下载导出文件（带鉴权）；docx 目录域为占位时提示手动更新域 */
   async function downloadJob(job: ExportJob, fallbackTitle = 'report'): Promise<void> {
-    const resp = await client.get(`/reports/exports/${job.id}/download`, { responseType: 'blob' })
-    saveReportBlob(resp.data, job, fallbackTitle)
+    const { data } = await client.post<DownloadTicket>('/reports/download-tickets', {
+      job_ids: [job.id],
+    })
+    startUrlDownload(data.url, data.filename || `${job.title || fallbackTitle}.${job.fmt}`)
+    if (!job.toc_auto_updated) showTocNotice()
   }
 
   /** 删除导出记录 */
@@ -173,8 +178,12 @@ export function useExportJobs() {
 
   /** 批量下载已完成任务的 zip */
   async function downloadZip(jobIds: string): Promise<void> {
-    const resp = await client.get('/reports/batch-download', { params: { job_ids: jobIds }, responseType: 'blob' })
-    saveBlob(resp.data, '测试报告批量下载.zip')
+    const ids = jobIds.split(',').map((value) => Number(value.trim())).filter((value) => value > 0)
+    if (!ids.length) return
+    const { data } = await client.post<DownloadTicket>('/reports/download-tickets', {
+      job_ids: ids,
+    })
+    startUrlDownload(data.url, data.filename || '测试报告批量下载.zip')
   }
 
   return {

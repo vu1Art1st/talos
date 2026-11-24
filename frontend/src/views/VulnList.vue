@@ -93,6 +93,11 @@
         <el-button v-if="auth.hasPerm('vuln:manage') && selected.length" type="danger" class="btn-min" @click="batchRemove">
           <el-icon class="mr-1"><Delete /></el-icon>删除选中 ({{ selected.length }})
         </el-button>
+        <el-button :loading="exporting" :disabled="exporting || !total" class="btn-min"
+                   @click="exportExcel(filterParams(), sort, selected.map((row) => row.id))">
+          <el-icon class="mr-1"><Download /></el-icon>
+          {{ selected.length ? `导出选中 (${selected.length})` : '导出 Excel' }}
+        </el-button>
         <el-button v-if="auth.hasPerm('vuln:submit')" type="primary" class="btn-min" @click="router.push('/vulns/new')">
           <el-icon class="mr-1"><Plus /></el-icon>提交漏洞
         </el-button>
@@ -215,7 +220,8 @@
       <el-table v-loading="loading" :data="items" stripe @row-click="(row: Vuln) => router.push(`/vulns/${row.id}`)"
                class="cursor-pointer" @selection-change="(rows: Vuln[]) => (selected = rows)"
                 @sort-change="onSortChange">
-        <el-table-column v-if="auth.hasPerm('vuln:manage')" type="selection" width="40" />
+        <!-- 勾选同时服务管理员批量删除与所有查看者的选中导出 -->
+        <el-table-column type="selection" width="40" />
         <el-table-column type="index" label="序号" width="64" :index="(i: number) => (page - 1) * size + i + 1" />
         <el-table-column prop="title" label="漏洞名称" min-width="240" show-overflow-tooltip sortable="custom" />
         <el-table-column prop="level" label="等级" width="90" sortable="custom">
@@ -306,6 +312,7 @@ import { useAssetSelect } from '../composables/useAssetSelect'
 import { useClickOutside } from '../composables/useClickOutside'
 import { useDictOptions } from '../composables/useDictOptions'
 import { useListPage } from '../composables/useListPage'
+import { useVulnExport } from '../composables/useVulnExport'
 import { useAuthStore } from '../stores/auth'
 import {
   dotStyle, levelColor, levelDotStyle, levelName, slaStateMeta, slaStateOptions,
@@ -324,7 +331,9 @@ const query = reactive({
   sla_state: '',
   mine: false,
 })
-const { items, total, page, size, search, loading, load, onSortChange, onSizeChange } = useListPage<Vuln>('/vulns', { extraParams: filterParams })
+const { items, total, page, size, search, sort, loading, load, onSortChange, onSizeChange } =
+  useListPage<Vuln>('/vulns', { extraParams: filterParams })
+const { exporting, exportExcel } = useVulnExport()
 
 const slaStateOpts = computed(() => slaStateOptions())
 const filterVisible = ref(false)

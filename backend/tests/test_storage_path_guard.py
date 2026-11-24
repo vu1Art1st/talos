@@ -12,7 +12,12 @@ import pytest
 from fastapi import HTTPException
 
 from app.core.config import settings
-from app.core.storage import is_attachment_path, require_attachment_path, resolve_storage_path
+from app.core.storage import (
+    is_attachment_path,
+    require_attachment_path,
+    resolve_export_file_path,
+    resolve_storage_path,
+)
 from app.db import async_session_maker
 from app.models import RemoteTesting, SpringAction
 
@@ -76,6 +81,21 @@ def test_resolve_storage_path_guard(tmp_path, monkeypatch):
         with pytest.raises(HTTPException) as exc:
             resolve_storage_path(bad)
         assert exc.value.status_code == 404, bad
+
+
+def test_resolve_export_file_path_maps_legacy_container_path(tmp_path, monkeypatch):
+    """历史 export_jobs 存旧容器绝对路径，迁到宿主机后按 storage 根目录重映射。"""
+    monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
+    name = "report_42_20260101120000.docx"
+    target = tmp_path / "exports" / name
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"PK\x03\x04-legacy-export")
+
+    assert resolve_export_file_path(f"/app/storage/exports/{name}") == target.resolve()
+    assert resolve_export_file_path(f"storage\\exports\\{name}") == target.resolve()
+    assert resolve_export_file_path(f"E:/old-deploy/storage/exports/{name}") == target.resolve()
+    assert resolve_export_file_path(f"/unknown/root/{name}") == target.resolve()
+    assert resolve_export_file_path("/app/storage/exports/../../etc/passwd") is None
 
 
 # ---------- 接口级：写入侧拒绝越界路径 ----------

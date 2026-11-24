@@ -181,7 +181,7 @@
                      :loading="saving" @click="saveManual">保存报告</el-button>
           <el-button class="w-full !ml-0" @click="vulnFormVisible = true">录入漏洞</el-button>
           <el-divider class="!my-3" />
-          <el-button class="w-full" @click="doExport('docx')">
+          <el-button class="w-full" data-test="report-export-word" @click="doExport('docx')">
             <el-icon class="mr-1"><Document /></el-icon>导出 Word
           </el-button>
         </div>
@@ -204,7 +204,8 @@
             <!-- has_file=false 为导入报告自动生成的导出记录（无实际文件），仅展示状态与时间，不提供预览/下载 -->
             <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link
                        @click="previewRef?.open(`/reports/exports/${job.id}/preview`, `${job.title || report.title}.docx`)">预览</el-button>
-            <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary" link class="!ml-0" @click="download(job)">下载</el-button>
+            <el-button v-if="job.status === 'done' && job.has_file" size="small" type="primary"
+                       link class="!ml-0" data-test="report-download" @click="download(job)">下载</el-button>
             <el-popconfirm v-if="job.status === 'done' || job.status === 'failed'"
                            title="确认删除该导出记录及报告文件？" @confirm="removeJob(job)">
               <template #reference>

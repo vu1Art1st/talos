@@ -1,6 +1,7 @@
 """认证依赖：JWT 会话令牌（get_current_user）、个人访问令牌（get_pat_user，F6/P1-6）、
 图片端点认证（get_image_viewer，安全审计 批次 E-1）。"""
 import hashlib
+from dataclasses import dataclass
 
 from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordBearer
@@ -12,7 +13,7 @@ from app.constants import PAT_ADMIN_READ_SCOPES, PAT_PLAN_WRITE_SCOPES, PAT_READ
 from app.core.config import settings
 from app.core.data_scope import install_data_scope
 from app.core.ratelimit import get_failures, incr_failure
-from app.core.security import IMAGE_COOKIE, decode_token
+from app.core.security import DOWNLOAD_COOKIE, IMAGE_COOKIE, decode_download_token, decode_token
 from app.core.timeutil import now
 from app.db import get_session
 from app.models import PersonalAccessToken, User, UserSession
@@ -45,12 +46,13 @@ def _enforce_password_change(user: User, path: str) -> None:
         )
 
 
-async def _load_user_by_access_token(session: AsyncSession, token: str) -> tuple[User, str]:
-    """按 access token 校验并加载用户（站内依赖与图片端点共用同一口径）。"""
-    decoded = decode_token(token, "access")
-    if decoded is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录已过期，请重新登录")
-    user_id, ver, sid = decoded
+async def _load_user_by_claims(
+    session: AsyncSession,
+    user_id: int,
+    ver: int,
+    sid: str,
+) -> tuple[User, str]:
+    """按已解码的令牌声明校验并加载用户（access / download 共用）。"""
     user = (
         await session.execute(
             select(User)
@@ -73,6 +75,14 @@ async def _load_user_by_access_token(session: AsyncSession, token: str) -> tuple
         ):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录状态已失效，请重新登录")
     return user, sid
+
+
+async def _load_user_by_access_token(session: AsyncSession, token: str) -> tuple[User, str]:
+    """按 access token 校验并加载用户（站内依赖与图片端点共用同一口径）。"""
+    decoded = decode_token(token, "access")
+    if decoded is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录已过期，请重新登录")
+    return await _load_user_by_claims(session, *decoded)
 
 
 async def get_current_user(
@@ -238,6 +248,43 @@ def _has_any_perm(user: User, required: tuple[str, ...]) -> bool:
     return "*" in perms or bool(perms & set(required))
 
 
+@dataclass(frozen=True)
+class DownloadAccess:
+    """报告下载专用认证结果：只暴露本次 ticket 绑定的导出任务。"""
+
+    user: User
+    kind: str
+    job_ids: list[int]
+
+
+async def get_download_viewer(
+    request: Request,
+    ticket_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> DownloadAccess:
+    """报告原生下载认证：只接受与当前 ticket 路径绑定的 HttpOnly Cookie。
+
+    下载令牌是独立类型，不能用于普通 API；这里仍会重新校验用户启用状态、
+    token_version、数据库会话、未改密状态和 `report:manage` 权限，避免 Cookie
+    变成长期有效的匿名下载能力。
+    """
+    decoded = decode_download_token(request.cookies.get(DOWNLOAD_COOKIE, ""))
+    if decoded is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "下载凭证无效或已过期")
+    user_id, ver, sid, ticket, kind, job_ids = decoded
+    if not sid or ticket != ticket_id:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "下载凭证与请求不匹配")
+    if kind == "export" and len(job_ids) != 1:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "下载凭证内容不合法")
+    user, _sid = await _load_user_by_claims(session, user_id, ver, sid)
+    request.state.session_id = sid
+    _enforce_password_change(user, request.url.path)
+    if not _has_perm(user, "report:manage"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "缺少权限: report:manage")
+    await install_data_scope(session, user)
+    return DownloadAccess(user=user, kind=kind, job_ids=job_ids)
+
+
 def require_perm(perm: str):
     """权限校验依赖工厂：角色权限包含 perm 或通配符 * 时放行。"""
 
@@ -252,7 +299,7 @@ def require_perm(perm: str):
 def require_pat_perm(perm: str, *, scopes: tuple[str, ...] = PAT_PLAN_WRITE_SCOPES):
     """开放 API 写操作权限校验：PAT scope 命中 **且** 令牌所属用户角色权限命中。
 
-    - scope（P1-6）：默认要求工单写能力（`plan_write` / `full`）；只读 scope 的令牌
+    - scope（P1-6）：调用方按接口传入工单写或漏洞推送能力集合；只读 scope 的令牌
       即使账号有权限也不能写，避免「只读令牌被用于写操作」；
     - 角色权限：与站内 require_perm 同口径（含 perm 或通配符 * 放行），
       避免个人令牌绕过 RBAC。
@@ -263,7 +310,7 @@ def require_pat_perm(perm: str, *, scopes: tuple[str, ...] = PAT_PLAN_WRITE_SCOP
         if scope not in scopes:
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN,
-                f"当前访问令牌 scope「{scope}」不足，工单写操作需为 {' / '.join(scopes)}",
+                f"当前访问令牌 scope「{scope}」不足，写操作需为 {' / '.join(scopes)}",
             )
         if _has_perm(user, perm):
             return user

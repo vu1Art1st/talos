@@ -25,6 +25,16 @@
 
 ---
 
+## [2.34.0] - 2026-11-24
+
+### 新增
+
+- **开放 API 漏洞 / 图片远程推送**：PAT 新增 `vuln_write` scope（+ `vuln:submit` 权限、令牌账号须为目标工单认领者），新增 `POST /open/testing-plans/{id}/vulns`、`POST /open/testing-plans/{id}/images`；Agent 仅提交 Markdown，由服务端 `markdown_service` 统一转 HTML + ProseMirror JSON（新增 `markdown-it-py` 依赖）。新增幂等映射表 `vul_external_refs`（外部漏洞 ID ↔ 站内漏洞长期映射、`payload_hash` + `converter_version` 支持幂等与重放）与图片表 `vul_external_images`（`sha256` / 外部图片 ID 双唯一约束），`vul_push_service` 统一编排，写接口纳入 `Idempotency-Key`（同键重放返回首次结果、同键异内容 409）。新增迁移 `f4a5b6c7d8e9`（链式单头，仅建表）。
+- **报告原生下载链路**：新增短时专用下载令牌（`download` 类型 JWT，不能当普通 access token 使用）+ HttpOnly Cookie `vp_dl` 精确绑定随机 ticket 路径（默认 300s，`DOWNLOAD_TOKEN_EXPIRE_SECONDS` 可调）；`/api/v1/reports/downloads/` 免 Nginx 缓冲、600s 超时，支持浏览器下载管理器 Range 续传；`resolve_export_file_path` 路径守卫防越权读取，`Cache-Control: private, no-store`。
+- **历史漏洞库批量导出**：新增 `GET /api/v1/vulns/export`，支持按当前搜索、筛选与排序导出全部匹配漏洞（不受分页限制），也支持勾选任意行后通过 `ids` 仅导出选中漏洞；两种模式均为单 Sheet `.xlsx`。导出沿用列表数据范围与字典口径，包含关联资产 / 工单 / SLA 等字段，多资产聚合为一行；复用 `excel_safe()` 防止公式注入，单次最多 20,000 条。`VulnList.vue` 工具栏新增「导出 Excel / 导出选中 (N)」入口与加载态，后端新增筛选 / 排序 / 勾选 / 多资产 / 公式注入 / 空结果 / 上限与数据范围回归用例。
+
+---
+
 ## [2.33.2] - 2026-11-18
 
 ### 修复

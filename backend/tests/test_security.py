@@ -2,7 +2,14 @@
 
 import bcrypt
 
-from app.core.security import hash_password, verify_password, verify_password_and_update
+from app.core.security import (
+    create_download_token,
+    decode_download_token,
+    decode_token,
+    hash_password,
+    verify_password,
+    verify_password_and_update,
+)
 
 
 def test_password_hash_uses_argon2id() -> None:
@@ -39,3 +46,28 @@ def test_legacy_bcrypt_wrong_password_does_not_upgrade() -> None:
 def test_unknown_hash_is_rejected() -> None:
     assert verify_password("password", "not-a-password-hash") is False
     assert verify_password_and_update("password", "not-a-password-hash") == (False, None)
+
+
+def test_download_token_is_typed_and_expires() -> None:
+    token = create_download_token(
+        7,
+        3,
+        "session-id",
+        "a" * 32,
+        "export",
+        [42],
+        expires_seconds=300,
+    )
+    assert decode_download_token(token) == (7, 3, "session-id", "a" * 32, "export", [42])
+    assert decode_token(token, "access") is None
+
+    expired = create_download_token(
+        7,
+        3,
+        "session-id",
+        "b" * 32,
+        "export",
+        [42],
+        expires_seconds=-1,
+    )
+    assert decode_download_token(expired) is None

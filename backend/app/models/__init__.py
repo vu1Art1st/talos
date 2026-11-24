@@ -33,6 +33,7 @@ from app.models.system import (
 )
 from app.models.sla import SlaConfig, SlaExtension, SlaPolicy
 from app.models.dashboard import DashboardView
+from app.models.push import VulExternalImage, VulExternalRef
 
 __all__ = [
     "Role", "User", "UserSession", "AccountActionToken",
@@ -47,4 +48,5 @@ __all__ = [
     "OperationLog", "NotificationChannel", "TaskDedupKey", "NotifyDelivery", "ApiIdempotencyKey",
     "SlaConfig", "SlaPolicy", "SlaExtension",
     "DashboardView",
+    "VulExternalRef", "VulExternalImage",
 ]

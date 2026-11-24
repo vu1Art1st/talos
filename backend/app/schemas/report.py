@@ -117,6 +117,20 @@ class ExportJobOut(BaseModel):
         return {**source, "has_file": has_file}
 
 
+class DownloadTicketIn(BaseModel):
+    """申请报告原生下载凭证：单文件与批量共用。"""
+
+    job_ids: list[int] = Field(min_length=1, max_length=200)
+
+
+class DownloadTicketOut(BaseModel):
+    """短时下载地址：URL 只含随机 ticket，真正的凭证在 HttpOnly Cookie。"""
+
+    url: str
+    filename: str
+    expires_in: int
+
+
 class ExportCheckIn(BaseModel):
     """导出前重复判断请求：指定导出格式。"""
 

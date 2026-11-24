@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "Talos"
     # 版本号遵循语义化版本 x.y.z，发布时同步更新 docs/RELEASE.md 与 frontend/package.json
     # （登录页右下角版本号由前端构建时从 package.json 注入，随 APP_VERSION 保持一致）
-    APP_VERSION: str = "2.33.2"
+    APP_VERSION: str = "2.34.0"
     DEBUG: bool = False
     # 系统标准时区（IETF 名称）：业务时间统一按此时区写入与展示，默认 UTC+8 北京时间
     TIMEZONE: str = "Asia/Shanghai"
@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # refresh token 轮换宽限期（秒）：多标签页/并发刷新会在极短时间内用同一个旧令牌换两次，
     # 该窗口内允许「刚被轮换掉的 jti」再换一次，避免自己把自己挤下线；窗口外的旧 jti 一律 401
     REFRESH_GRACE_SECONDS: int = 120
+    # 报告原生下载凭证有效期（秒）：浏览器下载开始后，后续 Range 续传仍需携带该 Cookie。
+    # 凭证绑定单个随机 ticket 路径，不能用于普通 API，也不进入 URL 查询参数。
+    DOWNLOAD_TOKEN_EXPIRE_SECONDS: int = 300
 
     # 图片下发 Cookie（HttpOnly + Path 限定到图片路径）：Secure 需在 HTTPS 部署时开启，
     # HTTP 部署下开启会导致浏览器拒收（图片不显示）

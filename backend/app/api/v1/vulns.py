@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -8,6 +9,7 @@ from app.constants import VUL_LAYER, VUL_LEVEL, VUL_STATUS, VUL_TRANSITIONS, VUL
 from app.core.deps import get_current_user, require_perm, user_permissions
 from app.core.query import get_or_404, paginate, apply_sort, parse_int_list, parse_str_list
 from app.core.timeutil import parse_date
+from app.core.xlsx import xlsx_response
 from app.db import get_session
 from app.models import (
     Asset,
@@ -37,7 +39,7 @@ from app.schemas import (
     VulTransitionIn,
     VulUpdateIn,
 )
-from app.services import plan_service, sla_service, stats_cache, vul_service
+from app.services import plan_service, sla_service, stats_cache, vul_export, vul_service
 from app.services.audit_service import audit, resolve_realnames
 from app.services.notify_service import notify
 
@@ -311,6 +313,78 @@ def _build_vuln_conditions(
     return cond
 
 
+def _vuln_conditions_from_query(
+    *,
+    search: str,
+    status: int | None,
+    level: int | None,
+    levels: str,
+    statuses: str,
+    vul_type: int | None,
+    vul_types: str,
+    asset_id: int | None,
+    asset_ids: str,
+    department: str,
+    departments: str,
+    system_type: str,
+    system_types: str,
+    testing_plan_id: int | None,
+    test_type: str,
+    test_types: str,
+    submit_time_from: str,
+    submit_time_to: str,
+    mine: bool,
+    user: User,
+) -> list:
+    """统一解析列表 / 统计 / 导出共用的原始查询参数。"""
+    return _build_vuln_conditions(
+        search=search, status=status, level=level, levels=parse_int_list(levels),
+        statuses=parse_int_list(statuses),
+        vul_type=vul_type, vul_types=parse_int_list(vul_types),
+        asset_id=asset_id, asset_ids=parse_int_list(asset_ids),
+        department=department, departments=parse_str_list(departments),
+        system_type=system_type, system_types=parse_str_list(system_types),
+        testing_plan_id=testing_plan_id, test_type=test_type,
+        test_types=parse_str_list(test_types),
+        submit_time_from=parse_date(submit_time_from),
+        submit_time_to=parse_date(submit_time_to),
+        mine=mine, user=user,
+    )
+
+
+def _vuln_statement(*, conditions: list, sort: str, order: str):
+    """构造漏洞查询并应用列表与导出共用的稳定排序。"""
+    stmt = select(Vul).where(*conditions)
+    if sort == "level":
+        # 同危害等级按录入时间升序（submit_time 升序，id 兜底），保证列表顺序稳定
+        level_col = Vul.level.desc() if order == "desc" else Vul.level.asc()
+        return stmt.order_by(level_col, Vul.submit_time.asc(), Vul.id.asc())
+    return apply_sort(
+        stmt, Vul, sort, order,
+        {"id", "title", "level", "vul_type", "status", "submit_time"},
+        # 报告导入的漏洞 submit_time 相同，id 升序保证同批次按原报告序号稳定展示
+        (Vul.submit_time.desc(), Vul.id.asc()),
+    )
+
+
+def _parse_export_ids(raw: str) -> list[int]:
+    """解析勾选导出的漏洞 ID；非正整数直接拒绝，空值表示不限制。"""
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    if not parts:
+        return []
+    if not all(part.isdigit() and int(part) > 0 for part in parts):
+        raise HTTPException(400, "选中漏洞参数无效")
+    return list(dict.fromkeys(int(part) for part in parts))
+
+
+def _enforce_export_limit(total: int) -> None:
+    if total > vul_export.MAX_VUL_EXPORT_ROWS:
+        raise HTTPException(
+            400,
+            f"单次最多导出 {vul_export.MAX_VUL_EXPORT_ROWS:,} 条漏洞，请缩小筛选范围",
+        )
+
+
 @router.get("", response_model=Page[VulOut])
 async def list_vulns(
     search: str = "",
@@ -340,37 +414,19 @@ async def list_vulns(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    # 多选：逗号分隔字符串转列表；空字符串/全空 → None（等价不筛选）
-    level_list = parse_int_list(levels)
-    cond = _build_vuln_conditions(
-        search=search, status=status, level=level, levels=level_list,
-        statuses=parse_int_list(statuses),
-        vul_type=vul_type, vul_types=parse_int_list(vul_types),
-        asset_id=asset_id, asset_ids=parse_int_list(asset_ids),
-        department=department, departments=parse_str_list(departments),
-        system_type=system_type, system_types=parse_str_list(system_types),
-        testing_plan_id=testing_plan_id, test_type=test_type,
-        test_types=parse_str_list(test_types),
-        submit_time_from=parse_date(submit_time_from),
-        submit_time_to=parse_date(submit_time_to),
+    cond = _vuln_conditions_from_query(
+        search=search, status=status, level=level, levels=levels, statuses=statuses,
+        vul_type=vul_type, vul_types=vul_types, asset_id=asset_id, asset_ids=asset_ids,
+        department=department, departments=departments,
+        system_type=system_type, system_types=system_types,
+        testing_plan_id=testing_plan_id, test_type=test_type, test_types=test_types,
+        submit_time_from=submit_time_from, submit_time_to=submit_time_to,
         mine=mine, user=user,
     )
     if sla_state:
         cond.extend(sla_service.sla_state_condition(sla_state, await sla_service.runtime(session)))
 
-    stmt = select(Vul).where(*cond)
-    if sort == "level":
-        # 需求7：同危害等级按录入时间升序（submit_time 升序，id 兜底），保证列表顺序稳定
-        level_col = Vul.level.desc() if order == "desc" else Vul.level.asc()
-        stmt = stmt.order_by(level_col, Vul.submit_time.asc(), Vul.id.asc())
-    else:
-        stmt = apply_sort(
-            stmt, Vul, sort, order,
-            {"id", "title", "level", "vul_type", "status", "submit_time"},
-            # 默认视图：提交时间倒序 + id 升序兜底——报告导入的漏洞 submit_time 相同
-            # （均为报告日期 14:00），id 升序保证同批次按原报告序号稳定展示
-            (Vul.submit_time.desc(), Vul.id.asc()),
-        )
+    stmt = _vuln_statement(conditions=cond, sort=sort, order=order)
     total, vulns = await paginate(session, stmt, page, size)
     plan_ids = {v.testing_plan_id for v in vulns if v.testing_plan_id is not None}
     claimed_plan_ids = await _claimed_plan_ids(session, plan_ids, user.id)
@@ -582,6 +638,64 @@ def _build_pivot(cond_rows: list, levels: list[int]) -> dict:
     return {"rows": rows, "totals": totals}
 
 
+@router.get("/export")
+async def export_vulns(
+    search: str = "",
+    status: int | None = None,
+    level: int | None = None,
+    levels: str = "",
+    statuses: str = "",
+    vul_type: int | None = None,
+    vul_types: str = "",
+    asset_id: int | None = None,
+    asset_ids: str = "",
+    department: str = "",
+    departments: str = "",
+    system_type: str = "",
+    system_types: str = "",
+    testing_plan_id: int | None = None,
+    test_type: str = "",
+    test_types: str = "",
+    submit_time_from: str = "",
+    submit_time_to: str = "",
+    sla_state: str = "",
+    ids: str = "",
+    mine: bool = False,
+    sort: str = "",
+    order: str = "desc",
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """按当前搜索、筛选与排序导出全部匹配漏洞，单次最多 20,000 条。"""
+    runtime = await sla_service.runtime(session)
+    cond = _vuln_conditions_from_query(
+        search=search, status=status, level=level, levels=levels, statuses=statuses,
+        vul_type=vul_type, vul_types=vul_types, asset_id=asset_id, asset_ids=asset_ids,
+        department=department, departments=departments,
+        system_type=system_type, system_types=system_types,
+        testing_plan_id=testing_plan_id, test_type=test_type, test_types=test_types,
+        submit_time_from=submit_time_from, submit_time_to=submit_time_to,
+        mine=mine, user=user,
+    )
+    selected_ids = _parse_export_ids(ids)
+    if selected_ids:
+        cond.append(Vul.id.in_(selected_ids))
+    if sla_state:
+        cond.extend(sla_service.sla_state_condition(sla_state, runtime))
+
+    total = (await session.execute(select(func.count(Vul.id)).where(*cond))).scalar_one()
+    _enforce_export_limit(total)
+
+    stmt = _vuln_statement(conditions=cond, sort=sort, order=order)
+    vulns = list((await session.execute(stmt)).scalars().all())
+    _enforce_export_limit(len(vulns))
+
+    plans, users = await vul_export.load_reference_maps(session, vulns)
+    rows = vul_export.build_rows(vulns, plans, users, runtime)
+    wb = await asyncio.to_thread(vul_export.build_workbook, rows)
+    return xlsx_response(wb, "历史漏洞库导出.xlsx")
+
+
 @router.get("/stats")
 async def vuln_stats(
     search: str = "",
@@ -613,18 +727,13 @@ async def vuln_stats(
     分组统计基于漏洞-资产多对多关联（JOIN vuln_assets+Asset），同一漏洞关联多资产时
     会在分组维度重复计入（按关联关系统计），total 仍为漏洞条数。
     """
-    level_list = parse_int_list(levels)
-    cond = _build_vuln_conditions(
-        search=search, status=status, level=level, levels=level_list,
-        statuses=parse_int_list(statuses),
-        vul_type=vul_type, vul_types=parse_int_list(vul_types),
-        asset_id=asset_id, asset_ids=parse_int_list(asset_ids),
-        department=department, departments=parse_str_list(departments),
-        system_type=system_type, system_types=parse_str_list(system_types),
-        testing_plan_id=testing_plan_id, test_type=test_type,
-        test_types=parse_str_list(test_types),
-        submit_time_from=parse_date(submit_time_from),
-        submit_time_to=parse_date(submit_time_to),
+    cond = _vuln_conditions_from_query(
+        search=search, status=status, level=level, levels=levels, statuses=statuses,
+        vul_type=vul_type, vul_types=vul_types, asset_id=asset_id, asset_ids=asset_ids,
+        department=department, departments=departments,
+        system_type=system_type, system_types=system_types,
+        testing_plan_id=testing_plan_id, test_type=test_type, test_types=test_types,
+        submit_time_from=submit_time_from, submit_time_to=submit_time_to,
         mine=mine, user=user,
     )
 

@@ -10,11 +10,14 @@ vi.mock('element-plus', () => ({
 }))
 
 // mock 下载工具：验证调用参数即可，不触发真实浏览器下载
-const saveReportBlobMock = vi.fn()
-const saveBlobMock = vi.fn()
+const startUrlDownloadMock = vi.fn()
 vi.mock('../../utils/download', () => ({
-  saveBlob: (...args: unknown[]) => saveBlobMock(...args),
-  saveReportBlob: (...args: unknown[]) => saveReportBlobMock(...args),
+  startUrlDownload: (...args: unknown[]) => startUrlDownloadMock(...args),
+}))
+
+const showTocNoticeMock = vi.fn()
+vi.mock('../../utils/tocNotice', () => ({
+  showTocNotice: () => showTocNoticeMock(),
 }))
 
 // mock axios client：export-check 结果由用例内定义，其余接口返回空数据
@@ -130,12 +133,26 @@ describe('useExportJobs', () => {
     expect(ElMessage.success).toHaveBeenCalled()
   })
 
-  it('downloadJob 以 blob 拉取文件并交给 saveReportBlob', async () => {
-    const blob = { size: 1024 }
-    getMock.mockResolvedValueOnce({ data: blob })
+  it('downloadJob 申请短时凭证后触发浏览器原生下载', async () => {
+    postMock.mockResolvedValueOnce({
+      data: { url: '/api/v1/reports/downloads/abc', filename: '报告.docx', expires_in: 300 },
+    })
     const job: ExportJob = { id: 5, report_id: 9, fmt: 'docx', status: 'done' }
     await useExportJobs().downloadJob(job, '兜底标题')
-    expect(getMock).toHaveBeenCalledWith('/reports/exports/5/download', { responseType: 'blob' })
-    expect(saveReportBlobMock).toHaveBeenCalledWith(blob, job, '兜底标题')
+    expect(postMock).toHaveBeenCalledWith('/reports/download-tickets', { job_ids: [5] })
+    expect(startUrlDownloadMock).toHaveBeenCalledWith('/api/v1/reports/downloads/abc', '报告.docx')
+    expect(showTocNoticeMock).toHaveBeenCalledOnce()
+  })
+
+  it('downloadZip 将任务 ID 转为批量凭证下载', async () => {
+    postMock.mockResolvedValueOnce({
+      data: { url: '/api/v1/reports/downloads/batch', filename: '测试报告批量下载.zip', expires_in: 300 },
+    })
+    await useExportJobs().downloadZip('5, 7,invalid')
+    expect(postMock).toHaveBeenCalledWith('/reports/download-tickets', { job_ids: [5, 7] })
+    expect(startUrlDownloadMock).toHaveBeenCalledWith(
+      '/api/v1/reports/downloads/batch',
+      '测试报告批量下载.zip',
+    )
   })
 })

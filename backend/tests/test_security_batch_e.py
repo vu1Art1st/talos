@@ -10,23 +10,48 @@ import io
 import zipfile
 
 import pytest
+import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.core import token_store
 from app.core.archive import assert_archive_quota
 from app.core.config import settings
-from app.core.security import IMAGE_COOKIE, create_refresh_token
+from app.core.security import IMAGE_COOKIE, create_refresh_token, hash_password
 from app.db import async_session_maker
 from app.models import User
 
-ADMIN = {"username": "admin", "password": "admin123"}
+# 会话生命周期用例使用独立账号：共享 `auth` fixture 是 admin 的 session 级会话，
+# 而生产逻辑只保留每个用户最近 5 个会话。若这里反复登录 admin，会把 `auth` 挤出上限，
+# 导致同 worker 后续所有用例级联 401（全量运行时尤其明显）。
+SESSION_USER = "security_session_user"
+SESSION_PASSWORD = "Session@12345"
+SESSION_ACCOUNT = {"username": SESSION_USER, "password": SESSION_PASSWORD}
 
 
-async def _login(client, username: str = "admin", password: str = "admin123") -> dict:
+async def _login(client, username: str, password: str) -> dict:
     resp = await client.post("/api/v1/auth/login", data={"username": username, "password": password})
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+@pytest_asyncio.fixture(scope="session", loop_scope="session")
+async def session_account(client) -> dict:
+    """创建仅供登录/刷新/退出用例使用的独立账号。"""
+    async with async_session_maker() as session:
+        user = (
+            await session.execute(select(User).where(User.username == SESSION_USER))
+        ).scalar_one_or_none()
+        if user is None:
+            session.add(User(
+                username=SESSION_USER,
+                password_hash=hash_password(SESSION_PASSWORD),
+                realname="会话生命周期用例",
+                is_active=True,
+                must_change_password=False,
+            ))
+            await session.commit()
+    return SESSION_ACCOUNT
 
 
 async def _anonymous_client() -> AsyncClient:
@@ -41,14 +66,16 @@ async def _anonymous_client() -> AsyncClient:
 
 
 # ---------- E-1：图片需登录 ----------
-async def test_image_anonymous_denied_and_authenticated_allowed(client, tmp_path, monkeypatch):
+async def test_image_anonymous_denied_and_authenticated_allowed(
+    client, session_account, tmp_path, monkeypatch,
+):
     monkeypatch.setattr(settings, "STORAGE_DIR", str(tmp_path))
     name = "a" * 32 + ".png"
     img = tmp_path / "uploads" / "images" / name
     img.parent.mkdir(parents=True)
     img.write_bytes(b"\x89PNG\r\n\x1a\nfake-image")
     url = f"/storage/uploads/images/{name}"
-    access = (await _login(client))["access_token"]
+    access = (await _login(client, **session_account))["access_token"]
 
     async with await _anonymous_client() as anon:
         # 匿名（既无 Cookie 也无 Authorization）→ 401，不再静态直出
@@ -79,8 +106,8 @@ async def test_image_anonymous_denied_and_authenticated_allowed(client, tmp_path
         assert (await anon.get("/storage/avatars/zzz/1.3/99.webp")).status_code == 404
 
 
-async def test_login_sets_scoped_image_cookie(client):
-    resp = await client.post("/api/v1/auth/login", data=ADMIN)
+async def test_login_sets_scoped_image_cookie(client, session_account):
+    resp = await client.post("/api/v1/auth/login", data=session_account)
     assert resp.status_code == 200
     cookie = resp.headers.get("set-cookie", "")
     assert IMAGE_COOKIE in cookie
@@ -89,8 +116,8 @@ async def test_login_sets_scoped_image_cookie(client):
     assert "SameSite=lax" in cookie.replace("samesite", "SameSite")
 
 
-async def test_logout_clears_image_cookie(client):
-    tokens = await _login(client)
+async def test_logout_clears_image_cookie(client, session_account):
+    tokens = await _login(client, **session_account)
     resp = await client.post(
         "/api/v1/auth/logout",
         json={"refresh_token": tokens["refresh_token"]},
@@ -101,8 +128,10 @@ async def test_logout_clears_image_cookie(client):
 
 
 # ---------- E-3：refresh 轮换 ----------
-async def test_refresh_rotates_and_rejects_old_token_after_grace(client, monkeypatch):
-    first = await _login(client)
+async def test_refresh_rotates_and_rejects_old_token_after_grace(
+    client, session_account, monkeypatch,
+):
+    first = await _login(client, **session_account)
     # 宽限期置 0：轮换后旧 jti 立即失效（等价于「宽限窗口已过」）
     monkeypatch.setattr(settings, "REFRESH_GRACE_SECONDS", 0)
     resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]})
@@ -119,9 +148,9 @@ async def test_refresh_rotates_and_rejects_old_token_after_grace(client, monkeyp
     )).status_code == 200
 
 
-async def test_refresh_allows_old_token_within_grace(client):
+async def test_refresh_allows_old_token_within_grace(client, session_account):
     """宽限期内允许旧令牌再兑换一次：多标签页/并发刷新的正常形态。"""
-    first = await _login(client)
+    first = await _login(client, **session_account)
     assert (await client.post(
         "/api/v1/auth/refresh", json={"refresh_token": first["refresh_token"]},
     )).status_code == 200
@@ -137,9 +166,9 @@ async def test_refresh_rejects_unknown_jti(client):
     assert resp.status_code == 401, resp.text
 
 
-async def test_multi_device_sessions_are_independent(client):
-    a = await _login(client)
-    b = await _login(client)
+async def test_multi_device_sessions_are_independent(client, session_account):
+    a = await _login(client, **session_account)
+    b = await _login(client, **session_account)
     assert (await client.post(
         "/api/v1/auth/refresh", json={"refresh_token": a["refresh_token"]},
     )).status_code == 200
@@ -149,8 +178,8 @@ async def test_multi_device_sessions_are_independent(client):
     )).status_code == 200
 
 
-async def test_logout_invalidates_refresh_token(client):
-    tokens = await _login(client)
+async def test_logout_invalidates_refresh_token(client, session_account):
+    tokens = await _login(client, **session_account)
     await client.post(
         "/api/v1/auth/logout", json={"refresh_token": tokens["refresh_token"]},
         headers={"Authorization": f"Bearer {tokens['access_token']}"},
@@ -158,6 +187,18 @@ async def test_logout_invalidates_refresh_token(client):
     assert (await client.post(
         "/api/v1/auth/refresh", json={"refresh_token": tokens["refresh_token"]},
     )).status_code == 401
+
+
+async def test_login_churn_does_not_evict_shared_admin_session(
+    client, auth, session_account,
+):
+    """会话生命周期用例的登录 churn 不得淘汰共享 `auth` fixture。"""
+    from app.api.v1.auth import MAX_USER_SESSIONS
+
+    for _ in range(MAX_USER_SESSIONS + 1):
+        assert (await _login(client, **session_account))["access_token"]
+    resp = await client.get("/api/v1/auth/me", headers=auth)
+    assert resp.status_code == 200, resp.text
 
 
 async def test_password_change_invalidates_other_sessions(client, auth):

@@ -1,10 +1,15 @@
 """漏洞域模型：录入/输出、批量操作、状态流转与复测记录。"""
 from datetime import datetime
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.constants import VUL_LAYER, VUL_LEVEL
 from .asset import AssetBrief
 from .common import AffectedUrl, HtmlStr, OptHtmlStr
+
+MARKDOWN_MAX_LENGTH = 50_000
+MarkdownStr = Annotated[str, Field(max_length=MARKDOWN_MAX_LENGTH)]
 
 
 class VulIn(BaseModel):
@@ -70,6 +75,117 @@ class VulBatchIn(BaseModel):
 
     asset_ids: list[int] = []
     vulns: list[VulIn] = Field(min_length=1)
+
+
+class VulPushItemIn(BaseModel):
+    """远程 Agent 推送的单条漏洞：正文只接收 Markdown。"""
+
+    external_id: str = Field(min_length=1, max_length=191)
+    title: str = Field(min_length=1, max_length=255)
+    level: int
+    vul_type: int = Field(gt=0)
+    layer: int = 10
+    affected_url: AffectedUrl
+    description_md: MarkdownStr
+    reproduce_md: MarkdownStr
+    solution_md: MarkdownStr
+    score: float = Field(default=0.0, ge=0, le=10)
+    risk_score: int = Field(default=0, ge=0)
+    left_risk_score: int = Field(default=0, ge=0)
+    asset_level: int = Field(default=0, ge=0)
+    cvss_vector: str = Field(default="", max_length=255)
+    asset_ids: list[int] = []
+
+    @field_validator("external_id", "title")
+    @classmethod
+    def _strip_required_text(_cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value
+
+    @field_validator("level")
+    @classmethod
+    def _valid_level(_cls, value: int) -> int:
+        if value not in VUL_LEVEL:
+            raise ValueError("非法漏洞等级")
+        return value
+
+    @field_validator("layer")
+    @classmethod
+    def _valid_layer(_cls, value: int) -> int:
+        if value not in VUL_LAYER:
+            raise ValueError("非法漏洞层级")
+        return value
+
+    @field_validator("affected_url")
+    @classmethod
+    def _require_affected_url(_cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("影响URL不能为空")
+        return value
+
+    @field_validator("description_md", "reproduce_md", "solution_md")
+    @classmethod
+    def _require_markdown(_cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Markdown 正文不能为空")
+        return value
+
+    @field_validator("asset_ids")
+    @classmethod
+    def _dedupe_asset_ids(_cls, value: list[int]) -> list[int]:
+        return list(dict.fromkeys(value))
+
+
+class VulPushIn(BaseModel):
+    """指定工单的批量漏洞推送请求。"""
+
+    source_system: str = Field(min_length=1, max_length=64)
+    items: list[VulPushItemIn] = Field(min_length=1, max_length=100)
+
+    @field_validator("source_system")
+    @classmethod
+    def _strip_source_system(_cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("来源系统不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def _unique_external_ids(self):
+        ids = [item.external_id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("同一批次内 external_id 不能重复")
+        return self
+
+
+class VulPushItemResultOut(BaseModel):
+    external_id: str
+    vul_id: int
+    result: Literal["created", "duplicated"]
+
+
+class VulPushSummaryOut(BaseModel):
+    created: int
+    duplicated: int
+
+
+class VulPushOut(BaseModel):
+    plan_id: int
+    summary: VulPushSummaryOut
+    items: list[VulPushItemResultOut]
+
+
+class VulImageUploadOut(BaseModel):
+    image_id: str
+    url: str
+    markdown: str
+    sha256: str
+    size_bytes: int
+    content_type: str
+    result: Literal["created", "duplicated"]
 
 
 class VulBatchDeleteIn(BaseModel):

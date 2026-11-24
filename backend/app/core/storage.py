@@ -26,6 +26,7 @@ from app.core.config import settings
 # 与 services/upload_store.save_upload 的产物严格一致（服务端 uuid4 命名 + 小写扩展名）。
 # 该格式下客户端不可能构造出目录穿越、绝对路径或指向 storage 之外的文件。
 ATTACHMENT_PATH_RE = re.compile(r"^uploads/[a-z][a-z0-9_]*/[0-9a-f]{32}\.[a-z0-9]{1,8}$")
+EXPORT_FILENAME_RE = re.compile(r"^report_\d+_[0-9-]+\.docx$")
 
 _ILLEGAL_PATH_MSG = "附件路径非法：请通过本系统上传附件（不支持手工填写或外部路径）"
 
@@ -77,3 +78,55 @@ def resolve_storage_path(rel: str, *, not_found_detail: str = "附件已被清�
     if not candidate.is_relative_to(root) or not candidate.is_file():
         raise HTTPException(404, not_found_detail)
     return candidate
+
+
+def resolve_export_file_path(stored_path: str) -> Path | None:
+    """解析报告导出文件路径，兼容旧容器绝对路径与当前 storage 相对路径。
+
+    历史记录可能保存 `/app/storage/exports/report_x.docx`，迁移到宿主机后
+    文件实际位于当前 `settings.storage_path/exports/`。解析优先级：
+    1. 字面路径可直接访问；
+    2. 从 `storage/` 标记之后取相对路径，拼到当前 storage 根；
+    3. 仅对系统生成的报告文件名，回退到当前 `storage/exports/`。
+
+    所有映射结果都必须落在当前 storage 根目录内，越界或不存在返回 None。
+    """
+    text = (stored_path or "").strip()
+    if not text or "\x00" in text:
+        return None
+    try:
+        direct = Path(text)
+        if direct.is_file():
+            return direct.resolve()
+    except OSError:
+        pass
+
+    root = settings.storage_path.resolve()
+    normalized = text.replace("\\", "/")
+    lower = normalized.lower()
+    marker = "/storage/"
+    marker_index = lower.rfind(marker)
+    if marker_index >= 0:
+        rel = normalized[marker_index + len(marker):]
+    elif lower.startswith("storage/"):
+        rel = normalized[len("storage/"):]
+    elif lower.startswith("exports/"):
+        rel = normalized
+    else:
+        rel = ""
+
+    candidates: list[Path] = []
+    if rel and not _unsafe_relative(rel):
+        candidates.append(root / rel)
+    filename = Path(normalized).name
+    if EXPORT_FILENAME_RE.match(filename):
+        candidates.append(root / "exports" / filename)
+
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.is_relative_to(root) and resolved.is_file():
+            return resolved
+    return None

@@ -1,4 +1,6 @@
 """P2-1 API 集成：部门 scope 覆盖列表、详情、搜索，并禁止猜测 ID 越权。"""
+from io import BytesIO
+
 import pytest
 from httpx import AsyncClient
 
@@ -93,6 +95,15 @@ async def test_department_scope_filters_assets_vulns_and_search(
     )
     assert vulns.status_code == 200, vulns.text
     assert [row["id"] for row in vulns.json()["items"]] == [vuln_a["id"]]
+
+    from openpyxl import load_workbook
+
+    export = await client.get(
+        "/api/v1/vulns/export", headers=scoped_auth, params={"search": "Scope"},
+    )
+    assert export.status_code == 200, export.text
+    rows = list(load_workbook(BytesIO(export.content)).active.iter_rows(values_only=True))
+    assert [row[0] for row in rows[1:]] == [vuln_a["id"]]
 
     search = await client.get(
         "/api/v1/search", headers=scoped_auth, params={"q": "Scope", "limit": 10},

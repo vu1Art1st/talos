@@ -9,6 +9,8 @@ URL、相似度检查（含无快照历史数据）、重复导出拦截、漏�
 import pytest
 from httpx import AsyncClient
 
+from app.db import async_session_maker
+from app.models import ExportJob
 from _helpers import _wait_job
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
@@ -75,6 +77,75 @@ async def test_report_edit_and_export(client: AsyncClient, auth: dict):
     download_resp = await client.get(f"/api/v1/reports/exports/{job_id}/download", headers=auth)
     assert download_resp.status_code == 200
     assert download_resp.content[:2] == b"PK"  # docx 是 zip 容器
+    assert download_resp.headers["cache-control"] == "private, no-store"
+
+    # 原生下载凭证：URL 只含随机 ticket，凭证由精确路径的 HttpOnly Cookie 承载
+    assert (
+        await client.post("/api/v1/reports/download-tickets", json={"job_ids": [job_id]})
+    ).status_code == 401
+    ticket_resp = await client.post(
+        "/api/v1/reports/download-tickets",
+        headers=auth,
+        json={"job_ids": [job_id]},
+    )
+    assert ticket_resp.status_code == 200, ticket_resp.text
+    ticket = ticket_resp.json()
+    assert ticket["url"].startswith("/api/v1/reports/downloads/")
+    assert ticket["filename"].endswith(".docx")
+    assert ticket["expires_in"] > 0
+    assert ticket_resp.headers["cache-control"] == "no-store"
+    set_cookie = ticket_resp.headers.get("set-cookie", "")
+    assert "vp_dl=" in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "Path=/api/v1/reports/downloads/" in set_cookie
+    assert "SameSite=strict" in set_cookie.replace("samesite", "SameSite")
+
+    native_download = await client.get(ticket["url"])
+    assert native_download.status_code == 200, native_download.text
+    assert native_download.content[:2] == b"PK"
+    assert native_download.headers["cache-control"] == "private, no-store"
+    assert "attachment" in native_download.headers["content-disposition"]
+    ranged_download = await client.get(ticket["url"], headers={"Range": "bytes=0-1"})
+    assert ranged_download.status_code == 206
+    assert ranged_download.content == native_download.content[:2]
+
+    # 无对应 ticket Cookie 的随机路径不能下载
+    assert (
+        await client.get(f"/api/v1/reports/downloads/{'0' * 32}")
+    ).status_code == 401
+
+    # 批量凭证仍走同一个原生下载入口，返回 ZIP
+    batch_ticket_resp = await client.post(
+        "/api/v1/reports/download-tickets",
+        headers=auth,
+        json={"job_ids": [job_id, 999999999]},
+    )
+    assert batch_ticket_resp.status_code == 200, batch_ticket_resp.text
+    batch_ticket = batch_ticket_resp.json()
+    assert batch_ticket["filename"] == "测试报告批量下载.zip"
+    batch_download = await client.get(batch_ticket["url"])
+    assert batch_download.status_code == 200, batch_download.text
+    assert batch_download.content[:2] == b"PK"
+    assert int(batch_download.headers["content-length"]) > 0
+
+    # 历史记录可能保存旧容器绝对路径；当前环境应按 storage 根目录重新定位
+    from pathlib import Path
+
+    async with async_session_maker() as session:
+        job_row = await session.get(ExportJob, job_id)
+        assert job_row is not None
+        job_row.file_path = f"/app/storage/exports/{Path(job_row.file_path).name}"
+        await session.commit()
+    legacy_ticket_resp = await client.post(
+        "/api/v1/reports/download-tickets",
+        headers=auth,
+        json={"job_ids": [job_id]},
+    )
+    assert legacy_ticket_resp.status_code == 200, legacy_ticket_resp.text
+    legacy_download = await client.get(legacy_ticket_resp.json()["url"])
+    assert legacy_download.status_code == 200
+    assert legacy_download.content[:2] == b"PK"
+
     preview_resp = await client.get(f"/api/v1/reports/exports/{job_id}/preview", headers=auth)
     assert preview_resp.status_code == 200
     assert preview_resp.headers["content-type"].startswith(

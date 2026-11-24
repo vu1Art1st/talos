@@ -35,6 +35,7 @@ from app.services import (
     task_dedup,
     task_lifecycle,
     template_service,
+    vul_push_service,
 )
 from app.services.docx_parser import parse_any_docx
 from app.services.report_builder import build_report_docx
@@ -281,12 +282,13 @@ async def sla_scan_task(ctx) -> None:
 
 
 async def cleanup_task(ctx) -> None:
-    """定期清理过期幂等键、超保留期消息、投递记录与 API 幂等键。"""
+    """定期清理过期幂等键、超保留期消息、投递记录、API 幂等键与孤立图片。"""
     async with async_session_maker() as session:
         removed = await task_dedup.cleanup_dedup_keys(session)
         messages = await message_service.cleanup_messages(session)
         deliveries = await notify_service.cleanup_deliveries(session)
         api_keys = await idempotency.cleanup(session)
+        orphan_images = await vul_push_service.cleanup_orphan_images(session)
         stale_account_tokens = (
             await session.execute(
                 delete(AccountActionToken).where(AccountActionToken.expires_at < now())
@@ -300,10 +302,15 @@ async def cleanup_task(ctx) -> None:
             )
         ).rowcount or 0
         await session.commit()
-    if removed or messages or deliveries or api_keys or stale_account_tokens or stale_sessions:
+    if (
+        removed or messages or deliveries or api_keys or orphan_images
+        or stale_account_tokens or stale_sessions
+    ):
         logger.info(
-            "清理完成：幂等键=%s 消息=%s 投递记录=%s 接口幂等键=%s 账户令牌=%s 会话=%s",
-            removed, messages, deliveries, api_keys, stale_account_tokens, stale_sessions,
+            "清理完成：幂等键=%s 消息=%s 投递记录=%s 接口幂等键=%s "
+            "孤立图片=%s 账户令牌=%s 会话=%s",
+            removed, messages, deliveries, api_keys, orphan_images,
+            stale_account_tokens, stale_sessions,
         )
 
 

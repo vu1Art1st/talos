@@ -1,16 +1,20 @@
+import secrets
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import quote
 from zipfile import ZipFile
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import DOCX_MIME, VulStatus
-from app.core.deps import require_perm
+from app.core.config import settings
+from app.core.deps import DownloadAccess, get_download_viewer, require_perm
+from app.core.security import create_download_token, set_download_cookie
+from app.core.storage import resolve_export_file_path
 from app.core.timeutil import mandays_between, now
 from app.core.query import get_or_404, paginate, apply_sort
 from app.db import get_session
@@ -18,6 +22,8 @@ from app.models import ExportJob, Report, ReportSection, TestingPlan, User, Vul
 from app.schemas import (
     BatchExportCheckIn,
     BatchExportIn,
+    DownloadTicketIn,
+    DownloadTicketOut,
     ExportCheckIn,
     ExportCheckOut,
     ExportJobOut,
@@ -39,6 +45,62 @@ from app.services.report_retest import create_retest_report, snapshot_vul_edits
 from app.workers.dispatch import dispatch
 
 router = APIRouter(prefix="/reports", tags=["报告"])
+
+
+def _download_headers(filename: str, *, inline: bool = False) -> dict[str, str]:
+    disposition = "inline" if inline else "attachment"
+    return {
+        "Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(filename)}",
+        # 报告属于敏感文件，禁止浏览器 HTTP 缓存；原生下载管理器仍会正常落盘。
+        "Cache-Control": "private, no-store",
+    }
+
+
+def _export_filename(job: ExportJob, report: Report | None) -> str:
+    return f"{job.title or (report.title if report else 'report')}.{job.fmt}"
+
+
+async def _available_download_jobs(
+    session: AsyncSession,
+    job_ids: list[int],
+) -> list[ExportJob]:
+    """按请求顺序返回已完成且文件仍存在的导出任务。"""
+    if not job_ids:
+        return []
+    rows = (
+        await session.execute(
+            select(ExportJob).where(ExportJob.id.in_(job_ids), ExportJob.status == "done")
+        )
+    ).scalars().all()
+    by_id = {
+        job.id: job
+        for job in rows
+        if resolve_export_file_path(job.file_path) is not None
+    }
+    return [by_id[job_id] for job_id in job_ids if job_id in by_id]
+
+
+async def _batch_zip_response(
+    session: AsyncSession,
+    jobs: list[ExportJob],
+) -> StreamingResponse:
+    buf = BytesIO()
+    with ZipFile(buf, "w") as zf:
+        for job in jobs:
+            report = await session.get(Report, job.report_id)
+            path = resolve_export_file_path(job.file_path)
+            if path is not None:
+                zf.write(path, _export_filename(job, report))
+    size = buf.getbuffer().nbytes
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={
+            **_download_headers("测试报告批量下载.zip"),
+            "Content-Length": str(size),
+        },
+    )
 
 
 async def _get_report(session: AsyncSession, report_id: int) -> Report:
@@ -350,7 +412,7 @@ async def batch_export(
                 .order_by(ExportJob.id.desc()).limit(1)
             )
         ).scalar_one_or_none()
-        if done is not None and done.file_path and Path(done.file_path).exists():
+        if done is not None and resolve_export_file_path(done.file_path) is not None:
             jobs.append({
                 "report_id": rid, "job_id": done.id, "status": "done", "fmt": done.fmt, "title": report.title,
                 "toc_auto_updated": done.toc_auto_updated,
@@ -427,27 +489,78 @@ async def batch_download(
     ids = [int(x) for x in job_ids.split(",") if x.strip().isdigit()]
     if not ids:
         raise HTTPException(400, "未选择导出任务")
-    rows = (
-        await session.execute(
-            select(ExportJob).where(ExportJob.id.in_(ids), ExportJob.status == "done")
-        )
-    ).scalars().all()
-    files = [(Path(j.file_path), j) for j in rows if j.file_path and Path(j.file_path).exists()]
-    if not files:
+    jobs = await _available_download_jobs(session, ids)
+    if not jobs:
         raise HTTPException(404, "暂无可下载的导出文件，请等待导出完成后再试")
-    buf = BytesIO()
-    with ZipFile(buf, "w") as zf:
-        for path, job in files:
-            report = await session.get(Report, job.report_id)
-            name = f"{job.title or (report.title if report else 'report')}.{job.fmt}"
-            zf.write(path, name)
-    buf.seek(0)
-    filename = quote("测试报告批量下载.zip")
-    return StreamingResponse(
-        buf,
-        media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+    return await _batch_zip_response(session, jobs)
+
+
+@router.post("/download-tickets", response_model=DownloadTicketOut)
+async def create_download_ticket(
+    body: DownloadTicketIn,
+    request: Request,
+    response: Response,
+    user: User = Depends(require_perm("report:manage")),
+    session: AsyncSession = Depends(get_session),
+):
+    """签发短时报告下载凭证；真正的凭证放在 HttpOnly Cookie，不进入 URL。"""
+    job_ids = list(dict.fromkeys(body.job_ids))
+    jobs = await _available_download_jobs(session, job_ids)
+    if not jobs:
+        raise HTTPException(404, "暂无可下载的导出文件，请等待导出完成后再试")
+    if len(job_ids) == 1 and len(jobs) != 1:
+        raise HTTPException(404, "导出文件不存在或尚未生成完成")
+
+    sid = str(getattr(request.state, "session_id", "") or "")
+    if not sid:
+        raise HTTPException(401, "登录状态缺少会话标识，请重新登录")
+    ticket = secrets.token_hex(16)
+    kind = "export" if len(job_ids) == 1 else "batch"
+    token = create_download_token(
+        user.id,
+        user.token_version,
+        sid,
+        ticket,
+        kind,
+        [job.id for job in jobs],
+        expires_seconds=settings.DOWNLOAD_TOKEN_EXPIRE_SECONDS,
     )
+    set_download_cookie(response, ticket, token)
+    response.headers["Cache-Control"] = "no-store"
+    if kind == "export":
+        report = await session.get(Report, jobs[0].report_id)
+        filename = _export_filename(jobs[0], report)
+    else:
+        filename = "测试报告批量下载.zip"
+    return DownloadTicketOut(
+        url=f"/api/v1/reports/downloads/{ticket}",
+        filename=filename,
+        expires_in=settings.DOWNLOAD_TOKEN_EXPIRE_SECONDS,
+    )
+
+
+@router.get("/downloads/{ticket_id}")
+async def download_ticket(
+    ticket_id: str,
+    access: DownloadAccess = Depends(get_download_viewer),
+    session: AsyncSession = Depends(get_session),
+):
+    """浏览器原生下载入口：仅接受与 ticket 路径绑定的短时 Cookie。"""
+    jobs = await _available_download_jobs(session, access.job_ids)
+    if not jobs:
+        raise HTTPException(404, "导出文件已被清理")
+    if access.kind == "export":
+        if len(access.job_ids) != 1 or len(jobs) != 1:
+            raise HTTPException(404, "导出文件不存在或尚未生成完成")
+        report = await session.get(Report, jobs[0].report_id)
+        path = resolve_export_file_path(jobs[0].file_path)
+        if path is None:
+            raise HTTPException(404, "导出文件已被清理")
+        return FileResponse(
+            path,
+            headers=_download_headers(_export_filename(jobs[0], report)),
+        )
+    return await _batch_zip_response(session, jobs)
 
 
 @router.get("/{report_id}", response_model=ReportOut)
@@ -668,12 +781,13 @@ async def check_export_duplicate(
         file_size: int | None = None
         file_name = ""
         if last.file_path:
-            p = Path(last.file_path)
-            file_name = p.name
-            try:
-                file_size = p.stat().st_size
-            except OSError:
-                file_size = None
+            p = resolve_export_file_path(last.file_path)
+            file_name = p.name if p is not None else Path(last.file_path).name
+            if p is not None:
+                try:
+                    file_size = p.stat().st_size
+                except OSError:
+                    file_size = None
         return ExportCheckOut(
             duplicate=True,
             missing_fields=missing_fields,
@@ -758,14 +872,13 @@ async def download_export(
     job = await session.get(ExportJob, job_id)
     if job is None or job.status != "done":
         raise HTTPException(404, "导出文件不存在或尚未生成完成")
-    path = Path(job.file_path)
-    if not path.exists():
+    path = resolve_export_file_path(job.file_path)
+    if path is None:
         raise HTTPException(404, "导出文件已被清理")
     report = await session.get(Report, job.report_id)
-    filename = quote(f"{job.title or (report.title if report else 'report')}.{job.fmt}")
     return FileResponse(
         path,
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{filename}"},
+        headers=_download_headers(_export_filename(job, report)),
     )
 
 
@@ -781,15 +894,14 @@ async def preview_export(
         raise HTTPException(404, "导出文件不存在或尚未生成完成")
     if job.fmt != "docx":
         raise HTTPException(404, "导出文件不是 DOCX")
-    path = Path(job.file_path)
-    if not path.exists():
+    path = resolve_export_file_path(job.file_path)
+    if path is None:
         raise HTTPException(404, "导出文件已被清理")
     report = await session.get(Report, job.report_id)
-    filename = quote(f"{job.title or (report.title if report else 'report')}.docx")
     return FileResponse(
         path,
         media_type=DOCX_MIME,
-        headers={"Content-Disposition": f"inline; filename*=UTF-8''{filename}"},
+        headers=_download_headers(_export_filename(job, report), inline=True),
     )
 
 
@@ -806,7 +918,9 @@ async def delete_export(
     if job.status in ("pending", "running"):
         raise HTTPException(400, "导出任务进行中，请稍后再删除")
     if job.file_path:
-        Path(job.file_path).unlink(missing_ok=True)
+        path = resolve_export_file_path(job.file_path)
+        if path is not None:
+            path.unlink(missing_ok=True)
     await session.delete(job)
     await session.commit()
     return {"msg": "删除成功"}

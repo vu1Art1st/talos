@@ -13,6 +13,7 @@
  * - **不做截图基线、不断言 canvas**（项目有 21 处 ECharts，canvas 渲染不稳定）；
  * - 每条用例开头/结尾断言**控制台无 error**（与人工冒烟同一判据，见 AGENTS.md 验收口径）。
  */
+import { statSync } from 'node:fs'
 import { expect, test, type Page } from '@playwright/test'
 
 /** 种子数据账号（`python -m scripts.seed_dev_data --reset` 固定创建） */
@@ -114,4 +115,37 @@ test('报告中心：打开报告编辑器并完成渲染', async ({ page }) => 
   // 编辑器骨架：富文本区与章节导航均渲染（不深入断言正文，避免耦合具体报告内容）
   await expect(page.locator('.ProseMirror').first()).toBeVisible()
   await expect(page.getByRole('button', { name: '导出 PDF' })).toHaveCount(0)
+})
+
+test('报告下载：导出后交给浏览器原生下载管理器', async ({ page }) => {
+  test.setTimeout(90_000)
+  await login(page)
+  await page.goto('/reports')
+
+  const firstRow = page.locator('tbody tr').first()
+  await expect(firstRow).toBeVisible()
+  await firstRow.getByRole('button', { name: '编辑' }).click()
+  await expect(page).toHaveURL(/\/reports\/\d+$/)
+
+  await page.getByTestId('report-export-word').click()
+  // 导出预检可能依次弹「信息不完整」和「重复导出」；两种确认都继续导出
+  for (let i = 0; i < 2; i += 1) {
+    const confirm = page.getByRole('button', { name: /仍要导出|继续导出/ })
+    if (await confirm.isVisible().catch(() => false)) {
+      await confirm.click()
+      await page.waitForTimeout(300)
+    }
+  }
+
+  const downloadButton = page.getByTestId('report-download').first()
+  await expect(downloadButton).toBeVisible({ timeout: 60_000 })
+
+  const downloadPromise = page.waitForEvent('download')
+  await downloadButton.click()
+  const download = await downloadPromise
+  expect(download.url()).toContain('/api/v1/reports/downloads/')
+  expect(download.suggestedFilename()).toMatch(/\.docx$/)
+  const filePath = await download.path()
+  expect(filePath).toBeTruthy()
+  expect(statSync(filePath as string).size).toBeGreaterThan(0)
 })

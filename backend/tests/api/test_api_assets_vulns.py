@@ -222,6 +222,152 @@ async def test_asset_excel_import_export(client: AsyncClient, auth: dict):
     assert resp.status_code == 200
     assert resp.content[:2] == b"PK"
 
+
+async def test_vuln_excel_export_matches_filters_and_aggregates_assets(
+    client: AsyncClient, auth: dict,
+):
+    """漏洞导出与列表同条件：跨分页全量、排序一致、多资产一条一行。"""
+    from openpyxl import load_workbook
+
+    from app.services.vul_export import VUL_EXPORT_HEADERS
+
+    marker = "导出筛选XQ"
+    asset_a = (await client.post(
+        "/api/v1/assets", headers=auth,
+        json={"name": f"{marker}资产甲", "department": "导出部门甲", "system_type": "自有系统（正式）"},
+    )).json()
+    asset_b = (await client.post(
+        "/api/v1/assets", headers=auth,
+        json={"name": f"{marker}资产乙", "department": "导出部门乙", "system_type": "DICT系统"},
+    )).json()
+    asset_ids = [asset_a["id"], asset_b["id"]]
+    created = []
+    for title in (f"{marker}-B", f"{marker}-A", "导出范围外漏洞"):
+        url_marker = marker.lower() if title.startswith(marker) else "outside-export-filter"
+        resp = await client.post(
+            "/api/v1/vulns", headers=auth,
+            json={
+                "title": title,
+                "level": 20,
+                "vul_type": 30,
+                "affected_url": f"https://{url_marker}.example.com/{title}",
+                "asset_ids": asset_ids if title.startswith(marker) else [],
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        created.append(resp.json())
+
+    listing = await client.get(
+        "/api/v1/vulns", headers=auth,
+        params={"search": marker, "levels": "20", "size": 1},
+    )
+    assert listing.status_code == 200, listing.text
+    assert listing.json()["total"] == 2
+
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth,
+        params={"search": marker, "levels": "20", "sort": "title", "order": "asc"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith(
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    ws = load_workbook(BytesIO(resp.content)).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert list(rows[0]) == VUL_EXPORT_HEADERS
+    assert len(rows) == 3
+
+    exported = [dict(zip(rows[0], row, strict=True)) for row in rows[1:]]
+    assert [row["漏洞名称"] for row in exported] == [f"{marker}-A", f"{marker}-B"]
+    assert {row["漏洞ID"] for row in exported} == {
+        item["id"] for item in created if item["title"].startswith(marker)
+    }
+    for row in exported:
+        assert row["漏洞等级"] == "高危"
+        assert row["关联资产"] == f"{marker}资产甲、{marker}资产乙"
+        assert row["归属部门"] == "导出部门甲、导出部门乙"
+        assert row["系统类型"] == "自有系统（正式）、DICT系统"
+
+    selected_id = created[1]["id"]
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth,
+        params={"search": marker, "ids": str(selected_id)},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = list(load_workbook(BytesIO(resp.content)).active.iter_rows(values_only=True))
+    assert [row[0] for row in rows[1:]] == [selected_id]
+
+    # 勾选导出仍叠加筛选条件：范围外 ID 不会绕过当前搜索条件
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth,
+        params={"search": marker, "ids": str(created[2]["id"])},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = list(load_workbook(BytesIO(resp.content)).active.iter_rows(values_only=True))
+    assert len(rows) == 1
+
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth, params={"ids": "abc"},
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "选中漏洞参数无效"
+
+
+async def test_vuln_excel_export_neutralizes_formula_and_supports_empty_result(
+    client: AsyncClient, auth: dict,
+):
+    from openpyxl import load_workbook
+
+    from app.services.vul_export import VUL_EXPORT_HEADERS
+
+    marker = "export-formula-xq"
+    resp = await client.post(
+        "/api/v1/vulns", headers=auth,
+        json={"title": "=1+1", "level": 30, "affected_url": f"https://{marker}.example.com"},
+    )
+    assert resp.status_code == 200, resp.text
+
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth, params={"search": marker},
+    )
+    assert resp.status_code == 200, resp.text
+    ws = load_workbook(BytesIO(resp.content)).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert rows[1][rows[0].index("漏洞名称")] == "'=1+1"
+
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth, params={"search": "不存在的导出结果XQ"},
+    )
+    assert resp.status_code == 200, resp.text
+    ws = load_workbook(BytesIO(resp.content)).active
+    rows = list(ws.iter_rows(values_only=True))
+    assert len(rows) == 1
+    assert list(rows[0]) == VUL_EXPORT_HEADERS
+
+
+async def test_vuln_excel_export_rejects_over_limit(
+    client: AsyncClient,
+    auth: dict,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from app.services import vul_export
+
+    marker = "导出上限XQ"
+    for suffix in ("A", "B"):
+        resp = await client.post(
+            "/api/v1/vulns", headers=auth,
+            json={"title": f"{marker}-{suffix}", "level": 30},
+        )
+        assert resp.status_code == 200, resp.text
+
+    monkeypatch.setattr(vul_export, "MAX_VUL_EXPORT_ROWS", 1)
+    resp = await client.get(
+        "/api/v1/vulns/export", headers=auth, params={"search": marker},
+    )
+    assert resp.status_code == 400
+    assert "缩小筛选范围" in resp.json()["detail"]
+
+
 async def test_vuln_list_sorting(client: AsyncClient, auth: dict):
     """漏洞列表按 level 升序排序结果非降序；sort 非法字段回退默认排序不报错。"""
     # 造三条不同等级的漏洞
